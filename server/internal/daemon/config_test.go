@@ -856,3 +856,48 @@ func agentKeys(m map[string]AgentEntry) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// TestLoadConfig_WorkspaceAllowlist covers the --workspace-allowlist resolution
+// (issue #3223): the env var parses a trimmed comma-separated list, a non-empty
+// CLI override fully replaces it, and an unset env yields no restriction.
+func TestLoadConfig_WorkspaceAllowlist(t *testing.T) {
+	t.Run("from env, trimmed", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_DAEMON_WORKSPACE_ALLOWLIST", " eskyfun , funtimes ,")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if want := []string{"eskyfun", "funtimes"}; !reflect.DeepEqual(cfg.WorkspaceAllowlist, want) {
+			t.Fatalf("WorkspaceAllowlist = %v, want %v", cfg.WorkspaceAllowlist, want)
+		}
+	})
+
+	t.Run("override wins over env", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_DAEMON_WORKSPACE_ALLOWLIST", "eskyfun")
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:          "http://localhost:8080",
+			WorkspacesRoot:     t.TempDir(),
+			WorkspaceAllowlist: []string{"only-this"},
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if want := []string{"only-this"}; !reflect.DeepEqual(cfg.WorkspaceAllowlist, want) {
+			t.Fatalf("WorkspaceAllowlist = %v, want %v", cfg.WorkspaceAllowlist, want)
+		}
+	})
+
+	t.Run("unset env yields no restriction", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_DAEMON_WORKSPACE_ALLOWLIST", "")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if len(cfg.WorkspaceAllowlist) != 0 {
+			t.Fatalf("WorkspaceAllowlist = %v, want empty", cfg.WorkspaceAllowlist)
+		}
+	})
+}

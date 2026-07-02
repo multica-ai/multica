@@ -1690,6 +1690,41 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 	}
 }
 
+// workspaceAllowed reports whether ws passes the allowlist. An empty/nil
+// allowlist allows everything, preserving the pre-allowlist behavior of
+// registering in every accessible workspace. Matching is case-insensitive
+// against the workspace slug or ID.
+func workspaceAllowed(allowlist []string, ws WorkspaceInfo) bool {
+	if len(allowlist) == 0 {
+		return true
+	}
+	slug := strings.ToLower(strings.TrimSpace(ws.Slug))
+	id := strings.ToLower(strings.TrimSpace(ws.ID))
+	for _, entry := range allowlist {
+		e := strings.ToLower(strings.TrimSpace(entry))
+		if e == "" {
+			continue
+		}
+		if e == slug || e == id {
+			return true
+		}
+	}
+	return false
+}
+
+// filterAllowedWorkspaces partitions workspaces into those the allowlist keeps
+// and those it excludes, preserving input order. An empty allowlist keeps all.
+func filterAllowedWorkspaces(allowlist []string, in []WorkspaceInfo) (kept, excluded []WorkspaceInfo) {
+	for _, ws := range in {
+		if workspaceAllowed(allowlist, ws) {
+			kept = append(kept, ws)
+		} else {
+			excluded = append(excluded, ws)
+		}
+	}
+	return kept, excluded
+}
+
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
 // and registers runtimes for any new ones. A WS connect/reconnect broadcast
 // triggers an immediate sync so runtime/repo changes the server applied during
@@ -1739,6 +1774,23 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		return fmt.Errorf("list workspaces: %w", err)
 	}
 	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
+
+	// Apply the optional workspace allowlist. Excluded workspaces are dropped
+	// here so they are never registered; any that were already tracked (e.g. a
+	// previous run before the allowlist was set) fall out of apiIDs below and
+	// are pruned by the "user no longer belongs to" cleanup further down — their
+	// stale server-side runtimes then expire via missed heartbeats.
+	if len(d.cfg.WorkspaceAllowlist) > 0 {
+		kept, excluded := filterAllowedWorkspaces(d.cfg.WorkspaceAllowlist, workspaces)
+		if len(excluded) > 0 {
+			ids := make([]string, len(excluded))
+			for i, ws := range excluded {
+				ids[i] = ws.ID
+			}
+			d.logger.Debug("workspace sync: excluded by allowlist", "count", len(excluded), "workspace_ids", ids)
+		}
+		workspaces = kept
+	}
 
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {

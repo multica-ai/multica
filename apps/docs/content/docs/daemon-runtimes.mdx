@@ -100,6 +100,28 @@ the first step keeps the rollout observable.
 **Cloud runtimes are coming**, currently in a waitlist phase. Once available, you'll be able to execute agent tasks directly on Multica Cloud without running a local daemon. Sign up with your email on the [download page](https://multica.ai/download) to get notified.
 </Callout>
 
+## Scoping a daemon to specific workspaces
+
+By default a daemon registers a runtime in **every** workspace your login token can reach. On a shared self-hosted instance — multiple teams or orgs on one Multica server — you may want a specific machine to be visible only to certain workspaces. A company build server, for example, might belong in `eskyfun` but not in `funtimes`.
+
+Pass `--workspace-allowlist` (or set `MULTICA_DAEMON_WORKSPACE_ALLOWLIST`) when starting the daemon:
+
+```bash
+# Slug or ID, comma-separated…
+multica daemon start --workspace-allowlist eskyfun,funtimes
+
+# …or repeated, or via env var
+MULTICA_DAEMON_WORKSPACE_ALLOWLIST=eskyfun multica daemon start
+```
+
+- Each entry matches a workspace **slug** (the identifier in its URL) or its **ID**, case-insensitively.
+- An empty allowlist (the default) keeps today's behavior: every accessible workspace is registered.
+- Workspaces outside the allowlist are never registered. If a machine previously registered in one, the daemon stops heartbeating that runtime and the server marks it offline within seconds (and auto-deletes it later, per the thresholds below).
+
+<Callout type="info">
+This filters which workspaces a **daemon** registers in. It does not change what your account can access in the web UI — for that, manage workspace membership instead.
+</Callout>
+
 ## When a runtime is marked offline
 
 Multica uses heartbeats to decide whether a runtime is online. Three key numbers:
