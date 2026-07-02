@@ -28,6 +28,12 @@ import (
 const defaultContextWindow int64 = 200_000
 
 var modelContextWindows = map[string]int64{
+	// Anthropic — Fable 5 ships a 1M window as standard (max is also the default,
+	// no [1m] beta tag required). Curated here so the fullness indicator shows the
+	// real 1M denominator instead of falling through to the conservative 200k
+	// default — FIR-2580. Mirrors the claude-fable-5 pricing rows.
+	"claude-fable-5": 1_000_000,
+
 	// Anthropic — current Opus (4.6/4.7/4.8) ships the 1M window as standard.
 	"claude-opus-4-8": 1_000_000,
 	"claude-opus-4-7": 1_000_000,
