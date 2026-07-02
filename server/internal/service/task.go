@@ -1017,7 +1017,10 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
-// respecting max_concurrent_tasks.
+// respecting max_concurrent_tasks. Concurrency is serialized via
+// SELECT ... FOR UPDATE on the agent row inside a transaction,
+// so the capacity check (CountRunningTasks) cannot race with the
+// task claim (ClaimAgentTask).
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
