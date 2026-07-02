@@ -49,6 +49,9 @@ type Pricing struct {
 // for any future update — it was set correctly in PR #2334 (JEH-440) and
 // the two tables must agree.
 var modelPricing = map[string]Pricing{
+	// CEREBRO-PATCH(pricing-fable-5): add Claude Fable 5 list price ($10/$50) so it isn't over-charged at the Opus 4.1 fallback.
+	"claude-fable-5": {InputCentsPerMtok: 1000, OutputCentsPerMtok: 5000, CacheReadCentsPerMtok: 100, CacheWriteCentsPerMtok: 1250},
+
 	// Anthropic — Opus 4.5+ generation (lower-tier pricing).
 	// CEREBRO-PATCH(pricing-opus-4-8): FIR-2471 add Opus 4.8 list price — without it Opus 4.8 fell back to Opus 4.1 ($15/$75), a 3× over-charge.
 	"claude-opus-4-8": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
