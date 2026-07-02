@@ -481,7 +481,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, queryTeamKey 
 	// team_id; those rows carry the workspace's default-team key, so we fall
 	// back to it exactly like GetIssueByTeamKeyAndNumber does. defaultTeamJoin
 	// is only added when an identifier search needs the fallback.
-	// TODO(migration-b): remove null-team fallback after numbering cutover
+	// TODO(migration-b): remove null-team fallback after migration 132 has run in production
 	identifierKeyExpr := "wt.key"
 	defaultTeamJoin := ""
 	if hasNum {

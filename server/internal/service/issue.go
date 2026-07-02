@@ -280,7 +280,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 
 	// New issues sort to the top of their (workspace, team, status) column for
-	// manual ordering. Computed inside the tx, after IncrementIssueCounter
+	// manual ordering. Computed inside the tx, after IncrementTeamIssueCounter
 	// has already taken the team row lock, so two concurrent creates
 	// in the same team see each other's positions and don't both
 	// land on the same min-1 slot. Concurrent manual reorder via

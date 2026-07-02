@@ -40,11 +40,6 @@ SELECT id, repos FROM workspace
 WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
 ORDER BY id;
 
--- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter;
-
 -- name: DeleteWorkspace :exec
 WITH deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1

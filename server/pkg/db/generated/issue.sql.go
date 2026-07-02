@@ -516,50 +516,6 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 	return i, err
 }
 
-const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, team_id FROM issue
-WHERE workspace_id = $1 AND number = $2
-`
-
-type GetIssueByNumberParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Number      int32       `json:"number"`
-}
-
-func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, getIssueByNumber, arg.WorkspaceID, arg.Number)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.TeamID,
-	)
-	return i, err
-}
-
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, team_id FROM issue
 WHERE workspace_id = $1
@@ -629,7 +585,7 @@ type GetIssueByTeamKeyAndNumberParams struct {
 	Number      int32       `json:"number"`
 }
 
-// TODO(migration-b): remove null-team fallback after numbering cutover
+// TODO(migration-b): remove null-team fallback after migration 132 has run in production
 func (q *Queries) GetIssueByTeamKeyAndNumber(ctx context.Context, arg GetIssueByTeamKeyAndNumberParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, getIssueByTeamKeyAndNumber, arg.WorkspaceID, arg.Lower, arg.Number)
 	var i Issue
