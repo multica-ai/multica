@@ -1,5 +1,14 @@
 type RuntimeEnv = Record<string, string | undefined>;
 
+export function resolveDocsUrl(env: RuntimeEnv): string {
+  const explicitDocs = env.DOCS_URL?.trim();
+  if (explicitDocs) return explicitDocs;
+
+  if (env.NODE_ENV === "production") return "https://multica.ai";
+
+  return "http://localhost:4000";
+}
+
 export function resolveRemoteApiUrl(env: RuntimeEnv): string {
   const explicitRemote = env.REMOTE_API_URL?.trim();
   if (explicitRemote) return explicitRemote;
