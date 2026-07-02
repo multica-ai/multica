@@ -214,6 +214,29 @@ func (h *Handler) replaceInvocationTargets(ctx context.Context, agentID pgtype.U
 // simply ignored. Fails safe: on a DB error it returns changed=true so a
 // non-owner attempt is rejected rather than silently applied.
 func (h *Handler) permissionInputChangesAgent(ctx context.Context, existing db.Agent, req UpdateAgentRequest, hasPermissionMode, hasTargets bool) (bool, error) {
+	// Legacy-only request: the caller sent ONLY `visibility`, no permission_mode
+	// and no invocation_targets (an old client / PATCH-as-PUT echoing the field
+	// back while editing something else). Compare on the DERIVED legacy
+	// visibility, NOT by expanding "private" into a real private permission.
+	// A member-only public_to agent derives to legacy "private", so an admin
+	// resubmitting visibility:"private" is a NO-OP, not a public_to→private
+	// downgrade. Only a real legacy change (e.g. "workspace") counts. (MUL-3963
+	// review — this is the compatibility fix for PR #4853.)
+	if !hasPermissionMode && !hasTargets {
+		if req.Visibility == nil {
+			return false, nil
+		}
+		current, err := h.Queries.ListAgentInvocationTargets(ctx, existing.ID)
+		if err != nil {
+			return true, err
+		}
+		submitted := "private"
+		if *req.Visibility == "workspace" {
+			submitted = "workspace"
+		}
+		return submitted != deriveLegacyVisibility(existing.PermissionMode, current), nil
+	}
+
 	var targetsDTO []AgentInvocationTargetDTO
 	if req.InvocationTargets != nil {
 		targetsDTO = *req.InvocationTargets
