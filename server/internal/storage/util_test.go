@@ -53,3 +53,20 @@ func TestContentDisposition(t *testing.T) {
 		t.Fatalf("ContentDisposition svg = %q", got)
 	}
 }
+
+func TestContentDispositionUTF8Filename(t *testing.T) {
+	// RFC 6266: `filename=` is ASCII-only. A non-ASCII name (common for this
+	// product's users) must ride in `filename*=UTF-8''…` with an ASCII fallback,
+	// otherwise stricter clients/proxies garble the download name.
+	got := ContentDisposition("application/zip", "测试.zip")
+	want := `attachment; filename="__.zip"; filename*=UTF-8''%E6%B5%8B%E8%AF%95.zip`
+	if got != want {
+		t.Fatalf("ContentDisposition utf8 = %q, want %q", got, want)
+	}
+
+	got2 := AttachmentContentDisposition("résumé.pdf")
+	want2 := `attachment; filename="r_sum_.pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf`
+	if got2 != want2 {
+		t.Fatalf("AttachmentContentDisposition utf8 = %q, want %q", got2, want2)
+	}
+}
