@@ -26,10 +26,14 @@ describe("paths.workspace(slug)", () => {
     expect(ws.squads()).toBe("/acme/squads");
     expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");
     expect(ws.settings()).toBe("/acme/settings");
+    // FIR-2595: shareable per-note URL.
+    expect(ws.notes()).toBe("/acme/notes");
+    expect(ws.noteDetail("n1")).toBe("/acme/notes/n1");
   });
 
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
+    expect(ws.noteDetail("id with space")).toBe("/acme/notes/id%20with%20space");
   });
 });
 

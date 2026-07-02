@@ -25,6 +25,7 @@ import {
   Replace,
   Share2,
   Check,
+  Copy,
   GitMerge,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -67,6 +68,8 @@ import {
   ReadonlyContent,
 } from "@multica/views/editor";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -183,6 +186,27 @@ export function NotesPage({
     () => notes.find((n) => n.id === selectedId) ?? null,
     [notes, selectedId],
   );
+
+  // FIR-2595: keep the browser address bar in sync with the open note, so the
+  // URL is shareable ("kopier den fra browseren"). `replaceSilent` updates the
+  // URL via the History API with no route reload — the same trick the inbox
+  // uses (FIR-2684). Deliberately NOT falling back to `replace`: web-only, it
+  // is gated on `replaceSilent` being present. On desktop there is no URL bar
+  // and a real `replace` from /notes to /notes/:noteId would swap the route
+  // element and remount the page, so desktop shares via the Copy link button.
+  // Guarding on `pathname === desired` keeps it loop-free and, on a deep link
+  // like /notes/:id?comment=x, leaves the ?comment param untouched on load.
+  const navigation = useNavigation();
+  const wsPaths = useWorkspacePaths();
+  React.useEffect(() => {
+    if (!navigation.replaceSilent) return;
+    if (!navigation.pathname.includes("/notes")) return;
+    const desired = selectedId
+      ? wsPaths.noteDetail(selectedId)
+      : wsPaths.notes();
+    if (navigation.pathname === desired) return;
+    navigation.replaceSilent(desired);
+  }, [selectedId, wsPaths, navigation]);
 
   const noteFolderIds = React.useMemo(
     () => new Set(folders.map((f) => f.id)),
@@ -838,6 +862,20 @@ export function NoteEditor({
   const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
   const isOwner = note.owner_id === myId;
 
+  // FIR-2595: "Copy link" — puts a shareable URL to this note on the clipboard.
+  // getShareableUrl returns the web origin + path (desktop: the connected
+  // environment's public web URL), so the link opens the note for anyone with
+  // access. Available to everyone, not just the owner.
+  const navigation = useNavigation();
+  const wsPaths = useWorkspacePaths();
+  const [linkCopied, setLinkCopied] = React.useState(false);
+  const copyNoteLink = React.useCallback(() => {
+    const url = navigation.getShareableUrl(wsPaths.noteDetail(note.id));
+    void navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    window.setTimeout(() => setLinkCopied(false), 1500);
+  }, [navigation, wsPaths, note.id]);
+
   // Edit lock: while this note is open and the flag is on, hold the lock and
   // heartbeat. If someone else holds it live, drop to read-only + offer takeover.
   const editLock = useNoteEditLock(note.id, lockEnabled);
@@ -1093,6 +1131,14 @@ export function NoteEditor({
           triggerLabel="Note actions"
           className="ml-auto"
           items={[
+            // FIR-2595: Copy link — a shareable URL to this note. Available to
+            // everyone, so anyone viewing a note can hand the link on.
+            {
+              key: "copy-link",
+              label: linkCopied ? "Link copied" : "Copy link",
+              icon: linkCopied ? Check : Copy,
+              onSelect: copyNoteLink,
+            },
             // Share lives in the menu now (FIR-1873). Owner-only — only the
             // owner may change who can see the note; it opens the Share sheet.
             isOwner && {
