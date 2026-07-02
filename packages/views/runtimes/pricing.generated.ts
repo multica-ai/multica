@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-06-25
+// Snapshot: 2026-07-02
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -42,6 +42,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "claude-sonnet-4-0": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-sonnet-4-5": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "cursor": { input: 3, output: 15, cacheRead: 0.5, cacheWrite: 0 },
   "cursor/auto": { input: 1.25, output: 6, cacheRead: 0.25, cacheWrite: 0 },
   "cursor/composer-1": { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
@@ -147,7 +148,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "minimax-m2.1": { input: 0.3, output: 1.2, cacheRead: 0.1, cacheWrite: 0.3 },
   "minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "minimax-m2.7": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
-  "minimax-m3": { input: 0.1, output: 0.4, cacheRead: 0.02, cacheWrite: 0.1 },
+  "minimax-m3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "o1": { input: 15, output: 60, cacheRead: 7.5, cacheWrite: 15 },
   "o1-pro": { input: 150, output: 600, cacheRead: 150, cacheWrite: 150 },
   "o3": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 2 },
