@@ -446,6 +446,7 @@
     "team_desc": "チーム全体にアクセス権を付与します",
     "team_coming_soon": "近日公開",
     "members_group": "メンバー",
+    "public_group": "公開アクセス",
     "members_empty": "選択できるワークスペースメンバーがいません",
     "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
   },

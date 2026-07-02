@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // createPermissionTestMember inserts a fresh workspace member and returns its
@@ -201,5 +203,174 @@ func TestCanInvokeAgent_PublicToMemberWhitelist(t *testing.T) {
 	}
 	if code := assignAs(otherMember); code != http.StatusForbidden {
 		t.Errorf("non-allow-listed member assign: expected 403, got %d", code)
+	}
+}
+
+// --- MUL-3963 follow-up: stackable / mixed / batch-replaced targets -------
+
+// createPublicToAgentWithTargets creates a public_to agent (owned by
+// testUserID) with the given invocation targets via the CreateAgent handler
+// and returns its id.
+func createPublicToAgentWithTargets(t *testing.T, name string, targets []map[string]any) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":               name,
+		"runtime_id":         handlerTestRuntimeID(t),
+		"permission_mode":    "public_to",
+		"invocation_targets": targets,
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create %q: expected 201, got %d: %s", name, w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID) })
+	return resp.ID
+}
+
+// canMemberInvoke loads the agent fresh and asks canInvokeAgent whether the
+// given member may invoke it (member is their own originator).
+func canMemberInvoke(t *testing.T, agentID, userID string) bool {
+	t.Helper()
+	agent, err := testHandler.Queries.GetAgent(context.Background(), util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	return testHandler.canInvokeAgent(context.Background(), agent, "member", userID, userID, testWorkspaceID)
+}
+
+func invocationTargetCount(t *testing.T, agentID string) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_invocation_target WHERE agent_id = $1`, agentID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count targets: %v", err)
+	}
+	return n
+}
+
+// TestCanInvokeAgent_MixedMemberAndTeamTargets verifies a public_to agent can
+// carry a MIX of target types on one agent, and canInvokeAgent OR-matches: a
+// member target admits that member; a team target is inert in v1 so it admits
+// nobody, but co-existing with the member target does not break the member
+// grant.
+func TestCanInvokeAgent_MixedMemberAndTeamTargets(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	memberA := createPermissionTestMember(t, "perm-mix-a@multica.test")
+	memberB := createPermissionTestMember(t, "perm-mix-b@multica.test")
+	teamID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" // no team table FK in v1
+
+	agentID := createPublicToAgentWithTargets(t, "mixed-member-team-agent", []map[string]any{
+		{"target_type": "member", "target_id": memberA},
+		{"target_type": "team", "target_id": teamID},
+	})
+
+	if n := invocationTargetCount(t, agentID); n != 2 {
+		t.Errorf("expected 2 mixed targets persisted, got %d", n)
+	}
+	if !canMemberInvoke(t, agentID, memberA) {
+		t.Errorf("member A (on member target) should be able to invoke")
+	}
+	if canMemberInvoke(t, agentID, memberB) {
+		t.Errorf("member B should NOT invoke — only a (inert) team target applies to them")
+	}
+}
+
+// TestUpdateAgent_BatchReplaceOverlappingMembers verifies the create/update
+// path replaces the WHOLE allow-list (not one row) and that overlapping
+// members survive the replace while removed ones lose access.
+func TestUpdateAgent_BatchReplaceOverlappingMembers(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	memberA := createPermissionTestMember(t, "perm-batch-a@multica.test")
+	memberB := createPermissionTestMember(t, "perm-batch-b@multica.test")
+	memberC := createPermissionTestMember(t, "perm-batch-c@multica.test")
+
+	agentID := createPublicToAgentWithTargets(t, "batch-replace-agent", []map[string]any{
+		{"target_type": "member", "target_id": memberA},
+		{"target_type": "member", "target_id": memberB},
+	})
+	if !canMemberInvoke(t, agentID, memberA) || !canMemberInvoke(t, agentID, memberB) {
+		t.Fatalf("initial: A and B should both invoke")
+	}
+	if canMemberInvoke(t, agentID, memberC) {
+		t.Fatalf("initial: C should not invoke")
+	}
+
+	// Batch-replace the allow-list with an overlapping set: drop A, keep B, add C.
+	w := httptest.NewRecorder()
+	r := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"permission_mode": "public_to",
+		"invocation_targets": []map[string]any{
+			{"target_type": "member", "target_id": memberB},
+			{"target_type": "member", "target_id": memberC},
+		},
+	})
+	r = withURLParam(r, "id", agentID)
+	testHandler.UpdateAgent(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if n := invocationTargetCount(t, agentID); n != 2 {
+		t.Errorf("after batch replace expected exactly 2 targets, got %d (stale rows not cleared?)", n)
+	}
+	if canMemberInvoke(t, agentID, memberA) {
+		t.Errorf("A was removed and must no longer invoke")
+	}
+	if !canMemberInvoke(t, agentID, memberB) {
+		t.Errorf("B overlapped both sets and must still invoke")
+	}
+	if !canMemberInvoke(t, agentID, memberC) {
+		t.Errorf("C was added and must now invoke")
+	}
+}
+
+// TestUpdateAgent_WorkspaceStacksWithMembersThenNarrowed verifies workspace and
+// member targets stack (workspace admits any member via OR), and that a
+// subsequent batch replace to a member-only set narrows access correctly.
+func TestUpdateAgent_WorkspaceStacksWithMembersThenNarrowed(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	memberA := createPermissionTestMember(t, "perm-stack-a@multica.test")
+	memberB := createPermissionTestMember(t, "perm-stack-b@multica.test")
+
+	agentID := createPublicToAgentWithTargets(t, "workspace-plus-member-agent", []map[string]any{
+		{"target_type": "workspace"},
+		{"target_type": "member", "target_id": memberA},
+	})
+	// Workspace target admits ANY workspace member via OR, including B who is
+	// not on an explicit member target.
+	if !canMemberInvoke(t, agentID, memberA) || !canMemberInvoke(t, agentID, memberB) {
+		t.Fatalf("workspace target should admit any member (A and B)")
+	}
+
+	// Narrow to member C only — workspace grant is dropped by the replace.
+	memberC := createPermissionTestMember(t, "perm-stack-c@multica.test")
+	w := httptest.NewRecorder()
+	r := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"permission_mode": "public_to",
+		"invocation_targets": []map[string]any{
+			{"target_type": "member", "target_id": memberC},
+		},
+	})
+	r = withURLParam(r, "id", agentID)
+	testHandler.UpdateAgent(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("narrow update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if canMemberInvoke(t, agentID, memberB) {
+		t.Errorf("after dropping workspace target, non-listed member B must lose access")
+	}
+	if !canMemberInvoke(t, agentID, memberC) {
+		t.Errorf("member C must have access after the replace")
 	}
 }
