@@ -98,17 +98,50 @@ func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, owne
 	if len(added) == 0 {
 		return
 	}
-	for _, uid := range added {
-		mu, err := util.ParseUUID(uid)
-		if err != nil {
-			continue
+
+	// FIR-2595: who gets notified depends on whether the note lives in a folder.
+	// A foldered note is governed by the folder's Collections grants (Stage 1),
+	// so silently sharing the note with a tagged person no longer opens it — the
+	// folder still gates them and they'd get "note not found" (the FIR-2589
+	// symptom). So for a foldered note we do NOT auto-share: we notify only
+	// members who can already open the note. Granting a tagged person who lacks
+	// access is an explicit choice made via the mention-access endpoint (the
+	// "give access?" prompt), which grants folder access before the mention is
+	// saved — so by the time we run here, they can see it. A note with no folder
+	// has nothing to gate, so the original share + private→shared path applies.
+	art, artErr := h.Upstream.GetArtifact(ctx, db.GetArtifactParams{ID: artifactID, WorkspaceID: wsID})
+	foldered := artErr == nil && art.FolderID.Valid
+
+	var notify []string
+	if foldered {
+		for _, uid := range added {
+			mu, err := util.ParseUUID(uid)
+			if err != nil {
+				continue
+			}
+			ok, err := h.Cerebro.CanUserSeeNote(ctx, cerebrodb.CanUserSeeNoteParams{ArtifactID: artifactID, OwnerID: mu})
+			if err == nil && ok {
+				notify = append(notify, uid)
+			}
 		}
-		_ = h.Cerebro.AddNoteShare(ctx, cerebrodb.AddNoteShareParams{ArtifactID: artifactID, UserID: mu})
+	} else {
+		for _, uid := range added {
+			mu, err := util.ParseUUID(uid)
+			if err != nil {
+				continue
+			}
+			_ = h.Cerebro.AddNoteShare(ctx, cerebrodb.AddNoteShareParams{ArtifactID: artifactID, UserID: mu})
+		}
+		// Shares only grant access when visibility is 'shared' (or 'workspace'),
+		// so a private note becomes shared the moment it gains a tagged person.
+		if visibility == "private" {
+			_ = h.Cerebro.SetNoteVisibility(ctx, cerebrodb.SetNoteVisibilityParams{ArtifactID: artifactID, Visibility: "shared"})
+		}
+		notify = added
 	}
-	// Shares only grant access when visibility is 'shared' (or 'workspace'), so
-	// a private note becomes shared the moment it gains a tagged person.
-	if visibility == "private" {
-		_ = h.Cerebro.SetNoteVisibility(ctx, cerebrodb.SetNoteVisibilityParams{ArtifactID: artifactID, Visibility: "shared"})
+
+	if len(notify) == 0 {
+		return
 	}
 	if h.Bus == nil {
 		return
@@ -116,7 +149,7 @@ func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, owne
 	payload := map[string]any{
 		"note_id":    uuidStr(artifactID),
 		"note_title": title,
-		"member_ids": added,
+		"member_ids": notify,
 	}
 	// A comment mention carries the comment it was tagged in, so the inbox item
 	// can deep-link straight to that comment and show its text as context.
@@ -174,6 +207,10 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Put("/{id}/visibility", h.SetVisibility)
 	r.Put("/{id}/pin", h.SetPin)
 	r.Get("/{id}/shares", h.ListShares)
+	// FIR-2595 — the "give access?" prompt: check which tagged members can't open
+	// the note, and grant them access when the author confirms. See mention_access.go.
+	r.Get("/{id}/mention-access", h.MentionAccessCheck)
+	r.Post("/{id}/mention-access", h.GrantMentionAccess)
 	// References on a note (TECH-3421): mirror of the issue-reference feature,
 	// keyed by the note's artifact id. See references.go.
 	r.Get("/{id}/references", h.ListReferences)

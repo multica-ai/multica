@@ -31,11 +31,23 @@ import {
   parseIssueMentions,
   buildThreads,
   noteKeys,
+  extractMemberMentions,
+  checkMentionAccess,
+  grantMentionAccess,
+  type CreateNoteCommentInput,
   type IssueMention,
   type NoteComment,
   type NoteReference,
   type NoteThread,
 } from "../core";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import type { Editor } from "@tiptap/react";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
@@ -213,6 +225,13 @@ export function NoteCommentsPanel({
   // input side of that whole feature.
   const composerRef = React.useRef<ContentEditorRef>(null);
 
+  // FIR-2595: when a comment tags members who can't open this note, hold the
+  // pending comment here and ask the author whether to give them access.
+  const [accessPrompt, setAccessPrompt] = React.useState<{
+    noAccess: string[];
+    payload: CreateNoteCommentInput;
+  } | null>(null);
+
   const threads = React.useMemo(() => buildThreads(comments), [comments]);
   const open = threads.filter((t) => !t.root.resolved);
   const resolved = threads.filter((t) => t.root.resolved);
@@ -303,35 +322,104 @@ export function NoteCommentsPanel({
     return members.find((m) => m.user_id === id)?.name ?? "Unknown";
   }
 
+  function doCreate(payload: CreateNoteCommentInput) {
+    create.mutate(payload, {
+      onSuccess: () => {
+        setDraft("");
+        composerRef.current?.clearContent();
+        onClearDraft();
+      },
+    });
+  }
+
   function submit() {
     // Read straight from the editor so a click right after typing isn't lost to
     // the onUpdate debounce.
     const text = (composerRef.current?.getMarkdown() ?? draft).trim();
     if (!text) return;
     const ctx = draftQuote ? anchorContext(noteBody, draftQuote) : null;
-    create.mutate(
-      {
-        kind: mode,
-        body: mode === "suggestion" ? "Suggested edit" : text,
-        suggestion_text: mode === "suggestion" ? text : undefined,
-        anchor_quote: draftQuote || undefined,
-        anchor_prefix: ctx?.prefix || undefined,
-        anchor_suffix: ctx?.suffix || undefined,
-        anchor_start: ctx?.start ?? undefined,
-        anchor_end: ctx?.end ?? undefined,
-      },
-      {
-        onSuccess: () => {
-          setDraft("");
-          composerRef.current?.clearContent();
-          onClearDraft();
-        },
-      },
-    );
+    const payload: CreateNoteCommentInput = {
+      kind: mode,
+      body: mode === "suggestion" ? "Suggested edit" : text,
+      suggestion_text: mode === "suggestion" ? text : undefined,
+      anchor_quote: draftQuote || undefined,
+      anchor_prefix: ctx?.prefix || undefined,
+      anchor_suffix: ctx?.suffix || undefined,
+      anchor_start: ctx?.start ?? undefined,
+      anchor_end: ctx?.end ?? undefined,
+    };
+    // FIR-2595: a suggestion's stored body carries no @mentions; only a real
+    // comment tags people. Before posting a comment that tags someone, ask the
+    // server whether any tagged member can't open this note — if so, prompt the
+    // author to give them access (so the notification is openable) instead of
+    // silently posting a mention they'll never receive.
+    const mentioned = mode === "suggestion" ? [] : extractMemberMentions(text);
+    if (mentioned.length === 0) {
+      doCreate(payload);
+      return;
+    }
+    void checkMentionAccess(noteId, mentioned)
+      .then((noAccess) => {
+        if (noAccess.length === 0) doCreate(payload);
+        else setAccessPrompt({ noAccess, payload });
+      })
+      // Never block posting on a failed check — fall back to posting as-is.
+      .catch(() => doCreate(payload));
   }
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
+      {/* FIR-2595: "give access?" prompt when a comment tags people who can't
+          open this note. Give access grants them so they get the comment; Post
+          without still posts (they simply aren't notified); Cancel keeps the
+          draft. */}
+      <AlertDialog
+        open={accessPrompt !== null}
+        onOpenChange={(o) => {
+          if (!o) setAccessPrompt(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Give access to this note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {accessPrompt?.noAccess.map(nameFor).join(", ")} can&apos;t open
+              this note yet, so they won&apos;t receive your comment. Give them
+              access, or post without notifying them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="ghost" onClick={() => setAccessPrompt(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const p = accessPrompt;
+                setAccessPrompt(null);
+                if (p) doCreate(p.payload);
+              }}
+            >
+              Post without
+            </Button>
+            <Button
+              onClick={async () => {
+                const p = accessPrompt;
+                setAccessPrompt(null);
+                if (!p) return;
+                try {
+                  await grantMentionAccess(noteId, p.noAccess);
+                } catch {
+                  toast.error("Couldn't give access — posting anyway.");
+                }
+                doCreate(p.payload);
+              }}
+            >
+              Give access &amp; post
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <MessageSquarePlus className="size-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Comments</span>
