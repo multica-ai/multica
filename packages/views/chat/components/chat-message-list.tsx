@@ -640,12 +640,26 @@ function ThinkingRow({ item }: { item: ChatTimelineItem }) {
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-start gap-1.5 rounded px-1 -mx-1 py-0.5 text-xs hover:bg-accent/30 transition-colors">
-        <Brain className="h-3 w-3 shrink-0 text-muted-foreground/60 mt-0.5" />
-        <span className="text-muted-foreground italic truncate">{preview}</span>
+      <CollapsibleTrigger
+        className={cn(
+          "flex w-full items-start gap-1.5 rounded-md border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-xs text-violet-700 transition-colors hover:bg-violet-500/15 dark:text-violet-300",
+          open && "bg-violet-500/15",
+        )}
+      >
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 shrink-0 text-violet-500/80 transition-transform mt-0.5",
+            open && "rotate-90",
+          )}
+        />
+        <Brain className="h-3 w-3 shrink-0 text-violet-500 mt-0.5" />
+        <span className="shrink-0 font-medium">Thinking</span>
+        <span className="min-w-0 flex-1 truncate italic text-violet-700/80 dark:text-violet-200/80">
+          {preview}
+        </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/30 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-words">
+        <pre className="ml-[18px] mt-1 max-h-40 overflow-auto rounded-md border border-violet-500/15 bg-violet-500/5 p-2 text-xs text-violet-900/80 whitespace-pre-wrap break-words dark:text-violet-100/80">
           {text}
         </pre>
       </CollapsibleContent>

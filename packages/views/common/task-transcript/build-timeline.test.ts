@@ -101,4 +101,43 @@ describe("task transcript timeline", () => {
 
     expect(items[0]?.created_at).toBe("2026-06-09T09:00:00.000Z");
   });
+
+  it("splits plain text thinking tags into separate thinking timeline items", () => {
+    const items = buildTimeline([
+      message(1, "text", "Before <thinking>reasoning</thinking> final answer"),
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({ type: "text", content: "Before " }),
+      expect.objectContaining({ type: "thinking", content: "reasoning" }),
+      expect.objectContaining({ type: "text", content: " final answer" }),
+    ]);
+  });
+
+  it("splits thinking tags after streaming text chunks are coalesced", () => {
+    const items = buildTimeline([
+      message(1, "text", "Before <thinking>reason"),
+      message(2, "text", "ing</thinking> final"),
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({ type: "text", content: "Before " }),
+      expect.objectContaining({ type: "thinking", content: "reasoning" }),
+      expect.objectContaining({ type: "text", content: " final" }),
+    ]);
+  });
+
+  it("leaves unmatched thinking tags as text while streaming", () => {
+    const items = buildTimeline([
+      message(1, "text", "Before <thinking>partial reasoning"),
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        type: "text",
+        content: "Before <thinking>partial reasoning",
+      }),
+    ]);
+  });
 });
