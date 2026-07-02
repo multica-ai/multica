@@ -63,6 +63,27 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 	})
 }
 
+// TestNewAPIClient_LeftoverMarkerActionableError verifies that a stale
+// daemon-task marker with no daemon env (the local_directory crash-leftover
+// case) fails closed with an actionable message that names the marker file,
+// rather than an opaque "requires mat_ token" error.
+func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected error for leftover daemon-task marker, got nil")
+	} else if !strings.Contains(err.Error(), execenv.TaskContextMarkerRelPath) {
+		t.Fatalf("error should name the marker path; got %q", err.Error())
+	} else if !strings.Contains(err.Error(), "leftover") {
+		t.Fatalf("error should hint it may be a leftover; got %q", err.Error())
+	}
+}
+
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
 // the cross-workspace contamination bug (#1235). Inside a daemon-spawned
 // agent task (MULTICA_AGENT_ID / MULTICA_TASK_ID set), the CLI must NOT

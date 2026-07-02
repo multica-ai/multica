@@ -251,6 +251,16 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
 	if inDaemonManagedExecutionContext() && !strings.HasPrefix(token, "mat_") {
+		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
+		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
+		// real task is a leftover marker from a crashed daemon task in a
+		// local_directory. Name the exact file so a normal user can recover
+		// instead of hitting an opaque "requires mat_ token" error.
+		if !inAgentExecutionContext() && os.Getenv("MULTICA_DAEMON_PORT") == "" {
+			if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
+				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
+			}
+		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
 	}
 
@@ -305,9 +315,16 @@ func inDaemonManagedExecutionContext() bool {
 }
 
 func hasDaemonTaskContextMarker() bool {
+	return daemonTaskContextMarkerPath() != ""
+}
+
+// daemonTaskContextMarkerPath walks up from the current working directory and
+// returns the path of the first readable daemon-task marker whose managed_by
+// matches, or "" when none is found.
+func daemonTaskContextMarkerPath() string {
 	dir, err := os.Getwd()
 	if err != nil {
-		return false
+		return ""
 	}
 	for {
 		markerPath := filepath.Join(dir, execenv.TaskContextMarkerRelPath)
@@ -324,13 +341,13 @@ func hasDaemonTaskContextMarker() bool {
 				ManagedBy string `json:"managed_by"`
 			}
 			if json.Unmarshal(data, &marker) == nil && marker.ManagedBy == execenv.TaskContextMarkerManagedBy {
-				return true
+				return markerPath
 			}
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return false
+			return ""
 		}
 		dir = parent
 	}
