@@ -1368,8 +1368,26 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 // causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
+	var cancelledChildren []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+		// 1. Lock and cancel active descendants first to eliminate the race window
+		var err error
+		cancelledChildren, err = qtx.CancelActiveRetryDescendantsByParent(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("cancel active retry descendants: %w", err)
+		}
+
+		// 2. Check if any descendant has completed
+		hasCompleted, err := qtx.HasCompletedRetryDescendantsByParent(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("check completed retry descendants: %w", err)
+		}
+		if hasCompleted {
+			return pgx.ErrNoRows // Abort parent reclaim
+		}
+
+		// 3. Reclaim the parent task
+		t, err := qtx.CompleteOrReclaimAgentTask(ctx, db.CompleteOrReclaimAgentTaskParams{
 			ID:        taskID,
 			Result:    result,
 			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
@@ -1379,6 +1397,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			return err
 		}
 		task = t
+
 
 		if t.ChatSessionID.Valid {
 			// Pin the chat_session's runtime_id alongside the session_id so the
@@ -1434,6 +1453,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+
+	for _, c := range cancelledChildren {
+		s.captureTaskCancelled(ctx, c)
+		s.ReconcileAgentStatus(ctx, c.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, c)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1561,8 +1586,26 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		failureReason = taskfailure.Classify(errMsg).String()
 	}
 	var task db.AgentTaskQueue
+	var cancelledChildren []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
+		// 1. Lock and cancel active descendants first to eliminate the race window
+		var err error
+		cancelledChildren, err = qtx.CancelActiveRetryDescendantsByParent(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("cancel active retry descendants: %w", err)
+		}
+
+		// 2. Check if any descendant has completed
+		hasCompleted, err := qtx.HasCompletedRetryDescendantsByParent(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("check completed retry descendants: %w", err)
+		}
+		if hasCompleted {
+			return pgx.ErrNoRows // Abort parent reclaim
+		}
+
+		// 3. Reclaim the parent task
+		t, err := qtx.FailOrReclaimAgentTask(ctx, db.FailOrReclaimAgentTaskParams{
 			ID:            taskID,
 			Error:         pgtype.Text{String: errMsg, Valid: true},
 			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
@@ -1573,6 +1616,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -1624,6 +1668,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+
+	for _, c := range cancelledChildren {
+		s.captureTaskCancelled(ctx, c)
+		s.ReconcileAgentStatus(ctx, c.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, c)
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts

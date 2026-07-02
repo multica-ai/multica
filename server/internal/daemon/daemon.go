@@ -237,6 +237,8 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	pendingQueueNotify chan struct{} // signaled when a new record is enqueued or wakeup connection reconnects
 }
 
 type profileLaunchSpec struct {
@@ -270,6 +272,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		pendingQueueNotify:        make(chan struct{}, 1),
 		reconcile:                 newReconcileBroadcaster(),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
@@ -794,6 +797,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	go d.pendingQueueRetrierLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -3143,7 +3147,8 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// has already refused this task and the only useful UI signal
 		// left is a concrete failure.
 		if isTransientError(err) {
-			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
+			taskLog.Error("complete task failed after retries; saving to pending queue", "error", err)
+			d.enqueuePendingResult(taskID, result)
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
@@ -3156,8 +3161,17 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// which is the canonical replacement for the legacy
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
-			taskLog.Error("fail task fallback also failed", "error", failErr)
+		fallbackReason := taskfailure.Classify(fallbackErrMsg).String()
+		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, fallbackReason); failErr != nil {
+			if isTransientError(failErr) {
+				result.Status = "failed"
+				result.Comment = fallbackErrMsg
+				result.FailureReason = fallbackReason
+				taskLog.Error("fail task fallback failed after retries; saving to pending queue", "error", failErr)
+				d.enqueuePendingResult(taskID, result)
+				return
+			}
+			taskLog.Error("fail task fallback also failed permanently", "error", failErr)
 		}
 	default:
 		failureReason := result.FailureReason
@@ -3178,9 +3192,15 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 				failureReason = taskfailure.Classify(result.Comment).String()
 			}
 		}
+		result.FailureReason = failureReason
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
 		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
-			taskLog.Error("report failed task failed", "error", err)
+			if isTransientError(err) {
+				taskLog.Error("report failed task failed after retries; saving to pending queue", "error", err)
+				d.enqueuePendingResult(taskID, result)
+				return
+			}
+			taskLog.Error("report failed task failed permanently", "error", err)
 		}
 	}
 }
