@@ -19,8 +19,10 @@ import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
+import { useRegisterIssueNavigation } from "../hooks";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
@@ -141,6 +143,7 @@ export function BoardView({
   projectId?: string;
 }) {
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
@@ -212,6 +215,15 @@ export function BoardView({
     () => makeKanbanCollision(groupIds),
     [groupIds],
   );
+
+  // Publish the resting column order for the issue detail's previous/next
+  // navigation. Derived from props rather than the local `columns` state below
+  // so an in-progress drag never leaks a transient ordering into navigation.
+  const navColumns = useMemo(
+    () => buildColumns(groupedIssues, groups, grouping),
+    [groupedIssues, groups, grouping],
+  );
+  useRegisterIssueNavigation(wsId, navColumns);
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);

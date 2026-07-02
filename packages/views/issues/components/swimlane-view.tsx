@@ -56,6 +56,7 @@ import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { ChildProgress } from "./list-row";
+import { useClearIssueNavigation } from "../hooks";
 import { useT } from "../../i18n";
 
 const COLUMN_WIDTH = 280;
@@ -490,6 +491,10 @@ export function SwimLaneView({
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
+  // The 2D lane×status grid has no single "column" the detail can step through,
+  // so clear this workspace's published columns rather than offer navigation
+  // that wouldn't match what the user sees here.
+  useClearIssueNavigation(wsId);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const runningIssueIds = useMemo(() => {
