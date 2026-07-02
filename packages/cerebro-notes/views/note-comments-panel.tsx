@@ -14,6 +14,7 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
 import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useEnsureNoteMentionScope } from "./note-mention-scope";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { ApiError } from "@multica/core/api";
@@ -137,6 +138,9 @@ export function NoteCommentsPanel({
   // selected (or all) to the note's coupled issue/chat. Behind a flag; nothing
   // shows unless the flag is on.
   const collabEnabled = useFeatureFlag("cerebro_note_agent_collab");
+  // FIR-2595 point 3: scope the comment @mention picker to people with note access.
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
+  useEnsureNoteMentionScope(wsId, noteId, scopedMentions);
   const send = useSendNoteComments(noteId);
   const { data: references = [] } = useNoteReferences(
     collabEnabled ? noteId : undefined,
@@ -552,6 +556,8 @@ export function NoteCommentsPanel({
             onSubmit={submit}
             showBubbleMenu={false}
             debounceMs={150}
+            // FIR-2595 point 3: scope @mentions to people with note access.
+            currentNoteId={scopedMentions ? noteId : undefined}
             placeholder={
               mode === "suggestion"
                 ? "Replace the selected text with…"
@@ -666,6 +672,9 @@ function ThreadView({
   onAfterDecide: () => void;
 }) {
   const { root, replies } = thread;
+  // FIR-2595 point 3: scope the reply @mention picker (cache is warmed by the
+  // parent panel's useEnsureNoteMentionScope for this note).
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
   const resolve = useResolveNoteComment(noteId);
   const del = useDeleteNoteComment(noteId);
   const decide = useDecideNoteSuggestion(noteId);
@@ -804,6 +813,8 @@ function ThreadView({
               onSubmit={sendReply}
               showBubbleMenu={false}
               debounceMs={150}
+              // FIR-2595 point 3: scope @mentions to people with note access.
+              currentNoteId={scopedMentions ? noteId : undefined}
               placeholder="Reply… (type @ to mention)"
               className="min-h-[40px] text-sm"
             />

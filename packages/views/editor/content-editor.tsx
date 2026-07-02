@@ -104,6 +104,9 @@ interface ContentEditorProps {
    * under this ID and replaces the selection with a mention link.
    */
   currentIssueId?: string;
+  // CEREBRO-PATCH(note-mention-scope-prop): FIR-2595 point 3 — when this editor
+  // belongs to a note, its id scopes the @mention picker to note-access.
+  currentNoteId?: string;
   /**
    * When true, the @mention extension is not registered. Use for editors
    * where mentioning members/agents has no business meaning (e.g. agent
@@ -186,6 +189,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       showBubbleMenu = true,
       submitOnEnter = false,
       currentIssueId,
+      // CEREBRO-PATCH(note-mention-scope-destructure): FIR-2595 point 3.
+      currentNoteId,
       disableMentions = false,
       autoFocus = false,
       mentionMode = "default",
@@ -282,6 +287,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // the editor's current issue id into the mention factory so cerebro
         // can dim members lacking project access.
         currentIssueId,
+        // CEREBRO-PATCH(note-mention-scope-wire): FIR-2595 point 3 — pass the
+        // note id so the mention factory can scope suggestions to note-access.
+        currentNoteId,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,

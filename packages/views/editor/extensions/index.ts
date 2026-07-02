@@ -143,6 +143,9 @@ export interface EditorExtensionsOptions {
   // editor's currentIssueId into the @mention factory so cerebro-access can
   // mark users lacking project access. Optional; unused upstream.
   currentIssueId?: string | null;
+  // CEREBRO-PATCH(note-mention-scope-opt): FIR-2595 point 3 — thread the note id
+  // so the @mention factory can scope suggestions to note-access. Optional.
+  currentNoteId?: string | null;
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
@@ -216,6 +219,8 @@ export function createEditorExtensions(
                 mode: options.mentionMode,
                 getContextItems: options.getMentionContextItems,
                 currentIssueId: options.currentIssueId,
+                // CEREBRO-PATCH(note-mention-scope-pass): FIR-2595 point 3.
+                currentNoteId: options.currentNoteId,
               }),
             }
           : {}),

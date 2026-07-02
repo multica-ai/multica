@@ -88,6 +88,10 @@ export type CerebroFlagKey =
   // (no auto-fire on @-mention). Gates the coupling UI, the "unsent comments"
   // notice, and the send controls. Default off until QA'd on staging.
   | "cerebro_note_agent_collab"
+  // FIR-2595 point 3: scope the @mention picker inside a note to the people the
+  // note is shared with (and their agents), instead of the full workspace
+  // directory. Prevents even offering a colleague who cannot open the note.
+  | "cerebro_note_scoped_mentions"
   // FIR-1800: reference an artifact (document/note) inside a comment / chat /
   // DM / channel body via a `mention://artifact/<id>` token, rendered as a
   // compact white card that opens the full-page note editor.
@@ -403,6 +407,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_inbox_pane: true,
   // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.
   cerebro_note_agent_collab: true,
+  // FIR-2595 point 3: OFF until the scoped note @mention picker is QA'd on staging.
+  cerebro_note_scoped_mentions: false,
   // FIR-2022: OFF until the Notes search scope is QA'd on staging. Gates only
   // the in-app global-search "Notes" scope; the CLI/MCP search tools always work.
   cerebro_note_search: false,
@@ -1319,6 +1325,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Periodically scan each agent for capability drift — a tool it actually used (observed access) that its declared policy does not allow (blocked or unmapped). When drift is found, alert the workspace owners/admins in their inbox with the agent and the offending tools. Read-only and off by default; turn it on to get proactive alerts instead of only seeing drift on the Capabilities tab. TECH-3738 Bid C.",
   },
   {
+    key: "cerebro_note_scoped_mentions",
+    label: "Scoped note mentions",
+    group: "permissions",
+    description:
+      "Inside a note, the @mention picker only offers people the note is shared with (and their agents), instead of the whole workspace. Prevents tagging a colleague who cannot open the note. FIR-2595.",
+  },
+  {
     key: "cerebro_note_types",
     label: "Note types",
     group: "workspace",
@@ -1679,6 +1692,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_private_agent_requests: "approvals",
   // Folders & content access.
   cerebro_folder_access: "content_access",
+  cerebro_note_scoped_mentions: "content_access",
   cerebro_folder_action_guard: "content_access",
   cerebro_collections: "content_access",
   // Agent permissions & visibility.

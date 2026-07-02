@@ -73,6 +73,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useEnsureNoteMentionScope } from "./note-mention-scope";
 import type { Editor } from "@tiptap/react";
 import {
   notesListOptions,
@@ -805,6 +806,9 @@ export function NoteEditor({
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
+  // FIR-2595 point 3: scope the note's @mention picker to people with access.
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
+  useEnsureNoteMentionScope(wsId, note.id, scopedMentions);
   // FIR-1317 Plan A: per-note toggle for conflict merge (moved out of the
   // workspace feature flag so each user can turn it on/off from the note ⋯ menu).
   // Defaults to ON; stored in localStorage so the preference survives a reload.
@@ -1271,6 +1275,8 @@ export function NoteEditor({
                 onCommentOnSelection={
                   commentsEnabled ? startCommentOnSelection : undefined
                 }
+                // FIR-2595 point 3: scope @mentions to people with note access.
+                currentNoteId={scopedMentions ? note.id : undefined}
                 placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
                 className="min-h-[50vh] flex-1"
               />
