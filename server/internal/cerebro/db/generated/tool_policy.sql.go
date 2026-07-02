@@ -45,12 +45,13 @@ WHERE workspace_id = $1
   AND tool_key = $2
   AND resource_pattern = $3
   AND (
-    (layer = 'workspace' AND subject_id = $1) OR
-    (layer = 'runtime'   AND subject_id = $4) OR
-    (layer = 'agent'     AND subject_id = $5) OR
-    (layer = 'user'      AND subject_id = $6) OR
-    (layer = 'group'     AND subject_id = ANY($7::uuid[])) OR
-    (layer = 'system'    AND subject_id = $8)
+    (layer = 'workspace'    AND subject_id = $1) OR
+    (layer = 'runtime'      AND subject_id = $4) OR
+    (layer = 'agent'        AND subject_id = $5) OR
+    (layer = 'user'         AND subject_id = $6) OR
+    (layer = 'group'        AND subject_id = ANY($7::uuid[])) OR
+    (layer = 'system'       AND subject_id = $8) OR
+    (layer = 'on_behalf_of' AND subject_id = $9)
   )
 `
 
@@ -63,6 +64,7 @@ type ListCerebroToolPolicyForContextParams struct {
 	UserID          pgtype.UUID   `json:"user_id"`
 	GroupIds        []pgtype.UUID `json:"group_ids"`
 	SystemID        pgtype.UUID   `json:"system_id"`
+	OnBehalfOfID    pgtype.UUID   `json:"on_behalf_of_id"`
 }
 
 type ListCerebroToolPolicyForContextRow struct {
@@ -91,6 +93,12 @@ type ListCerebroToolPolicyForContextRow struct {
 // workspace itself, so it enters every resolution. group_ids may be empty. The
 // system layer is the mandate-actor ceiling for human-less runs (FIR-1609): its
 // subject is the autopilot id, so it only matches when a system run supplies one.
+// The on_behalf_of layer is the delegated member (the task initiator) as a real,
+// tighten-only actor level (FIR-2441): its subject is the human the work is
+// performed for, distinct from user (the agent owner), so it only matches when a
+// delegated run supplies one. This keeps the Resolve path (which powers the claim
+// brief) at parity with the TableQuery path that already honours it — listed ==
+// callable.
 // conditions is the optional WHEN layer (FIR-1609): the resolver evaluates it
 // against the request context and drops a row whose terms are not met, so the
 // Terms axis bites at the gate, not only in the admin table read.
@@ -104,6 +112,7 @@ func (q *Queries) ListCerebroToolPolicyForContext(ctx context.Context, arg ListC
 		arg.UserID,
 		arg.GroupIds,
 		arg.SystemID,
+		arg.OnBehalfOfID,
 	)
 	if err != nil {
 		return nil, err

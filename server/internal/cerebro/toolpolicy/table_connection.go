@@ -219,9 +219,10 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
 		    (p.layer = 'agent'     AND p.subject_id = $3) OR
 		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
 		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
 	if err != nil {
 		if isUndefinedTable(err) {
 			return nil, nil
@@ -433,8 +434,10 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // actor, over the connection-wide row (`connection:<name>`, empty
 // resource_pattern) AND the matching per-endpoint row (source
 // connection-endpoint, resource_pattern "<METHOD> <path>"), at EVERY actor layer
-// (Workspace › Runtime › Agent › Group › User). It is the engine half the
-// API-call gate uses, so the gateway gate and the admin screen can never drift.
+// (Workspace › Runtime › Agent › Group › User), plus the tighten-only on_behalf_of
+// layer (the delegated task initiator, keyed by onBehalfOfID — Deny-only, see the
+// SECURITY note in the loop below). It is the engine half the API-call gate uses,
+// so the gateway gate and the admin screen can never drift.
 //
 // API-connection endpoints resolve against a PER-CONNECTION default — FIR-2166
 // "C" v2. Each connection carries a default_access mode (allow/ask/deny) chosen
@@ -458,16 +461,17 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // connections (ConnectionToolEffective / ConnectionToolDenied), which keep their
 // Allow-baseline shape and are unaffected. Returns the resolved setting and, on a
 // non-Allow, the connection name so callers can surface "which integration".
-func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (Setting, string, error) {
+func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (Setting, string, error) {
 	if connName == "" || method == "" || path == "" {
 		// An unidentifiable endpoint cannot be matched to a grant; fail closed.
 		return SettingDeny, connName, nil
 	}
 	rows, err := s.Table(ctx, TableQuery{
-		WorkspaceID: workspaceID,
-		RuntimeID:   runtimeID,
-		AgentID:     agentID,
-		UserID:      userID,
+		WorkspaceID:  workspaceID,
+		RuntimeID:    runtimeID,
+		AgentID:      agentID,
+		UserID:       userID,
+		OnBehalfOfID: onBehalfOfID,
 	})
 	if err != nil {
 		// Return the error so the caller's fail-open(list)/fail-closed(call) policy
@@ -492,7 +496,24 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// Inspect the raw per-layer settings (NOT r.Effective, whose tighten-only
 		// verdict carries an Allow base). Deny wins immediately; otherwise an
 		// explicit Allow grants and an explicit Ask gates, overriding the default.
-		for _, set := range r.Layers {
+		//
+		// SECURITY (FIR-2441): the on_behalf_of layer (the delegated task initiator,
+		// keyed by OnBehalfOfID above) is TIGHTEN-ONLY on this grant path. This path
+		// GRANTS on any layer's explicit Allow, and it is the gate for the default-deny
+		// secrets connections (infisical-admin). So a member (on_behalf_of) rule may only
+		// ever REVOKE — an on_behalf_of Deny blocks the call, but an on_behalf_of
+		// Allow/Ask is ignored (never grants, never gates). That keeps a member from
+		// opening the secrets box to whoever drives the agent, while still letting a
+		// member-level Deny hold across every agent that member delegates work to.
+		for layer, set := range r.Layers {
+			if layer == LayerOnBehalfOf {
+				// Deny-only: honour a revoke, ignore any Allow/Ask so the initiator can
+				// never grant or gate a call the owner's own layers did not.
+				if set == SettingDeny {
+					return SettingDeny, connName, nil
+				}
+				continue
+			}
 			switch set {
 			case SettingDeny:
 				return SettingDeny, connName, nil
@@ -681,9 +702,10 @@ func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery,
 		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
 		    (p.layer = 'agent'     AND p.subject_id = $3) OR
 		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
 		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
 	if err != nil {
 		return nil, fmt.Errorf("toolpolicy: load connection policy settings: %w", err)
 	}

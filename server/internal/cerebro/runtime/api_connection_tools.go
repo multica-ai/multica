@@ -68,6 +68,25 @@ var pathParamRe = regexp.MustCompile(`\{([^/{}]+)\}`)
 // byte the same argument-shape guidance in the first prompt (FIR-2441).
 const APIConnectionArgHint = connmeta.APIConnectionArgHint
 
+// ConnectionGuidance re-exports the full descriptive connection guidance from
+// connmeta so the cloud gateway renders byte-for-byte the same first-prompt text
+// the local claim brief already ships. It embeds APIConnectionArgHint (FIR-2441
+// fix-list #5).
+const ConnectionGuidance = connmeta.ConnectionGuidance
+
+// toolsHaveAPIConnectionTool reports whether any tool in the slice is an
+// *APIConnectionTool. The compat tool loop only has the resolved []Tool (no
+// Registry handle), so it keys on the concrete type to decide whether to append
+// ConnectionGuidance to the system prompt (FIR-2441).
+func toolsHaveAPIConnectionTool(tools []Tool) bool {
+	for _, t := range tools {
+		if _, isAPI := t.(*APIConnectionTool); isAPI {
+			return true
+		}
+	}
+	return false
+}
+
 // registryHasAPIConnectionTool reports whether any of the named tools resolves,
 // in the registry, to an *APIConnectionTool. The cloud gateway uses it to decide
 // whether to append APIConnectionArgHint to the system prompt, so the check keys

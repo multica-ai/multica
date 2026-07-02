@@ -1374,9 +1374,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim; FIR-2441 routes the decision through the unified ConnectionToolResolver when the flag is on, else the legacy BuildMCPConfig/DisallowedMCPTools path (reversible). See injectClaimConnectionMCP.
+		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim; FIR-2441 routes the decision through the unified ConnectionToolResolver when the flag is on (else the legacy path, reversible) and passes the task initiator so the tighten-only on_behalf_of member layer enforces at claim. See injectClaimConnectionMCP.
 		var connDisallowedMCPTools []string
-		mcpConfig, connDisallowedMCPTools = h.injectClaimConnectionMCP(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID, mcpConfig)
+		mcpConfig, connDisallowedMCPTools = h.injectClaimConnectionMCP(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID, task.InitiatorUserID, mcpConfig)
 		resp.DisallowedMCPTools = connDisallowedMCPTools
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any

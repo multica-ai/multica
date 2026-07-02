@@ -11,6 +11,39 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 )
 
+// capturingVerdicts records the TableQuery the resolver builds, so a test can
+// assert the on_behalf_of subject was threaded through from the claim identity.
+type capturingVerdicts struct{ last toolpolicy.TableQuery }
+
+func (c *capturingVerdicts) ConnectionToolVerdicts(ctx context.Context, in toolpolicy.TableQuery) ([]toolpolicy.ConnectionToolVerdict, error) {
+	c.last = in
+	return nil, nil
+}
+
+// The claim identity's InitiatorID (the delegated member) must reach the
+// on_behalf_of policy layer so member-level denies enforce at claim (FIR-2441).
+func TestClaimConnectionMCPThreadsInitiatorToOnBehalfOf(t *testing.T) {
+	cap := &capturingVerdicts{}
+	conns := fakeConnLister{conns: mixedVerdictConns()}
+	api := NewAPIConnectionResolver(conns,
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{}}, fakeFlag{on: true}, slog.Default())
+	r := NewConnectionToolResolver(api, conns, cap, fakeFlag{on: true}, fakeEntry, slog.Default())
+
+	initiator := gateTestUUID(9)
+	_, _, handled := r.ClaimConnectionMCP(context.Background(), handler.CerebroConnectionClaimIdentity{
+		WorkspaceID: gateTestUUID(1),
+		AgentID:     gateTestUUID(3),
+		OwnerID:     gateTestUUID(4),
+		InitiatorID: initiator,
+	})
+	if !handled {
+		t.Fatal("flag on must be authoritative")
+	}
+	if cap.last.OnBehalfOfID != initiator {
+		t.Fatalf("initiator must thread to the on_behalf_of layer: got %v want %v", cap.last.OnBehalfOfID, initiator)
+	}
+}
+
 func claimIdent() handler.CerebroConnectionClaimIdentity {
 	return handler.CerebroConnectionClaimIdentity{
 		WorkspaceID: gateTestUUID(1),

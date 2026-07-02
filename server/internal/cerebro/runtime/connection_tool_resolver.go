@@ -80,23 +80,28 @@ import (
 // post-Flip.
 //
 // Two user fields feed Lone #3 (on_behalf_of): OwnerID is the agent's owner and
-// InitiatorID is the human the work is performed for. The user layer of the tool
-// policy is gated on the INTERSECTION (most restrictive) of the two, computed
-// once by userCeiling() below and used identically by BOTH sub-resolvers
-// (apiIdentity for the api half, tableQuery for the mcp_http half). Because the
-// intersection lives on the identity — not at each callsite — every consumer the
+// InitiatorID is the human the work is performed for. The two sub-resolvers gate
+// them differently because their underlying engines differ:
+//
+//   - tableQuery (mcp_http, tighten-only Resolve): the user layer is the
+//     INTERSECTION (most restrictive) of owner and initiator via userCeiling(),
+//     AND the initiator is passed as its own on_behalf_of layer. A tighten-only
+//     chain can never grant, so folding into the ceiling is safe.
+//   - apiIdentity (api endpoints, default-deny GRANT path): the user layer stays
+//     the real OwnerID and the initiator enters ONLY as the tighten-only
+//     on_behalf_of layer (FIR-2441 — member as a full actor level). Folding the
+//     initiator into userCeiling() here would empty the user layer on delegation
+//     and diverge from the cloud call-time guard (apiEndpointSetting), which keys
+//     on the real owner — breaking list == callable. See apiIdentity() below.
+//
+// Either way the initiator can only ever NARROW access (Deny), never widen it, and
+// that rule lives on the identity — not at each callsite — so every consumer the
 // Flip points here (agent-brief, cloud call-time, local call-time, runtime-scan)
-// gets the SAME fail-closed rule by construction and cannot re-implement it as
-// "most permissive" and leak a grant between the owner and the initiator.
+// gets it by construction and cannot re-implement it as "most permissive".
 //
 // InitiatorID is optional: when it is not set (Valid == false) there is no
-// delegation in play and the ceiling is simply OwnerID, exactly like the api-only
-// APIConnectionIdentity — so nothing changes for the non-delegated path. When it
-// IS set and differs from OwnerID, the intersection of two distinct single-user
-// sets is empty, so the user layer is emptied (invalid UUID → no user-scoped
-// grant matches). That is the fail-closed choice: delegation can only ever
-// narrow access, never widen it. Modelling on_behalf_of as its own policy layer
-// (so a rule can name the initiator explicitly) is a later slice.
+// delegation in play — userCeiling() is simply OwnerID and the on_behalf_of layer
+// resolves as absent, so nothing changes for the non-delegated path.
 type ConnectionIdentity struct {
 	WorkspaceID pgtype.UUID
 	RuntimeID   pgtype.UUID
@@ -124,12 +129,21 @@ func (id ConnectionIdentity) userCeiling() pgtype.UUID {
 	return pgtype.UUID{}
 }
 
+// apiIdentity maps to the api-endpoint gate (ConnectionEndpointEffective). Unlike
+// the tighten-only mcp_http path (tableQuery), this gate GRANTS on an explicit
+// Allow, so it must NOT fold the initiator into userCeiling() — an emptied user
+// layer here would diverge from the cloud call-time guard (apiEndpointSetting),
+// which keys the user layer on the real agent owner. Instead the owner stays the
+// user layer and the initiator enters as its own tighten-only on_behalf_of layer
+// (FIR-2441): a member Deny revokes, a member Allow/Ask never grants. That keeps
+// list == callable across owner and initiator without leaking a grant either way.
 func (id ConnectionIdentity) apiIdentity() APIConnectionIdentity {
 	return APIConnectionIdentity{
-		WorkspaceID: id.WorkspaceID,
-		RuntimeID:   id.RuntimeID,
-		AgentID:     id.AgentID,
-		OwnerID:     id.userCeiling(),
+		WorkspaceID:  id.WorkspaceID,
+		RuntimeID:    id.RuntimeID,
+		AgentID:      id.AgentID,
+		OwnerID:      id.OwnerID,
+		OnBehalfOfID: id.InitiatorID,
 	}
 }
 
@@ -139,6 +153,11 @@ func (id ConnectionIdentity) tableQuery() toolpolicy.TableQuery {
 		RuntimeID:   id.RuntimeID,
 		AgentID:     id.AgentID,
 		UserID:      id.userCeiling(),
+		// on_behalf_of layer (FIR-2441 — member as a full actor level): the delegated
+		// initiator is passed as its own tighten-only policy layer, so a member can be
+		// denied/ask-restricted a connection tool across every agent they drive without
+		// affecting the owner's own user-layer verdict. Zero when there is no delegation.
+		OnBehalfOfID: id.InitiatorID,
 	}
 }
 

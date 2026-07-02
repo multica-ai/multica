@@ -68,6 +68,10 @@ type RuntimeToolAccessQuery struct {
 	RuntimeCapabilities []byte
 	AgentID             pgtype.UUID
 	UserID              pgtype.UUID
+	// OnBehalfOfID is the delegated member (task initiator) the work is performed
+	// for, resolved as the tighten-only on_behalf_of policy layer distinct from
+	// UserID (the agent owner) (FIR-2441). Zero when there is no delegation.
+	OnBehalfOfID pgtype.UUID
 }
 
 func (h *Handler) SetRuntimeToolAccess(svc RuntimeToolAccessService) {

@@ -72,7 +72,7 @@ var (
 // System mandate peer of User, FIR-1609).
 func validLayer(l Layer) bool {
 	switch l {
-	case LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerSystem:
+	case LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerOnBehalfOf, LayerSystem:
 		return true
 	default:
 		return false
@@ -111,6 +111,14 @@ type Query struct {
 	// System layer is then absent and treated as Inherit. The owner's User ceiling
 	// loads regardless; System only ever tightens on top of it.
 	SystemID pgtype.UUID
+	// OnBehalfOfID is the subject of the on_behalf_of layer — the delegated member
+	// (the task initiator) the work is performed for, as a real tighten-only actor
+	// level distinct from UserID (the agent owner) (FIR-2441). Zero (Valid=false)
+	// when the run has no delegation, so the layer is then absent and treated as
+	// Inherit. It can restrict a delegated member's access across every agent they
+	// drive but never widen it. Threading it here keeps Resolve (which powers the
+	// claim brief) at parity with the TableQuery path that already honours it.
+	OnBehalfOfID pgtype.UUID
 	// Base is the workspace/system default applied when even the runtime layer
 	// inherits. Empty defaults to Allow (see Resolve).
 	Base Setting
@@ -213,6 +221,7 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		UserID:          in.UserID,
 		GroupIds:        groupIDs,
 		SystemID:        in.SystemID,
+		OnBehalfOfID:    in.OnBehalfOfID,
 	})
 	if err != nil {
 		return Input{}, fmt.Errorf("toolpolicy: load context settings: %w", err)

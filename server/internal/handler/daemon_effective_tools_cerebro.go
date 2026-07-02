@@ -50,11 +50,17 @@ type CerebroAPIConnectionBriefResolver interface {
 // CerebroAPIConnectionBriefIdentity is the actor the endpoints are gated for. It
 // mirrors runtime.APIConnectionIdentity but is declared here so the interface has
 // no runtime-package types in its signature (keeping the cycle broken).
+//
+// InitiatorID is the delegated task initiator (on_behalf_of, FIR-2441): a
+// tighten-only layer the endpoint gate honours Deny-only, so the brief lists a
+// member-denied tool as hidden exactly as the call path refuses it. Zero when
+// there is no delegation.
 type CerebroAPIConnectionBriefIdentity struct {
 	WorkspaceID pgtype.UUID
 	RuntimeID   pgtype.UUID
 	AgentID     pgtype.UUID
 	OwnerID     pgtype.UUID
+	InitiatorID pgtype.UUID
 }
 
 // CerebroAPIConnectionBriefTool is one resolved endpoint tool for the brief.
@@ -78,19 +84,33 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 		return nil
 	}
 
-	// User layer: prefer the member who triggered this task; fall back to the
-	// agent's owner so the chain still resolves a user layer when an agent or
-	// autopilot triggered the run. An invalid/zero UUID resolves the chain
-	// without a user layer, which is fine.
-	var userID pgtype.UUID
-	if initiatorType == "member" && strings.TrimSpace(initiatorID) != "" {
-		if u, err := util.ParseUUID(initiatorID); err == nil {
-			userID = u
+	// Actor layers (FIR-2441). The agent owner and the delegated member (the task
+	// initiator, on_behalf_of) are two DISTINCT policy layers — matching the claim-
+	// time connection resolver (connection_tool_resolver.userCeiling), so the brief
+	// lists exactly what the run can call (list == callable):
+	//   - User layer  = the fail-closed intersection of owner and initiator: no
+	//     initiator → the owner; owner == initiator → that user; owner != initiator
+	//     → the zero UUID, so a personal grant on either party never leaks to the
+	//     other.
+	//   - on_behalf_of = the initiator member, resolved tighten-only, so a member
+	//     denied a tool across every agent they drive is reflected here too.
+	var ownerID, initiatorMember pgtype.UUID
+	if strings.TrimSpace(agent.OwnerID) != "" {
+		if u, err := util.ParseUUID(agent.OwnerID); err == nil {
+			ownerID = u
 		}
 	}
-	if !userID.Valid && strings.TrimSpace(agent.OwnerID) != "" {
-		if u, err := util.ParseUUID(agent.OwnerID); err == nil {
-			userID = u
+	if initiatorType == "member" && strings.TrimSpace(initiatorID) != "" {
+		if u, err := util.ParseUUID(initiatorID); err == nil {
+			initiatorMember = u
+		}
+	}
+	userID := ownerID
+	if initiatorMember.Valid {
+		if !(ownerID.Valid && ownerID.Bytes == initiatorMember.Bytes) {
+			// Owner != initiator (or owner unset): the intersection is empty, so the
+			// user layer is fail-closed (no user-scoped grant applies to either).
+			userID = pgtype.UUID{}
 		}
 	}
 
@@ -102,6 +122,7 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 		RuntimeCapabilities: marshalRuntimeCapabilities(normalizedRuntimeCapabilities(runtime.Provider, runtime.Capabilities, runtime.ToolsConfig)),
 		AgentID:             agentID,
 		UserID:              userID,
+		OnBehalfOfID:        initiatorMember,
 	})
 	if err != nil {
 		// Best-effort: a resolution error must not fail the claim. The agent
@@ -145,15 +166,10 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 	// them through the SAME shared resolver the cloud gateway and local MCP handler
 	// use, so "listed in the brief" == "callable" for every runtime. The endpoint
 	// gate keys on the agent's OWNER as the user layer (matching the cloud call-
-	// time guard, apiEndpointSetting), so the brief cannot show a tool the call
-	// path would then refuse.
+	// time guard, apiEndpointSetting) PLUS the delegated initiator as the tighten-
+	// only on_behalf_of layer (FIR-2441), so the brief cannot show a tool the call
+	// path would then refuse — including a member-level Deny on the initiator.
 	if h.APIConnectionBrief != nil {
-		var ownerID pgtype.UUID
-		if strings.TrimSpace(agent.OwnerID) != "" {
-			if u, err := util.ParseUUID(agent.OwnerID); err == nil {
-				ownerID = u
-			}
-		}
 		seen := make(map[string]struct{}, len(out))
 		for _, e := range out {
 			seen[e.Name] = struct{}{}
@@ -163,6 +179,7 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 			RuntimeID:   runtime.ID,
 			AgentID:     agentID,
 			OwnerID:     ownerID,
+			InitiatorID: initiatorMember,
 		})
 		for _, t := range apiTools {
 			name := strings.TrimSpace(t.Name)

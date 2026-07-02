@@ -289,3 +289,45 @@ func TestRegistryHasAPIConnectionTool(t *testing.T) {
 		t.Errorf("APIConnectionArgHint must state the query-object rule; got %q", APIConnectionArgHint)
 	}
 }
+
+// FIR-2441 fix-list #5: the compat tool loop has only the resolved []Tool (no
+// Registry handle), so it keys on the concrete type to decide whether to append
+// the connection guidance.
+func TestToolsHaveAPIConnectionTool(t *testing.T) {
+	if toolsHaveAPIConnectionTool(nil) {
+		t.Fatal("empty tool slice must report no api-connection tool")
+	}
+	api := &APIConnectionTool{toolName: "infisical_admin__get_secrets", connName: "infisical-admin", method: "GET", path: "/secrets"}
+	if !toolsHaveAPIConnectionTool([]Tool{api}) {
+		t.Error("expected api-connection tool to be detected in the slice")
+	}
+}
+
+// FIR-2441 fix-list #5: ConnectionGuidance is the full first-prompt guidance and
+// MUST embed the argument-shape rule so cloud and local first prompts teach the
+// same `query`-object contract from one source of truth.
+func TestConnectionGuidanceEmbedsArgHint(t *testing.T) {
+	if !strings.Contains(ConnectionGuidance, APIConnectionArgHint) {
+		t.Error("ConnectionGuidance must embed APIConnectionArgHint so the two surfaces never drift")
+	}
+	if !strings.Contains(ConnectionGuidance, "connection") {
+		t.Errorf("ConnectionGuidance must explain what a connection is; got %q", ConnectionGuidance)
+	}
+}
+
+// FIR-2441 fix-list #5: the LIVE cloud compat tool loop must render the full
+// connection guidance in the system prompt when an api-connection tool is
+// offered — before this it shipped only a bare tool-name list, so a cloud agent
+// never saw the `query`-object rule the local claim brief already teaches.
+func TestWithRegistryToolUsageHintIncludesConnectionGuidance(t *testing.T) {
+	sys := GatewayMessage{Role: "system", Content: "You are an agent."}
+	api := &APIConnectionTool{toolName: "infisical_admin__get_secrets", connName: "infisical-admin", method: "GET", path: "/secrets"}
+
+	out := withRegistryToolUsageHint(context.Background(), []GatewayMessage{sys}, []Tool{api})
+	if len(out) == 0 || out[0].Role != "system" {
+		t.Fatal("expected the system message to be preserved")
+	}
+	if !strings.Contains(out[0].Content, ConnectionGuidance) {
+		t.Errorf("compat loop system prompt must include ConnectionGuidance when an api-connection tool is offered; got %q", out[0].Content)
+	}
+}

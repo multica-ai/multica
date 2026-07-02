@@ -68,6 +68,17 @@ const (
 	LayerGroup Layer = "group"
 	// LayerUser is the ceiling — the requesting user's own access.
 	LayerUser Layer = "user"
+	// LayerOnBehalfOf is the human the work is performed FOR — the task initiator
+	// in a delegated run (on_behalf_of), distinct from the agent owner at LayerUser
+	// (FIR-2441 — member as a full actor level). It is a TIGHTEN-ONLY layer: in the
+	// tighten-only Resolve it can only restrict, so a delegated member can be denied
+	// or ask-gated a tool across every agent they drive, but it can NEVER raise
+	// access. On the default-deny api-endpoint path (ConnectionEndpointEffective,
+	// which grants on an explicit Allow at any layer) its Allow is deliberately
+	// ignored — otherwise an on_behalf_of grant could open a default-deny secrets
+	// connection (infisical-admin) to whoever drives the agent. Modelling a member
+	// grant that WIDENS access is a separate, reviewed slice.
+	LayerOnBehalfOf Layer = "on_behalf_of"
 	// LayerSystem is the ceiling for runs with no human behind them (autopilot /
 	// system-triggered). It is a PEER of LayerUser at the mandate level: exactly
 	// one of User or System fills the ceiling slot per run, never both. A System
@@ -83,7 +94,7 @@ const (
 // LayerUser and LayerSystem are mutually exclusive per run (one mandate actor),
 // so listing both at the ceiling is safe: the absent one is Inherit and does not
 // constrain. Either can cap below the base, like a ceiling should.
-var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerSystem}
+var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerOnBehalfOf, LayerSystem}
 
 // rank maps a concrete setting to its restrictiveness. Higher is tighter.
 // Inherit (and any unknown value) returns -1 — "no opinion, pass through".

@@ -32,15 +32,18 @@ var _ handler.CerebroAPIConnectionBriefResolver = (*ConnectionToolResolver)(nil)
 // shape. Name is the exact tool name the agent calls verbatim, so the rendered
 // brief lists the callable identity, not a decorated label.
 //
-// InitiatorID is left unset: the brief keys the api endpoint gate on the agent
-// owner only, matching the cloud call-time guard (apiEndpointSetting) — the
-// non-delegated ceiling, so the brief cannot show a tool the call path refuses.
+// InitiatorID threads the delegated task initiator (on_behalf_of, FIR-2441) into
+// the resolve so the brief matches the cloud call-time guard (apiEndpointSetting),
+// which now also passes the initiator as a tighten-only Deny-only layer: a
+// member-denied endpoint is hidden from the brief exactly as the call path refuses
+// it. Zero when there is no delegation, so the non-delegated path is unchanged.
 func (r *ConnectionToolResolver) APIConnectionToolsForBrief(ctx context.Context, ident handler.CerebroAPIConnectionBriefIdentity) []handler.CerebroAPIConnectionBriefTool {
 	out := r.Resolve(ctx, ConnectionIdentity{
 		WorkspaceID: ident.WorkspaceID,
 		RuntimeID:   ident.RuntimeID,
 		AgentID:     ident.AgentID,
 		OwnerID:     ident.OwnerID,
+		InitiatorID: ident.InitiatorID,
 	})
 	if len(out.APITools) == 0 {
 		return nil

@@ -276,14 +276,20 @@ func TestConnectionToolResolverFlagOffReturnsEmpty(t *testing.T) {
 	}
 }
 
-// Lone #3 (on_behalf_of): the user layer both sub-resolvers gate on is the
-// fail-closed intersection of the agent owner and the work initiator. This
-// intersection lives on ConnectionIdentity, so the api half (apiIdentity) and the
-// mcp_http half (tableQuery) can never drift — they read the SAME userCeiling.
-//   - no initiator            → ceiling is the owner (non-delegated path unchanged)
-//   - owner == initiator      → ceiling is that shared user (self-delegation)
-//   - owner != initiator      → ceiling is empty (a personal grant on either party
-//                               never leaks to the other; delegation only narrows)
+// Lone #3 + FIR-2441 (on_behalf_of): the two sub-resolvers gate the initiator
+// differently because their engines differ, and the rule for each lives on
+// ConnectionIdentity so no callsite can re-implement it:
+//   - mcp_http (tableQuery, tighten-only): the user layer is the fail-closed
+//     userCeiling intersection of owner and initiator, AND the initiator is the
+//     on_behalf_of layer.
+//   - api endpoints (apiIdentity, default-deny GRANT path): the user layer is the
+//     REAL owner (never emptied — that would diverge from the call-time guard) and
+//     the initiator is ONLY the tighten-only on_behalf_of layer.
+//
+// Either way the initiator can only ever narrow access (Deny), never widen it. The
+// mcp_http user-layer ceiling per case: no initiator → owner; owner == initiator →
+// that shared user; owner != initiator → empty (a personal grant never leaks). The
+// api half always keeps the real owner plus a Deny-only on_behalf_of layer.
 func TestConnectionIdentityOnBehalfOfIntersection(t *testing.T) {
 	owner := gateTestUUID(10)
 	initiator := gateTestUUID(11)
@@ -293,7 +299,7 @@ func TestConnectionIdentityOnBehalfOfIntersection(t *testing.T) {
 		name        string
 		owner       pgtype.UUID
 		initiator   pgtype.UUID
-		wantCeiling pgtype.UUID
+		wantCeiling pgtype.UUID // the mcp_http user-layer ceiling
 	}{
 		{"no initiator falls back to owner", owner, empty, owner},
 		{"self-delegation keeps the shared user", owner, owner, owner},
@@ -309,15 +315,24 @@ func TestConnectionIdentityOnBehalfOfIntersection(t *testing.T) {
 				OwnerID:     c.owner,
 				InitiatorID: c.initiator,
 			}
-			// Both sub-resolvers must gate on the identical ceiling — this is the
-			// "applied identically" guarantee for agent-brief + cloud + local.
-			if got := id.apiIdentity().OwnerID; got != c.wantCeiling {
-				t.Errorf("api half OwnerID = %v, want %v", got, c.wantCeiling)
+			// api half: the user layer stays the REAL owner (matching the cloud
+			// call-time guard), and the initiator is carried as the Deny-only
+			// on_behalf_of layer — NOT folded into an emptied ceiling.
+			if got := id.apiIdentity().OwnerID; got != c.owner {
+				t.Errorf("api half OwnerID = %v, want owner %v", got, c.owner)
 			}
+			if got := id.apiIdentity().OnBehalfOfID; got != c.initiator {
+				t.Errorf("api half OnBehalfOfID = %v, want initiator %v", got, c.initiator)
+			}
+			// mcp half: the user layer is the fail-closed userCeiling, and the
+			// initiator is also carried as the on_behalf_of layer.
 			if got := id.tableQuery().UserID; got != c.wantCeiling {
 				t.Errorf("mcp half UserID = %v, want %v", got, c.wantCeiling)
 			}
-			// When it fails closed, the ceiling must be an INVALID uuid (no row
+			if got := id.tableQuery().OnBehalfOfID; got != c.initiator {
+				t.Errorf("mcp half OnBehalfOfID = %v, want initiator %v", got, c.initiator)
+			}
+			// When the mcp ceiling fails closed, it must be an INVALID uuid (no row
 			// matches), not merely a different-but-valid user.
 			if c.wantCeiling == empty && id.userCeiling().Valid {
 				t.Errorf("expected fail-closed invalid ceiling, got a valid uuid")

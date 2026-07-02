@@ -19,6 +19,12 @@
 -- workspace itself, so it enters every resolution. group_ids may be empty. The
 -- system layer is the mandate-actor ceiling for human-less runs (FIR-1609): its
 -- subject is the autopilot id, so it only matches when a system run supplies one.
+-- The on_behalf_of layer is the delegated member (the task initiator) as a real,
+-- tighten-only actor level (FIR-2441): its subject is the human the work is
+-- performed for, distinct from user (the agent owner), so it only matches when a
+-- delegated run supplies one. This keeps the Resolve path (which powers the claim
+-- brief) at parity with the TableQuery path that already honours it — listed ==
+-- callable.
 -- conditions is the optional WHEN layer (FIR-1609): the resolver evaluates it
 -- against the request context and drops a row whose terms are not met, so the
 -- Terms axis bites at the gate, not only in the admin table read.
@@ -28,12 +34,13 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND tool_key = sqlc.arg(tool_key)
   AND resource_pattern = sqlc.arg(resource_pattern)
   AND (
-    (layer = 'workspace' AND subject_id = sqlc.arg(workspace_id)) OR
-    (layer = 'runtime'   AND subject_id = sqlc.arg(runtime_id)) OR
-    (layer = 'agent'     AND subject_id = sqlc.arg(agent_id)) OR
-    (layer = 'user'      AND subject_id = sqlc.arg(user_id)) OR
-    (layer = 'group'     AND subject_id = ANY(sqlc.arg(group_ids)::uuid[])) OR
-    (layer = 'system'    AND subject_id = sqlc.arg(system_id))
+    (layer = 'workspace'    AND subject_id = sqlc.arg(workspace_id)) OR
+    (layer = 'runtime'      AND subject_id = sqlc.arg(runtime_id)) OR
+    (layer = 'agent'        AND subject_id = sqlc.arg(agent_id)) OR
+    (layer = 'user'         AND subject_id = sqlc.arg(user_id)) OR
+    (layer = 'group'        AND subject_id = ANY(sqlc.arg(group_ids)::uuid[])) OR
+    (layer = 'system'       AND subject_id = sqlc.arg(system_id)) OR
+    (layer = 'on_behalf_of' AND subject_id = sqlc.arg(on_behalf_of_id))
   );
 
 -- name: UpsertCerebroToolPolicy :one

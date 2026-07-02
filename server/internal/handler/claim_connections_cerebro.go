@@ -44,6 +44,12 @@ type CerebroConnectionClaimIdentity struct {
 	RuntimeID   pgtype.UUID
 	AgentID     pgtype.UUID
 	OwnerID     pgtype.UUID
+	// InitiatorID is the human this run is performed for (the task initiator /
+	// on_behalf_of member), distinct from OwnerID (the agent owner). It gates the
+	// tighten-only on_behalf_of policy layer (FIR-2441 — member as a full actor
+	// level): a member denied a connection tool has it withheld across every agent
+	// they drive. Zero when there is no member initiator (agent/autopilot-triggered).
+	InitiatorID pgtype.UUID
 }
 
 // CerebroConnectionClaimResolver is the seam the unified runtime resolver
@@ -63,7 +69,7 @@ type CerebroConnectionClaimResolver interface {
 // deny slice onto the task response.
 func (h *Handler) injectClaimConnectionMCP(
 	ctx context.Context,
-	workspaceID, runtimeID, agentID, ownerID pgtype.UUID,
+	workspaceID, runtimeID, agentID, ownerID, initiatorID pgtype.UUID,
 	mcpConfig json.RawMessage,
 ) (json.RawMessage, []string) {
 	// --- Flip: unified resolver decides when the flag is on ---
@@ -73,6 +79,7 @@ func (h *Handler) injectClaimConnectionMCP(
 			RuntimeID:   runtimeID,
 			AgentID:     agentID,
 			OwnerID:     ownerID,
+			InitiatorID: initiatorID,
 		}); handled {
 			if len(connMCP) > 0 {
 				mcpConfig = daemonmcp.Merge(connMCP, mcpConfig)
@@ -85,7 +92,19 @@ func (h *Handler) injectClaimConnectionMCP(
 	if h.ConnectionsInjector == nil {
 		return mcpConfig, nil
 	}
-	connMCP := h.ConnectionsInjector.BuildMCPConfig(ctx, workspaceID)
+	// FIR-2441 fix-list #2 follow-up: when the injector is the mcp relay it can mint
+	// actor-scoped relay tokens, so the relay honors an agent- or member-level Deny
+	// server-side even for a CLI that ignores the --disallowedTools list below.
+	// Optional-interface assertion keeps the handler seam unchanged: a non-relay
+	// injector (relay unconfigured) just uses the workspace-scoped BuildMCPConfig.
+	var connMCP json.RawMessage
+	if actorInj, ok := h.ConnectionsInjector.(interface {
+		BuildMCPConfigForActor(ctx context.Context, workspaceID, runtimeID, agentID, ownerID, initiatorID pgtype.UUID) json.RawMessage
+	}); ok {
+		connMCP = actorInj.BuildMCPConfigForActor(ctx, workspaceID, runtimeID, agentID, ownerID, initiatorID)
+	} else {
+		connMCP = h.ConnectionsInjector.BuildMCPConfig(ctx, workspaceID)
+	}
 	if len(connMCP) == 0 {
 		return mcpConfig, nil
 	}

@@ -76,16 +76,26 @@ brief builder for every local provider (Claude → `CLAUDE.md`, Codex/Cursor/Kir
 → `AGENTS.md`, Gemini → `GEMINI.md`). One render path covers them all; see
 [runtime-prompt-architecture.md](./runtime-prompt-architecture.md).
 
-**Cloud (Firtal Gateway) runtimes assemble their system prompt in
-`runtime.FirtalGatewayExecutor.runAnthropicToolLoop`
+**Cloud (Firtal Gateway) runtimes assemble their system prompt in the
+`runtime.FirtalGatewayExecutor` tool loops
 ([firtal_gateway_executor.go](../../server/internal/cerebro/runtime/firtal_gateway_executor.go)),
-a separate path from the local brief builder.** Two levels of parity apply:
+a separate path from the local brief builder.** Note there are **two** cloud tool
+loops and the compat one is the live default: `runGatewayCompatRegistryToolLoop`
+(builds its prompt in `withRegistryToolUsageHint`) is the primary path per the
+`firtal-gateway-tool-loop-fallback` patch; `runAnthropicToolLoop` is the
+Anthropic-native fallback. Any prompt-parity change must land in **both**. Two
+levels of parity apply:
 
-- **Argument-shape parity (done, FIR-2441).** When an api-connection tool is
-  actually offered (detected via `registryHasAPIConnectionTool`, not a name
-  pattern), the cloud prompt appends the same `runtime.APIConnectionArgHint`
-  constant the local brief renders. So a cloud agent and a local agent learn the
-  identical `query`-object rule — the two first prompts cannot drift on it.
+- **Connection-guidance parity (done, FIR-2441 fix-list #5).** When an
+  api-connection tool is actually offered (detected via
+  `registryHasAPIConnectionTool` in the native loop / `toolsHaveAPIConnectionTool`
+  in the compat loop, not a name pattern), both cloud loops append the full
+  `runtime.ConnectionGuidance` constant — the same text the local brief renders,
+  which embeds `runtime.APIConnectionArgHint`. So a cloud agent and a local agent
+  learn the identical "what a connection is" + `query`-object rule; the two first
+  prompts cannot drift on it. Before this the live compat loop shipped only a bare
+  tool-name list, so a cloud agent discovered the `query` shape by calling and
+  failing.
 - **Full tool-list parity (still tracked).** The flat cloud "You have the
   following tools available: …" line is built from the offered tool names, not yet
   from the shipped `effective_tools` entries with their families/verdicts. Making

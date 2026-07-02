@@ -50,7 +50,7 @@ type apiConnectionLister interface {
 
 // endpointPolicyResolver resolves the per-actor verdict for one endpoint.
 type endpointPolicyResolver interface {
-	ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error)
+	ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error)
 }
 
 // apiConnectionFlagChecker reads the default-off cerebro_api_connection_tools flag.
@@ -58,14 +58,21 @@ type apiConnectionFlagChecker interface {
 	GetCerebroFeatureFlag(ctx context.Context, params cerebrodb.GetCerebroFeatureFlagParams) (bool, error)
 }
 
-// APIConnectionIdentity is the resolved actor an endpoint is gated for. All four
+// APIConnectionIdentity is the resolved actor an endpoint is gated for. The owner
 // layers feed the Workspace › Runtime › Agent › Group › User chain
 // (ConnectionEndpointEffective); a zero UUID simply resolves that layer as absent.
+//
+// OnBehalfOfID is the delegated task initiator — a distinct, TIGHTEN-ONLY policy
+// layer (FIR-2441). On this default-deny grant path an on_behalf_of Deny revokes
+// the call but an on_behalf_of Allow/Ask can never grant it, so a member can be
+// denied a connection across every agent they drive without ever being able to
+// open the secrets box to themselves. Zero (Valid == false) means no delegation.
 type APIConnectionIdentity struct {
-	WorkspaceID pgtype.UUID
-	RuntimeID   pgtype.UUID
-	AgentID     pgtype.UUID
-	OwnerID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	RuntimeID    pgtype.UUID
+	AgentID      pgtype.UUID
+	OwnerID      pgtype.UUID
+	OnBehalfOfID pgtype.UUID
 }
 
 // APIConnectionToolVerdict pairs an admitted endpoint tool with the per-agent
@@ -142,7 +149,7 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 			continue
 		}
 		setting, _, err := r.policy.ConnectionEndpointEffective(
-			ctx, ident.WorkspaceID, ident.RuntimeID, ident.AgentID, ident.OwnerID,
+			ctx, ident.WorkspaceID, ident.RuntimeID, ident.AgentID, ident.OwnerID, ident.OnBehalfOfID,
 			api.ConnectionName(), api.Method(), api.Path())
 		if err != nil {
 			// Fail closed: a resolve error must not expose a gate that fronts the

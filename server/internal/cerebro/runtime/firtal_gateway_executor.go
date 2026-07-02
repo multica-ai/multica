@@ -987,20 +987,37 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		if agent, err := e.queries.GetAgent(ctx, agentID); err != nil {
 			e.logger.Warn("firtal gateway: agent lookup for api-connection tools failed",
 				"agent_id", util.UUIDToString(agentID), "error", err)
-		} else if apiTools := e.connectionToolResolver().Resolve(ctx, ConnectionIdentity{
-			WorkspaceID: workspaceID,
-			RuntimeID:   agent.RuntimeID,
-			AgentID:     agentID,
-			OwnerID:     agent.OwnerID,
-		}).APITools; len(apiTools) > 0 {
-			for _, v := range apiTools {
-				taskRegistry.Register(v.Tool)
-				enabledTools = append(enabledTools, v.Tool)
+		} else {
+			resolved := e.connectionToolResolver().Resolve(ctx, ConnectionIdentity{
+				WorkspaceID: workspaceID,
+				RuntimeID:   agent.RuntimeID,
+				AgentID:     agentID,
+				OwnerID:     agent.OwnerID,
+			})
+			connTools := make([]Tool, 0, len(resolved.APITools))
+			for _, v := range resolved.APITools {
+				connTools = append(connTools, v.Tool)
 			}
-			enabledTools = limitFirtalGatewayTools(enabledTools)
-			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
-			activeRegistry = taskRegistry
-			useRegistry = true
+			// FIR-2441 fix-list #4: reach the mcp_http half too. On a local runtime
+			// the CLI is handed resolved.MCPServers as --mcp-config and spins up its
+			// own MCP client per connection; the gateway has no such CLI, so those
+			// tools reached nobody. buildGatewayMCPTools dials each Allow-only
+			// connection in-process (the gateway lives inside the network and can
+			// reach an *.internal host a laptop cannot), discovers its tools, and
+			// registers each as "mcp__<connection>__<tool>". Ask/Deny connections are
+			// absent from resolved.MCPServers by construction (the Allow-only rule),
+			// so nothing exposed here can bypass a Deny.
+			connTools = append(connTools, buildGatewayMCPTools(ctx, resolved.MCPServers, nil, e.logger)...)
+			if len(connTools) > 0 {
+				for _, t := range connTools {
+					taskRegistry.Register(t)
+					enabledTools = append(enabledTools, t)
+				}
+				enabledTools = limitFirtalGatewayTools(enabledTools)
+				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+				activeRegistry = taskRegistry
+				useRegistry = true
+			}
 		}
 	}
 	// When the policy engine handled the decision, an empty list is a deliberate
@@ -1569,12 +1586,13 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				break
 			}
 		}
-		// FIR-2441: surface the api-connection argument shape in the cloud system
-		// prompt too, so the cloud and local (claim brief) first prompts agree.
-		// Detect an api-connection tool through the registry rather than a fragile
-		// name pattern; the same shared hint text is rendered in both places.
+		// FIR-2441 fix-list #5: surface the FULL connection guidance in the cloud
+		// system prompt (not just the argument-shape hint) so the cloud and local
+		// (claim brief) first prompts agree. Detect an api-connection tool through
+		// the registry rather than a fragile name pattern; the same shared text is
+		// rendered in both places.
 		if registryHasAPIConnectionTool(registry, toolNames) {
-			systemText += "\n\n" + APIConnectionArgHint
+			systemText += "\n\n" + ConnectionGuidance
 		}
 	}
 
@@ -1831,6 +1849,14 @@ func withRegistryToolUsageHint(ctx context.Context, messages []GatewayMessage, t
 			hint += reg.AccessSummaryForPrompt(ctx)
 			break
 		}
+	}
+	// FIR-2441 fix-list #5: this compat loop is the LIVE cloud tool path, yet it
+	// shipped only the bare name list — no argument-form guidance, no "what a
+	// connection is" paragraph. The local claim brief carries the full guidance,
+	// so a cloud agent had to discover the `query` argument shape by calling and
+	// failing. Render the same ConnectionGuidance here so cloud == local.
+	if toolsHaveAPIConnectionTool(tools) {
+		hint += "\n\n" + ConnectionGuidance
 	}
 	out := append([]GatewayMessage(nil), messages...)
 	out[0].Content = strings.TrimRight(out[0].Content, "\n") + hint

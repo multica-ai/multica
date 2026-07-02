@@ -57,6 +57,10 @@ func (r *ConnectionToolResolver) ClaimConnectionMCP(ctx context.Context, ident h
 		RuntimeID:   ident.RuntimeID,
 		AgentID:     ident.AgentID,
 		OwnerID:     ident.OwnerID,
+		// The delegated member (task initiator) gates the tighten-only on_behalf_of
+		// policy layer, so a member-denied connection tool is withheld at claim
+		// across every agent they drive (FIR-2441).
+		InitiatorID: ident.InitiatorID,
 	})
 	return out.MCPServers, out.Deny, true
 }

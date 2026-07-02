@@ -106,6 +106,13 @@ type TableQuery struct {
 	AgentID     pgtype.UUID
 	UserID      pgtype.UUID
 	GroupIDs    []pgtype.UUID
+	// OnBehalfOfID scopes the on_behalf_of layer to the human the work is performed
+	// for (the task initiator in a delegated run), distinct from UserID (the agent
+	// owner). Zero (Valid=false) leaves the layer empty — the non-delegated path is
+	// unchanged. The layer is tighten-only (see LayerOnBehalfOf): it can restrict a
+	// delegated member's access but never widen it, and its Allow is ignored on the
+	// default-deny api-endpoint grant path (FIR-2441).
+	OnBehalfOfID pgtype.UUID
 	// SystemID scopes the System (mandate-actor) layer to one autopilot, so the
 	// admin can view/author the System rules for that human-less actor (FIR-1609).
 	// Zero (Valid=false) leaves the System column empty — the existing agent /
@@ -217,11 +224,12 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		   (p.layer = 'agent'     AND p.subject_id = $3) OR
 		   (p.layer = 'user'      AND p.subject_id = $4) OR
 		   (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		   (p.layer = 'system'    AND p.subject_id = $6)
+		   (p.layer = 'system'    AND p.subject_id = $6) OR
+		   (p.layer = 'on_behalf_of' AND p.subject_id = $7)
 		 )
 		WHERE c.workspace_id = $1`+runtimeFilter+`
 		ORDER BY c.category, lower(c.title), c.capability_key
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID, in.OnBehalfOfID)
 	if err != nil {
 		return nil, fmt.Errorf("toolpolicy: load table: %w", err)
 	}
