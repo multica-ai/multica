@@ -487,6 +487,101 @@ func TestSubscriberSystemCommentDoesNotSubscribe(t *testing.T) {
 	}
 }
 
+// TestNotification_SquadAssigneeSkipsInbox is the squad-assignee analog of
+// TestNotification_SystemCommentSkipsInboxAndMentions: when an issue is created
+// or reassigned with assignee_type='squad', the notification listener must
+// NOT call notifyDirect with recipient_type='squad' — inbox_item.recipient_type
+// is CHECK-constrained to ('member','agent') (SQLSTATE 23514), and the squad
+// leader is dispatched via EnqueueTaskForSquadLeader instead. The fix mirrors
+// the author_type='system' gate from MUL-2538.
+//
+// Covers both the issue:created and issue:updated (assignee_changed) paths.
+// Same caveat as the system-comment test: the behavioral assertion holds
+// either way (the insert fails), but the test pins the invariant and will
+// fail loudly if anyone widens inbox_item.recipient_type to include 'squad'
+// without revisiting this listener.
+func TestNotification_SquadAssigneeSkipsInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	squadID := createTestSquad(t, testWorkspaceID, testUserID, "Notification Squad")
+	t.Cleanup(func() { cleanupTestSquad(t, squadID) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
+
+	// --- issue:created with squad assignee ---
+	createdType := "squad"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "squad-assigned at creation",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &createdType,
+				AssigneeID:   &squadID,
+			},
+		},
+	})
+
+	// --- issue:updated reassigning to the squad ---
+	updatedType := "squad"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "squad-assigned at creation",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &updatedType,
+				AssigneeID:   &squadID,
+			},
+			"assignee_changed": true,
+		},
+	})
+
+	// No inbox item should exist for the squad (recipient_type='squad' would
+	// be rejected anyway, but the listener must short-circuit before the
+	// insert — the assertion pins the invariant).
+	squadItems, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
+		RecipientType: "squad",
+		RecipientID:   util.MustParseUUID(squadID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems for squad: %v", err)
+	}
+	if len(squadItems) != 0 {
+		t.Fatalf("expected 0 inbox items for squad assignee, got %d", len(squadItems))
+	}
+	if len(inboxEvents) != 0 {
+		t.Fatalf("expected 0 inbox:new events for squad-assigned issue, got %d", len(inboxEvents))
+	}
+}
+
 // TestNotification_AssigneeChanged verifies the full assignee change flow:
 // - New assignee gets "issue_assigned" (Direct)
 // - Old assignee gets "unassigned" (Direct)
