@@ -106,6 +106,13 @@
     },
     "create": "Create",
     "creating": "Creating...",
+    "create_dialog": {
+      "title": "Create API Token",
+      "description": "Name the token and choose how long it should stay active.",
+      "name_label": "Name",
+      "expiry_label": "Expiration",
+      "cancel": "Cancel"
+    },
     "toast_load_failed": "Failed to load tokens",
     "toast_create_failed": "Failed to create token",
     "toast_revoked": "Token revoked",

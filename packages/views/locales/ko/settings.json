@@ -106,6 +106,13 @@
     },
     "create": "만들기",
     "creating": "만드는 중...",
+    "create_dialog": {
+      "title": "API 토큰 만들기",
+      "description": "토큰 이름을 입력하고 활성 상태로 둘 기간을 선택하세요.",
+      "name_label": "이름",
+      "expiry_label": "만료",
+      "cancel": "취소"
+    },
     "toast_load_failed": "토큰을 불러오지 못했습니다",
     "toast_create_failed": "토큰을 만들지 못했습니다",
     "toast_revoked": "토큰을 폐기했습니다",
