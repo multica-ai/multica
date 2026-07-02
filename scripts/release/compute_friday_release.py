@@ -251,6 +251,22 @@ def main() -> int:
             lines.append(render_line(c))
         lines.append("")
 
+    # Standing action-required footer: a released binary only takes effect once
+    # each runtime's daemon is on it. Local runtimes self-update; cloud runtimes
+    # are updated centrally by the admin (FIR-2549).
+    lines.append("### Runtimes — action required")
+    lines.append("")
+    lines.append(
+        "- **Local runtimes:** update to this version so your daemon runs the "
+        "latest code — `brew upgrade multica` (or your runtime's update flow), "
+        "then restart the runtime."
+    )
+    lines.append(
+        "- **Cloud runtimes** are updated centrally by the Multica admin — no "
+        "action needed on your side."
+    )
+    lines.append("")
+
     notes_path = os.environ.get("RELEASE_NOTES_FILE", "release-notes.md")
     Path(notes_path).write_text("\n".join(lines).rstrip() + "\n")
     print(f"Notes written to {notes_path}", file=sys.stderr)
