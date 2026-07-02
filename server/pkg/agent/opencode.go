@@ -164,7 +164,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	if err := startProcessGroup(cmd); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
@@ -215,6 +215,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd.Process)
 		close(procDone)
 		duration := time.Since(startTime)
 

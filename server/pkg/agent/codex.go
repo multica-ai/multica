@@ -571,8 +571,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// this, killing the leader leaves grandchildren as orphans that
 	// keep consuming memory until the OS reaps them; see #4520, where a
 	// scanner overflow during thread/resume otherwise leaked Codex
-	// processes indefinitely. configureProcessGroup is a no-op on
-	// Windows.
+	// processes indefinitely. On Windows, startProcessGroup creates a
+	// kill-on-close Job Object for the same tree-cleanup contract.
 	configureProcessGroup(cmd)
 	// Override the default exec.CommandContext cancel behaviour. The
 	// default sends SIGKILL only to cmd.Process (the leader); we instead
@@ -608,7 +608,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startProcessGroup(cmd); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
 	}
@@ -748,6 +748,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			waitCh := make(chan struct{})
 			go func() {
 				_ = cmd.Wait()
+				releaseProcessGroup(cmd.Process)
 				close(waitCh)
 			}()
 			select {
