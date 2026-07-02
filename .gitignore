@@ -72,4 +72,4 @@ data/
 .cache/go-build
 .cursor
 .gocache
-server
+server/.tmp*
