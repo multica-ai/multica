@@ -170,7 +170,7 @@
     "add_sub_issue_tooltip": "Add sub-issue",
     "add_sub_issue_aria": "Add sub-issue",
     "child_done_notify_label": "Notify on sub-issue completion",
-    "child_done_notify_tooltip": "When on, completing all sub-issues wakes this issue's assignee to continue. Turn off to stop the auto-notification.",
+    "child_done_notify_tooltip": "When on, this issue's assignee is woken to continue as sub-issues finish (once per stage when staged). Turn off to stop the auto-notification.",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",

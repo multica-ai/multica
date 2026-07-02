@@ -44,6 +44,7 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     project_id: "p1",
     position: idx,
     stage: null,
+    child_done_notify: true,
     start_date: null,
     due_date: null,
     labels: [],

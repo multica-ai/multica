@@ -2903,7 +2903,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage", "child_done_notify"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -3070,6 +3070,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			} else {
 				params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
 			}
+		}
+		// COALESCE'd in SQL (NOT NULL column): only override on an explicit
+		// boolean; an unset/null value leaves the current value in place.
+		if _, ok := rawUpdates["child_done_notify"]; ok && req.Updates.ChildDoneNotify != nil {
+			params.ChildDoneNotify = pgtype.Bool{Bool: *req.Updates.ChildDoneNotify, Valid: true}
 		}
 
 		// Validate the resulting assignee pair when this batch update touches

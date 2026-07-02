@@ -168,7 +168,7 @@
     "add_sub_issue_tooltip": "하위 이슈 추가",
     "add_sub_issue_aria": "하위 이슈 추가",
     "child_done_notify_label": "하위 이슈 완료 시 알림",
-    "child_done_notify_tooltip": "켜면 모든 하위 이슈가 완료될 때 이 이슈의 담당자에게 알리고 깨웁니다. 끄면 자동 알림이 비활성화됩니다.",
+    "child_done_notify_tooltip": "켜면 하위 이슈가 완료될 때(스테이지가 있으면 스테이지마다) 이 이슈의 담당자에게 알리고 깨웁니다. 끄면 자동 알림이 비활성화됩니다.",
     "section_properties": "속성",
     "section_parent_issue": "상위 이슈",
     "section_pull_requests": "Pull requests",
