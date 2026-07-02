@@ -1413,6 +1413,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					"current_status", existing.Status,
 					"agent_id", util.UUIDToString(existing.AgentID),
 				)
+
+				// When the server-side sweeper recovered this task before the
+				// daemon could report completion (e.g. network partition caused
+				// the runtime to be marked offline), the agent's work output
+				// would be silently discarded. Save it as an issue comment so
+				// the user can still see what the agent produced.
+				if existing.FailureReason.Valid &&
+					(existing.FailureReason.String == "runtime_offline" ||
+						existing.FailureReason.String == "runtime_recovery") &&
+					existing.IssueID.Valid {
+					s.saveRecoveredOutputAsComment(ctx, existing, result)
+				}
+
 				return &existing, nil
 			}
 			slog.Warn("complete task failed",
@@ -2414,6 +2427,44 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// saveRecoveredOutputAsComment persists the agent's work output as an issue
+// comment when the daemon's completion report arrived after the server-side
+// sweeper had already recovered the task (network partition → runtime offline →
+// auto-fail). Without this, the agent's output would be silently lost.
+//
+// The method is intentionally best-effort: errors are logged but not returned,
+// matching the pattern of the existing comment fallback in CompleteTask. The
+// durable recover-or-retry logic has already handled the task lifecycle; this
+// is purely about preserving the human-visible work product.
+func (s *TaskService) saveRecoveredOutputAsComment(ctx context.Context, task db.AgentTaskQueue, result []byte) {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil || payload.Output == "" {
+		slog.Debug("saveRecoveredOutputAsComment: no output to save",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+		)
+		return
+	}
+	// Apply the same unescaping as the main completion path so literal
+	// \n sequences from agent stdout render as real newlines.
+	body := util.UnescapeBackslashEscapes(payload.Output)
+	if body == "" {
+		return
+	}
+	slog.Info("saving recovered agent output as comment",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(task.IssueID),
+		"agent_id", util.UUIDToString(task.AgentID),
+		"failure_reason", task.FailureReason.String,
+	)
+	// The task's trigger_comment_id is threaded as the parent so the
+	// recovered output appears under the same conversation thread
+	// as the original trigger, matching the fallback comment path
+	// in CompleteTask.
+	s.createAgentComment(ctx, task.IssueID, task.AgentID,
+		redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
