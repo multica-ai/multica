@@ -439,6 +439,7 @@ function PreviewContent({
           onDownload={onDownload}
           render={(text) => {
             const issueId = source.kind === "full" ? source.attachment.issue_id : null;
+            const replyToCommentId = source.kind === "full" ? source.attachment.comment_id : null;
             if (issueId) {
               return (
                 <MarkdownAnnotationPreview
@@ -446,6 +447,7 @@ function PreviewContent({
                   filename={state.filename}
                   content={text}
                   issueId={issueId}
+                  replyToCommentId={replyToCommentId}
                   attachments={source.kind === "full" ? [source.attachment] : []}
                 />
               );

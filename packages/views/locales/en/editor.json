@@ -56,8 +56,11 @@
     "cancel": "Cancel",
     "clear": "Clear",
     "send_to_comments": "Send to comments",
+    "reply_to_comment": "Reply to this comment",
     "sent": "Sent to comments",
+    "replied": "Replied to comment",
     "send_failed": "Failed to send annotations",
+    "reply_failed": "Failed to reply",
     "invalid_selection": "This selection cannot be located in the Markdown source. Select plain text content.",
     "empty_note": "Enter a note.",
     "list_title": "Current annotations"

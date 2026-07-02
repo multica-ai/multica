@@ -120,13 +120,16 @@ vi.mock("../i18n", () => ({
           count: "Annotations 0",
           clear: "Clear",
           send_to_comments: "Send to comments",
+          reply_to_comment: "Reply to this comment",
           add: "Add note",
           note_placeholder: "Add a note",
           cancel: "Cancel",
           save: "Save note",
           list_title: "Current annotations",
           sent: "Sent to comments",
+          replied: "Replied to comment",
           send_failed: "Failed to send",
+          reply_failed: "Failed to reply",
           empty_note: "Enter a note.",
         },
       }),
@@ -281,6 +284,25 @@ describe("AttachmentPreviewModal — dispatch", () => {
       expect(screen.getByText("Send to comments")).toBeTruthy();
     });
     expect(screen.queryByTestId("readonly-content")).toBeNull();
+  });
+
+  it("shows the reply action for Markdown attachments that belong to a comment", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "# heading\n\nbody\n",
+      originalContentType: "text/markdown",
+    });
+    const att = makeAttachment({
+      filename: "README.md",
+      content_type: "text/markdown",
+      issue_id: "issue-1",
+      comment_id: "comment-1",
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Reply to this comment")).toBeTruthy();
+    });
+    expect(screen.queryByText("Send to comments")).toBeNull();
   });
 
   it("lets Markdown previews toggle between modal and fullscreen layout", async () => {

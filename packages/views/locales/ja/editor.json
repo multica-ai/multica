@@ -56,8 +56,11 @@
     "cancel": "キャンセル",
     "clear": "クリア",
     "send_to_comments": "コメントに送信",
+    "reply_to_comment": "このコメントに返信",
     "sent": "コメントに送信しました",
+    "replied": "コメントに返信しました",
     "send_failed": "注釈を送信できませんでした",
+    "reply_failed": "返信できませんでした",
     "invalid_selection": "この選択範囲は Markdown ソースに特定できません。プレーンテキストを選択してください。",
     "empty_note": "メモを入力してください。",
     "list_title": "今回の注釈"
