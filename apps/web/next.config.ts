@@ -43,34 +43,38 @@ const nextConfig: NextConfig = {
     return {
       // Run before file-system routes so /docs isn't shadowed by the
       // [workspaceSlug] dynamic segment.
-      beforeFiles: [
-        {
-          source: "/docs",
-          destination: `${docsUrl}/docs`,
-        },
-        {
-          source: "/docs/:path*",
-          destination: `${docsUrl}/docs/:path*`,
-        },
-      ],
-      afterFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${remoteApiUrl}/api/:path*`,
-        },
-        {
-          source: "/ws",
-          destination: `${remoteApiUrl}/ws`,
-        },
-        {
-          source: "/auth/:path*",
-          destination: `${remoteApiUrl}/auth/:path*`,
-        },
-        {
-          source: "/uploads/:path*",
-          destination: `${remoteApiUrl}/uploads/:path*`,
-        },
-      ],
+      beforeFiles: docsUrl
+        ? [
+            {
+              source: "/docs",
+              destination: `${docsUrl}/docs`,
+            },
+            {
+              source: "/docs/:path*",
+              destination: `${docsUrl}/docs/:path*`,
+            },
+          ]
+        : [],
+      afterFiles: remoteApiUrl
+        ? [
+            {
+              source: "/api/:path*",
+              destination: `${remoteApiUrl}/api/:path*`,
+            },
+            {
+              source: "/ws",
+              destination: `${remoteApiUrl}/ws`,
+            },
+            {
+              source: "/auth/:path*",
+              destination: `${remoteApiUrl}/auth/:path*`,
+            },
+            {
+              source: "/uploads/:path*",
+              destination: `${remoteApiUrl}/uploads/:path*`,
+            },
+          ]
+        : [],
       fallback: [],
     };
   },

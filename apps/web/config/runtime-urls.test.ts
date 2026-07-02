@@ -28,64 +28,38 @@ describe("resolveRemoteApiUrl", () => {
     ).toBe("http://localhost:19000");
   });
 
-  it("derives localhost backend URL from PORT when no API URL is set", () => {
-    expect(resolveRemoteApiUrl({ PORT: "19080" })).toBe(
-      "http://localhost:19080",
-    );
-  });
-
-  it("supports explicit backend port aliases before PORT", () => {
-    expect(resolveRemoteApiUrl({ BACKEND_PORT: "28080", PORT: "19080" })).toBe(
-      "http://localhost:28080",
-    );
-    expect(resolveRemoteApiUrl({ API_PORT: "38080", PORT: "19080" })).toBe(
-      "http://localhost:38080",
-    );
-    expect(resolveRemoteApiUrl({ SERVER_PORT: "48080", PORT: "19080" })).toBe(
-      "http://localhost:48080",
-    );
-  });
-
-  it("prefers backend port aliases by documented precedence", () => {
+  it("does not infer a backend URL from frontend or backend port env vars", () => {
     expect(
       resolveRemoteApiUrl({
         BACKEND_PORT: "28080",
         API_PORT: "38080",
         SERVER_PORT: "48080",
-        PORT: "19080",
+        PORT: "3000",
       }),
-    ).toBe("http://localhost:28080");
-
-    expect(
-      resolveRemoteApiUrl({
-        API_PORT: "38080",
-        SERVER_PORT: "48080",
-        PORT: "19080",
-      }),
-    ).toBe("http://localhost:38080");
-
-    expect(resolveRemoteApiUrl({ SERVER_PORT: "48080", PORT: "19080" })).toBe(
-      "http://localhost:48080",
-    );
+    ).toBeUndefined();
+    expect(resolveRemoteApiUrl({ PORT: "3000" })).toBeUndefined();
   });
 
-  it("ignores whitespace-only backend URL values", () => {
+  it("does not use relative public API URLs for server-side rewrites", () => {
+    expect(
+      resolveRemoteApiUrl({
+        NEXT_PUBLIC_API_URL: "/api",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("ignores whitespace-only or invalid backend URL values", () => {
     expect(
       resolveRemoteApiUrl({
         REMOTE_API_URL: "  ",
-        NEXT_PUBLIC_API_URL: "  ",
-        BACKEND_PORT: "  ",
-        API_PORT: "  ",
-        SERVER_PORT: "  ",
+        NEXT_PUBLIC_API_URL: "ftp://api.example.com",
         PORT: "19080",
       }),
-    ).toBe("http://localhost:19080");
-
-    expect(resolveRemoteApiUrl({ PORT: "  " })).toBe("http://localhost:8080");
+    ).toBeUndefined();
   });
 
-  it("falls back to the historical backend port when no env is configured", () => {
-    expect(resolveRemoteApiUrl({})).toBe("http://localhost:8080");
+  it("returns undefined when no API origin is configured", () => {
+    expect(resolveRemoteApiUrl({})).toBeUndefined();
   });
 });
 
@@ -96,8 +70,13 @@ describe("resolveDocsUrl", () => {
     );
   });
 
-  it("falls back to the local docs dev server", () => {
-    expect(resolveDocsUrl({})).toBe("http://localhost:4000");
+  it("returns undefined when no docs origin is configured", () => {
+    expect(resolveDocsUrl({})).toBeUndefined();
+  });
+
+  it("ignores relative or invalid docs URL values", () => {
+    expect(resolveDocsUrl({ DOCS_URL: "/docs" })).toBeUndefined();
+    expect(resolveDocsUrl({ DOCS_URL: "ftp://docs.example.com" })).toBeUndefined();
   });
 });
 
@@ -137,6 +116,32 @@ describe("browser runtime URLs", () => {
 });
 
 describe("runtimeRewriteDestination", () => {
+  it("keeps same-origin fallback when no runtime upstreams are configured", () => {
+    expect(runtimeRewriteDestination("/api/config", {})).toBeUndefined();
+    expect(runtimeRewriteDestination("/auth/send-code", {})).toBeUndefined();
+    expect(
+      runtimeRewriteDestination("/uploads/workspaces/a.png", {}),
+    ).toBeUndefined();
+    expect(runtimeRewriteDestination("/ws", {})).toBeUndefined();
+    expect(runtimeRewriteDestination("/docs/zh", {})).toBeUndefined();
+  });
+
+  it("keeps same-origin fallback for runtime API paths when only frontend PORT is configured", () => {
+    expect(
+      runtimeRewriteDestination("/api/config", {
+        PORT: "3000",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not rewrite runtime API paths to relative public API URLs", () => {
+    expect(
+      runtimeRewriteDestination("/api/config", {
+        NEXT_PUBLIC_API_URL: "/api",
+      }),
+    ).toBeUndefined();
+  });
+
   it("maps backend HTTP paths to the runtime API origin", () => {
     expect(
       runtimeRewriteDestination("/api/config", {
