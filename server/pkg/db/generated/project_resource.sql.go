@@ -74,6 +74,41 @@ func (q *Queries) DeleteProjectResource(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const listGitHubRepoProjectResources = `-- name: ListGitHubRepoProjectResources :many
+SELECT workspace_id, resource_ref
+FROM project_resource
+WHERE resource_type = 'github_repo'
+ORDER BY workspace_id, project_id, position ASC, created_at ASC
+`
+
+type ListGitHubRepoProjectResourcesRow struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ResourceRef []byte      `json:"resource_ref"`
+}
+
+// GitHub webhook routing needs to find the workspace that owns a repo even
+// when the repo is attached at the project level rather than the legacy
+// workspace.repos list.
+func (q *Queries) ListGitHubRepoProjectResources(ctx context.Context) ([]ListGitHubRepoProjectResourcesRow, error) {
+	rows, err := q.db.Query(ctx, listGitHubRepoProjectResources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGitHubRepoProjectResourcesRow{}
+	for rows.Next() {
+		var i ListGitHubRepoProjectResourcesRow
+		if err := rows.Scan(&i.WorkspaceID, &i.ResourceRef); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getProjectResource = `-- name: GetProjectResource :one
 SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
 WHERE id = $1

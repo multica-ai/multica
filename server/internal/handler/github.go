@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -562,6 +563,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	h.reconcileIssuePullRequestMetadata(r.Context(), issue)
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -572,6 +574,92 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+func (h *Handler) reconcileIssuePullRequestMetadata(ctx context.Context, issue db.Issue) {
+	metadata := parseIssueMetadata(issue.Metadata)
+	rawURL, ok := metadata["pr_url"].(string)
+	if !ok {
+		return
+	}
+	owner, repo, number, ok := parseGitHubPullRequestURL(rawURL)
+	if !ok {
+		return
+	}
+	if metaNumber, ok := metadataPRNumber(metadata["pr_number"]); ok && metaNumber != number {
+		return
+	}
+	pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: issue.WorkspaceID,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		PrNumber:    number,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: reconcile issue pr metadata lookup failed", "err", err, "issue_id", uuidToString(issue.ID))
+		}
+		return
+	}
+	if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+		IssueID:             issue.ID,
+		PullRequestID:       pr.ID,
+		CloseIntent:         false,
+		PreserveCloseIntent: false,
+		LinkedByType:        strToText("system"),
+		LinkedByID:          pgtype.UUID{},
+	}); err != nil {
+		slog.Warn("github: reconcile issue pr metadata link failed", "err", err, "issue_id", uuidToString(issue.ID), "pr_id", uuidToString(pr.ID))
+	}
+}
+
+func metadataPRNumber(v any) (int32, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n <= 0 || n > math.MaxInt32 || n != math.Trunc(n) {
+			return 0, false
+		}
+		return int32(n), true
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(n), 10, 32)
+		if err != nil {
+			return 0, false
+		}
+		return int32(parsed), true
+	default:
+		return 0, false
+	}
+}
+
+func parseGitHubPullRequestURL(raw string) (owner, repo string, number int32, ok bool) {
+	s := strings.TrimSpace(raw)
+	if i := strings.Index(s, "]("); i >= 0 {
+		rest := s[i+2:]
+		if j := strings.Index(rest, ")"); j >= 0 {
+			s = rest[:j]
+		}
+	}
+	s = strings.Trim(strings.TrimSpace(s), "<>")
+	if strings.HasPrefix(strings.ToLower(s), "github.com/") {
+		s = "https://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return "", "", 0, false
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	if host != "github.com" {
+		return "", "", 0, false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[0] == "" || parts[1] == "" || !strings.EqualFold(parts[2], "pull") {
+		return "", "", 0, false
+	}
+	n, err := strconv.ParseInt(parts[3], 10, 32)
+	if err != nil || n <= 0 {
+		return "", "", 0, false
+	}
+	return parts[0], strings.TrimSuffix(parts[1], ".git"), int32(n), true
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
@@ -1235,15 +1323,15 @@ func parseGHTimeRequired(s string) pgtype.Timestamptz {
 
 const githubWebhookHost = "github.com"
 
-// resolveWorkspaceForRepo routes a delivery to the workspace whose repos
-// registry owns github.com/owner/name, so one installation can serve repos in
-// several workspaces; falls back to the caller-supplied workspace when
-// unmatched (callers pass the installation's oldest binding, since an
-// installation may now be bound to several workspaces). The registry is
-// admin-editable, so it overrides the verified installation binding only when
-// owner == the delivering account (accountLogin) and the host matches — no
+// resolveWorkspaceForRepo routes a delivery to the workspace whose project or
+// workspace repo registry owns github.com/owner/name, so one installation can
+// serve repos in several workspaces. Project-level github_repo resources take
+// precedence because they are the task/issue-specific repo source used by
+// agents; the legacy workspace.repos list is the fallback registry. The
+// registries are admin-editable, so either override is honored only when owner
+// == the delivering account (accountLogin) and the host matches — no
 // cross-account capture. On ties the fallback workspace wins if it is among the
-// matches, else the lowest id (query is ORDER BY id).
+// matches, else the lowest id from the query ordering wins.
 func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.UUID, accountLogin, owner, name string) pgtype.UUID {
 	owner = strings.TrimSpace(owner)
 	name = strings.TrimSpace(name)
@@ -1255,6 +1343,10 @@ func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.U
 		return fallback
 	}
 	target := githubWebhookHost + "/" + strings.ToLower(owner) + "/" + strings.ToLower(name)
+	if matches := h.matchProjectRepoWorkspaces(ctx, target); len(matches) > 0 {
+		return chooseRepoWorkspace(fallback, matches)
+	}
+
 	rows, err := h.Queries.ListWorkspacesWithRepos(ctx)
 	if err != nil {
 		slog.Warn("github: list workspaces with repos failed", "err", err)
@@ -1275,19 +1367,49 @@ func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.U
 			}
 		}
 	}
+	return chooseRepoWorkspace(fallback, matches)
+}
+
+func (h *Handler) matchProjectRepoWorkspaces(ctx context.Context, target string) []pgtype.UUID {
+	rows, err := h.Queries.ListGitHubRepoProjectResources(ctx)
+	if err != nil {
+		slog.Warn("github: list project github_repo resources failed", "err", err)
+		return nil
+	}
+	matches := make([]pgtype.UUID, 0, 1)
+	seen := map[pgtype.UUID]struct{}{}
+	for _, row := range rows {
+		var ref struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(row.ResourceRef, &ref); err != nil {
+			continue
+		}
+		if repoIdentityFromURL(ref.URL) != target {
+			continue
+		}
+		if _, dup := seen[row.WorkspaceID]; dup {
+			continue
+		}
+		seen[row.WorkspaceID] = struct{}{}
+		matches = append(matches, row.WorkspaceID)
+	}
+	return matches
+}
+
+func chooseRepoWorkspace(fallback pgtype.UUID, matches []pgtype.UUID) pgtype.UUID {
 	switch len(matches) {
 	case 0:
 		return fallback
 	case 1:
 		return matches[0]
-	default:
-		for _, m := range matches {
-			if m == fallback {
-				return m
-			}
-		}
-		return matches[0]
 	}
+	for _, m := range matches {
+		if m == fallback {
+			return m
+		}
+	}
+	return matches[0]
 }
 
 // repoIdentityFromURL returns lowercased "host/owner/name" from an https, scp

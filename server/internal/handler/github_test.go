@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -2699,6 +2700,120 @@ func TestRepoIdentityFromURL(t *testing.T) {
 	}
 }
 
+func TestParseGitHubPullRequestURL(t *testing.T) {
+	cases := []struct {
+		in         string
+		wantOwner  string
+		wantRepo   string
+		wantNumber int32
+		wantOK     bool
+	}{
+		{"https://github.com/acme/widget/pull/42", "acme", "widget", 42, true},
+		{"[https://github.com/acme/widget/pull/42](https://github.com/acme/widget/pull/42)", "acme", "widget", 42, true},
+		{"github.com/acme/widget/pull/42", "acme", "widget", 42, true},
+		{"https://gitlab.com/acme/widget/-/merge_requests/42", "", "", 0, false},
+		{"https://github.com/acme/widget/issues/42", "", "", 0, false},
+	}
+	for _, tc := range cases {
+		owner, repo, number, ok := parseGitHubPullRequestURL(tc.in)
+		if owner != tc.wantOwner || repo != tc.wantRepo || number != tc.wantNumber || ok != tc.wantOK {
+			t.Errorf("parseGitHubPullRequestURL(%q) = %q %q %d %v, want %q %q %d %v",
+				tc.in, owner, repo, number, ok, tc.wantOwner, tc.wantRepo, tc.wantNumber, tc.wantOK)
+		}
+	}
+}
+
+func TestListPullRequestsForIssueReconcilesMetadataLink(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "metadata pr link",
+		"status": "done",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	const repoOwner, repoName = "metadata-acme", "metadata-widget"
+	const installationID int64 = 778899004
+	const prNumber int32 = 4545
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   repoOwner,
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+	pr, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID:         parseUUID(testWorkspaceID),
+		InstallationID:      installationID,
+		RepoOwner:           repoOwner,
+		RepoName:            repoName,
+		PrNumber:            prNumber,
+		Title:               "Metadata-only PR",
+		State:               "merged",
+		HtmlUrl:             "https://github.com/metadata-acme/metadata-widget/pull/4545",
+		Branch:              pgtype.Text{String: "feat/metadata", Valid: true},
+		MergedAt:            parseGHTime("2026-04-29T00:00:00Z"),
+		ClosedAt:            parseGHTime("2026-04-29T00:00:00Z"),
+		PrCreatedAt:         parseGHTimeRequired("2026-04-28T00:00:00Z"),
+		PrUpdatedAt:         parseGHTimeRequired("2026-04-29T00:00:00Z"),
+		HeadSha:             "metadata-head",
+		ClearMergeableState: pgtype.Bool{Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("UpsertGitHubPullRequest: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET metadata = $1 WHERE id = $2`,
+		[]byte(`{"pr_url":"[https://github.com/metadata-acme/metadata-widget/pull/4545](https://github.com/metadata-acme/metadata-widget/pull/4545)","pr_number":4545}`),
+		created.ID,
+	); err != nil {
+		t.Fatalf("set issue metadata: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE id = $1`, pr.ID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	rec := httptest.NewRecorder()
+	listReq := withURLParam(newRequest("GET", "/api/issues/"+created.ID+"/pull-requests", nil), "id", created.ID)
+	testHandler.ListPullRequestsForIssue(rec, listReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListPullRequestsForIssue: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		PullRequests []GitHubPullRequestResponse `json:"pull_requests"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.PullRequests) != 1 {
+		t.Fatalf("pull_requests length = %d, want 1", len(payload.PullRequests))
+	}
+	if payload.PullRequests[0].Number != prNumber || payload.PullRequests[0].State != "merged" {
+		t.Fatalf("pull request = #%d state %q, want #%d merged", payload.PullRequests[0].Number, payload.PullRequests[0].State, prNumber)
+	}
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("metadata reconciliation should persist the missing link row, got %d links", len(linked))
+	}
+}
+
 // TestWebhook_RoutesToRepoOwningWorkspace is the regression test for the bug
 // where one GitHub App installation serving repos in several workspaces filed
 // every PR under the installation's single workspace — so a PR's identifier
@@ -2834,6 +2949,166 @@ func TestWebhook_RoutesToRepoOwningWorkspace(t *testing.T) {
 	}
 	if len(linked) != 1 {
 		t.Fatalf("expected 1 linked PR on the repo-owning workspace issue, got %d", len(linked))
+	}
+}
+
+// TestWebhook_RoutesToProjectGitHubRepoWorkspace covers the project-resource
+// variant of the repo routing path: agents receive github_repo resources from
+// the issue's project, not only the legacy workspace.repos list. A merged PR
+// from that repo must be mirrored in the issue workspace, linked by its
+// title/body identifier scan, and returned by the issue pull-requests query.
+func TestWebhook_RoutesToProjectGitHubRepoWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "project-resource-route-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	const repoOwner, repoName = "project-route-acme", "project-route-widget"
+	repoURL := "https://github.com/" + repoOwner + "/" + repoName
+
+	project, err := testHandler.Queries.CreateProject(ctx, db.CreateProjectParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Title:       "project route",
+		Status:      "in_progress",
+		Priority:    "none",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	resource, err := testHandler.Queries.CreateProjectResource(ctx, db.CreateProjectResourceParams{
+		ProjectID:    project.ID,
+		WorkspaceID:  parseUUID(testWorkspaceID),
+		ResourceType: "github_repo",
+		ResourceRef:  []byte(`{"url":"` + repoURL + `"}`),
+		Label:        pgtype.Text{String: "project repo", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateProjectResource: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "project resource route test",
+		"status":     "in_progress",
+		"project_id": uuidToString(project.ID),
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "project-route-install-ws")
+	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        "project-route-install-ws",
+		Slug:        "project-route-install-ws",
+		IssuePrefix: "PRW",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	const installationID int64 = 778899003
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    wsA.ID,
+		InstallationID: installationID,
+		AccountLogin:   repoOwner,
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE repo_owner = $1 AND repo_name = $2`, repoOwner, repoName)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM project_resource WHERE id = $1`, resource.ID)
+		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, project.ID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
+	})
+
+	const prNumber = 4343
+	body := map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number":        prNumber,
+			"html_url":      repoURL + "/pull/4343",
+			"title":         "Ship project fix " + created.Identifier,
+			"body":          "Closes " + created.Identifier,
+			"state":         "closed",
+			"draft":         false,
+			"merged":        true,
+			"merged_at":     "2026-04-29T00:00:00Z",
+			"closed_at":     "2026-04-29T00:00:00Z",
+			"created_at":    "2026-04-28T00:00:00Z",
+			"updated_at":    "2026-04-29T00:00:00Z",
+			"head":          map[string]any{"ref": "feat/project-route"},
+			"user":          map[string]any{"login": "octocat", "avatar_url": ""},
+			"additions":     3,
+			"deletions":     1,
+			"changed_files": 2,
+		},
+		"repository": map[string]any{
+			"name":  repoName,
+			"owner": map[string]any{"login": repoOwner},
+		},
+		"installation": map[string]any{"id": installationID},
+	}
+	raw, _ := json.Marshal(body)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+
+	rec := httptest.NewRecorder()
+	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
+	hookReq.Header.Set("X-GitHub-Event", "pull_request")
+	hookReq.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	testHandler.HandleGitHubWebhook(rec, hookReq)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	pr, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		RepoOwner:   repoOwner,
+		RepoName:    repoName,
+		PrNumber:    prNumber,
+	})
+	if err != nil {
+		t.Fatalf("expected PR filed under the project resource workspace: %v", err)
+	}
+	if pr.State != "merged" {
+		t.Fatalf("pr state = %q, want merged", pr.State)
+	}
+	if _, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsA.ID,
+		RepoOwner:   repoOwner,
+		RepoName:    repoName,
+		PrNumber:    prNumber,
+	}); err == nil {
+		t.Fatalf("PR should NOT be filed under the installation workspace")
+	}
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected 1 linked PR on the project issue, got %d", len(linked))
+	}
+	if linked[0].PrNumber != prNumber || linked[0].State != "merged" {
+		t.Fatalf("linked PR = #%d state %q, want #%d merged", linked[0].PrNumber, linked[0].State, prNumber)
+	}
+
+	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if updated.Status != "done" {
+		t.Fatalf("issue status = %q, want done", updated.Status)
 	}
 }
 

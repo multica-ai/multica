@@ -8,6 +8,15 @@ SELECT * FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 ORDER BY project_id, position ASC, created_at ASC;
 
+-- name: ListGitHubRepoProjectResources :many
+-- GitHub webhook routing needs to find the workspace that owns a repo even
+-- when the repo is attached at the project level rather than the legacy
+-- workspace.repos list.
+SELECT workspace_id, resource_ref
+FROM project_resource
+WHERE resource_type = 'github_repo'
+ORDER BY workspace_id, project_id, position ASC, created_at ASC;
+
 -- name: GetProjectResource :one
 SELECT * FROM project_resource
 WHERE id = $1;
