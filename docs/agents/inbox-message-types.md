@@ -234,10 +234,10 @@ into its issue's group:
 
 ---
 
-## Mentions come from two sources (comment and note)
+## Mentions come from three sources (issue comment, note, note comment)
 
-`mentioned` is a single `InboxItemType`, but it is produced from **two** places —
-both reuse the same comment-mention engine and the per-user
+`mentioned` is a single `InboxItemType`, but it is produced from **three** places —
+all reuse the same comment-mention engine and the per-user
 `"mentioned"` → `"comments"` notification setting:
 
 - **Comment mention** — `@`-tagging a member in an issue comment. The inbox item
@@ -252,6 +252,13 @@ both reuse the same comment-mention engine and the per-user
   (`details.note_id`, `details.note_title`) and the inbox UI deep-links from
   `details.note_id`. The listener also shares the note with the mentioned member
   so the notification is openable.
+- **Note comment mention** (FIR-2589) — `@`-tagging a member in a **comment on a
+  note**. `CreateComment` (`server/internal/cerebro/note/comments.go`) calls
+  `notifyCommentMentions`, which reuses the exact note-body path above: it
+  shares the note with the tagged member and publishes the same
+  `EventNoteMentioned`, so the inbox item deep-links to the note (where the
+  comment lives). No new event or notification type — a comment mention is
+  indistinguishable from a body mention at the inbox layer.
 
 > Takeaway for agents: a note mention is **not** a separate type — it is a
 > `mentioned` notification whose `details.note_id` is set (issue-less). If you

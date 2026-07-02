@@ -143,7 +143,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, ownerUUID, ok := h.scope(w, r, userID)
+	wsUUID, ownerUUID, ok := h.scope(w, r, userID)
 	if !ok {
 		return
 	}
@@ -206,7 +206,35 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment")
 		return
 	}
+	// Notify members @mentioned in the comment body (bug FIR-2589). Reuses the
+	// exact share + EventNoteMentioned path a note-body mention uses, so a
+	// tagged member gets an openable "mentioned" inbox item that deep-links to
+	// the note. Best-effort: a failed lookup never fails the create.
+	h.notifyCommentMentions(r.Context(), wsUUID, noteID, ownerUUID, req.Body)
 	writeJSON(w, http.StatusCreated, commentToResponse(created))
+}
+
+// notifyCommentMentions fans out "mentioned" notifications for the member
+// (@member) mentions in a newly created note comment. A comment is created
+// once, so every member mention in its body is new — oldBody is "". Delegates
+// to notifyNoteMentions (share the note + publish EventNoteMentioned) so the
+// comment path behaves identically to the note-body path.
+func (h *Handler) notifyCommentMentions(ctx context.Context, wsUUID, noteID, authorID pgtype.UUID, body string) {
+	if h.Bus == nil {
+		return
+	}
+	if len(newMemberMentions("", body, uuidStr(authorID))) == 0 {
+		return
+	}
+	noteRow, err := h.Cerebro.GetNote(ctx, noteID)
+	if err != nil {
+		return
+	}
+	artifact, err := h.Upstream.GetArtifact(ctx, db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID})
+	if err != nil {
+		return
+	}
+	h.notifyNoteMentions(ctx, wsUUID, noteID, authorID, artifact.Title, "", body, noteRow.Visibility)
 }
 
 // UpdateComment edits a comment's own text. Author-only (or note owner).
