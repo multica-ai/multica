@@ -9,6 +9,7 @@ export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";
+export { planApi, workflowApi } from "./workflows";
 export { WSClient } from "./ws-client";
 
 import type { ApiClient as ApiClientType } from "./client";
