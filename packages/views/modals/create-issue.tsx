@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -48,6 +48,7 @@ import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -268,6 +269,27 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  // A project belongs to one or more teams; an issue's team must be one of
+  // them. When a project is selected, constrain the team picker to its teams;
+  // no project selected leaves the picker unconstrained.
+  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
+  useEffect(() => {
+    if (!projectId) return;
+    const allowed = selectedProject?.team_ids ?? [];
+    // Exactly one team: auto-select it. Otherwise drop a stale pick that the
+    // newly-chosen project doesn't include.
+    if (allowed.length === 1) {
+      setTeamId(allowed[0]);
+      return;
+    }
+    if (teamId && !allowed.includes(teamId)) setTeamId(undefined);
+  }, [projectId, selectedProject, teamId]);
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -688,6 +710,7 @@ export function ManualCreatePanel({
                 onChange={(next) => setTeamId(next ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
+                allowedTeamIds={projectTeamIds}
               />
 
               {/* Project */}

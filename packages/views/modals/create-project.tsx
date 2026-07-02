@@ -217,8 +217,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
+  // Seed the default team exactly once, when teams first load. Guarding only
+  // on `teamIds.length` re-seeded the moment the user cleared the selection,
+  // fighting the deselection; the ref makes seeding a one-shot so clearing
+  // sticks.
+  const seededDefaultTeamRef = useRef(false);
   useEffect(() => {
-    if (teamIds.length > 0 || teams.length === 0) return;
+    if (seededDefaultTeamRef.current || teams.length === 0) return;
+    seededDefaultTeamRef.current = true;
+    if (teamIds.length > 0) return;
     const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
     if (defaultTeam) setTeamIds([defaultTeam.id]);
   }, [teamIds.length, teams]);

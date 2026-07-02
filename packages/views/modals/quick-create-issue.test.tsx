@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
+const mockSetLastTeamId = vi.hoisted(() => vi.fn());
 const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -19,6 +20,8 @@ const mockQuickCreateStore = {
   setLastActor: mockSetLastActor,
   lastProjectId: null as string | null,
   setLastProjectId: mockSetLastProjectId,
+  lastTeamId: null as string | null,
+  setLastTeamId: mockSetLastTeamId,
   prompt: "Persisted draft prompt",
   setPrompt: mockSetPrompt,
   clearPrompt: mockClearPrompt,
@@ -63,6 +66,7 @@ vi.mock("@tanstack/react-query", () => ({
         return { data: [] };
     }
   },
+  queryOptions: (options: unknown) => options,
 }));
 
 vi.mock("@multica/core/api", () => ({

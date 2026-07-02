@@ -481,7 +481,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
-const TeamSchema = z.object({
+export const TeamSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   name: z.string().default(""),
@@ -541,7 +541,9 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
-  team_ids: z.array(z.string()).optional(),
+  // Tolerate a missing key or an explicit null (older backends) by defaulting
+  // to an empty membership list.
+  team_ids: z.array(z.string()).nullish().transform((ids) => ids ?? []),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({

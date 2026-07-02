@@ -30,16 +30,23 @@ export function TeamPicker({
   triggerRender,
   align = "start",
   allowClear = false,
+  allowedTeamIds,
 }: {
   teamId: string | null;
   onChange: (teamId: string | null) => void;
   triggerRender?: ReactElement;
   align?: "start" | "center" | "end";
   allowClear?: boolean;
+  // When set, restricts the offered teams to this id set (e.g. the selected
+  // project's teams). Undefined means no constraint.
+  allowedTeamIds?: string[];
 }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
-  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const { data: allTeams = [] } = useQuery(activeTeamListOptions(wsId));
+  const teams = allowedTeamIds
+    ? allTeams.filter((team) => allowedTeamIds.includes(team.id))
+    : allTeams;
   const current = teams.find((team) => team.id === teamId);
 
   return (

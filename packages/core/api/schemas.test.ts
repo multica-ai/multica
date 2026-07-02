@@ -20,6 +20,9 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
+  ListTeamsResponseSchema,
+  TeamSchema,
+  EMPTY_LIST_TEAMS_RESPONSE,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -720,6 +723,129 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("TeamSchema / ListTeamsResponseSchema drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/teams" };
+  const baseTeam = {
+    id: "team-1",
+    workspace_id: "ws-1",
+    name: "Frontend",
+    key: "FE",
+    description: "",
+    icon: null,
+    issue_counter: 3,
+    is_default: true,
+    archived_at: null,
+    created_by: "user-1",
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+  };
+
+  it("parses a well-formed team and tolerates extra fields", () => {
+    const parsed = TeamSchema.parse({ ...baseTeam, future_field: "ignored" });
+    expect(parsed.id).toBe("team-1");
+    expect(parsed.key).toBe("FE");
+    expect(parsed.is_default).toBe(true);
+  });
+
+  it("defaults scalar fields when an older backend omits them", () => {
+    const parsed = TeamSchema.parse({ id: "team-2", workspace_id: "ws-1" });
+    expect(parsed.name).toBe("");
+    expect(parsed.key).toBe("");
+    expect(parsed.description).toBe("");
+    expect(parsed.icon).toBeNull();
+    expect(parsed.issue_counter).toBe(0);
+    expect(parsed.is_default).toBe(false);
+    expect(parsed.archived_at).toBeNull();
+  });
+
+  it("parses a list response and coerces total", () => {
+    const parsed = parseWithFallback(
+      { teams: [baseTeam], total: 1 },
+      ListTeamsResponseSchema,
+      EMPTY_LIST_TEAMS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.teams).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+  });
+
+  it("defaults teams and total when the body omits them", () => {
+    const parsed = parseWithFallback(
+      {},
+      ListTeamsResponseSchema,
+      EMPTY_LIST_TEAMS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.teams).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("falls back to empty when a team row has a wrong-typed id", () => {
+    expect(
+      parseWithFallback(
+        { teams: [{ ...baseTeam, id: 42 }], total: 1 },
+        ListTeamsResponseSchema,
+        EMPTY_LIST_TEAMS_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_LIST_TEAMS_RESPONSE);
+  });
+
+  it("falls back to empty for a non-object body", () => {
+    expect(
+      parseWithFallback(null, ListTeamsResponseSchema, EMPTY_LIST_TEAMS_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_LIST_TEAMS_RESPONSE);
+  });
+});
+
+describe("ProjectSchema team_ids drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/projects/search" };
+  const baseProject = {
+    id: "proj-1",
+    workspace_id: "ws-1",
+    title: "Website",
+    description: null,
+    icon: null,
+    status: "active",
+    priority: "medium",
+    lead_type: null,
+    lead_id: null,
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+    match_source: "title",
+  };
+
+  it("preserves a populated team_ids array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, team_ids: ["team-1", "team-2"] }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.team_ids).toEqual(["team-1", "team-2"]);
+  });
+
+  it("defaults team_ids to an empty array when the field is missing", () => {
+    const parsed = parseWithFallback(
+      { projects: [baseProject], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.team_ids).toEqual([]);
+  });
+
+  it("coerces a null team_ids to an empty array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, team_ids: null }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.team_ids).toEqual([]);
   });
 });
 

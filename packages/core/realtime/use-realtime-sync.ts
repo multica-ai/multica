@@ -11,6 +11,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { teamKeys } from "../teams/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -340,6 +341,17 @@ export function applyWorkspaceUpdatedToCache(
   qc: QueryClient,
   payload: WorkspaceUpdatedPayload,
 ): void {
+  // Team create/update/archive rides the same `workspace:updated` channel but
+  // carries a `team` instead of a `workspace`. The global query client uses
+  // staleTime: Infinity, so without an explicit invalidation other clients
+  // never refetch the team list. Archiving a team also shifts issue
+  // identifiers/filters, so mirror the team mutations' onSettled issue-key
+  // invalidation here.
+  const team = payload.team;
+  if (team?.workspace_id) {
+    qc.invalidateQueries({ queryKey: teamKeys.list(team.workspace_id) });
+    qc.invalidateQueries({ queryKey: issueKeys.all(team.workspace_id) });
+  }
   const next = payload.workspace;
   if (next?.id) {
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list());

@@ -336,11 +336,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
+  // Default-team seeding applies only when no project is selected. With a
+  // project chosen, the team is constrained to the project's teams below.
   useEffect(() => {
-    if (!open || teamId || teams.length === 0) return;
+    if (!open || teamId || teams.length === 0 || projectId) return;
     const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
-    setTeamId(defaultTeam.id);
-  }, [open, teamId, teams]);
+    if (defaultTeam) setTeamId(defaultTeam.id);
+  }, [open, teamId, teams, projectId]);
 
   const initialEventFilters: WebhookEventFilter[] =
     !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
@@ -379,6 +381,21 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => teams.find((team) => team.id === teamId) ?? null,
     [teams, teamId],
   );
+
+  // A project belongs to one or more teams; an issue's team must be one of
+  // them. With a project selected, constrain the team picker to its teams;
+  // no project selected leaves it unconstrained (default seeding above).
+  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
+  useEffect(() => {
+    if (!open || !projectId) return;
+    const allowed = selectedProject?.team_ids ?? [];
+    const [only] = allowed;
+    if (allowed.length === 1 && only) {
+      setTeamId(only);
+      return;
+    }
+    if (teamId && !allowed.includes(teamId)) setTeamId(null);
+  }, [open, projectId, selectedProject, teamId]);
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -705,6 +722,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               teamId={teamId}
               selectedTeam={selectedTeam}
               onChange={setTeamId}
+              allowedTeamIds={projectTeamIds}
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
@@ -910,10 +928,12 @@ function TeamSection({
   teamId,
   selectedTeam,
   onChange,
+  allowedTeamIds,
 }: {
   teamId: string | null;
   selectedTeam: { name: string; key: string } | null;
   onChange: (teamId: string | null) => void;
+  allowedTeamIds?: string[];
 }) {
   const { t } = useT("autopilots");
   return (
@@ -923,6 +943,7 @@ function TeamSection({
         teamId={teamId}
         onChange={onChange}
         align="start"
+        allowedTeamIds={allowedTeamIds}
         triggerRender={
           <button
             type="button"
