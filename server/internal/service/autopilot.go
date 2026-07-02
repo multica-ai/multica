@@ -40,7 +40,11 @@ type AutopilotService struct {
 const DefaultAutopilotTriggerTimezone = "UTC"
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
-	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+	svc := &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+	if taskSvc != nil {
+		taskSvc.AutopilotSvc = svc
+	}
+	return svc
 }
 
 // DispatchAutopilot is the core execution entry point.
@@ -636,19 +640,26 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 }
 
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
-func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTaskQueue) {
+// It returns true when an autopilot-specific retry task was queued.
+func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTaskQueue) bool {
 	if !task.AutopilotRunID.Valid {
-		return
+		return false
 	}
 
 	run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
 	if err != nil {
-		return
+		return false
+	}
+	if run.Status == "completed" || run.Status == "failed" || run.Status == "skipped" {
+		return false
+	}
+	if run.TaskID.Valid && util.UUIDToString(run.TaskID) != util.UUIDToString(task.ID) {
+		return false
 	}
 
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
-		return
+		return false
 	}
 	wsID := util.UUIDToString(autopilot.WorkspaceID)
 
@@ -660,11 +671,14 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		})
 		if err != nil {
 			slog.Warn("failed to complete autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
-			return
+			return false
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
+		if child := s.maybeRetryRunOnlyTask(ctx, autopilot, run, task); child != nil {
+			return true
+		}
 		reason := "task " + task.Status
 		if task.Error.Valid {
 			reason = task.Error.String
@@ -675,11 +689,73 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		})
 		if err != nil {
 			slog.Warn("failed to fail autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
-			return
+			return false
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+	return false
+}
+
+func (s *AutopilotService) maybeRetryRunOnlyTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun, task db.AgentTaskQueue) *db.AgentTaskQueue {
+	if !shouldRetryAutopilotTask(task) {
+		return nil
+	}
+	if s.TaskSvc == nil {
+		slog.Warn("autopilot retry skipped: task service unavailable",
+			"run_id", util.UUIDToString(run.ID),
+			"task_id", util.UUIDToString(task.ID),
+		)
+		return nil
+	}
+
+	child, err := s.Queries.CreateRetryTask(ctx, task.ID)
+	if err != nil {
+		slog.Warn("autopilot retry failed",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"task_id", util.UUIDToString(task.ID),
+			"reason", taskFailureReason(task),
+			"error", err,
+		)
+		return nil
+	}
+	if _, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID:     run.ID,
+		TaskID: child.ID,
+	}); err != nil {
+		slog.Warn("autopilot retry: failed to link retry task",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"retry_task_id", util.UUIDToString(child.ID),
+			"error", err,
+		)
+	}
+
+	slog.Info("autopilot retry enqueued",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"parent_task_id", util.UUIDToString(task.ID),
+		"retry_task_id", util.UUIDToString(child.ID),
+		"reason", taskFailureReason(task),
+		"attempt", child.Attempt,
+		"max_attempts", child.MaxAttempts,
+	)
+	s.TaskSvc.NotifyTaskEnqueued(ctx, child)
+	return &child
+}
+
+func shouldRetryAutopilotTask(task db.AgentTaskQueue) bool {
+	if task.Status != "failed" {
+		return false
+	}
+	if !task.AutopilotRunID.Valid {
+		return false
+	}
+	if !retryableReasons[taskFailureReason(task)] {
+		return false
+	}
+	return task.Attempt < task.MaxAttempts
 }
 
 // SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
