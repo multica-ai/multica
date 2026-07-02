@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { capturePageview } from "@multica/core/analytics";
+import { capturePageview, normalizePageviewPath } from "@multica/core/analytics";
+import { setDiagnosticRoute } from "@multica/core/diagnostics/diagnostic-route";
 import { useAuthStore } from "@multica/core/auth";
 import {
   getActiveTab,
@@ -91,15 +92,24 @@ export function PageviewTracker() {
     const last = lastSurfaceRef.current;
     const next = { kind, key, path };
 
+    // Bucket the route to its template (drops resource ids: `/acme/issues/123`
+    // → `/acme/issues`) BEFORE it leaves the renderer, so neither the recovery
+    // breadcrumb (main) nor the longtask watchdog ever sees a raw resource id
+    // (MUL-3738, P0②). `capturePageview` below still receives the raw path and
+    // buckets it itself.
+    const routeTemplate = normalizePageviewPath(path) ?? path;
     const routeContext: RendererRouteContextInput = {
       surface: kind,
-      path,
+      path: routeTemplate,
     };
     if (kind === "tab") {
       routeContext.workspaceSlug = activeWorkspaceSlug ?? undefined;
       routeContext.tabId = activeTabId ?? undefined;
     }
     reportRendererRouteContext(routeContext);
+    // Feed the in-thread freeze watchdog the same template — on desktop
+    // `location.pathname` is the asar path, not the app route.
+    setDiagnosticRoute(routeTemplate);
 
     if (kind === "tab" && key !== null) {
       const knownPath = observed.get(key);

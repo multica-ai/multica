@@ -67,6 +67,10 @@ export function AuthInitializer({
           daemonServerUrl: cfg.daemon_server_url,
           daemonAppUrl: cfg.daemon_app_url,
         });
+        configStore.getState().setDiagnosticsConfig({
+          // Old servers omit this — treat absent as off (feature ships dark).
+          cpuProfileEnabled: cfg.diagnostics_cpu_profile_enabled === true,
+        });
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

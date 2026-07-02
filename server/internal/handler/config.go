@@ -44,6 +44,14 @@ type AppConfig struct {
 	PosthogKey           string `json:"posthog_key"`
 	PosthogHost          string `json:"posthog_host"`
 	AnalyticsEnvironment string `json:"analytics_environment"`
+
+	// DiagnosticsCpuProfileEnabled gates the desktop "capture a CPU sampling
+	// profile when the renderer hangs" diagnostic (MUL-3738). Defaults to false
+	// and is omitted from the JSON when off, so the feature ships dark and can
+	// be turned on (and off again, as a runtime kill switch) by flipping the
+	// DIAGNOSTICS_CPU_PROFILE_ENABLED env var without a client release. Only
+	// ever true when analytics is enabled.
+	DiagnosticsCpuProfileEnabled bool `json:"diagnostics_cpu_profile_enabled,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -71,6 +79,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		if config.PosthogHost == "" && config.PosthogKey != "" {
 			config.PosthogHost = "https://us.i.posthog.com"
 		}
+		// Tied to analytics being enabled: a CPU profile is telemetry, so it
+		// only ships when the rest of the analytics pipeline is on. Defaults
+		// off; flip DIAGNOSTICS_CPU_PROFILE_ENABLED=true to enable.
+		config.DiagnosticsCpuProfileEnabled = os.Getenv("DIAGNOSTICS_CPU_PROFILE_ENABLED") == "true"
 	}
 
 	writeJSON(w, http.StatusOK, config)

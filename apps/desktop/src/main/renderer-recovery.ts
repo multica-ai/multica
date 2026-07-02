@@ -1,3 +1,8 @@
+import type {
+  FreezeDiagnosticContext,
+} from "../shared/freeze-breadcrumb";
+import type { CpuProfilePayload } from "../shared/cpu-profile";
+
 export type RendererRecoveryWindow = {
   isDestroyed: () => boolean;
   on: (event: "unresponsive" | "responsive", handler: () => void) => unknown;
@@ -9,7 +14,7 @@ export type RendererRecoveryWindow = {
 
 type ReloadPromptPayload = {
   kind: "render-process-gone" | "preload-error" | "unresponsive";
-  context: Record<string, unknown>;
+  context: FreezeDiagnosticContext;
 };
 
 type ReloadPromptResult = "reload" | "dismiss";
@@ -17,7 +22,7 @@ type ReloadPromptResult = "reload" | "dismiss";
 type RendererRecoveryOptions = {
   isDev: boolean;
   showReloadPrompt: (payload: ReloadPromptPayload) => Promise<ReloadPromptResult>;
-  getDiagnosticContext?: () => Record<string, unknown>;
+  getDiagnosticContext?: () => FreezeDiagnosticContext;
   /**
    * Persist a freeze/crash breadcrumb to disk. The renderer can't report a
    * true hang or process death itself (blocked / gone), so the main process
@@ -33,6 +38,13 @@ type RendererRecoveryOptions = {
    * process never recovers.
    */
   clearBreadcrumb?: () => void;
+  /**
+   * Best-effort CPU sampling profile of the hung renderer, captured while the
+   * window is unresponsive (P0① / MUL-3738). Resolves to null when disabled,
+   * opted out, or capture failed. Omitted (or returning null) keeps the
+   * existing reload-prompt path exactly as-is — profiling never gates recovery.
+   */
+  captureCpuProfile?: () => Promise<CpuProfilePayload | null>;
   log?: (tag: string, ...args: unknown[]) => void;
   unresponsivePromptDelayMs?: number;
 };
@@ -45,6 +57,7 @@ export function installRendererRecoveryHandlers(
     getDiagnosticContext,
     persistBreadcrumb,
     clearBreadcrumb,
+    captureCpuProfile,
     log = defaultDevLog,
     unresponsivePromptDelayMs = 1500,
   }: RendererRecoveryOptions,
@@ -53,7 +66,13 @@ export function installRendererRecoveryHandlers(
   // True once a breadcrumb has been written for the current hang. A later
   // `responsive` clears it; only a hang that never returns survives to report.
   let unresponsiveBreadcrumbWritten = false;
-  const mergeDiagnosticContext = (context: Record<string, unknown>) => ({
+  // True from `unresponsive` until the matching `responsive`. Guards the async
+  // CPU-profile path: if the window recovers while we're still sampling, we
+  // must not resurrect a breadcrumb for a freeze that already resolved.
+  let hangActive = false;
+  const mergeDiagnosticContext = (
+    context: Partial<FreezeDiagnosticContext>,
+  ): FreezeDiagnosticContext => ({
     ...readDiagnosticContext(getDiagnosticContext),
     ...context,
   });
@@ -71,7 +90,7 @@ export function installRendererRecoveryHandlers(
     if (!isRecoverableRendererExit(details)) return;
     const payload: ReloadPromptPayload = {
       kind: "render-process-gone",
-      context: mergeDiagnosticContext({ details }),
+      context: mergeDiagnosticContext({ details: narrowExitDetails(details) }),
     };
     persistBreadcrumb?.(payload);
     maybePromptReload(payload);
@@ -89,21 +108,42 @@ export function installRendererRecoveryHandlers(
     });
   });
 
+  // Persist + prompt once the hang has lasted `unresponsivePromptDelayMs`,
+  // folding in a CPU profile when one was captured. Bails if the window
+  // recovered in the meantime (the async profile path can outlive recovery).
+  const finalizeUnresponsive = (cpuProfile: CpuProfilePayload | null) => {
+    if (!hangActive) return;
+    const payload: ReloadPromptPayload = {
+      kind: "unresponsive",
+      context: mergeDiagnosticContext(cpuProfile ? { cpuProfile } : {}),
+    };
+    persistBreadcrumb?.(payload);
+    unresponsiveBreadcrumbWritten = true;
+    maybePromptReload(payload);
+  };
+
   window.on("unresponsive", () => {
     if (isDev || unresponsivePromptTimer) return;
+    hangActive = true;
+    // Start sampling immediately so it overlaps the prompt delay and doesn't
+    // push the dialog back. Best-effort: resolves null when disabled / opted
+    // out / capture failed. Without a capturer, the path stays fully
+    // synchronous (unchanged behavior).
+    const profilePromise = captureCpuProfile
+      ? captureCpuProfile().catch(() => null)
+      : null;
     unresponsivePromptTimer = setTimeout(() => {
       unresponsivePromptTimer = null;
-      const payload: ReloadPromptPayload = {
-        kind: "unresponsive",
-        context: mergeDiagnosticContext({}),
-      };
-      persistBreadcrumb?.(payload);
-      unresponsiveBreadcrumbWritten = true;
-      maybePromptReload(payload);
+      if (!profilePromise) {
+        finalizeUnresponsive(null);
+        return;
+      }
+      void profilePromise.then(finalizeUnresponsive);
     }, unresponsivePromptDelayMs);
   });
 
   window.on("responsive", () => {
+    hangActive = false;
     if (unresponsivePromptTimer) {
       clearTimeout(unresponsivePromptTimer);
       unresponsivePromptTimer = null;
@@ -115,6 +155,21 @@ export function installRendererRecoveryHandlers(
       unresponsiveBreadcrumbWritten = false;
     }
   });
+}
+
+/**
+ * Narrow Electron's `render-process-gone` details to the whitelisted shape —
+ * reason + exit code only, never any other field the platform might attach.
+ */
+function narrowExitDetails(
+  details: unknown,
+): { reason?: string; exitCode?: number } | undefined {
+  if (!details || typeof details !== "object") return undefined;
+  const d = details as { reason?: unknown; exitCode?: unknown };
+  return {
+    ...(typeof d.reason === "string" ? { reason: d.reason } : {}),
+    ...(typeof d.exitCode === "number" ? { exitCode: d.exitCode } : {}),
+  };
 }
 
 export function createElectronReloadPrompt(
@@ -191,8 +246,8 @@ function defaultDevLog(tag: string, ...args: unknown[]) {
 }
 
 function readDiagnosticContext(
-  getDiagnosticContext: (() => Record<string, unknown>) | undefined,
-) {
+  getDiagnosticContext: (() => FreezeDiagnosticContext) | undefined,
+): FreezeDiagnosticContext {
   if (!getDiagnosticContext) return {};
   try {
     return getDiagnosticContext();

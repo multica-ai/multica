@@ -42,6 +42,9 @@ export interface AppConfigResponse {
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+  // Desktop on-hang CPU profiling feature flag (MUL-3738). Older servers omit
+  // it; treat absent as false (feature off).
+  diagnostics_cpu_profile_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +185,7 @@ export const AppConfigSchema = z.object({
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  diagnostics_cpu_profile_enabled: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {

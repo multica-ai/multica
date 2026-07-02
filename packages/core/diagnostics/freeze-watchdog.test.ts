@@ -26,9 +26,11 @@ function fireLongTask(duration: number) {
 async function load() {
   vi.resetModules();
   const mod = await import("./freeze-watchdog");
+  const route = await import("./diagnostic-route");
   const { captureEvent } = await import("../analytics");
   return {
     installFreezeWatchdog: mod.installFreezeWatchdog,
+    setDiagnosticRoute: route.setDiagnosticRoute,
     captureEvent: captureEvent as unknown as ReturnType<typeof vi.fn>,
   };
 }
@@ -60,6 +62,22 @@ describe("installFreezeWatchdog", () => {
       source: "longtask",
       duration_ms: 2300,
       path: "/acme/issues",
+    });
+  });
+
+  it("prefers the pushed app route template over location.pathname (desktop)", async () => {
+    // On desktop location.pathname is the asar file path, so the route comes
+    // from setDiagnosticRoute (the bucketed template the pageview tracker pushes).
+    const { installFreezeWatchdog, setDiagnosticRoute, captureEvent } = await load();
+    setDiagnosticRoute("/:slug/inbox");
+    installFreezeWatchdog();
+
+    fireLongTask(2300);
+
+    expect(captureEvent).toHaveBeenCalledWith("client_unresponsive", {
+      source: "longtask",
+      duration_ms: 2300,
+      path: "/:slug/inbox",
     });
   });
 

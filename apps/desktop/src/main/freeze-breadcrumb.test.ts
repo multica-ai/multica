@@ -24,7 +24,13 @@ afterEach(() => {
 
 const sample: FreezeBreadcrumb = {
   kind: "unresponsive",
-  context: { desktopRoute: { path: "/acme/issues" } },
+  context: {
+    desktopRoute: {
+      surface: "tab",
+      path: "/acme/issues",
+      reportedAt: "2026-06-15T00:00:00.000Z",
+    },
+  },
   ts: 1_700_000_000_000,
   version: "0.3.1",
 };

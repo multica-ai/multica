@@ -16,6 +16,13 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@multica/core/analytics", () => ({
   capturePageview: state.capturePageview,
+  // Identity is enough here — these tests assert pageview emission, not route
+  // bucketing (covered by analytics' own normalizePageviewPath tests).
+  normalizePageviewPath: (path?: string) => path,
+}));
+
+vi.mock("@multica/core/diagnostics/diagnostic-route", () => ({
+  setDiagnosticRoute: vi.fn(),
 }));
 
 // Auth store — single selector pattern (`s => s.user`).

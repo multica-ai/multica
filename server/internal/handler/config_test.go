@@ -237,6 +237,51 @@ func TestGetConfigOmitsCloudDaemonSetupForAppSubdomain(t *testing.T) {
 	}
 }
 
+// TestGetConfigGatesCpuProfileFlag verifies the MUL-3738 diagnostics flag:
+// off by default (and omitted from JSON), on only when the env var is "true",
+// and never set when analytics is disabled — a CPU profile is telemetry, so it
+// rides on the same kill switch.
+func TestGetConfigGatesCpuProfileFlag(t *testing.T) {
+	fetch := func() AppConfig {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var cfg AppConfig
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	// Default: feature ships dark.
+	if cfg := fetch(); cfg.DiagnosticsCpuProfileEnabled {
+		t.Fatalf("diagnostics_cpu_profile_enabled: want false by default, got true")
+	}
+
+	// Explicitly on.
+	t.Setenv("DIAGNOSTICS_CPU_PROFILE_ENABLED", "true")
+	if cfg := fetch(); !cfg.DiagnosticsCpuProfileEnabled {
+		t.Fatalf("diagnostics_cpu_profile_enabled: want true with env on, got false")
+	}
+
+	// Any non-"true" value stays off.
+	t.Setenv("DIAGNOSTICS_CPU_PROFILE_ENABLED", "1")
+	if cfg := fetch(); cfg.DiagnosticsCpuProfileEnabled {
+		t.Fatalf("diagnostics_cpu_profile_enabled: want false for non-\"true\" value, got true")
+	}
+
+	// Disabling analytics also disables the profile flag, even with it set on.
+	t.Setenv("DIAGNOSTICS_CPU_PROFILE_ENABLED", "true")
+	t.Setenv("ANALYTICS_DISABLED", "true")
+	if cfg := fetch(); cfg.DiagnosticsCpuProfileEnabled {
+		t.Fatalf("diagnostics_cpu_profile_enabled: want false when analytics disabled, got true")
+	}
+}
+
 func TestURLHostEqualsCanonicalizesCommonHostForms(t *testing.T) {
 	tests := []struct {
 		name string

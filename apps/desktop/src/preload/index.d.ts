@@ -3,6 +3,7 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type { DiagnosticsControl } from "../shared/diagnostics-control";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -52,6 +53,8 @@ interface DesktopAPI {
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) => void;
+  /** Push the CPU-profiling gate (backend flag + analytics opt-out) to main. */
+  setDiagnosticsControl: (control: DiagnosticsControl) => void;
   /** Open the OS folder picker and return the chosen absolute path.
    *  Used by the Project settings "Add local directory" flow. */
   pickDirectory: (

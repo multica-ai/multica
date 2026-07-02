@@ -14,6 +14,8 @@
 
 import posthog from "posthog-js";
 import { redactExceptionProperties } from "./redact-exception";
+
+export { redactText } from "./redact-exception";
 import { shouldDropException } from "./exception-dedupe";
 import { isBenignException } from "./benign-exceptions";
 
@@ -309,6 +311,23 @@ export function captureException(
     return;
   }
   posthog.captureException(error, withClientEventProperties(props));
+}
+
+/**
+ * Whether analytics capture is opted out for this client. Used by the desktop
+ * diagnostics gate (MUL-3738): the renderer pushes this to the main process so
+ * a hung-renderer CPU profile is never captured for an opted-out user. When
+ * analytics isn't running (no key / pre-init / SSR), this returns `true` —
+ * "no telemetry sink" is treated as opted out, so we never sample a profile we
+ * couldn't send anyway.
+ */
+export function hasOptedOutCapturing(): boolean {
+  if (!initialized) return true;
+  try {
+    return posthog.has_opted_out_capturing() === true;
+  } catch {
+    return true;
+  }
 }
 
 /**

@@ -18,6 +18,7 @@
 // platform branch here.
 
 import { captureEvent } from "../analytics";
+import { getDiagnosticRoute } from "./diagnostic-route";
 
 // 2s is well above the normal switch/render cost (measured 50–600ms) and just
 // under Electron's renderer-hang threshold, so an event here means "the user
@@ -59,7 +60,13 @@ export function installFreezeWatchdog(): void {
         captureEvent("client_unresponsive", {
           source: "longtask",
           duration_ms: Math.round(entry.duration),
-          path: typeof location !== "undefined" ? location.pathname : undefined,
+          // Desktop's in-memory router makes `location.pathname` the asar file
+          // path, so prefer the bucketed app route template the desktop pushes
+          // via setDiagnosticRoute (MUL-3738, P0②). Web sets nothing here, so
+          // it keeps using `location.pathname` (already the app route) — no
+          // change to web longtask attribution.
+          path: getDiagnosticRoute() ??
+            (typeof location !== "undefined" ? location.pathname : undefined),
         });
       }
     });

@@ -7,6 +7,10 @@ import {
   type RendererRouteContextInput,
 } from "../shared/renderer-route-context";
 import {
+  DIAGNOSTICS_CONTROL_CHANNEL,
+  type DiagnosticsControl,
+} from "../shared/diagnostics-control";
+import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
@@ -174,6 +178,10 @@ const desktopAPI = {
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
+  /** Push the CPU-profiling gate (backend flag + analytics opt-out) to main so
+   *  it can decide whether to sample a future hang (MUL-3738). */
+  setDiagnosticsControl: (control: DiagnosticsControl) =>
+    ipcRenderer.send(DIAGNOSTICS_CONTROL_CHANNEL, control),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),

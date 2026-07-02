@@ -19,10 +19,16 @@ import {
   type RendererRouteContext,
 } from "../shared/renderer-route-context";
 import {
+  DIAGNOSTICS_CONTROL_CHANNEL,
+  sanitizeDiagnosticsControl,
+  type DiagnosticsControl,
+} from "../shared/diagnostics-control";
+import {
   createElectronReloadPrompt,
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import { captureRendererCpuProfile } from "./renderer-cpu-profile";
 import {
   writeFreezeBreadcrumb,
   readAndClearFreezeBreadcrumb,
@@ -80,6 +86,10 @@ function freezeBreadcrumbPath(): string {
 
 let mainWindow: BrowserWindow | null = null;
 let latestRendererRouteContext: RendererRouteContext | null = null;
+// Last-known diagnostics gate pushed by the renderer (MUL-3738). null until the
+// renderer's first push — treated as "do not capture" so a hang before the
+// push, a disabled flag, or an opted-out user never triggers CPU profiling.
+let latestDiagnosticsControl: DiagnosticsControl | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -185,11 +195,13 @@ function createWindow(): void {
   });
   const window = mainWindow;
   latestRendererRouteContext = null;
+  latestDiagnosticsControl = null;
 
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
       latestRendererRouteContext = null;
+      latestDiagnosticsControl = null;
     }
   });
 
@@ -302,6 +314,25 @@ function createWindow(): void {
     clearBreadcrumb: is.dev
       ? undefined
       : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+    // Best-effort renderer CPU profile on hang (P0① / MUL-3738). Gated three
+    // ways: dev is excluded; the backend flag must be on; and the user must not
+    // be opted out. The control object is pushed by the renderer before any
+    // hang — null/unknown means "do not capture". Only the V8 sampling profiler
+    // is driven (Profiler.* allowlist enforced in renderer-cpu-profile.ts).
+    captureCpuProfile: is.dev
+      ? undefined
+      : async () => {
+          const control = latestDiagnosticsControl;
+          if (
+            !control ||
+            control.cpuProfileEnabled !== true ||
+            control.optOut !== false
+          ) {
+            return null;
+          }
+          if (!mainWindow || mainWindow.isDestroyed()) return null;
+          return captureRendererCpuProfile(mainWindow.webContents.debugger);
+        },
   });
 
   installContextMenu(window.webContents);
@@ -460,6 +491,16 @@ if (!gotTheLock) {
       const sanitized = sanitizeRendererRouteContext(context);
       if (!sanitized) return;
       latestRendererRouteContext = sanitized;
+    });
+
+    // Renderer pushes the CPU-profiling gate (backend flag + analytics opt-out)
+    // so the main process can decide at hang time, when it can no longer ask
+    // the frozen renderer anything (MUL-3738).
+    ipcMain.on(DIAGNOSTICS_CONTROL_CHANNEL, (event, control: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      const sanitized = sanitizeDiagnosticsControl(control);
+      if (!sanitized) return;
+      latestDiagnosticsControl = sanitized;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

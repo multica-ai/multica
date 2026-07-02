@@ -14,12 +14,14 @@ import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { PageviewTracker } from "./components/pageview-tracker";
+import { DiagnosticsControlBridge } from "./components/diagnostics-control-bridge";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
+import { buildFreezeEventProps } from "./freeze-flush";
 import { RESOURCES } from "@multica/views/locales";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
@@ -283,6 +285,7 @@ function AppContent() {
   return (
     <>
       <PageviewTracker />
+      <DiagnosticsControlBridge />
       {user ? <DesktopShell /> : <DesktopLoginPage />}
     </>
   );
@@ -341,16 +344,11 @@ export default function App() {
   useEffect(() => {
     const last = window.desktopAPI.getLastFreeze();
     if (!last) return;
-    const crashed = last.kind === "render-process-gone";
-    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
-      // Spread context FIRST so our explicit fields below always win — a
-      // future context key (e.g. its own `source`) must not silently override.
-      ...last.context,
-      source: crashed ? "render-process-gone" : "main-unresponsive",
-      recovered: false,
-      breadcrumb_ts: last.ts,
-      crashed_version: last.version,
-    });
+    // buildFreezeEventProps owns the event shape: it buckets the route to a
+    // template and redacts CPU-profile script URLs before anything leaves the
+    // client (MUL-3738). See freeze-flush.ts.
+    const { name, props } = buildFreezeEventProps(last);
+    captureEvent(name, props);
   }, []);
 
   // Stable identity reference so downstream effects (WS reconnect) don't

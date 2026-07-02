@@ -84,7 +84,7 @@ describe("installRendererRecoveryHandlers", () => {
     const fixture = makeWindow();
     const showReloadPrompt = vi.fn(async () => "dismiss" as const);
     const desktopRoute = {
-      surface: "tab",
+      surface: "tab" as const,
       path: "/acme/issues/MUL-3239",
       workspaceSlug: "acme",
       tabId: "tab-1",
@@ -267,5 +267,81 @@ describe("freeze/crash breadcrumb state machine", () => {
     fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "clean-exit" });
 
     expect(persistBreadcrumb).not.toHaveBeenCalled();
+  });
+});
+
+describe("on-hang CPU profile capture (MUL-3738)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.useRealTimers());
+
+  const cpuProfile = { nodes: [], startTime: 0, endTime: 1 };
+
+  it("folds a captured CPU profile into the unresponsive breadcrumb", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const persistBreadcrumb = vi.fn();
+    installRendererRecoveryHandlers(fixture.window, {
+      isDev: false,
+      showReloadPrompt: vi.fn(async () => "dismiss" as const),
+      persistBreadcrumb,
+      captureCpuProfile: vi.fn(async () => cpuProfile),
+      unresponsivePromptDelayMs: 100,
+    });
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(persistBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "unresponsive", context: { cpuProfile } }),
+    );
+  });
+
+  it("omits cpuProfile when capture returns null (disabled / opted out)", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const persistBreadcrumb = vi.fn();
+    installRendererRecoveryHandlers(fixture.window, {
+      isDev: false,
+      showReloadPrompt: vi.fn(async () => "dismiss" as const),
+      persistBreadcrumb,
+      captureCpuProfile: vi.fn(async () => null),
+      unresponsivePromptDelayMs: 100,
+    });
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(persistBreadcrumb).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "unresponsive", context: {} }),
+    );
+  });
+
+  it("does not persist if the window recovers while still sampling", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const persistBreadcrumb = vi.fn();
+    const clearBreadcrumb = vi.fn();
+    let resolveProfile!: (value: typeof cpuProfile | null) => void;
+    const pending = new Promise<typeof cpuProfile | null>((resolve) => {
+      resolveProfile = resolve;
+    });
+    installRendererRecoveryHandlers(fixture.window, {
+      isDev: false,
+      showReloadPrompt: vi.fn(async () => "dismiss" as const),
+      persistBreadcrumb,
+      clearBreadcrumb,
+      captureCpuProfile: vi.fn(() => pending),
+      unresponsivePromptDelayMs: 100,
+    });
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100); // timer fired; now awaiting the profile
+    fixture.windowHandlers.get("responsive")?.(); // recovered mid-sample
+    resolveProfile(cpuProfile);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(persistBreadcrumb).not.toHaveBeenCalled();
+    expect(clearBreadcrumb).not.toHaveBeenCalled();
   });
 });

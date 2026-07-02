@@ -15,6 +15,10 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // Desktop on-hang CPU profiling feature flag (MUL-3738). Defaults false;
+  // unknown / older servers behave as off. Read by the desktop diagnostics
+  // bridge, which pushes it to the Electron main process.
+  cpuProfileEnabled: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
@@ -25,6 +29,7 @@ interface ConfigState {
     daemonServerUrl?: string;
     daemonAppUrl?: string;
   }) => void;
+  setDiagnosticsConfig: (config: { cpuProfileEnabled?: boolean }) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -35,11 +40,13 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  cpuProfileEnabled: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
     set({ allowSignup, googleClientId, workspaceCreationDisabled }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
+  setDiagnosticsConfig: ({ cpuProfileEnabled = false }) => set({ cpuProfileEnabled }),
 }));
 
 export function useConfigStore(): ConfigState;
