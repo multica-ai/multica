@@ -47,15 +47,20 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
 //
-// Before any work is queued we run an admission check against the assignee
+// Before run_only work is queued we run an admission check against the assignee
 // agent's runtime: if it is not online, we record a `skipped` run with a
 // failure_reason and return without enqueueing. This is the "触发时准入" gate
 // from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
 // autopilots to pile thousands of doomed tasks onto agent_task_queue.
 //
+// create_issue mode is different: its primary contract is a durable audit
+// trail. If the assignee has a runtime but that runtime is merely offline,
+// dispatch still creates the issue and issue task so the work is visible and
+// can be claimed when the runtime returns.
+//
 // When assignee_type='squad' the gate runs against the squad leader (Path A
-// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), so an offline or
-// archived leader produces the same skip behaviour as an offline solo agent.
+// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), with the same
+// create_issue audit-trail exception for a merely offline leader runtime.
 func (s *AutopilotService) DispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -161,11 +166,11 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 //   - It is in-flight in a state whose downstream side effect is
 //     observable:
 //
-//     * issue_created with a valid issue_id — the issue exists and
-//       the issue-event listener owns task creation from here.
+//   - issue_created with a valid issue_id — the issue exists and
+//     the issue-event listener owns task creation from here.
 //
-//     * running with a valid task_id — the task is queued, the
-//       listener will close the run when the task terminates.
+//   - running with a valid task_id — the task is queued, the
+//     listener will close the run when the task terminates.
 //
 // Anything else — most importantly issue_created/running with NULL
 // issue_id/task_id, or the brief 'pending' state — is a partial run:
@@ -868,7 +873,15 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		return "", false
 	}
 	if !ready {
-		return formatAdmissionReason(ap, reason), true
+		if ap.ExecutionMode == "create_issue" && strings.HasPrefix(reason, "agent runtime is ") {
+			slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"runtime_id", util.UUIDToString(agent.RuntimeID),
+				"reason", reason,
+			)
+		} else {
+			return formatAdmissionReason(ap, reason), true
+		}
 	}
 	// Private-agent gate at the autopilot layer. Caller identity = the
 	// autopilot's creator: if the creator no longer has access to the

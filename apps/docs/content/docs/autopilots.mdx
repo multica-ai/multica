@@ -241,7 +241,9 @@ your provider's webhook-retry machinery doesn't keep hammering the URL:
 - `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
   — a run was dispatched.
 - `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
-  — the assignee's runtime is offline; recorded as a `skipped` run.
+  — for `run_only` autopilots, the assignee's runtime is offline and no task
+  was queued. `create_issue` autopilots still create the tracked issue so the
+  work stays visible and can be claimed when the runtime returns.
 - `{"status":"ignored","reason":"trigger_disabled"}` — the trigger is disabled.
 - `{"status":"ignored","reason":"autopilot_paused"}` — the autopilot is paused.
 - `{"status":"ignored","reason":"autopilot_archived"}` — the autopilot is archived.

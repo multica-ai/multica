@@ -399,6 +399,102 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 	}
 }
 
+// TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline locks in the
+// audit-trail contract for tracked autopilots: create_issue mode must still
+// create a visible issue when the assignee runtime is offline, leaving the
+// issue/task to be claimed when the runtime comes back instead of silently
+// recording an unrecoverable skipped run.
+func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, 'Offline create-issue runtime', 'local', 'ws1325_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'ws1325-offline-create-issue-agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create offline agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Offline create-issue autopilot",
+		Description:        pgtype.Text{String: "WS-1325 regression test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "Tracked issue", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "issue_created" {
+		t.Fatalf("expected run status 'issue_created', got %q", run.Status)
+	}
+	if !run.IssueID.Valid {
+		t.Fatal("create_issue dispatch did not link an issue")
+	}
+	if run.FailureReason.Valid {
+		t.Fatalf("expected no failure reason, got %q", run.FailureReason.String)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, run.IssueID)
+	})
+
+	tasks, err := queries.ListTasksByIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one queued issue task, got %d", len(tasks))
+	}
+	if tasks[0].AgentID != parseUUID(agentID) {
+		t.Fatalf("task agent mismatch: got %v want %v", tasks[0].AgentID, parseUUID(agentID))
+	}
+	if tasks[0].RuntimeID != parseUUID(runtimeID) {
+		t.Fatalf("task runtime mismatch: got %v want %v", tasks[0].RuntimeID, parseUUID(runtimeID))
+	}
+}
+
 // TestManualTriggerDoesNotErrorOnPostAdmissionSkip locks in PR #2888 review
 // fix #2: if the dispatcher decides to skip after the admission gate has
 // already passed (e.g. the leader's runtime went offline between admission

@@ -192,7 +192,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 Multica は正常な no-op の結果に対して `status` フィールド付きで `200 OK` を返すため、プロバイダーの webhook 再試行メカニズムが URL を叩き続けることはありません。
 
 - `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 実行がディスパッチされました。
-- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}` — 割り当て先のランタイムがオフラインで、`skipped` の実行として記録されます。
+- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}` — `run_only` オートパイロットでは、割り当て先のランタイムがオフラインのためタスクはキューに入りません。`create_issue` オートパイロットは追跡可能な issue を作成し、ランタイム復帰後に引き継げるようにします。
 - `{"status":"ignored","reason":"trigger_disabled"}` — トリガーが無効になっています。
 - `{"status":"ignored","reason":"autopilot_paused"}` — オートパイロットが一時停止しています。
 - `{"status":"ignored","reason":"autopilot_archived"}` — オートパイロットがアーカイブされています。
