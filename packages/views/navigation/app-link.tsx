@@ -5,11 +5,13 @@ import { useNavigation } from "./context";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
+  /** Desktop tab shells can opt into open-or-activate semantics for primary clicks. */
+  activateTabOnClick?: boolean;
 }
 
 export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
   function AppLink(
-    { href, children, onClick, onMouseEnter, onFocus, ...props },
+    { href, children, onClick, onMouseEnter, onFocus, activateTabOnClick, ...props },
     ref,
   ) {
     const { push, openInNewTab, prefetch } = useNavigation();
@@ -27,6 +29,10 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
       // (close popover, clear selection, blur the trigger) lands in the
       // same tick rather than getting deferred behind the transition.
       onClick?.(e);
+      if (activateTabOnClick && openInNewTab) {
+        openInNewTab(href, undefined, { activate: true });
+        return;
+      }
       push(href);
     };
 

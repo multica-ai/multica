@@ -202,7 +202,7 @@ function SortablePinItem({
       <SidebarMenuButton
         size="sm"
         isActive={isActive}
-        render={<AppLink href={href} draggable={false} />}
+        render={<AppLink href={href} draggable={false} activateTabOnClick />}
         onClick={(event) => {
           if (wasDragged.current) {
             wasDragged.current = false;
@@ -659,7 +659,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} activateTabOnClick />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
@@ -723,7 +723,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} activateTabOnClick />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
@@ -747,7 +747,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} activateTabOnClick />}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />

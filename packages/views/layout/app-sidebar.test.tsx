@@ -1,3 +1,4 @@
+import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
@@ -55,12 +56,25 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   }: {
     children: React.ReactNode;
     isActive?: boolean;
-    render?: React.ReactElement<{ href?: string }>;
-  }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
-      {children}
-    </button>
-  ),
+    render?: React.ReactElement<{
+      children?: React.ReactNode;
+      href?: string;
+      "data-active"?: string;
+      "data-href"?: string;
+    }>;
+  }) =>
+    React.isValidElement(render) ? (
+      React.cloneElement(
+        render,
+        {
+          "data-active": isActive ? "true" : undefined,
+          "data-href": render.props.href,
+        },
+        children,
+      )
+    ) : (
+      <button type="button" data-active={isActive ? "true" : undefined}>{children}</button>
+    ),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -87,7 +101,26 @@ vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
-  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
+  AppLink: ({
+    children,
+    href,
+    activateTabOnClick,
+    ...rest
+  }: {
+    children: React.ReactNode;
+    href: string;
+    activateTabOnClick?: boolean;
+    "data-active"?: string;
+    "data-href"?: string;
+  }) => (
+    <a
+      href={href}
+      data-activate-tab-on-click={activateTabOnClick ? "true" : undefined}
+      {...rest}
+    >
+      {children}
+    </a>
+  ),
   useNavigation: () => ({ pathname: navigation.current.pathname, push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
@@ -205,11 +238,26 @@ describe("PinRow", () => {
 
     const { container } = render(<AppSidebar />);
 
-    expect((await screen.findByText("Keep this pin")).closest("button")).toHaveAttribute(
+    expect((await screen.findByText("Keep this pin")).closest("a")).toHaveAttribute(
       "data-active",
       "true",
     );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    expect(container.querySelector('a[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+
+  it("opens pinned item clicks through desktop tab activation", async () => {
+    detail.current = {
+      isPending: false,
+      isError: false,
+      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
+      error: null,
+    };
+
+    render(<AppSidebar />);
+
+    const pinLink = await screen.findByRole("link", { name: /Keep this pin/ });
+    expect(pinLink).toHaveAttribute("href", "/acme/issues/issue-1");
+    expect(pinLink).toHaveAttribute("data-activate-tab-on-click", "true");
   });
 });
 
