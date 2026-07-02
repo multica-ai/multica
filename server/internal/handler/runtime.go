@@ -640,6 +640,13 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
+	// First drop their invocation targets — agent_invocation_target has no
+	// agent_id FK (MUL-3963), so cleanup is app-layer and MUST precede the
+	// agent hard-delete to avoid orphan rows.
+	if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
@@ -868,6 +875,10 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 
 	// 4. Hard-delete the archived agents so the agent.runtime_id FK
 	//    (ON DELETE RESTRICT) no longer keeps the runtime alive.
+	if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return

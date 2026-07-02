@@ -20,8 +20,12 @@ import { useT } from "../../../i18n";
  * Creator-only MCP tab on the agent detail page (MUL-3870). Lets the agent
  * owner pick which of *their own* active Composio connections this agent may
  * mount as MCP servers — the selection is written to
- * `agent.composio_toolkit_allowlist` and only takes effect at dispatch when
- * the run originator is the owner (the backend gate, MUL-3869).
+ * `agent.composio_toolkit_allowlist`. At dispatch the overlay is mounted for
+ * ANY run that passes the agent's invocation permission and always uses the
+ * agent OWNER's Composio connection (MUL-3963) — it is no longer gated on the
+ * run originator being the owner. That is why sharing the agent (public_to)
+ * surfaces the warning banner below: everyone who can invoke the agent can
+ * drive these apps through it.
  *
  * Visibility is enforced by the parent (the tab entry isn't rendered unless
  * `agent.owner_id === viewer.id`), so this component assumes the owner. It

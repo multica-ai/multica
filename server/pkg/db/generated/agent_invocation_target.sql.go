@@ -53,6 +53,23 @@ func (q *Queries) DeleteAgentInvocationTargets(ctx context.Context, agentID pgty
 	return err
 }
 
+const deleteAgentInvocationTargetsByArchivedRuntimeAgents = `-- name: DeleteAgentInvocationTargetsByArchivedRuntimeAgents :exec
+DELETE FROM agent_invocation_target
+WHERE agent_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+)
+`
+
+// Application-layer replacement for the (deliberately absent) agent_id ON
+// DELETE CASCADE: removes invocation targets for the archived agents a runtime
+// delete is about to hard-delete. MUST run in the same tx as, and BEFORE,
+// DeleteArchivedAgentsByRuntime so no orphan target rows survive the agent
+// rows they belonged to. Mirrors the agent hard-delete predicate exactly.
+func (q *Queries) DeleteAgentInvocationTargetsByArchivedRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentInvocationTargetsByArchivedRuntimeAgents, runtimeID)
+	return err
+}
+
 const deleteAgentInvocationTargetsByMember = `-- name: DeleteAgentInvocationTargetsByMember :exec
 DELETE FROM agent_invocation_target
 WHERE target_type = 'member' AND target_id = $1

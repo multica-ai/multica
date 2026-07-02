@@ -437,6 +437,10 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
 			return
 		}
+		if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return

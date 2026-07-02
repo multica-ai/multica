@@ -175,6 +175,14 @@ func parsePermissionInput(workspaceID pgtype.UUID, permissionMode *string, targe
 			}
 		}
 	}
+	// An empty public_to is a phantom: "shared with nobody" that the front-end
+	// would render as workspace-shared while the backend admits no one. Per the
+	// MUL-3963 ruling, a public_to with no resolvable targets is normalised to
+	// a single workspace target — this also makes `--permission-mode public_to`
+	// with no --public-to-* flags mean "public to workspace".
+	if len(res.targets) == 0 {
+		res.targets = append(res.targets, targetSpec{targetType: invocationTargetWorkspace, targetID: workspaceID})
+	}
 	return res, true, nil
 }
 

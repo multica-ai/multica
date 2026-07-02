@@ -36,3 +36,14 @@ WHERE agent_id = $1;
 -- departed user does not linger on any agent's allow-list.
 DELETE FROM agent_invocation_target
 WHERE target_type = 'member' AND target_id = $1;
+
+-- name: DeleteAgentInvocationTargetsByArchivedRuntimeAgents :exec
+-- Application-layer replacement for the (deliberately absent) agent_id ON
+-- DELETE CASCADE: removes invocation targets for the archived agents a runtime
+-- delete is about to hard-delete. MUST run in the same tx as, and BEFORE,
+-- DeleteArchivedAgentsByRuntime so no orphan target rows survive the agent
+-- rows they belonged to. Mirrors the agent hard-delete predicate exactly.
+DELETE FROM agent_invocation_target
+WHERE agent_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+);

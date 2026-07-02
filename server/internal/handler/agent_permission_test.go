@@ -374,3 +374,152 @@ func TestUpdateAgent_WorkspaceStacksWithMembersThenNarrowed(t *testing.T) {
 		t.Errorf("member C must have access after the replace")
 	}
 }
+
+// TestCreateAgent_EmptyPublicToNormalizesToWorkspace locks the MUL-3963 review
+// ruling: a public_to agent with no invocation targets is a phantom, so the
+// backend normalises it to a single workspace target (and therefore derived
+// visibility "workspace"). This also covers `--permission-mode public_to`
+// alone from the CLI, which sends permission_mode without targets.
+func TestCreateAgent_EmptyPublicToNormalizesToWorkspace(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest("POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":            "empty-public-to-agent",
+		"runtime_id":      handlerTestRuntimeID(t),
+		"permission_mode": "public_to",
+		// no invocation_targets on purpose
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID) })
+
+	if resp.PermissionMode != "public_to" {
+		t.Errorf("permission_mode = %q, want public_to", resp.PermissionMode)
+	}
+	if resp.Visibility != "workspace" {
+		t.Errorf("empty public_to should derive visibility=workspace, got %q", resp.Visibility)
+	}
+	foundWorkspace := false
+	for _, tgt := range resp.InvocationTargets {
+		if tgt.TargetType == "workspace" {
+			foundWorkspace = true
+		}
+	}
+	if !foundWorkspace {
+		t.Errorf("empty public_to must normalise to a workspace target, got %+v", resp.InvocationTargets)
+	}
+	// And any workspace member can then invoke it.
+	someMember := createPermissionTestMember(t, "perm-emptypublic-m@multica.test")
+	if !canMemberInvoke(t, resp.ID, someMember) {
+		t.Errorf("a workspace member should be able to invoke the normalised public_to-workspace agent")
+	}
+}
+
+// TestCanInvokeAgent_SystemWorkspaceExceptionAndMemberFailClosed locks the
+// product-approved exception (MUL-3963): a system / no-human-originator trigger
+// MAY hit a workspace target (webhook / workspace-wide automation), but MUST
+// fail closed against a member/team target when no originator resolves.
+func TestCanInvokeAgent_SystemWorkspaceExceptionAndMemberFailClosed(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// public_to workspace agent → system trigger (no originator) is admitted.
+	wsAgentID := createPublicToAgentWithTargets(t, "sys-exception-workspace-agent", []map[string]any{
+		{"target_type": "workspace"},
+	})
+	wsAgent, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(wsAgentID))
+	if err != nil {
+		t.Fatalf("load ws agent: %v", err)
+	}
+	if !testHandler.canInvokeAgent(ctx, wsAgent, "system", "", "", testWorkspaceID) {
+		t.Errorf("system trigger should hit a workspace target (product-approved exception)")
+	}
+	if !testHandler.canInvokeAgent(ctx, wsAgent, "agent", "", "", testWorkspaceID) {
+		t.Errorf("agent trigger with no originator should still hit a workspace target")
+	}
+
+	// public_to member-only agent → system / unattributed agent trigger must
+	// fail closed (member target requires a resolved human originator).
+	memberX := createPermissionTestMember(t, "perm-sys-failclosed@multica.test")
+	memAgentID := createPublicToAgentWithTargets(t, "sys-exception-member-agent", []map[string]any{
+		{"target_type": "member", "target_id": memberX},
+	})
+	memAgent, err := testHandler.Queries.GetAgent(ctx, util.MustParseUUID(memAgentID))
+	if err != nil {
+		t.Fatalf("load member agent: %v", err)
+	}
+	if testHandler.canInvokeAgent(ctx, memAgent, "system", "", "", testWorkspaceID) {
+		t.Errorf("system trigger must FAIL CLOSED against a member target with no originator")
+	}
+	if testHandler.canInvokeAgent(ctx, memAgent, "agent", "", "", testWorkspaceID) {
+		t.Errorf("agent trigger with no originator must FAIL CLOSED against a member target")
+	}
+	// But the actual member (as originator) is admitted.
+	if !testHandler.canInvokeAgent(ctx, memAgent, "agent", "", memberX, testWorkspaceID) {
+		t.Errorf("agent trigger whose originator IS the targeted member should be admitted")
+	}
+}
+
+// TestRevokeMember_ClearsInvocationTargets is the MUL-3963 review regression:
+// removing a member must prune their member-target invocation grants (there is
+// no DB FK), and a re-invited user must NOT silently reclaim the old grant.
+func TestRevokeMember_ClearsInvocationTargets(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	memberX := createPermissionTestMember(t, "perm-revoke-x@multica.test")
+	agentID := createPublicToAgentWithTargets(t, "revoke-member-target-agent", []map[string]any{
+		{"target_type": "member", "target_id": memberX},
+	})
+	if !canMemberInvoke(t, agentID, memberX) {
+		t.Fatalf("member X should be able to invoke before removal")
+	}
+
+	// Resolve the member row id for the revoke call.
+	var memberRowID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`,
+		testWorkspaceID, memberX,
+	).Scan(&memberRowID); err != nil {
+		t.Fatalf("load member row: %v", err)
+	}
+
+	if _, err := testHandler.revokeAndRemoveMember(ctx,
+		util.MustParseUUID(testWorkspaceID),
+		util.MustParseUUID(memberX),
+		util.MustParseUUID(memberRowID),
+		util.MustParseUUID(testUserID),
+	); err != nil {
+		t.Fatalf("revokeAndRemoveMember: %v", err)
+	}
+
+	// The member-target grant must be gone.
+	if n := invocationTargetCount(t, agentID); n != 0 {
+		t.Errorf("member target should be pruned on removal, still have %d", n)
+	}
+	if canMemberInvoke(t, agentID, memberX) {
+		t.Errorf("removed member must no longer invoke the agent")
+	}
+
+	// Re-invite the same user: they must NOT reclaim the old grant.
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, memberX,
+	); err != nil {
+		t.Fatalf("re-invite member: %v", err)
+	}
+	if canMemberInvoke(t, agentID, memberX) {
+		t.Errorf("re-invited member must NOT reclaim the stale invocation grant")
+	}
+}
