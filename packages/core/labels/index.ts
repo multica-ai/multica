@@ -4,5 +4,6 @@ export {
   useUpdateLabel,
   useDeleteLabel,
   useAttachLabel,
+  useAttachLabelToIssue,
   useDetachLabel,
 } from "./mutations";
