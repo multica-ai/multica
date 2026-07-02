@@ -37,7 +37,7 @@ func TestSupportedTypesLockstepWithNew(t *testing.T) {
 // from the runtime_profile.protocol_family CHECK fails loudly.
 func TestSupportedTypesMatchesMigrationWhitelist(t *testing.T) {
 	want := map[string]bool{
-		"claude": true, "codebuddy": true, "codex": true, "copilot": true,
+		"claude": true, "codebuddy": true, "codex": true, "copilot": true, "droid": true,
 		"opencode": true, "openclaw": true, "hermes": true,
 		"pi": true, "cursor": true, "kimi": true, "kiro": true, "antigravity": true,
 	}

@@ -115,6 +115,7 @@ var (
 		"antigravity":   "antigravity",
 		"claude":        "claude",
 		"codebuddy":     "codebuddy",
+		"droid":         "droid",
 		"codex":         "codex",
 		"copilot":       "copilot",
 		"cursor":        "cursor",

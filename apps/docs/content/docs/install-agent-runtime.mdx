@@ -66,6 +66,16 @@ The CLI counterpart to the Cursor editor. **Session resumption works** with curr
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
 
+### Droid (Factory)
+
+Factory's terminal agent (`droid exec`). Multica drives the headless stream-json path with `--auto high` so agents can edit files and run development workflows without an interactive shell. Session resumption works via `--session-id`.
+
+| | |
+|---|---|
+| Daemon looks for | `droid` |
+| Install | Follow the official guide at [docs.factory.ai/cli/getting-started/overview](https://docs.factory.ai/cli/getting-started/overview). Typical routes: `curl -fsSL https://app.factory.ai/cli | sh` or `npm install -g droid`. |
+| Authentication | Run `droid` once and follow the login flow, or set `FACTORY_API_KEY`. |
+
 ### GitHub Copilot
 
 Model routing goes through your GitHub account entitlement — the tool doesn't pick a model itself; GitHub decides which model you get.
