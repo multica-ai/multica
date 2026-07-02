@@ -137,7 +137,8 @@
   },
   "list": {
     "empty_status": "이슈 없음",
-    "add_issue_tooltip": "이슈 추가"
+    "add_issue_tooltip": "이슈 추가",
+    "cross_status": "교차 상태"
   },
   "swimlane": {
     "no_parent": "상위 이슈 없음",

@@ -40,8 +40,10 @@ import {
   getMoveUpdates,
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
+import { buildHierarchy, type ParentInfo } from "../utils/hierarchy";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
+const EMPTY_CHILDREN_MAP = new Map<string, Issue[]>();
 const EMPTY_IDS: string[] = [];
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
@@ -57,6 +59,7 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  childrenMap = EMPTY_CHILDREN_MAP,
   myIssuesScope,
   myIssuesFilter,
   projectId,
@@ -66,6 +69,7 @@ export function ListView({
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
+  childrenMap?: Map<string, Issue[]>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
   projectId?: string;
@@ -86,6 +90,71 @@ export function ListView({
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
     : null;
 
+  // Track which parent issues have their children expanded in the list view.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+
+  const toggleExpandParent = useCallback((parentId: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Track which parent status column is hovered via a cross-status chip.
+  const [hoveredParentStatus, setHoveredParentStatus] = useState<string | null>(null);
+
+  const handleHoverParent = useCallback((parentStatus: string | null) => {
+    setHoveredParentStatus(parentStatus);
+  }, []);
+
+  // Scroll to a parent issue — expand the target column first if collapsed,
+  // then scroll the row into view.
+  const handleScrollToParent = useCallback(
+    (parentId: string, parentStatus: string) => {
+      const statusKey = parentStatus as IssueStatus;
+      // Expand the target column if it's collapsed.
+      if (listCollapsedStatuses.includes(statusKey)) {
+        toggleListCollapsed(statusKey);
+      }
+      // Wait two frames for the accordion expansion to render, then scroll.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
+          if (el) {
+            el.scrollIntoView({ behavior: "auto", block: "center" });
+            // Flash highlight: outline ring + background using brand token.
+            el.style.transition = "background-color 800ms ease-out, outline-color 800ms ease-out";
+            el.style.backgroundColor = "color-mix(in srgb, var(--brand) 30%, transparent)";
+            el.style.outline = "4px solid var(--brand)";
+            // Hold the highlight for 150ms (safe margin for 30fps low-end devices),
+            // then clear to trigger the CSS transition fade-out.
+            setTimeout(() => {
+              el.style.backgroundColor = "";
+              // Only clear outlineColor so the outline fades via transition instead
+              // of hard-cutting (clearing outline-style would remove it instantly).
+              el.style.outlineColor = "color-mix(in srgb, var(--brand) 0%, transparent)";
+            }, 150);
+            // Clean up inline properties exactly when the transition ends.
+            const onEnd = () => {
+              el.removeEventListener("transitionend", onEnd);
+              el.style.removeProperty("transition");
+              el.style.removeProperty("background-color");
+              el.style.removeProperty("outline");
+              el.style.removeProperty("outline-color");
+            };
+            el.addEventListener("transitionend", onEnd);
+          }
+        });
+      });
+    },
+    [listCollapsedStatuses, toggleListCollapsed],
+  );
+
   const expandedStatuses = useMemo(
     () =>
       visibleStatuses.filter(
@@ -98,7 +167,10 @@ export function ListView({
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
 
-  const dragEnabled = !!onMoveIssue;
+  // Disable DnD when any parent is expanded: the flat column order
+  // diverges from the hierarchical render order, so drop-position math
+  // would be inaccurate. Re-collapse all parents to re-enable.
+  const dragEnabled = !!onMoveIssue && expandedParents.size === 0;
 
   const groups = useMemo(
     () => buildListGroups(visibleStatuses),
@@ -144,6 +216,22 @@ export function ListView({
   if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  // Build a global parent-info map: parentId → { identifier, status }
+  // for all issues that have child progress (i.e., are known parents).
+  const parentInfoMap = useMemo(() => {
+    const map = new Map<string, ParentInfo>();
+    for (const issue of issues) {
+      if (childProgressMap.has(issue.id)) {
+        map.set(issue.id, {
+          identifier: issue.identifier,
+          status: issue.status,
+          parentId: issue.id,
+        });
+      }
+    }
+    return map;
+  }, [issues, childProgressMap]);
 
   const collisionDetection = useMemo(
     () => makeKanbanCollision(groupIds),
@@ -315,6 +403,13 @@ export function ListView({
             issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
+            childrenMap={childrenMap}
+            expandedParents={expandedParents}
+            onToggleExpand={toggleExpandParent}
+            parentInfoMap={parentInfoMap}
+            highlightedStatus={hoveredParentStatus}
+            onHoverParent={handleHoverParent}
+            onScrollToParent={handleScrollToParent}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
             dragEnabled={dragEnabled}
@@ -364,6 +459,13 @@ function StatusAccordionItem({
   issueIds,
   issueMap,
   childProgressMap,
+  childrenMap,
+  expandedParents,
+  onToggleExpand,
+  parentInfoMap,
+  highlightedStatus,
+  onHoverParent,
+  onScrollToParent,
   myIssuesOpts,
   projectId,
   dragEnabled,
@@ -375,6 +477,13 @@ function StatusAccordionItem({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
+  childrenMap: Map<string, Issue[]>;
+  expandedParents: ReadonlySet<string>;
+  onToggleExpand: (parentId: string) => void;
+  parentInfoMap: Map<string, ParentInfo>;
+  highlightedStatus: string | null;
+  onHoverParent: (parentStatus: string | null) => void;
+  onScrollToParent: (parentId: string, parentStatus: string) => void;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
   dragEnabled: boolean;
@@ -400,6 +509,23 @@ function StatusAccordionItem({
     [issueIds, issueMap],
   );
 
+  // Build the set of issue IDs in this status group (for hierarchy resolution).
+  const statusIssueIds = useMemo(
+    () => new Set(issueIds),
+    [issueIds],
+  );
+
+  // Build hierarchical render items for this status group.
+  const renderItems = useMemo(
+    () => buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap),
+    [issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap],
+  );
+
+  const allRenderIds = useMemo(
+    () => renderItems.map((r) => r.issue.id),
+    [renderItems],
+  );
+
   const selectedCount = issueIds.filter((id) => selectedIds.has(id)).length;
   const allSelected = issues.length > 0 && selectedCount === issues.length;
   const someSelected = selectedCount > 0;
@@ -411,12 +537,18 @@ function StatusAccordionItem({
 
   const disableSorting = !!sortLabel;
 
+  const isHighlighted = highlightedStatus === status;
+
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
         className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
+            : ""
+        } ${
+          isHighlighted
+            ? "ring-1 ring-brand/20 bg-accent/10"
             : ""
         }`}
       >
@@ -464,15 +596,25 @@ function StatusAccordionItem({
         </div>
       </Accordion.Header>
       <Accordion.Panel>
-        {issues.length > 0 ? (
+        {renderItems.length > 0 ? (
           dragEnabled ? (
-            <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {issues.map((issue) => (
+            <SortableContext items={allRenderIds} strategy={verticalListSortingStrategy}>
+              {renderItems.map((item) => (
                 <DraggableListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  disableSorting={disableSorting}
+                  key={item.issue.id}
+                  issue={item.issue}
+                  childProgress={childProgressMap.get(item.issue.id)}
+                  disableSorting={disableSorting || item.indent > 0}
+                  indent={item.indent}
+                  isParent={item.isParent}
+                  isExpanded={expandedParents.has(item.issue.id)}
+                  childCount={item.childCount}
+                  crossStatusChildCount={item.crossStatusChildCount}
+                  crossStatusChildren={item.crossStatusChildren}
+                  onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
+                  parentInfo={item.parentInfo}
+                  onHoverParent={onHoverParent}
+                  onScrollToParent={onScrollToParent}
                 />
               ))}
               {hasMore && (
@@ -481,8 +623,22 @@ function StatusAccordionItem({
             </SortableContext>
           ) : (
             <>
-              {issues.map((issue) => (
-                <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+              {renderItems.map((item) => (
+                <ListRow
+                  key={item.issue.id}
+                  issue={item.issue}
+                  childProgress={childProgressMap.get(item.issue.id)}
+                  indent={item.indent}
+                  isParent={item.isParent}
+                  isExpanded={expandedParents.has(item.issue.id)}
+                  childCount={item.childCount}
+                  crossStatusChildCount={item.crossStatusChildCount}
+                  crossStatusChildren={item.crossStatusChildren}
+                  onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
+                  parentInfo={item.parentInfo}
+                  onHoverParent={onHoverParent}
+                  onScrollToParent={onScrollToParent}
+                />
               ))}
               {hasMore && (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

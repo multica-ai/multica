@@ -137,7 +137,8 @@
   },
   "list": {
     "empty_status": "无 issue",
-    "add_issue_tooltip": "新建 issue"
+    "add_issue_tooltip": "新建 issue",
+    "cross_status": "跨状态"
   },
   "swimlane": {
     "no_parent": "无父级",
