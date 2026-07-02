@@ -20,23 +20,69 @@
 -- Go layer assembles (for feishu: app_id, app_secret_encrypted, tenant_key,
 -- bot_open_id, bot_union_id, region). Re-installing the same agent on the
 -- same channel_type replaces the whole config and forces status back to
--- 'active'. The conflict key is (workspace_id, agent_id, channel_type) so an
--- agent may hold one installation per channel_type (feishu + slack + ...)
--- without one install clobbering another. The WS lease is intentionally NOT
--- reset here — the inbound hub owns lease lifecycle.
-INSERT INTO channel_installation (
-    workspace_id, agent_id, channel_type, config, installer_user_id
-) VALUES (
-    $1, $2, $3, $4, $5
+-- 'active'. The WS lease is intentionally NOT reset here — the inbound hub owns
+-- lease lifecycle.
+--
+-- The app_id routing key also has to be respected here. channel_installation
+-- has no FK (MUL-3515 §4), so rows can survive workspace deletion, hard agent
+-- deletion, agent archive, or explicit revocation. Those stale rows should not
+-- permanently reserve an IM bot app_id, but a live active owner must still
+-- refuse a bind from another agent/workspace. This query first locks any row
+-- already carrying app_id. If that row is the same agent or is stale, it is
+-- reclaimed in place; if it is owned by a live unarchived agent, no row is
+-- returned and callers surface an installation conflict. If no app_id row
+-- exists, the normal one-installation-per-agent upsert runs.
+WITH existing_app AS (
+    SELECT
+        ci.*,
+        (w.id IS NOT NULL AND a.id IS NOT NULL AND a.archived_at IS NULL AND ci.status = 'active') AS live_owner
+    FROM channel_installation ci
+    LEFT JOIN workspace w ON w.id = ci.workspace_id
+    LEFT JOIN agent a ON a.id = ci.agent_id
+    WHERE ci.channel_type = sqlc.arg('channel_type')
+      AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text
+    FOR UPDATE OF ci
+),
+reclaimed AS (
+    UPDATE channel_installation ci
+    SET workspace_id       = sqlc.arg('workspace_id'),
+        agent_id           = sqlc.arg('agent_id'),
+        channel_type       = sqlc.arg('channel_type'),
+        config             = sqlc.arg('config'),
+        installer_user_id  = sqlc.arg('installer_user_id'),
+        status             = 'active',
+        ws_lease_token     = NULL,
+        ws_lease_expires_at = NULL,
+        installed_at       = now(),
+        updated_at         = now()
+    FROM existing_app e
+    WHERE ci.id = e.id
+      AND (
+          (e.workspace_id = sqlc.arg('workspace_id') AND e.agent_id = sqlc.arg('agent_id'))
+          OR NOT e.live_owner
+      )
+    RETURNING ci.*
+),
+upserted AS (
+    INSERT INTO channel_installation (
+        workspace_id, agent_id, channel_type, config, installer_user_id
+    )
+    SELECT
+        sqlc.arg('workspace_id'), sqlc.arg('agent_id'), sqlc.arg('channel_type'),
+        sqlc.arg('config'), sqlc.arg('installer_user_id')
+    WHERE NOT EXISTS (SELECT 1 FROM existing_app)
+    ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
+        channel_type      = EXCLUDED.channel_type,
+        config            = EXCLUDED.config,
+        installer_user_id = EXCLUDED.installer_user_id,
+        status            = 'active',
+        installed_at      = now(),
+        updated_at        = now()
+    RETURNING *
 )
-ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
-    channel_type      = EXCLUDED.channel_type,
-    config            = EXCLUDED.config,
-    installer_user_id = EXCLUDED.installer_user_id,
-    status            = 'active',
-    installed_at      = now(),
-    updated_at        = now()
-RETURNING *;
+SELECT * FROM reclaimed
+UNION ALL
+SELECT * FROM upserted;
 
 -- name: UpsertChannelInstallationByAppID :one
 -- Team-keyed install / re-install for channels whose natural identity is the
@@ -117,13 +163,14 @@ ORDER BY created_at ASC;
 -- installation can be orphaned when its workspace is deleted or its agent is
 -- hard-deleted (e.g. runtime teardown). Without this guard the hub would keep
 -- opening a WebSocket for a bot whose workspace/agent is gone. The JOIN matches
--- the old ON DELETE CASCADE semantics: it filters on row existence, not agent
--- archival, so an archived-but-present agent's installation is still listed.
+-- the old ON DELETE CASCADE semantics plus archive semantics: archived agents
+-- are treated as dead owners for inbound-channel supervision.
 SELECT ci.* FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
 JOIN agent a ON a.id = ci.agent_id
 WHERE ci.status = 'active'
   AND ci.channel_type = sqlc.arg('channel_type')
+  AND a.archived_at IS NULL
 ORDER BY ci.created_at ASC;
 
 -- name: ListAllActiveChannelInstallations :many
@@ -135,11 +182,12 @@ ORDER BY ci.created_at ASC;
 -- never needs to know which platforms exist. Same orphan guard as the per-type
 -- query: the workspace + agent JOINs drop installations whose owning rows are
 -- gone (channel_installation has no FK, MUL-3515 §4), matching the old ON
--- DELETE CASCADE semantics (row existence, not agent archival).
+-- DELETE CASCADE semantics plus archive semantics.
 SELECT ci.* FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
 JOIN agent a ON a.id = ci.agent_id
 WHERE ci.status = 'active'
+  AND a.archived_at IS NULL
 ORDER BY ci.created_at ASC;
 
 -- name: SetChannelInstallationStatus :exec

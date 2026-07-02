@@ -51,17 +51,17 @@ type fakeInstallQueries struct {
 // WithTx returns the same fake — the fake tx is a no-op token.
 func (f *fakeInstallQueries) WithTx(_ pgx.Tx) installQueries { return f }
 
-func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
+func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.UpsertChannelInstallationRow, error) {
 	f.upsertCalled = true
 	f.upsertParams = arg
 	if f.appIDTaken {
-		return db.ChannelInstallation{}, &pgconn.PgError{Code: "23505"}
+		return db.UpsertChannelInstallationRow{}, &pgconn.PgError{Code: "23505"}
 	}
 	id := f.rowID
 	if f.existing != nil {
 		id = f.existing.ID // reconnect updates the agent's existing row in place
 	}
-	return db.ChannelInstallation{
+	return db.UpsertChannelInstallationRow{
 		ID:              id,
 		WorkspaceID:     arg.WorkspaceID,
 		AgentID:         arg.AgentID,

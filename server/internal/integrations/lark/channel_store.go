@@ -135,11 +135,29 @@ func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertIns
 		ChannelType:     channelTypeFeishu,
 		Config:          cfg,
 		InstallerUserID: arg.InstallerUserID,
+		AppID:           arg.AppID,
 	})
 	if err != nil {
 		return Installation{}, err
 	}
-	return installationFromRow(row)
+	return installationFromRow(upsertRowToChannelInstallation(row))
+}
+
+func upsertRowToChannelInstallation(row db.UpsertChannelInstallationRow) db.ChannelInstallation {
+	return db.ChannelInstallation{
+		ID:               row.ID,
+		WorkspaceID:      row.WorkspaceID,
+		AgentID:          row.AgentID,
+		ChannelType:      row.ChannelType,
+		Config:           row.Config,
+		Status:           row.Status,
+		WsLeaseToken:     row.WsLeaseToken,
+		WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+		InstallerUserID:  row.InstallerUserID,
+		InstalledAt:      row.InstalledAt,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
+	}
 }
 
 func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetInstallationStatusParams) error {
