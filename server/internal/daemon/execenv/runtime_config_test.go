@@ -282,6 +282,7 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
 		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
 		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		"ScheduleWakeup", // #4093: long-running external job check-in guidance
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("assignment-triggered brief missing identity-bound workflow text %q\n---\n%s", want, out)
