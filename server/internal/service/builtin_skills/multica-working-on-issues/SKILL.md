@@ -23,11 +23,13 @@ same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
 (`PREFIX-NUMBER`, e.g. `MUL-2759`). Each match writes an issue ↔ PR link row.
-This is the link that `multica issue pull-requests` reads back.
+This is the link that `multica issue pull-requests` reads back — but see the
+reference-only rule below: a key that appears **only** as a bare mention in the
+body is linked yet hidden from that list.
 
 ```text
-MUL-2759: add built-in issue working skill        # title prefix → links
-agent/matt/mul-2759-working-on-issues             # branch ref   → links
+MUL-2759: add built-in issue working skill        # title prefix → links, shown
+agent/matt/mul-2759-working-on-issues             # branch ref   → links, shown
 ```
 
 **Close intent** is stricter and is a separate scan over **title or body only —
@@ -47,6 +49,20 @@ Consequence: a bare title prefix or a branch reference links the PR but does not
 close the issue on merge. A closing keyword immediately adjacent to the issue key
 records close intent; on merge, that close intent can move the linked issue to
 `done`.
+
+**Reference-only links (hidden from the PR list).** A key that appears **only**
+as a bare mention in the body — no closing keyword, and not in the title or
+branch — still writes a link row, but the row is flagged `reference_only` and
+**excluded from `multica issue pull-requests`** (and the issue's right-side PR
+list in the UI). This keeps passing mentions like `Related MUL-2759` or
+`Follow up in MUL-2759` from surfacing an unrelated PR as if it were working on
+that issue. To make a PR show up for an issue, put the key in the title, the
+branch, or after a closing keyword in the body — not as a loose body reference.
+
+```text
+Closes MUL-2759 in the body                        # links and shown
+Related to MUL-2759 in the body (no title/branch)  # links but reference_only → hidden
+```
 
 ### Default for code-changing issue work
 
@@ -98,7 +114,9 @@ So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; CI status is `checks_conclusion`.
 
 If the command returns no linked PRs after a PR was opened, the link scanner did
-not observe a routable issue key in the PR title/body/branch.
+not observe a routable issue key in the PR title/body/branch — or the only match
+was a bare body mention, which links as `reference_only` and is hidden from this
+list (see the reference-only rule above).
 
 ## Metadata: high-signal keys only
 

@@ -72,6 +72,19 @@ Every `PREFIX-NUMBER` mention in **title, body, or branch** resolves to an issue
 in the workspace and writes a link row (`LinkIssueToPullRequest`, ~`github.go:762`).
 This is what `multica issue pull-requests` later reads back.
 
+**Reference-only flag (MUL-3739).** The link row carries a `reference_only`
+boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler
+computes a `qualifyingIdents` set = identifiers in **title or branch** (any
+`extractIdentifiers` match) ∪ **body closing keywords** (`closingIdents`). A
+linked identifier NOT in that set was matched only by a bare body mention, so its
+row is written with `reference_only = true`. Both `ListPullRequestsByIssue` and
+`GetIssuePullRequestCloseAggregate` filter `AND NOT reference_only`, so
+reference-only links are hidden from the CLI / UI PR list **and** excluded from
+the auto-advance gate (an open body-only mention must not silently block the
+issue from reaching `done` while invisible in the list). The row still exists for
+edit-time close-intent tracking. `reference_only` follows the same
+`preserve_close_intent` terminal gate as `close_intent`.
+
 Drifted from the prior skill's `github.go:727` citation, which pointed at the old
 call-site location for the link logic.
 
@@ -93,8 +106,10 @@ deliberately excluded (function doc, `github.go:1044-1050`): a branch like
 
 Drifted from the prior skill's `github.go:736` citation.
 
-Net: a bare title prefix (`MUL-2759: ...`) or a branch ref links only;
-`Closes MUL-2759` links **and** records close intent.
+Net: a bare title prefix (`MUL-2759: ...`) or a branch ref links only (shown in
+the PR list); `Closes MUL-2759` links **and** records close intent; a bare body
+mention with no title/branch ref and no closing keyword links as `reference_only`
+and is hidden from the PR list.
 
 ## Status side effects (enqueue contracts)
 
@@ -146,6 +161,7 @@ grep -n 'pull-requests <id>'                 cmd/multica/cmd_issue.go
 grep -n 'ListPullRequestsForIssue'           cmd/server/router.go internal/handler/github.go
 grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse struct\|func derivePRState\|func extractIdentifiers\|func extractClosingIdentifiers\|closingIdentifierRe' internal/handler/github.go
 grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' internal/handler/github.go
+grep -n 'qualifyingIdents\|reference_only\|ReferenceOnly' internal/handler/github.go pkg/db/queries/github.sql
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
 ```
