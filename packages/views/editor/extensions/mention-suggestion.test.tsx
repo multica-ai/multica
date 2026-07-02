@@ -125,7 +125,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!({ query: "a", editor: {} as never, signal: new AbortController().signal });
 
     // Must be synchronous: a plain array, not a Promise.
     expect(Array.isArray(result)).toBe(true);
@@ -351,7 +351,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!({ query: "a", editor: {} as never, signal: new AbortController().signal });
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
@@ -381,7 +381,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!({ query: "a", editor: {} as never, signal: new AbortController().signal });
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(true);
@@ -397,7 +397,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "bug", editor: {} as never });
+    const result = config.items!({ query: "bug", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
@@ -411,7 +411,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!({ query: "", editor: {} as never, signal: new AbortController().signal }) as MentionItem[];
 
     expect(result.some((item) => item.group === "current" || item.group === "recent")).toBe(false);
     expect(result.map((item) => `${item.type}:${item.id}`)).toContain("member:u1");
@@ -434,7 +434,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!({ query: "", editor: {} as never, signal: new AbortController().signal }) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" || item.type === "agent")).toBe(false);
@@ -455,7 +455,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+    const result = config.items!({ query: "a", editor: {} as never, signal: new AbortController().signal }) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`).slice(0, 2)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" && item.label === "Alice")).toBe(true);
@@ -494,7 +494,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!({ query: "", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(2);
@@ -511,7 +511,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!({ query: "", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
@@ -527,7 +527,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "liyunlong", editor: {} as never });
+    const result = config.items!({ query: "liyunlong", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -545,7 +545,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "lyl", editor: {} as never });
+    const result = config.items!({ query: "lyl", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -562,7 +562,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "whs", editor: {} as never });
+    const result = config.items!({ query: "whs", editor: {} as never, signal: new AbortController().signal });
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
