@@ -17,12 +17,11 @@
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-import { Header } from "@/components/ui/header";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { IssueRow } from "@/components/issue/issue-row";
@@ -124,9 +123,12 @@ export default function MyIssues() {
   const showEmptyState =
     !isLoading && !error && filtered.length === 0;
 
-  return (
-    <View className="flex-1 bg-background">
-      <Header title="My Issues" right={<HeaderActions />} />
+  // The scope toolbar + filter chips ride as the SectionList header so the
+  // list sits flush under the nav bar — that's what lets the iOS large title
+  // expand and collapse on scroll. Pinning the toolbar above the list would
+  // pin the title in its collapsed (inline) state.
+  const listHeader = (
+    <>
       <ScopeToolbar
         scopes={SCOPES}
         scope={scope}
@@ -146,30 +148,49 @@ export default function MyIssues() {
           }
         />
       ) : null}
+    </>
+  );
+
+  return (
+    <View className="flex-1 bg-background">
+      <Stack.Screen
+        options={{ headerRight: () => <HeaderActions /> }}
+      />
       {isLoading ? (
-        <IssuesLoading />
+        <>
+          {listHeader}
+          <IssuesLoading />
+        </>
       ) : error ? (
-        <View className="px-4 gap-3 pt-4">
-          <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
-          </Text>
-          <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
-          </Button>
-        </View>
+        <>
+          {listHeader}
+          <View className="px-4 gap-3 pt-4">
+            <Text className="text-sm text-destructive">
+              Failed to load issues:{" "}
+              {error instanceof Error ? error.message : "unknown error"}
+            </Text>
+            <Button variant="outline" onPress={() => refetch()}>
+              <Text>Retry</Text>
+            </Button>
+          </View>
+        </>
       ) : showEmptyState ? (
-        <EmptyState
-          message={
-            hasActiveFilters
-              ? "No issues match the current filters."
-              : emptyMessageForScope(scope)
-          }
-        />
+        <>
+          {listHeader}
+          <EmptyState
+            message={
+              hasActiveFilters
+                ? "No issues match the current filters."
+                : emptyMessageForScope(scope)
+            }
+          />
+        </>
       ) : (
         <SectionList
           sections={sections}
           keyExtractor={(item) => item.id}
+          contentInsetAdjustmentBehavior="automatic"
+          ListHeaderComponent={listHeader}
           stickySectionHeadersEnabled={false}
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-4" />
