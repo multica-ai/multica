@@ -1029,7 +1029,7 @@ const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id
+    squad_id, context
 )
 VALUES (
     $1, $2, $3, 'queued', $4, $5,
@@ -1037,7 +1037,12 @@ VALUES (
     COALESCE($7::boolean, FALSE),
     COALESCE($8::boolean, FALSE),
     $9,
-    $10
+    $10,
+    CASE
+        WHEN COALESCE($11::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $11::text)
+        ELSE NULL
+    END
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, escalation_for_task_id, fire_at
 `
@@ -1053,8 +1058,16 @@ type CreateAgentTaskParams struct {
 	IsLeaderTask      pgtype.Bool `json:"is_leader_task"`
 	HandoffNote       pgtype.Text `json:"handoff_note"`
 	SquadID           pgtype.UUID `json:"squad_id"`
+	HeadSha           pgtype.Text `json:"head_sha"`
 }
 
+// head_sha stamps the commit under review into the task's context JSONB so the
+// reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
+// against an OLD head apart from a fresh request against a NEW head (TEN-356).
+// Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
+// issues with no linked PR. Issue-linked tasks never hit quick-create context
+// parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
+// key rides harmlessly alongside.
 func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAgentTask,
 		arg.AgentID,
@@ -1067,6 +1080,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.IsLeaderTask,
 		arg.HandoffNote,
 		arg.SquadID,
+		arg.HeadSha,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -2110,17 +2124,30 @@ func (q *Queries) HasPendingTaskForIssue(ctx context.Context, issueID pgtype.UUI
 const hasPendingTaskForIssueAndAgent = `-- name: HasPendingTaskForIssueAndAgent :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
+  AND (
+    COALESCE($3::text, '') = ''
+    OR context->>'head_sha' = $3::text
+  )
 `
 
 type HasPendingTaskForIssueAndAgentParams struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	AgentID pgtype.UUID `json:"agent_id"`
+	HeadSha pgtype.Text `json:"head_sha"`
 }
 
 // Returns true if a specific agent already has a queued or dispatched task
 // for the given issue. Used by @mention trigger dedup.
+//
+// head_sha keys the dedup on the commit under review (TEN-356): when a caller
+// passes a non-empty head_sha, a pending task only dedups if it was stamped
+// with the SAME head_sha at enqueue time. If HEAD advanced since the pending
+// task's run began (its context head_sha differs, or predates the stamp and is
+// NULL), the dedup MISSES and a fresh review enqueues against the new HEAD.
+// When head_sha is empty/NULL (issue has no linked PR) the check falls back to
+// the pre-TEN-356 (issue_id, agent_id) key so non-PR issues keep coalescing.
 func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPendingTaskForIssueAndAgentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
+	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgent, arg.IssueID, arg.AgentID, arg.HeadSha)
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
@@ -2132,19 +2159,30 @@ WHERE issue_id = $1
   AND agent_id = $2
   AND status IN ('queued', 'dispatched')
   AND trigger_comment_id IS DISTINCT FROM $3::uuid
+  AND (
+    COALESCE($4::text, '') = ''
+    OR context->>'head_sha' = $4::text
+  )
 `
 
 type HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams struct {
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
 	ExcludeTriggerCommentID pgtype.UUID `json:"exclude_trigger_comment_id"`
+	HeadSha                 pgtype.Text `json:"head_sha"`
 }
 
 // Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
 // current comment being edited. Edit preview needs this because save cancels
 // that comment's old queued/dispatched tasks before re-computing triggers.
+// Carries the same head_sha dedup key as HasPendingTaskForIssueAndAgent (TEN-356).
 func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx context.Context, arg HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgentExcludingTriggerComment, arg.IssueID, arg.AgentID, arg.ExcludeTriggerCommentID)
+	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgentExcludingTriggerComment,
+		arg.IssueID,
+		arg.AgentID,
+		arg.ExcludeTriggerCommentID,
+		arg.HeadSha,
+	)
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err

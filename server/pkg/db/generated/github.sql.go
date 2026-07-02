@@ -275,6 +275,31 @@ func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID
 	return i, err
 }
 
+const getIssueReviewHeadSha = `-- name: GetIssueReviewHeadSha :one
+SELECT pr.head_sha
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+LIMIT 1
+`
+
+// Returns the head SHA of the commit currently "under review" for an issue:
+// the most-recently-updated linked PR that still has an open/draft state and a
+// non-empty head_sha. Used by the reviewer-loop dedup (TEN-356) so a pending
+// review task pinned to an old head does not satisfy a request after HEAD
+// advanced. Prefers in-flight PRs (open/draft) over merged/closed ones so a
+// stale merged sibling can't shadow the live review target; falls back to the
+// newest linked PR with a head_sha when none are open. Returns no rows (empty
+// string) when the issue has no linked PR — callers treat that as "no SHA key"
+// and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
+func (q *Queries) GetIssueReviewHeadSha(ctx context.Context, issueID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getIssueReviewHeadSha, issueID)
+	var head_sha string
+	err := row.Scan(&head_sha)
+	return head_sha, err
+}
+
 const getPendingGitHubInstallation = `-- name: GetPendingGitHubInstallation :one
 SELECT installation_id, account_login, account_type, account_avatar_url, received_at, updated_at FROM github_pending_installation WHERE installation_id = $1
 `

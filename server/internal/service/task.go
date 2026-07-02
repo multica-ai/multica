@@ -453,6 +453,46 @@ func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue 
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
+// ResolveIssueReviewSHA returns the head SHA of the commit currently under
+// review for an issue (the head_sha of its most-relevant linked PR), or the
+// empty string when the issue has no linked PR. Callers thread this into both
+// the reviewer-loop dedup check and the enqueue path so a pending review task
+// pinned to an old head does not satisfy a request after HEAD advanced
+// (TEN-356). Empty string is the safe default: it makes dedup fall back to the
+// pre-TEN-356 (issue_id, agent_id) key and leaves the task's context NULL.
+//
+// The lookup fails soft — any DB error (including "no linked PR") returns "" so
+// a transient github-table hiccup can never over-dedup a review out of
+// existence; the worst case is the pre-TEN-356 coalescing behavior.
+func (s *TaskService) ResolveIssueReviewSHA(ctx context.Context, issueID pgtype.UUID) string {
+	if !issueID.Valid {
+		return ""
+	}
+	sha, err := s.Queries.GetIssueReviewHeadSha(ctx, issueID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("resolve issue review sha failed",
+				"issue_id", util.UUIDToString(issueID), "error", err)
+		}
+		return ""
+	}
+	return sha
+}
+
+// headShaText wraps a resolved review SHA into the pgtype.Text the dedup/enqueue
+// queries expect. Empty SHA marshals to an invalid (NULL) Text so the queries
+// take their fall-back branch.
+func headShaText(sha string) pgtype.Text {
+	return pgtype.Text{String: sha, Valid: sha != ""}
+}
+
+// ResolveIssueReviewSHAParam is ResolveIssueReviewSHA wrapped as the pgtype.Text
+// the dedup queries take, so both service- and handler-package call sites can
+// key dedup on the reviewed head with a single call (TEN-356).
+func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pgtype.UUID) pgtype.Text {
+	return headShaText(s.ResolveIssueReviewSHA(ctx, issueID))
+}
+
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
@@ -482,6 +522,9 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		// Stamp the reviewed head so dedup can distinguish this run's target
+		// from a later request against a new HEAD (TEN-356).
+		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -566,6 +609,9 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		SquadID:           squadID,
+		// Stamp the reviewed head so dedup can distinguish this run's target
+		// from a later request against a new HEAD (TEN-356).
+		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)

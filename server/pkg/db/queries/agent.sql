@@ -134,10 +134,17 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
+-- head_sha stamps the commit under review into the task's context JSONB so the
+-- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
+-- against an OLD head apart from a fresh request against a NEW head (TEN-356).
+-- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
+-- issues with no linked PR. Issue-linked tasks never hit quick-create context
+-- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
+-- key rides harmlessly alongside.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id
+    squad_id, context
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -145,7 +152,12 @@ VALUES (
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
-    sqlc.narg(squad_id)
+    sqlc.narg(squad_id),
+    CASE
+        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
+        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
+        ELSE NULL
+    END
 )
 RETURNING *;
 
@@ -607,18 +619,35 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 -- name: HasPendingTaskForIssueAndAgent :one
 -- Returns true if a specific agent already has a queued or dispatched task
 -- for the given issue. Used by @mention trigger dedup.
+--
+-- head_sha keys the dedup on the commit under review (TEN-356): when a caller
+-- passes a non-empty head_sha, a pending task only dedups if it was stamped
+-- with the SAME head_sha at enqueue time. If HEAD advanced since the pending
+-- task's run began (its context head_sha differs, or predates the stamp and is
+-- NULL), the dedup MISSES and a fresh review enqueues against the new HEAD.
+-- When head_sha is empty/NULL (issue has no linked PR) the check falls back to
+-- the pre-TEN-356 (issue_id, agent_id) key so non-PR issues keep coalescing.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
+  AND (
+    COALESCE(sqlc.narg('head_sha')::text, '') = ''
+    OR context->>'head_sha' = sqlc.narg('head_sha')::text
+  );
 
 -- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
 -- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
 -- current comment being edited. Edit preview needs this because save cancels
 -- that comment's old queued/dispatched tasks before re-computing triggers.
+-- Carries the same head_sha dedup key as HasPendingTaskForIssueAndAgent (TEN-356).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = @issue_id
   AND agent_id = @agent_id
   AND status IN ('queued', 'dispatched')
-  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid;
+  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
+  AND (
+    COALESCE(sqlc.narg('head_sha')::text, '') = ''
+    OR context->>'head_sha' = sqlc.narg('head_sha')::text
+  );
 
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this

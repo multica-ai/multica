@@ -185,6 +185,23 @@ LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
+-- name: GetIssueReviewHeadSha :one
+-- Returns the head SHA of the commit currently "under review" for an issue:
+-- the most-recently-updated linked PR that still has an open/draft state and a
+-- non-empty head_sha. Used by the reviewer-loop dedup (TEN-356) so a pending
+-- review task pinned to an old head does not satisfy a request after HEAD
+-- advanced. Prefers in-flight PRs (open/draft) over merged/closed ones so a
+-- stale merged sibling can't shadow the live review target; falls back to the
+-- newest linked PR with a head_sha when none are open. Returns no rows (empty
+-- string) when the issue has no linked PR — callers treat that as "no SHA key"
+-- and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
+SELECT pr.head_sha
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+LIMIT 1;
+
 -- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1;
