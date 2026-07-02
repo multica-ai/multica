@@ -25,6 +25,9 @@ func TestShardedStreamRelayConfigDefaults(t *testing.T) {
 	if relay.config.ReadBlock != defaultShardedRelayReadBlock {
 		t.Fatalf("expected default read block %s, got %s", defaultShardedRelayReadBlock, relay.config.ReadBlock)
 	}
+	if relay.config.ReplayGrace != defaultShardedRelayReplayGrace {
+		t.Fatalf("expected default replay grace %s, got %s", defaultShardedRelayReplayGrace, relay.config.ReplayGrace)
+	}
 }
 
 func TestShardedStreamRelayShardForScopeIsStableAndBounded(t *testing.T) {
@@ -74,7 +77,20 @@ func TestShardedStreamRelayDeliverMessageUsesEnvelopeScope(t *testing.T) {
 	}
 }
 
-func TestShardedStreamRelayReadShardReplaysRetainedMessages(t *testing.T) {
+func TestShardedRelayReplayStartIDUsesBoundedTimeWindow(t *testing.T) {
+	now := time.UnixMilli(1710000005000)
+	got := shardedRelayReplayStartID(now, 5*time.Second)
+	if got != "1710000000000-0" {
+		t.Fatalf("replay start ID = %q, want bounded time-window cursor", got)
+	}
+
+	got = shardedRelayReplayStartID(time.UnixMilli(1000), 5*time.Second)
+	if got != "0-0" {
+		t.Fatalf("replay start ID before Unix epoch = %q, want 0-0 floor", got)
+	}
+}
+
+func TestShardedStreamRelayReadShardReplaysBoundedRetainedMessages(t *testing.T) {
 	hub := NewHub()
 	client := attachRealtimeTestClient(hub, ScopeTask, "task-replay")
 	rdb, mock := redismock.NewClientMock()
@@ -86,8 +102,8 @@ func TestShardedStreamRelayReadShardReplaysRetainedMessages(t *testing.T) {
 		ReadBlock: time.Millisecond,
 	})
 	stream := ShardedStreamKey(0)
-	lastID := shardedRelayReplayStartID
-	msgID := "1710000000000-0"
+	lastID := "1710000000000-0"
+	msgID := "1710000001000-0"
 	ev := envelope{
 		EventID:     "event-replayed",
 		Scope:       ScopeTask,
@@ -96,7 +112,7 @@ func TestShardedStreamRelayReadShardReplaysRetainedMessages(t *testing.T) {
 	}
 
 	mock.ExpectXRead(&redis.XReadArgs{
-		Streams: []string{stream, shardedRelayReplayStartID},
+		Streams: []string{stream, lastID},
 		Count:   relay.config.ReadCount,
 		Block:   relay.config.ReadBlock,
 	}).SetVal([]redis.XStream{{

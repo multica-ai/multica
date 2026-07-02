@@ -18,7 +18,7 @@ const (
 	defaultShardedRelayStreamMaxLen = 100000
 	defaultShardedRelayReadCount    = 128
 	defaultShardedRelayReadBlock    = 5 * time.Second
-	shardedRelayReplayStartID       = "0-0"
+	defaultShardedRelayReplayGrace  = 2 * time.Minute
 )
 
 // ShardedStreamKey returns the Redis Stream key used by a fixed relay shard.
@@ -32,6 +32,7 @@ type ShardedStreamRelayConfig struct {
 	StreamMaxLen int64
 	ReadCount    int64
 	ReadBlock    time.Duration
+	ReplayGrace  time.Duration
 }
 
 // DefaultShardedStreamRelayConfig returns production-safe defaults: a small
@@ -43,6 +44,7 @@ func DefaultShardedStreamRelayConfig() ShardedStreamRelayConfig {
 		StreamMaxLen: defaultShardedRelayStreamMaxLen,
 		ReadCount:    defaultShardedRelayReadCount,
 		ReadBlock:    defaultShardedRelayReadBlock,
+		ReplayGrace:  defaultShardedRelayReplayGrace,
 	}
 }
 
@@ -59,6 +61,9 @@ func (c ShardedStreamRelayConfig) withDefaults() ShardedStreamRelayConfig {
 	}
 	if c.ReadBlock <= 0 {
 		c.ReadBlock = def.ReadBlock
+	}
+	if c.ReplayGrace <= 0 {
+		c.ReplayGrace = def.ReplayGrace
 	}
 	return c
 }
@@ -196,10 +201,10 @@ func (r *ShardedStreamRelay) shardFor(scopeType, scopeID string) int {
 
 func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 	stream := ShardedStreamKey(shard)
-	// Start at the beginning of the retained stream on reader startup. Stream
-	// retention bounds replay volume, and event-id dedup keeps repeat delivery
-	// idempotent for clients that already saw a message through another path.
-	lastID := shardedRelayReplayStartID
+	// Start from a recent time window on reader startup. This catches events
+	// retained during a normal restart/deploy gap without re-reading the whole
+	// retained stream on every pod start.
+	lastID := shardedRelayReplayStartID(time.Now(), r.config.ReplayGrace)
 	for {
 		if ctx.Err() != nil || r.isStopping() {
 			return
@@ -208,6 +213,14 @@ func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 			return
 		}
 	}
+}
+
+func shardedRelayReplayStartID(now time.Time, grace time.Duration) string {
+	ms := now.Add(-grace).UnixMilli()
+	if ms < 0 {
+		ms = 0
+	}
+	return fmt.Sprintf("%d-0", ms)
 }
 
 func (r *ShardedStreamRelay) readShardOnce(ctx context.Context, shard int, stream string, lastID *string) bool {
