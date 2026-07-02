@@ -142,8 +142,10 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	)
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
-	// blocks the connector ACK path.
-	if res.Outcome == OutcomeIngested && set.Typing != nil {
+	// blocks the connector ACK path. Only shown when a run was actually
+	// scheduled: a bare fresh-session reset (/new) schedules none, so nothing
+	// would ever clear the indicator — don't show it in the first place.
+	if res.Outcome == OutcomeIngested && res.RunScheduled && set.Typing != nil {
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
@@ -259,7 +261,28 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 
-	// 6. Append message + in-tx dedup Mark — the durable transition point.
+	// 6. A bare fresh-session command (a lone "/new" with no user prompt of its
+	//    own) is a pure reset: EnsureSession has already rotated to a brand-new
+	//    session (step 5) and there is no user prompt to record. Appending would
+	//    write a blank user message at the head of the fresh transcript, and
+	//    scheduling a run would invoke the agent with no input, so do neither —
+	//    only mark the dedup row (out-of-band, via finalizeMark) so the reset is
+	//    not reprocessed. This is safe only because ForceFresh rotates the session
+	//    at INGEST: every channel that sets ForceFresh maps it to
+	//    EnsureSessionInput.Fresh (dingtalk + lark resolvers). BareFresh is set by
+	//    the adapter from the user's OWN typed text — never from the enriched Text,
+	//    which may carry injected group context (see channel.InboundMessage).
+	if msg.BareFresh {
+		return Result{
+			Outcome:        OutcomeIngested,
+			InstallationID: inst.ID,
+			ChatSessionID:  sessionID,
+			Sender:         msg.Source.SenderID,
+			FreshReset:     true,
+		}, finalizeMark, nil
+	}
+
+	// 7. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
@@ -289,7 +312,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		Sender:         msg.Source.SenderID,
 	}
 
-	// 7. /issue command, if present. chat_message is already durable; all
+	// 8. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
 	if appendRes.IssueCommand != nil {
 		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
@@ -306,12 +329,13 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
+	// 9. Debounce the run trigger. The synchronous outcome is OutcomeIngested
 	//    with no TaskID — the task row is created at flush. identity.UserID is
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+	res.RunScheduled = true
 	return res, postAppendFinalize, nil
 }
 

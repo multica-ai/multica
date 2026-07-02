@@ -57,6 +57,15 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// RunScheduled reports whether this ingest scheduled an agent run. A run
+	// eventually clears the typing indicator, so the Router only shows it when
+	// this is true; a bare fresh-session reset (/new) schedules none.
+	RunScheduled bool
+	// FreshReset reports that this ingest was a bare fresh-session reset (a lone
+	// "/new"): the session was rotated but no prompt was recorded and no run
+	// scheduled. The replier posts a short confirmation for it so the reset is
+	// not silent (which reads as "the bot is broken").
+	FreshReset bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router

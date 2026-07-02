@@ -54,10 +54,38 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+), deleted_channel_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE workspace_id = $1
+), deleted_channel_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE workspace_id = $1
+), deleted_channel_chat_session_bindings AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM channel_installation WHERE workspace_id = $1)
+), deleted_channel_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup
+    WHERE installation_id IN (SELECT id FROM channel_installation WHERE workspace_id = $1)
+), deleted_channel_inbound_audit AS (
+    DELETE FROM channel_inbound_audit
+    WHERE installation_id IN (SELECT id FROM channel_installation WHERE workspace_id = $1)
+), deleted_channel_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT id FROM chat_session WHERE workspace_id = $1)
+), deleted_channel_installations AS (
+    DELETE FROM channel_installation WHERE workspace_id = $1
 )
-DELETE FROM workspace WHERE id = $1
+DELETE FROM workspace WHERE workspace.id = $1
 `
 
+// The channel_* tables carry no FK to workspace/chat_session (MUL-3515 §4), so
+// none of them cascade-delete with the workspace. Delete them explicitly here.
+// channel_installation must go or a deleted workspace's rows keep squatting the
+// (channel_type, app_id) routing index — permanently blocking the same IM bot
+// from being reconnected in any other workspace; the child rows (bindings,
+// tokens, dedup, session bindings, outbound cards) must go with it or they
+// linger forever as unreachable orphans. Rows without a workspace_id are reached
+// via their installation_id / chat_session_id (both scoped to this workspace);
+// all data-modifying CTEs run against one snapshot, so those subqueries still see
+// the channel_installation / chat_session rows this statement also removes.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err

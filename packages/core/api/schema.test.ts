@@ -170,6 +170,33 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listDingTalkInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      // `installations` with the wrong type triggers the fallback; the panel
+      // must not white-screen on `configured`/`install_supported`.
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    it("tolerates an old-server row and a missing install_supported flag", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-1", app_id: "cli", robot_code: "cli", status: "active" },
+        ],
+        configured: true,
+        // install_supported omitted (predates the flag) -> undefined, not a crash
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations).toHaveLength(1);
+      expect(res.configured).toBe(true);
+      expect(res.install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({

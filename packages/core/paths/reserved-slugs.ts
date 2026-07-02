@@ -103,6 +103,17 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "tokens",
   "cli",
 
+  // Channel integration bind routes
+  // Each chat integration owns a global pre-workspace bind route (`/lark/bind`,
+  // `/slack/bind`, `/dingtalk/bind`) where a member links their platform
+  // account. Next.js static segments take priority, so a workspace slug matching
+  // one of these names would shadow the route's sibling paths and lets a
+  // brand-name workspace be squatted to phish the bind page. Reserve the
+  // prefixes.
+  "lark",
+  "slack",
+  "dingtalk",
+
   // Backend ops / observability
   // `/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host;
   // reserving them on the workspace slug space prevents naming confusion if/when

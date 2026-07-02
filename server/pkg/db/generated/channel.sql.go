@@ -384,6 +384,35 @@ func (q *Queries) DeleteChannelChatSessionBindingsByInstallation(ctx context.Con
 	return err
 }
 
+const deleteChannelInstallation = `-- name: DeleteChannelInstallation :exec
+WITH deleted_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE installation_id = $1
+), deleted_chat_session_bindings AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id = $1
+), deleted_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id = $1
+), deleted_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE installation_id = $1
+), deleted_inbound_audit AS (
+    DELETE FROM channel_inbound_audit WHERE installation_id = $1
+)
+DELETE FROM channel_installation WHERE channel_installation.id = $1
+`
+
+// Hard-delete one installation by id, plus the child rows keyed to it. The
+// channel_* tables carry no FK/cascade (MUL-3515 §4), so this fans the delete
+// out in the app layer — same reason DeleteChannelChatSessionBindingsByInstallation
+// exists for the Slack re-connect path. Used by the BYO reclaim path to free a
+// DEAD binding's routing key; without the fan-out the deleted installation's
+// user/session/dedup/token/audit rows would linger forever as unreachable
+// orphans (matching what DeleteWorkspace clears). channel_outbound_card_message
+// is keyed on chat_session_id (not installation_id) and its sessions outlive a
+// single reclaim, so it is left to the session/workspace delete paths.
+func (q *Queries) DeleteChannelInstallation(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelInstallation, id)
+	return err
+}
+
 const deleteChannelUserBindingsByWorkspaceMember = `-- name: DeleteChannelUserBindingsByWorkspaceMember :exec
 DELETE FROM channel_user_binding
 WHERE workspace_id = $1 AND multica_user_id = $2
@@ -618,6 +647,62 @@ func (q *Queries) GetChannelInstallationInWorkspace(ctx context.Context, arg Get
 		&i.InstalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getChannelInstallationReclaimByAppID = `-- name: GetChannelInstallationReclaimByAppID :one
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.status,
+       (a.id IS NOT NULL)::bool AS agent_exists
+FROM channel_installation ci
+LEFT JOIN agent a ON a.id = ci.agent_id
+WHERE ci.channel_type = $1
+  AND ci.config ->> 'app_id' = $2::text
+FOR UPDATE OF ci
+`
+
+type GetChannelInstallationReclaimByAppIDParams struct {
+	ChannelType string `json:"channel_type"`
+	AppID       string `json:"app_id"`
+}
+
+type GetChannelInstallationReclaimByAppIDRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Status      string      `json:"status"`
+	AgentExists bool        `json:"agent_exists"`
+}
+
+// Reclaim probe for a BYO install colliding on the (channel_type, app_id)
+// routing index: return the current owner of this app_id (workspace, agent,
+// status) plus whether its agent still exists, so the caller can free a DEAD
+// binding and let the robot move to a new agent, while still refusing to steal a
+// recoverable or LIVE one. "Dead" is decided in the app layer (ReclaimDeadAppID):
+// an orphan (agent gone — channel_installation has no FK, MUL-3515 §4, so a
+// deleted workspace cascade-drops the agent but leaves this row; the LEFT JOIN
+// yields agent_exists=false), or a revoked binding IN THE SAME WORKSPACE. A
+// revoked binding in ANOTHER workspace is refused (Revoke preserves it for the
+// owning workspace to re-install), and an archived agent counts as LIVE
+// (archiving is reversible), so agent_archived is not needed here.
+//
+// FOR UPDATE OF ci row-locks the owner installation for the caller's tx. The
+// reclaim probe and the subsequent hard DELETE are separate statements, so under
+// READ COMMITTED a concurrent re-activation (dead -> active, e.g. the owner
+// workspace re-installs the same robot) could otherwise slip in between them and
+// the status-free DELETE would destroy a now-LIVE binding. Holding the lock from
+// the probe through the DELETE/upsert serializes that re-activation after this
+// tx, so we only ever delete a row still observed as DEAD. OF ci keeps the lock
+// off the LEFT-JOINed agent row.
+func (q *Queries) GetChannelInstallationReclaimByAppID(ctx context.Context, arg GetChannelInstallationReclaimByAppIDParams) (GetChannelInstallationReclaimByAppIDRow, error) {
+	row := q.db.QueryRow(ctx, getChannelInstallationReclaimByAppID, arg.ChannelType, arg.AppID)
+	var i GetChannelInstallationReclaimByAppIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Status,
+		&i.AgentExists,
 	)
 	return i, err
 }
@@ -922,6 +1007,30 @@ WHERE expires_at < $1
 
 func (q *Queries) PurgeExpiredChannelBindingTokens(ctx context.Context, expiresAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, purgeExpiredChannelBindingTokens, expiresAt)
+	return err
+}
+
+const rebindChannelChatSession = `-- name: RebindChannelChatSession :exec
+UPDATE channel_chat_session_binding
+SET chat_session_id = $1,
+    last_message_id = NULL,
+    last_thread_id  = NULL
+WHERE installation_id = $2
+  AND channel_chat_id = $3
+`
+
+type RebindChannelChatSessionParams struct {
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelChatID  string      `json:"channel_chat_id"`
+}
+
+// Repoint an existing (installation, channel_chat_id) binding at a brand-new
+// chat_session, clearing the reply-target pointers. Used by the /new command so
+// a conversation can start a genuinely fresh chat_session (new transcript, no
+// resume) without abandoning its stable isolation key.
+func (q *Queries) RebindChannelChatSession(ctx context.Context, arg RebindChannelChatSessionParams) error {
+	_, err := q.db.Exec(ctx, rebindChannelChatSession, arg.ChatSessionID, arg.InstallationID, arg.ChannelChatID)
 	return err
 }
 

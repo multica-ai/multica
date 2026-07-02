@@ -97,6 +97,15 @@
       ]
     },
     {
+      "label": "Channel integration bind routes",
+      "description": "Each chat integration owns a global pre-workspace bind route (`/lark/bind`, `/slack/bind`, `/dingtalk/bind`) where a member links their platform account. Next.js static segments take priority, so a workspace slug matching one of these names would shadow the route's sibling paths and lets a brand-name workspace be squatted to phish the bind page. Reserve the prefixes.",
+      "slugs": [
+        "lark",
+        "slack",
+        "dingtalk"
+      ]
+    },
+    {
       "label": "Backend ops / observability",
       "description": "`/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host; reserving them on the workspace slug space prevents naming confusion if/when these paths are ever proxied through the web origin.",
       "slugs": [

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -40,6 +41,7 @@ type SessionQueries interface {
 	GetChannelChatSessionBinding(ctx context.Context, arg db.GetChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error)
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
+	RebindChannelChatSession(ctx context.Context, arg db.RebindChannelChatSessionParams) error
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
 	GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (db.ChatMessage, error)
@@ -63,6 +65,9 @@ func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateCh
 }
 func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
 	return a.q.CreateChannelChatSessionBinding(ctx, arg)
+}
+func (a dbSessionQueries) RebindChannelChatSession(ctx context.Context, arg db.RebindChannelChatSessionParams) error {
+	return a.q.RebindChannelChatSession(ctx, arg)
 }
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
@@ -149,6 +154,15 @@ type EnsureSessionInput struct {
 	BindingKey     string
 	BindingConfig  []byte
 	ChatType       channel.ChatType
+	// Title is the display title for a NEWLY created session (first contact or a
+	// Fresh rotation). Empty falls back to the platform SessionTitles; the adapter
+	// seeds it from the first message so a channel chat reads like a web chat.
+	Title string
+	// Fresh asks EnsureSession to rotate an EXISTING binding onto a brand-new
+	// chat_session (the /new command): a fresh transcript with no resume, still
+	// reachable under the same isolation key. No-op on first contact (there is no
+	// prior session to rotate away from).
+	Fresh bool
 }
 
 // EnsureSession returns the chat_session.id bound to (installation, BindingKey),
@@ -161,6 +175,9 @@ func (s *ChatSession) EnsureSession(ctx context.Context, in EnsureSessionInput) 
 
 	existing, err := s.q.GetChannelChatSessionBinding(ctx, lookup)
 	if err == nil {
+		if in.Fresh {
+			return s.rebindFreshSession(ctx, in)
+		}
 		return existing.ChatSessionID, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -193,7 +210,7 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
-		Title:       s.titles.forType(in.ChatType),
+		Title:       s.sessionTitle(in),
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)
@@ -216,6 +233,50 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 		return pgtype.UUID{}, fmt.Errorf("commit: %w", err)
 	}
 	return session.ID, nil
+}
+
+// rebindFreshSession creates a brand-new chat_session and repoints the existing
+// (installation, BindingKey) binding at it, in one transaction. The old session
+// is left intact (its transcript stays in Multica); only the binding moves, so
+// the next message resumes nothing and the chat reads as freshly started.
+func (s *ChatSession) rebindFreshSession(ctx context.Context, in EnsureSessionInput) (pgtype.UUID, error) {
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+
+	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		WorkspaceID: in.WorkspaceID,
+		AgentID:     in.AgentID,
+		CreatorID:   in.Sender,
+		Title:       s.sessionTitle(in),
+	})
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("create fresh chat session: %w", err)
+	}
+	if err := qtx.RebindChannelChatSession(ctx, db.RebindChannelChatSessionParams{
+		ChatSessionID:  session.ID,
+		InstallationID: in.InstallationID,
+		ChannelChatID:  in.BindingKey,
+	}); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("rebind chat session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("commit: %w", err)
+	}
+	return session.ID, nil
+}
+
+// sessionTitle is the title for a newly created session: the adapter-seeded
+// Title (the first message, mirroring a web chat) when present, else the
+// platform's default wording.
+func (s *ChatSession) sessionTitle(in EnsureSessionInput) string {
+	if t := strings.TrimSpace(in.Title); t != "" {
+		return t
+	}
+	return s.titles.forType(in.ChatType)
 }
 
 // AppendInput is the channel-agnostic input for AppendUserMessage. Body is the

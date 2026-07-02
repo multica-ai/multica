@@ -149,6 +149,15 @@ type InboundMessage struct {
 	// into this boolean; the core only reads the flag.
 	ForceFresh bool
 
+	// BareFresh is true when ForceFresh was triggered by a fresh-session
+	// command carrying NO user prompt of its own (a lone "/new"). The core
+	// uses it to short-circuit a pure reset — rotate the session, skip the
+	// empty append and agent run. The adapter MUST derive it from the user's
+	// OWN typed text (before any enrichment), because Text may carry adapter-
+	// injected context (e.g. Lark's group <recent_context>) that would make a
+	// naive "Text is empty" check wrong.
+	BareFresh bool
+
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /
 	// mention arrays, …) and read them back only inside the adapter. The
