@@ -1,10 +1,12 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -69,5 +71,62 @@ func TestShardedStreamRelayDeliverMessageUsesEnvelopeScope(t *testing.T) {
 	case duplicate := <-client.send:
 		t.Fatalf("expected duplicate event id to be deduped, got %s", duplicate)
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestShardedStreamRelayReadShardReplaysRetainedMessages(t *testing.T) {
+	hub := NewHub()
+	client := attachRealtimeTestClient(hub, ScopeTask, "task-replay")
+	rdb, mock := redismock.NewClientMock()
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	relay := NewShardedStreamRelay(hub, rdb, rdb, ShardedStreamRelayConfig{
+		Shards:    1,
+		ReadCount: 2,
+		ReadBlock: time.Millisecond,
+	})
+	stream := ShardedStreamKey(0)
+	lastID := shardedRelayReplayStartID
+	msgID := "1710000000000-0"
+	ev := envelope{
+		EventID:     "event-replayed",
+		Scope:       ScopeTask,
+		ScopeID:     "task-replay",
+		PayloadJSON: `{"type":"task:updated"}`,
+	}
+
+	mock.ExpectXRead(&redis.XReadArgs{
+		Streams: []string{stream, shardedRelayReplayStartID},
+		Count:   relay.config.ReadCount,
+		Block:   relay.config.ReadBlock,
+	}).SetVal([]redis.XStream{{
+		Stream: stream,
+		Messages: []redis.XMessage{{
+			ID:     msgID,
+			Values: envelopeRedisValues(ev),
+		}},
+	}})
+
+	if !relay.readShardOnce(context.Background(), 0, stream, &lastID) {
+		t.Fatal("expected shard reader to continue after a successful replay read")
+	}
+	if lastID != msgID {
+		t.Fatalf("expected last ID to advance to %q, got %q", msgID, lastID)
+	}
+
+	select {
+	case raw := <-client.send:
+		var frame map[string]any
+		if err := json.Unmarshal(raw, &frame); err != nil {
+			t.Fatalf("delivered frame is not JSON: %v", err)
+		}
+		if frame["event_id"] != ev.EventID {
+			t.Fatalf("expected replayed event_id %q, got %v", ev.EventID, frame["event_id"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected retained stream message to be delivered")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
