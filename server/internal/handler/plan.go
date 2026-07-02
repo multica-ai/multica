@@ -38,13 +38,14 @@ func planToResponse(p service.PlanOutput) PlanResponse {
 }
 
 func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "workspaceId")
+	wsID := ctxWorkspaceID(r.Context())
 	if wsID == "" {
-		writeError(w, http.StatusBadRequest, "missing workspaceId")
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	creatorID, ok := requireUserID(w, r)
+	member, ok := ctxMember(r.Context())
 	if !ok {
+		writeError(w, http.StatusUnauthorized, "not a workspace member")
 		return
 	}
 
@@ -57,7 +58,7 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := h.PlanSvc.Create(r.Context(), wsID, creatorID, body.Title, body.Content)
+	plan, err := h.PlanSvc.Create(r.Context(), wsID, util.UUIDToString(member.ID), body.Title, body.Content)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -84,12 +85,12 @@ func (h *Handler) GetPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
-	wsIDStr := chi.URLParam(r, "workspaceId")
-	wsID, ok := parseUUIDOrBadRequest(w, wsIDStr, "workspaceId")
-	if !ok {
+	wsID := ctxWorkspaceID(r.Context())
+	if wsID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	plans, err := h.PlanSvc.List(r.Context(), util.UUIDToString(wsID))
+	plans, err := h.PlanSvc.List(r.Context(), wsID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
