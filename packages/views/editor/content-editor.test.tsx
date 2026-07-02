@@ -42,6 +42,13 @@ vi.mock("./utils/preprocess", () => ({
   preprocessMarkdown: (value: string) => value,
 }));
 
+// Empty-list repair needs a live ProseMirror doc (covered by
+// repair-list-items.test.ts against the real editor). Here it is a no-op so the
+// mocked editor's sync path exercises the normal (non-repair) branch.
+vi.mock("./utils/repair-list-items", () => ({
+  repairEmptyListItems: vi.fn(() => false),
+}));
+
 vi.mock("./bubble-menu", () => ({
   EditorBubbleMenu: () => null,
 }));
