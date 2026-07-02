@@ -71,6 +71,15 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     expect(parsed.issues[0]?.metadata).toEqual({});
   });
 
+  it("accepts legacy null metadata values without dropping the whole issue list", () => {
+    const payload = {
+      issues: [{ ...baseIssue, metadata: { old_assignee_id: null } }],
+      total: 1,
+    };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.metadata).toEqual({ old_assignee_id: null });
+  });
+
   it("rejects metadata with non-primitive values (nested object)", () => {
     const payload = {
       issues: [{ ...baseIssue, metadata: { nested: { x: 1 } } }],

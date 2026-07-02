@@ -91,6 +91,7 @@ export function useLoadMoreByStatus(
     setIsLoading(true);
     try {
       const res = await api.listIssues({
+        workspace_id: wsId,
         status,
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
@@ -110,7 +111,7 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort, wsId]);
 
   return { loadMore, hasMore, isLoading, total };
 }
@@ -129,6 +130,7 @@ export function useLoadMoreByAssigneeGroup(
   sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
   const cache = qc.getQueryData<GroupedIssuesResponse>(queryKey);
@@ -142,6 +144,7 @@ export function useLoadMoreByAssigneeGroup(
     setIsLoading(true);
     try {
       const res = await api.listGroupedIssues({
+        workspace_id: wsId,
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
@@ -171,7 +174,7 @@ export function useLoadMoreByAssigneeGroup(
     } finally {
       setIsLoading(false);
     }
-  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey, sort]);
+  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey, sort, wsId]);
 
   return { loadMore, hasMore, isLoading, total };
 }

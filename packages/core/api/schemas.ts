@@ -235,10 +235,11 @@ export const IssueTriggerPreviewSchema = z.object({
   total_count: z.number().default(0),
 }).loose();
 
-// Metadata is primitive-only by API/DB contract. Stay lenient on shape:
-// unknown keys land as `unknown` to a caller, but the field itself defaults
-// to {} so consumers never need to nil-guard `issue.metadata`.
-const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
+// Metadata is primitive-only by API/DB contract, but older rows may contain
+// null legacy values. Stay lenient on shape: unknown keys land as `unknown` to
+// a caller, but the field itself defaults to {} so consumers never need to
+// nil-guard `issue.metadata`.
+const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({});
 
 export const IssueSchema = z.object({
   id: z.string(),
