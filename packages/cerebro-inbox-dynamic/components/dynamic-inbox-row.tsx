@@ -12,6 +12,7 @@ import {
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ChatSession } from "@multica/core/types";
@@ -49,6 +50,12 @@ export function DynamicInboxRow({
   onArchive,
   onUnarchive,
 }: DynamicInboxRowProps) {
+  // FIR-2505 — the classic inbox passes this flag so a channel's bold "unread"
+  // title is driven by has_unread_activity (any new message) while the red
+  // stripe/count stays mention-only. Without it the dynamic row falls back to
+  // the mention-only unread_count and a non-mention channel message renders as
+  // already-read. Forward it so both inboxes agree.
+  const channelUnreadSmart = useFeatureFlag("cerebro_channel_unread_smart");
   let row: React.ReactNode;
   if (entry.kind === "thread") {
     // FIR-1854 — a channel/DM thread row reuses the issue-notification row
@@ -97,6 +104,7 @@ export function DynamicInboxRow({
       <ChannelListItem
         channel={channel}
         mentioned={isSelected ? false : mentioned}
+        smartUnread={channelUnreadSmart} // FIR-2505 — match classic inbox so non-mention channel messages still render bold/unread.
         isSelected={isSelected}
         onClick={() => onSelect(entry)}
         onArchive={() => onArchive(entry)}

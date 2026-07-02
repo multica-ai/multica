@@ -27,21 +27,32 @@ vi.mock("@multica/views/inbox/components/inbox-list-item", () => ({
   ChannelListItem: ({
     channel,
     mentioned,
+    smartUnread,
     isSelected,
   }: {
     channel: Channel;
     mentioned?: boolean;
+    smartUnread?: boolean;
     isSelected: boolean;
   }) => (
     <div
       data-testid="channel-row"
       data-unread-count={String(channel.unread_count)}
       data-mentioned={String(!!mentioned)}
+      data-smart-unread={String(!!smartUnread)}
       data-selected={String(isSelected)}
     />
   ),
   useTimeAgo: () => () => "just now",
   AgentRunPip: () => null,
+}));
+
+// FIR-2505 — the row now reads the smart-unread flag to forward it to
+// ChannelListItem (as the classic inbox does). useFeatureFlag calls
+// useWorkspaceId and throws when rendered bare, so stub it; default true so the
+// forwarding assertion below has a value to check.
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
 }));
 
 vi.mock("@multica/views/common/actor-avatar", () => ({
@@ -122,6 +133,16 @@ describe("DynamicInboxRow read-on-select (TECH-3709)", () => {
       <DynamicInboxRow entry={channelEntry(3)} isSelected={false} onSelect={noop} onArchive={noop} />,
     );
     expect(screen.getByTestId("channel-row").dataset.unreadCount).toBe("3");
+  });
+
+  it("forwards the smart-unread flag to the channel row (FIR-2505)", () => {
+    // Without this, a non-mention channel message (unread_count 0 but
+    // has_unread_activity) would render as already-read in the dynamic inbox
+    // while the classic inbox shows it bold/unread.
+    render(
+      <DynamicInboxRow entry={channelEntry(0)} isSelected={false} onSelect={noop} onArchive={noop} />,
+    );
+    expect(screen.getByTestId("channel-row").dataset.smartUnread).toBe("true");
   });
 
   it("drops the brand unread stripe on the open chat row", () => {
