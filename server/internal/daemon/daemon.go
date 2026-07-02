@@ -3119,23 +3119,29 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	return release, false
 }
 
-// reportDispositionTimeout bounds the detached final-disposition report so a
-// shutdown can't hang on an unreachable server, while still giving the POST
-// enough time to land through a transient blip.
-const reportDispositionTimeout = 15 * time.Second
-
 // dispositionCtx returns a bounded context DETACHED from parentCtx's
 // cancellation (issue #4336). The final task-disposition POST (Complete/Fail)
 // must land even when the daemon is shutting down — at which point the
 // caller's run/loop ctx is already cancelled, so reporting on it aborts with
 // "context canceled", the report is lost, and the cloud strands the task at
 // `in_progress` (which, under a per-agent concurrency cap of 1, permanently
-// wedges that agent's dispatch queue). WithoutCancel preserves request-scoped
-// values (e.g. auth) while ignoring the parent's Done channel; the timeout
-// keeps a shutdown from blocking on an unreachable server. Callers must
-// `defer cancel()`.
+// wedges that agent's dispatch queue).
+//
+// The detach is UNCONDITIONAL rather than scoped to an already-cancelled
+// parent: a shutdown can land mid-report (after this check but during the
+// retry loop), and only an unconditional WithoutCancel closes that race. The
+// deadline is sized to the client's full terminal-callback retry budget
+// (TerminalCallbackBudget) so detaching never costs the healthy path its
+// MUL-2780 retries — the original fixed 15s cap silently truncated the 124s
+// window to ~3 of 5 backoffs (MUL-3443). Shutdown still can't hang because the
+// shutdown coordinator independently caps its wait on in-flight tasks at 30s.
+// WithoutCancel preserves request-scoped values (e.g. auth) while ignoring the
+// parent's Done channel. Callers must `defer cancel()`.
+//
+// The deadline is read LIVE from TerminalCallbackBudget() (not cached) so it
+// tracks defaultTerminalRetrySchedule exactly — the two provably cannot drift.
 func dispositionCtx(parentCtx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(parentCtx), reportDispositionTimeout)
+	return context.WithTimeout(context.WithoutCancel(parentCtx), TerminalCallbackBudget())
 }
 
 // reportTaskResult writes the final task disposition back to the server.

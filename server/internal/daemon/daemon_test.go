@@ -2064,6 +2064,105 @@ func TestReportTaskResult_FailReportSurvivesCancelledParentCtx(t *testing.T) {
 	}
 }
 
+// TestTerminalCallbackBudget_CoversFullSchedule pins the derivation invariant
+// behind MUL-3443: the detached disposition deadline must be at least as long
+// as the terminal retry schedule it is supposed to protect. A regression that
+// shrinks the budget below the schedule sum (the original fixed 15s cap did
+// exactly this — 15s < 124s) would truncate the MUL-2780 recovery window and
+// is caught here without waiting on wall-clock.
+func TestTerminalCallbackBudget_CoversFullSchedule(t *testing.T) {
+	var sleeps time.Duration
+	for _, d := range defaultTerminalRetrySchedule {
+		sleeps += d
+	}
+	budget := TerminalCallbackBudget()
+	if budget < sleeps {
+		t.Fatalf("disposition budget %s is shorter than the retry sleep sum %s — the deadline would truncate the retry schedule (MUL-3443 regression)", budget, sleeps)
+	}
+	// The budget must also outrun the deadline that dispositionCtx actually
+	// installs, so the two are wired to the same source.
+	ctx, cancel := dispositionCtx(context.Background())
+	defer cancel()
+	dl, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("dispositionCtx must set a deadline")
+	}
+	if remaining := time.Until(dl); remaining < sleeps {
+		t.Fatalf("dispositionCtx deadline leaves only %s, less than the %s retry schedule needs", remaining, sleeps)
+	}
+}
+
+// TestReportTaskResult_DispositionSpansFullScheduleUnderSustained502 is the
+// WALL-CLOCK regression for MUL-3443. Unlike the other disposition tests it
+// does NOT swap in noSleepRetry — it runs the real retrySleep against a real
+// (scaled-down) retry schedule so the interaction between the dispositionCtx
+// deadline and the backoff sleeps is actually exercised. That is precisely the
+// interaction the fixed 15s cap broke and that the no-sleep tests are blind to:
+// with zeroed sleeps a too-short deadline never bites, so the truncation is
+// invisible.
+//
+// Under sustained 502s the disposition POST must run its FULL schedule
+// (len(schedule)+1 attempts) and the call must span at least the sum of the
+// backoff sleeps — proving the detached deadline did not cut the retry loop
+// short.
+func TestReportTaskResult_DispositionSpansFullScheduleUnderSustained502(t *testing.T) {
+	t.Parallel()
+
+	// Real, scaled-down schedule so this stays a sub-second wall-clock test
+	// while still using real time.Sleep via the default retrySleep.
+	prevSchedule := defaultTerminalRetrySchedule
+	defaultTerminalRetrySchedule = []time.Duration{
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+		60 * time.Millisecond,
+	}
+	t.Cleanup(func() { defaultTerminalRetrySchedule = prevSchedule })
+
+	var scheduleSum time.Duration
+	for _, d := range defaultTerminalRetrySchedule {
+		scheduleSum += d
+	}
+	wantAttempts := int32(len(defaultTerminalRetrySchedule) + 1)
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway) // sustained transient error
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	start := time.Now()
+	d.reportTaskResult(context.Background(), "task-502-storm", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+	elapsed := time.Since(start)
+
+	if got := completeCalls.Load(); got != wantAttempts {
+		t.Fatalf("expected %d /complete attempts across the full schedule, got %d — the disposition deadline truncated the retry loop (MUL-3443)", wantAttempts, got)
+	}
+	// The full schedule's sleeps must actually have elapsed; a deadline that
+	// cut the loop short would return well before scheduleSum.
+	if elapsed < scheduleSum {
+		t.Fatalf("disposition returned after %s, less than the %s schedule sum — retries were truncated", elapsed, scheduleSum)
+	}
+	// A sustained transient failure must NOT be downgraded to /fail (that would
+	// surface a real success as red — the MUL-2780 rule this budget protects).
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("sustained 502 on /complete must not fall back to /fail, got %d", got)
+	}
+}
+
 // Regression test for the MUL-2780 incident: a short 502 burst on the
 // /complete callback used to (a) drop the task at the first failure and
 // (b) wrongly fall back to /fail, surfacing a successful run as red.

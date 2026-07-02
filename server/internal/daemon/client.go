@@ -577,6 +577,31 @@ var skillBundleResolveRetrySchedule = []time.Duration{
 	2 * time.Second,
 }
 
+// terminalCallbackAttemptBudget is the per-attempt wall-clock headroom added on
+// top of the retry sleeps when sizing a detached disposition deadline. Each of
+// the N+1 attempts can spend up to client.Timeout (30s) inside http.Client.Do
+// before failing; budgeting one client-timeout per attempt guarantees the
+// deadline can never truncate the retry schedule even when every attempt runs
+// to its own timeout.
+const terminalCallbackAttemptBudget = 30 * time.Second
+
+// TerminalCallbackBudget returns the minimum wall-clock a Complete/Fail
+// callback needs to run its full retry schedule to completion: the sum of the
+// inter-attempt sleeps plus one per-attempt HTTP budget for each of the N+1
+// attempts, plus a small fixed cushion. It is DERIVED from
+// defaultTerminalRetrySchedule so a caller sizing a detached disposition
+// timeout (daemon.dispositionCtx, issue #4336 / MUL-3443) can never drift out
+// of sync with the MUL-2780 recovery window: shorten the schedule and this
+// shrinks with it; lengthen it and this grows.
+func TerminalCallbackBudget() time.Duration {
+	var sleeps time.Duration
+	for _, d := range defaultTerminalRetrySchedule {
+		sleeps += d
+	}
+	attempts := len(defaultTerminalRetrySchedule) + 1
+	return sleeps + time.Duration(attempts)*terminalCallbackAttemptBudget + 5*time.Second
+}
+
 // retrySleep is the sleep used between retry attempts. Pulled into a package
 // variable so tests can swap in an instant sleep without rewriting the
 // caller's schedule.
