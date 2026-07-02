@@ -1082,6 +1082,23 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	}
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
+
+	// Squad concurrency check: if the claimed task belongs to a squad-assigned
+	// issue and the squad has a max_concurrent_tasks cap, verify the squad has
+	// capacity before proceeding. If the squad is at capacity, release the task
+	// back to queued so another agent in the squad can claim it later.
+	if claimed.IssueID.Valid {
+		if released, releaseReason := s.maybeReleaseSquadTask(ctx, *claimed); released {
+			slog.Info("task claim: squad at capacity, task released back to queued",
+				"task_id", util.UUIDToString(claimed.ID),
+				"agent_id", util.UUIDToString(agentID),
+				"reason", releaseReason,
+			)
+			outcome = "squad_at_capacity"
+			return nil, nil
+		}
+	}
+
 	s.captureTaskDispatched(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
@@ -1099,6 +1116,49 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	outcome = "claimed"
 	return claimed, nil
+}
+
+// maybeReleaseSquadTask checks whether the squad this task belongs to is over
+// capacity. If the squad has max_concurrent_tasks > 0 and the current running
+// count (which includes the just-claimed task) strictly exceeds the cap, the
+// task is released back to queued and the function returns (true, reason).
+// Otherwise returns (false, "").
+func (s *TaskService) maybeReleaseSquadTask(ctx context.Context, task db.AgentTaskQueue) (bool, string) {
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		// Issue not found or load error — let the claim proceed.
+		return false, ""
+	}
+	if issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		// Not a squad-assigned issue — no squad limit applies.
+		return false, ""
+	}
+	squad, err := s.Queries.GetSquad(ctx, issue.AssigneeID)
+	if err != nil {
+		// Squad not found — let the claim proceed.
+		return false, ""
+	}
+	if squad.MaxConcurrentTasks <= 0 {
+		// 0 means no limit (matching agent.max_concurrent_tasks semantics).
+		return false, ""
+	}
+	running, err := s.Queries.CountRunningSquadTasks(ctx, issue.AssigneeID)
+	if err != nil {
+		return false, ""
+	}
+	if running > int64(squad.MaxConcurrentTasks) {
+		// Squad at capacity: release the task back to queued.
+		n, relErr := s.Queries.ReleaseTaskToQueued(ctx, task.ID)
+		if relErr != nil {
+			return false, ""
+		}
+		if n == 0 {
+			// Another goroutine already touched this task — don't block.
+			return false, ""
+		}
+		return true, "squad_max_concurrent"
+	}
+	return false, ""
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while

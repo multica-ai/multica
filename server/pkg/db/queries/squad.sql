@@ -149,3 +149,13 @@ LEFT JOIN issue i
        ON i.id = atq.issue_id
 WHERE sm.squad_id = $1
 ORDER BY sm.created_at ASC, atq.dispatched_at DESC NULLS LAST;
+
+-- name: CountRunningSquadTasks :one
+-- Count tasks currently consuming a squad's concurrency capacity.
+-- Only counts tasks for issues assigned to this squad; tasks for
+-- non-squad issues or chat tasks are excluded.
+SELECT count(*) FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.assignee_type = 'squad'
+  AND i.assignee_id = $1
+  AND atq.status IN ('dispatched', 'running', 'waiting_local_directory');

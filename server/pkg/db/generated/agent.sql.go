@@ -3086,6 +3086,21 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 	return i, err
 }
 
+const releaseTaskToQueued = `-- name: ReleaseTaskToQueued :execrows
+UPDATE agent_task_queue SET status = 'queued', dispatched_at = NULL
+WHERE id = $1 AND status = 'dispatched'
+`
+
+// Return a dispatched task back to the queued pool. Used when a
+// post-claim capacity check (e.g. squad concurrency) rejects the task.
+func (q *Queries) ReleaseTaskToQueued(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseTaskToQueued, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
