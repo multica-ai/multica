@@ -1077,6 +1077,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/mention-access",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/merge",
       "gate": "workspace_member"
     },
