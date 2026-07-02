@@ -11,11 +11,15 @@ import type {
 } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@multica/ui/components/ui/tooltip";
+import {
   PickerItem,
   PropertyPicker,
 } from "../../../issues/components/pickers";
 import { ActorAvatar } from "../../../common/actor-avatar";
-import { VisibilityBadge } from "../visibility-badge";
 import { useT } from "../../../i18n";
 import { CHIP_CLASS } from "./chip";
 
@@ -27,13 +31,20 @@ import { CHIP_CLASS } from "./chip";
  * Access is EITHER Private (only me) OR Public with a STACKABLE, MIXED
  * allow-list: the owner can combine "Everyone in workspace" + any number of
  * specific members + (future) teams on the same agent. `canInvokeAgent` on
- * the backend admits an actor when they match ANY target (OR), so the picker
- * emits the full union of every selected target and the whole set is replaced
- * on save. Team is a disabled placeholder in v1 but the structure is already
- * multi-select; any team targets that already exist are preserved on save.
+ * the backend admits an actor matching ANY target (OR), so the picker emits
+ * the full union of every selected target and the whole set is replaced on
+ * save.
  *
- * Non-editors get the read-only `<VisibilityBadge>` so the display surface is
- * unchanged for viewers.
+ * OWNER-ONLY (MUL-3963): access is the one agent property a workspace admin
+ * may NOT change — only the agent owner decides who can run their agent, and
+ * the backend rejects a non-owner permission change with 403. So `canEdit`
+ * here must be passed as "is the viewer the agent owner", NOT the general
+ * manage permission. When `canEdit` is false the control is a static,
+ * non-interactive read-only display (current value + a lock affordance +
+ * a tooltip explaining only the owner can change it), the same way GitHub /
+ * Notion present a permission setting a viewer can see but not edit. There is
+ * deliberately no clickable trigger in that state, so a non-owner can never
+ * open a picker that the backend would only bounce back.
  */
 
 export type AccessChange = {
@@ -60,7 +71,7 @@ function selectedTeamIds(targets: AgentInvocationTarget[]): string[] {
 export function AccessPicker({
   permissionMode,
   invocationTargets,
-  visibility,
+  visibility: _visibility,
   members,
   canEdit = true,
   hasComposioAllowlist = false,
@@ -68,10 +79,17 @@ export function AccessPicker({
 }: {
   permissionMode: AgentPermissionMode;
   invocationTargets: AgentInvocationTarget[];
-  /** Derived visibility, used only for the read-only badge path. */
+  /**
+   * Legacy derived visibility. No longer rendered directly (the read-only and
+   * editable states both summarise permission_mode + targets), but kept in the
+   * props so existing call sites compile unchanged.
+   */
   visibility: AgentVisibility;
   members: MemberWithUser[];
-  /** When false, render a read-only `<VisibilityBadge>` and skip the popover. */
+  /**
+   * True ONLY when the viewer is the agent owner (MUL-3963 access is
+   * owner-only). When false, render the static read-only state.
+   */
   canEdit?: boolean;
   /**
    * True when the agent already has a non-empty Composio toolkit allowlist.
@@ -85,10 +103,8 @@ export function AccessPicker({
   const [open, setOpen] = useState(false);
   const [showComposioHint, setShowComposioHint] = useState(false);
 
-  if (!canEdit) {
-    return <VisibilityBadge value={visibility} />;
-  }
-
+  // Display summary of the current access, shared by the read-only and
+  // editable states so they never drift.
   const isPrivate = permissionMode === "private";
   const workspaceOn = !isPrivate && hasWorkspaceTarget(invocationTargets);
   const memberIds = selectedMemberIds(invocationTargets);
@@ -96,6 +112,47 @@ export function AccessPicker({
   // a batch-replace never silently drops them.
   const teamIds = selectedTeamIds(invocationTargets);
   const memberCount = memberIds.length;
+
+  const SummaryIcon = isPrivate
+    ? Lock
+    : workspaceOn
+      ? Globe
+      : memberCount > 0
+        ? Users
+        : Globe;
+
+  const summaryLabel = isPrivate
+    ? t(($) => $.access.trigger_private)
+    : workspaceOn
+      ? t(($) => $.access.trigger_workspace)
+      : memberCount > 0
+        ? t(($) => $.access.trigger_members_count, { count: memberCount })
+        : t(($) => $.access.trigger_members_empty);
+
+  // Read-only state for non-owners: current value + lock + owner-only tooltip.
+  // No interactive trigger is rendered, so the control can never be clicked
+  // into a change the backend would reject.
+  if (!canEdit) {
+    const readOnlyMsg = t(($) => $.access.owner_only_readonly);
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              aria-label={readOnlyMsg}
+              data-testid="access-readonly"
+            >
+              <SummaryIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{summaryLabel}</span>
+              <Lock className="h-3 w-3 shrink-0 opacity-60" />
+            </span>
+          }
+        />
+        <TooltipContent>{readOnlyMsg}</TooltipContent>
+      </Tooltip>
+    );
+  }
 
   // Build the union of every selected target and emit it. An empty union
   // collapses to Private (owner-only), which is the intuitive "nothing shared"
@@ -145,22 +202,6 @@ export function AccessPicker({
     emit({ workspace: workspaceOn, members: Array.from(next), teams: teamIds });
   };
 
-  const TriggerIcon = isPrivate
-    ? Lock
-    : workspaceOn
-      ? Globe
-      : memberCount > 0
-        ? Users
-        : Globe;
-
-  const triggerLabel = isPrivate
-    ? t(($) => $.access.trigger_private)
-    : workspaceOn
-      ? t(($) => $.access.trigger_workspace)
-      : memberCount > 0
-        ? t(($) => $.access.trigger_members_count, { count: memberCount })
-        : t(($) => $.access.trigger_members_empty);
-
   const tooltip = t(($) => $.access.tooltip);
 
   return (
@@ -178,8 +219,8 @@ export function AccessPicker({
       }
       trigger={
         <>
-          <TriggerIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="truncate">{triggerLabel}</span>
+          <SummaryIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="truncate">{summaryLabel}</span>
         </>
       }
     >

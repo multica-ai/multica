@@ -205,6 +205,50 @@ func (h *Handler) replaceInvocationTargets(ctx context.Context, agentID pgtype.U
 	return nil
 }
 
+// permissionInputChangesAgent reports whether the permission fields on an
+// update request would actually CHANGE the agent's current invocation
+// permission (mode or the set of targets). Used to let a non-owner's no-op
+// resubmit through (PATCH-as-PUT that echoes unchanged permission) while
+// rejecting a real change with 403. Invalid/absent permission input counts as
+// "no change" — a non-owner sending garbage should not get a 403 either, it is
+// simply ignored. Fails safe: on a DB error it returns changed=true so a
+// non-owner attempt is rejected rather than silently applied.
+func (h *Handler) permissionInputChangesAgent(ctx context.Context, existing db.Agent, req UpdateAgentRequest, hasPermissionMode, hasTargets bool) (bool, error) {
+	var targetsDTO []AgentInvocationTargetDTO
+	if req.InvocationTargets != nil {
+		targetsDTO = *req.InvocationTargets
+	}
+	perm, ok, err := parsePermissionInput(existing.WorkspaceID, req.PermissionMode, targetsDTO, hasPermissionMode, hasTargets, req.Visibility)
+	if err != nil || !ok {
+		// Unparseable or effectively no permission fields → treat as no change.
+		return false, nil
+	}
+	if perm.mode != existing.PermissionMode {
+		return true, nil
+	}
+	current, err := h.Queries.ListAgentInvocationTargets(ctx, existing.ID)
+	if err != nil {
+		return true, err
+	}
+	want := make(map[string]struct{}, len(perm.targets))
+	for _, tgt := range perm.targets {
+		want[tgt.targetType+":"+uuidToString(tgt.targetID)] = struct{}{}
+	}
+	have := make(map[string]struct{}, len(current))
+	for _, row := range current {
+		have[row.TargetType+":"+uuidToString(row.TargetID)] = struct{}{}
+	}
+	if len(want) != len(have) {
+		return true, nil
+	}
+	for k := range want {
+		if _, ok := have[k]; !ok {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // enrichAgentResponseWithTargets loads an agent's invocation targets and
 // applies them to the response (InvocationTargets + derived Visibility). Used
 // by the single-agent detail / create / update responses.

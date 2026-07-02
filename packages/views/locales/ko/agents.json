@@ -454,6 +454,7 @@
     "team_coming_soon": "출시 예정",
     "members_group": "구성원",
     "public_group": "공개 액세스",
+    "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
     "members_empty": "선택할 워크스페이스 구성원이 없습니다",
     "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
   },

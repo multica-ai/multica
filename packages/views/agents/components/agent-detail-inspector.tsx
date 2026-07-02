@@ -156,7 +156,13 @@ export function AgentDetailInspector({
             invocationTargets={agent.invocation_targets}
             visibility={agent.visibility}
             members={members}
-            canEdit={canEdit}
+            // Access is OWNER-ONLY (MUL-3963): a workspace admin can edit other
+            // agent properties (canEdit) but NOT who may run the agent. Gate the
+            // picker on ownership specifically so non-owners get the read-only
+            // state instead of a control the backend would reject with 403.
+            canEdit={
+              currentUserId !== null && agent.owner_id === currentUserId
+            }
             hasComposioAllowlist={
               (agent.composio_toolkit_allowlist ?? []).length > 0
             }

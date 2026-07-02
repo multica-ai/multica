@@ -1294,11 +1294,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
 	}
-	// Invocation permission (MUL-3963). Owner-only write: an admin who passes
-	// permission fields is silently ignored (the invoke gate is owner/allow-
-	// list based, so an admin-authored allow-list would just confuse the
-	// owner). When the owner does pass them, permission_mode is authoritative;
-	// otherwise legacy visibility is mapped. Targets are replaced wholesale.
+	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
+	// agent property a workspace admin may NOT change (only the owner decides
+	// who can run their agent — the overlay uses the owner's own Composio
+	// connection, so admin-authored access would be confusing and unsafe).
+	//
+	// Non-owner behaviour: a *real* change is rejected with 403 so the contract
+	// is explicit and matches the owner-only UI (the picker is read-only for
+	// non-owners). A no-op resubmit — an admin editing OTHER fields via a
+	// PATCH-as-PUT client that echoes the unchanged permission back — is
+	// tolerated (dropped) so it doesn't break legitimate admin edits.
 	_, hasPermissionMode := rawFields["permission_mode"]
 	_, hasTargets := rawFields["invocation_targets"]
 	permissionTouched := hasPermissionMode || hasTargets || req.Visibility != nil
@@ -1307,7 +1312,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if permissionTouched {
 		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
 		if !isAgentOwner {
-			slog.Debug("update agent: invocation permission write by non-owner silently dropped",
+			changed, permErr := h.permissionInputChangesAgent(r.Context(), existing, req, hasPermissionMode, hasTargets)
+			if permErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to evaluate invocation permission change")
+				return
+			}
+			if changed {
+				writeError(w, http.StatusForbidden, "only the agent owner can change access (permission_mode / invocation_targets)")
+				return
+			}
+			slog.Debug("update agent: non-owner permission fields matched current state; ignored",
 				append(logger.RequestAttrs(r), "agent_id", id)...)
 		} else {
 			var targetsDTO []AgentInvocationTargetDTO

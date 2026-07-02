@@ -454,6 +454,7 @@
     "team_coming_soon": "即将推出",
     "members_group": "成员",
     "public_group": "公开访问",
+    "owner_only_readonly": "只有该 Agent 的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
   },
