@@ -1,0 +1,44 @@
+/* Collapsible <details>/<summary> blocks (DetailsBlock node view) */
+.rich-text-editor .details-block {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.rich-text-editor .details-block-summary {
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+  outline: none;
+  user-select: none;
+}
+
+/* Hide the native disclosure triangle and draw our own so it matches the
+   caret used elsewhere in the editor chrome. */
+.rich-text-editor .details-block-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rich-text-editor .details-block-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.4rem;
+  color: var(--muted-foreground);
+  transition: transform 0.15s;
+}
+
+.rich-text-editor .details-block[open] > .details-block-summary::before {
+  transform: rotate(90deg);
+}
+
+.rich-text-editor .details-block-body {
+  margin-top: 0.5rem;
+}
+
+/* The body renders through ReadonlyContent, which wraps in its own
+   .rich-text-editor; strip its outer margins so it sits flush in the panel. */
+.rich-text-editor .details-block-body > .rich-text-editor {
+  margin: 0;
+}
