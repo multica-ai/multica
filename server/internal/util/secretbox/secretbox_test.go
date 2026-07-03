@@ -105,4 +105,28 @@ func TestLoadKey(t *testing.T) {
 			t.Fatalf("LoadKey returned wrong bytes")
 		}
 	})
+	t.Run("trims surrounding whitespace", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, " \n"+base64.StdEncoding.EncodeToString(key)+"\n ")
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
+	t.Run("accepts url safe unpadded base64", func(t *testing.T) {
+		key := make([]byte, KeySize)
+		_, _ = rand.Read(key)
+		t.Setenv(envVar, base64.RawURLEncoding.EncodeToString(key))
+		got, err := LoadKey(envVar)
+		if err != nil {
+			t.Fatalf("LoadKey: %v", err)
+		}
+		if !bytes.Equal(got, key) {
+			t.Fatalf("LoadKey returned wrong bytes")
+		}
+	})
 }

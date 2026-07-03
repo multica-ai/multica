@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // KeySize is the required master-key length in bytes (AES-256).
@@ -92,11 +93,11 @@ func (b *Box) Open(sealed []byte) ([]byte, error) {
 // env values are treated as "not configured" and surface as a clear
 // error rather than silently using a zero key.
 func LoadKey(envVar string) ([]byte, error) {
-	raw := os.Getenv(envVar)
+	raw := strings.TrimSpace(os.Getenv(envVar))
 	if raw == "" {
 		return nil, fmt.Errorf("secretbox: %s is not set", envVar)
 	}
-	key, err := base64.StdEncoding.DecodeString(raw)
+	key, err := decodeKeyBase64(raw)
 	if err != nil {
 		return nil, fmt.Errorf("secretbox: %s is not valid base64: %w", envVar, err)
 	}
@@ -104,4 +105,22 @@ func LoadKey(envVar string) ([]byte, error) {
 		return nil, fmt.Errorf("secretbox: %s decodes to %d bytes, expected %d", envVar, len(key), KeySize)
 	}
 	return key, nil
+}
+
+func decodeKeyBase64(raw string) ([]byte, error) {
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	var lastErr error
+	for _, enc := range encodings {
+		key, err := enc.DecodeString(raw)
+		if err == nil {
+			return key, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("secretbox: key is not valid base64: %w", lastErr)
 }

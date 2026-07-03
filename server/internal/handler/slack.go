@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -49,24 +51,17 @@ func slackInstallationToResponse(row db.ChannelInstallation) SlackInstallationRe
 
 // ListSlackInstallations (GET /api/workspaces/{id}/slack/installations) is
 // member-visible so the Integrations tab renders for non-admins. Response
-// flags mirror Lark:
-//   - configured: at-rest encryption key is set (SlackInstall != nil).
-//   - install_supported: kept for the management UI; true whenever configured,
-//     since a BYO install needs only the at-rest key (no hosted OAuth creds).
+// flags mirror Lark for fresh installs, with one Slack-specific recovery case:
+// existing installations are still public-listable when the install service is
+// unavailable, because listing does not decrypt stored tokens. That keeps the
+// settings page from incorrectly presenting an already-connected workspace as
+// "not enabled"; token-writing actions remain disabled behind SlackInstall.
 func (h *Handler) ListSlackInstallations(w http.ResponseWriter, r *http.Request) {
-	if h.SlackInstall == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"installations":     []SlackInstallationResponse{},
-			"configured":        false,
-			"install_supported": false,
-		})
-		return
-	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
 	if !ok {
 		return
 	}
-	rows, err := h.SlackInstall.ListByWorkspace(r.Context(), wsUUID)
+	rows, installSupported, err := h.listSlackInstallations(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list slack installations")
 		return
@@ -77,9 +72,24 @@ func (h *Handler) ListSlackInstallations(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installations":     out,
-		"configured":        true,
-		"install_supported": true,
+		"configured":        installSupported || len(out) > 0,
+		"install_supported": installSupported,
 	})
+}
+
+func (h *Handler) listSlackInstallations(ctx context.Context, wsUUID pgtype.UUID) ([]db.ChannelInstallation, bool, error) {
+	if h.SlackInstall != nil {
+		rows, err := h.SlackInstall.ListByWorkspace(ctx, wsUUID)
+		return rows, true, err
+	}
+	if h.Queries == nil {
+		return nil, false, nil
+	}
+	rows, err := h.Queries.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		ChannelType: string(slack.TypeSlack),
+	})
+	return rows, false, err
 }
 
 // RegisterSlackBYORequest is the body for a bring-your-own-app install: the two
