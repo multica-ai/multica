@@ -175,6 +175,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "url required")
 		return
 	}
+	stored, err := h.Store.Get(r.Context(), connID, wsID)
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "connection not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get connection failed")
+		return
+	}
+	req.AuthConfig = preserveMaskedAuth(req.AuthConfig, stored.AuthConfig)
 	c, err := h.Store.Update(r.Context(), UpdateParams{
 		ID:                  connID,
 		WorkspaceID:         wsID,
@@ -328,6 +338,19 @@ func maskAuth(a AuthConfig) AuthConfig {
 		m.CFAccessSecret = "***"
 	}
 	return m
+}
+
+func preserveMaskedAuth(next, stored AuthConfig) AuthConfig {
+	if next.BearerToken == "***" {
+		next.BearerToken = stored.BearerToken
+	}
+	if next.APIKey == "***" {
+		next.APIKey = stored.APIKey
+	}
+	if next.CFAccessSecret == "***" {
+		next.CFAccessSecret = stored.CFAccessSecret
+	}
+	return next
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

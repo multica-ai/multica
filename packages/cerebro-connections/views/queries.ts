@@ -21,6 +21,14 @@ const AuthConfigSchema = z
     api_key_header: z.string().optional(),
     cf_access_id: z.string().optional(),
     cf_access_secret: z.string().optional(),
+    session_exchange: z
+      .object({
+        enabled: z.boolean().default(false),
+        path: z.string().optional(),
+        ttl_seconds: z.number().optional(),
+      })
+      .loose()
+      .optional(),
   })
   .loose();
 

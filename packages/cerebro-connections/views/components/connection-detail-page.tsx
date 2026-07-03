@@ -62,6 +62,9 @@ const EMPTY_FORM = {
   api_key_header: "",
   cf_access_id: "",
   cf_access_secret: "",
+  session_exchange_enabled: false,
+  session_exchange_path: "/sessions/exchange",
+  session_exchange_ttl_seconds: "3600",
   enabled: true,
   default_access: "deny" as DefaultAccess,
 };
@@ -587,6 +590,50 @@ function ConnectionFormBody({
             </div>
           </div>
 
+          {form.type === "api" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-start gap-3">
+                <Switch
+                  id="conn-session-exchange"
+                  checked={form.session_exchange_enabled}
+                  onCheckedChange={(v) =>
+                    setForm((f) => ({ ...f, session_exchange_enabled: v === true }))
+                  }
+                />
+                <div>
+                  <Label htmlFor="conn-session-exchange">Use personal session keys</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Exchange the shared connection key for the triggering person's own short-lived key before each API call. If exchange fails, the call stops instead of falling back to the shared key.
+                  </p>
+                </div>
+              </div>
+              {form.session_exchange_enabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-session-exchange-path">Exchange path</Label>
+                    <Input
+                      id="conn-session-exchange-path"
+                      value={form.session_exchange_path}
+                      onChange={field("session_exchange_path")}
+                      placeholder="/sessions/exchange"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-session-exchange-ttl">Key lifetime in seconds</Label>
+                    <Input
+                      id="conn-session-exchange-ttl"
+                      type="number"
+                      min={60}
+                      value={form.session_exchange_ttl_seconds}
+                      onChange={field("session_exchange_ttl_seconds")}
+                      placeholder="3600"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Endpoints (REST API only) — the catalogue of paths agents may call,
               each gated per HTTP method. Populated by "Test & discover" from the
               API's OpenAPI/Swagger spec, or added by hand. */}
@@ -767,8 +814,12 @@ function ConnectionFormBody({
 // Auth config builder
 // ---------------------------------------------------------------------------
 
-function buildAuthConfig(form: typeof EMPTY_FORM, authType: AuthType): Connection["auth_config"] {
-  return {
+function buildAuthConfig(
+  form: typeof EMPTY_FORM,
+  authType: AuthType,
+  existingAuth?: Connection["auth_config"],
+): Connection["auth_config"] {
+  const auth: Connection["auth_config"] = {
     ...(authType === "bearer" && form.bearer_token ? { bearer_token: form.bearer_token } : {}),
     ...(authType === "apikey" && form.api_key
       ? { api_key: form.api_key, ...(form.api_key_header ? { api_key_header: form.api_key_header } : {}) }
@@ -776,6 +827,27 @@ function buildAuthConfig(form: typeof EMPTY_FORM, authType: AuthType): Connectio
     ...(form.cf_access_id ? { cf_access_id: form.cf_access_id } : {}),
     ...(form.cf_access_secret ? { cf_access_secret: form.cf_access_secret } : {}),
   };
+  if (authType === "bearer" && !auth.bearer_token && existingAuth?.bearer_token === "***") {
+    auth.bearer_token = "***";
+  }
+  if (authType === "apikey" && !auth.api_key && existingAuth?.api_key === "***") {
+    auth.api_key = "***";
+    if (form.api_key_header) auth.api_key_header = form.api_key_header;
+  }
+  if (!auth.cf_access_secret && existingAuth?.cf_access_secret === "***") {
+    auth.cf_access_secret = "***";
+  }
+  if (form.session_exchange_enabled) {
+    const ttl = Number.parseInt(form.session_exchange_ttl_seconds, 10);
+    auth.session_exchange = {
+      enabled: true,
+      ...(form.session_exchange_path.trim()
+        ? { path: form.session_exchange_path.trim() }
+        : {}),
+      ...(Number.isFinite(ttl) && ttl > 0 ? { ttl_seconds: ttl } : {}),
+    };
+  }
+  return auth;
 }
 
 // ---------------------------------------------------------------------------
@@ -877,9 +949,13 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     api_key_header: conn.auth_config.api_key_header ?? "",
     cf_access_id: conn.auth_config.cf_access_id ?? "",
     cf_access_secret: conn.auth_config.cf_access_secret === "***" ? "" : (conn.auth_config.cf_access_secret ?? ""),
+    session_exchange_enabled: conn.auth_config.session_exchange?.enabled === true,
+    session_exchange_path: conn.auth_config.session_exchange?.path ?? "/sessions/exchange",
+    session_exchange_ttl_seconds: String(conn.auth_config.session_exchange?.ttl_seconds ?? 3600),
     enabled: conn.enabled,
     default_access: conn.default_access,
   };
+  const existingAuth = conn.auth_config;
 
   async function handleSave(
     form: typeof EMPTY_FORM,
@@ -891,7 +967,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       display_name: form.display_name,
       url: form.url,
       internal: form.internal,
-      auth_config: buildAuthConfig(form, authType),
+      auth_config: buildAuthConfig(form, authType, existingAuth),
       endpoint_permissions: endpoints,
       scopable_args: scopableArgs,
       enabled: form.enabled,

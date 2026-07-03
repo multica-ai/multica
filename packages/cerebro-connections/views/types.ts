@@ -8,6 +8,11 @@ export interface AuthConfig {
   api_key_header?: string;
   cf_access_id?: string;
   cf_access_secret?: string;
+  session_exchange?: {
+    enabled: boolean;
+    path?: string;
+    ttl_seconds?: number;
+  };
 }
 
 export interface EndpointPermission {
