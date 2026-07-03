@@ -12,6 +12,7 @@ import {
   useSensor,
   useSensors,
   closestCenter,
+  MeasuringStrategy,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
@@ -152,6 +153,10 @@ type NavLabelKey =
   | "skills"
   | "settings";
 
+// Re-measure droppable rects during a team drag: groups collapse on drag
+// start, so the rects cached at gesture start are immediately stale.
+const teamDragMeasuring = { droppable: { strategy: MeasuringStrategy.Always } };
+
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "inbox", labelKey: "inbox", icon: Inbox },
   { key: "chat", labelKey: "chat", icon: MessageSquare },
@@ -211,11 +216,16 @@ function SortableTeamGroup({
   pathname,
   buildHref,
   settingsHref,
+  forceCollapsed,
 }: {
   team: Team;
   pathname: string;
   buildHref: (pathKey: (typeof teamChildNav)[number]["pathKey"], teamKey: string) => string;
   settingsHref: string;
+  /** True while any team drag is in flight: every group renders collapsed so
+      all sortable items are the same height — variable-height blocks make
+      dnd-kit's rect math (and thus the whole gesture) feel broken. */
+  forceCollapsed: boolean;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: team.id });
@@ -238,7 +248,7 @@ function SortableTeamGroup({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(isDragging && "opacity-30")}
     >
-      <Collapsible open={collapse.open} onOpenChange={collapse.onOpenChange}>
+      <Collapsible open={collapse.open && !forceCollapsed} onOpenChange={collapse.onOpenChange}>
         {/* The whole row navigates to the team page (and expands the group —
             navigation is context). The chevron sits right after the name like
             every other group label — always visible, secondary color, primary
@@ -587,6 +597,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const [localTeams, setLocalTeams] = useState(myTeams);
   const [localTeamsWsId, setLocalTeamsWsId] = useState<string | null>(wsId ?? null);
   const isTeamDraggingRef = useRef(false);
+  const [teamDragActive, setTeamDragActive] = useState(false);
   useEffect(() => {
     if (!isTeamDraggingRef.current) {
       setLocalTeams(myTeams);
@@ -598,6 +609,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const visibleTeams = localTeamsWsId === (wsId ?? null) ? localTeams : [];
   const handleTeamDragStart = useCallback(() => {
     isTeamDraggingRef.current = true;
+    setTeamDragActive(true);
+  }, []);
+  const handleTeamDragCancel = useCallback(() => {
+    isTeamDraggingRef.current = false;
+    setTeamDragActive(false);
   }, []);
   // Fractional reorder (Linear-style): the dragged team takes the midpoint
   // of its new neighbors, so a drag is a single-row membership update. The
@@ -606,6 +622,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const handleTeamDragEnd = useCallback(
     (event: DragEndEvent) => {
       isTeamDraggingRef.current = false;
+      setTeamDragActive(false);
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const oldIndex = localTeams.findIndex((t) => t.id === active.id);
@@ -1045,11 +1062,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       (children→next row) — same spacing as SidebarMenu rows
                       everywhere else. */}
                   <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd}>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={teamDragMeasuring} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd} onDragCancel={handleTeamDragCancel}>
                       <SortableContext items={visibleTeams.map((team) => team.id)} strategy={verticalListSortingStrategy}>
                         {visibleTeams.map((team) => (
                           <SortableTeamGroup
                             key={team.id}
+                            forceCollapsed={teamDragActive}
                             team={team}
                             pathname={pathname}
                             buildHref={(pathKey, teamKey) => p[pathKey](teamKey)}
