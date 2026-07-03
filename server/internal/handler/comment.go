@@ -1219,6 +1219,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request, so an agent legitimately commenting on a different issue must
 	// not be blocked by its current task's trigger. Assignment-triggered
 	// tasks (no TriggerCommentID) are also unaffected.
+	// sourceTaskID captures the agent's currently-executing task when it posts
+	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
+	// originator inheritance chain (resolveOriginatorFromTriggerComment →
+	// comment.source_task_id → parent task's originator_user_id) intact across
+	// the leader→worker mention hop. Without this stamp, a private squad
+	// leader's worker-agent whose completion wakes the leader via
+	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the
+	// worker's task originator is unattributed, effectiveUser resolves to "",
+	// and the private-agent gate denies the wake (MUL-4015).
+	var sourceTaskID pgtype.UUID
 	if authorType == "agent" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
@@ -1243,6 +1253,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
 						return
 					}
+					// Only stamp source_task_id for a task belonging to THIS
+					// issue. An agent legitimately commenting on a DIFFERENT
+					// issue than its current task must not stamp that task's
+					// id here — the resulting chain would then attribute the
+					// out-of-band comment to an unrelated task's originator.
+					sourceTaskID = taskUUID
 				}
 			}
 		}
@@ -1269,13 +1285,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  authorType,
-		AuthorID:    parseUUID(authorID),
-		Content:     req.Content,
-		Type:        req.Type,
-		ParentID:    parentID,
+		IssueID:      issue.ID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   authorType,
+		AuthorID:     parseUUID(authorID),
+		Content:      req.Content,
+		Type:         req.Type,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
