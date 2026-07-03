@@ -67,7 +67,8 @@ func (h *Handler) MentionAccessCheck(w http.ResponseWriter, r *http.Request) {
 // note grants viewer on its folder (the Collections model — "via mappen"); a
 // note at the workspace root has no folder to gate it, so a note-share (with the
 // note bumped to 'shared' if it was private) is enough. The caller must be able
-// to comment on the note.
+// to comment on the note and own it; viewing/commenting alone must not let a
+// member expand the audience.
 func (h *Handler) GrantMentionAccess(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -82,6 +83,9 @@ func (h *Handler) GrantMentionAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.requireCanComment(w, r, noteID, ownerUUID) {
+		return
+	}
+	if !h.requireCanGrantMentionAccess(w, r, noteID, ownerUUID) {
 		return
 	}
 	var req grantMentionAccessRequest
@@ -135,6 +139,15 @@ func (h *Handler) GrantMentionAccess(w http.ResponseWriter, r *http.Request) {
 		granted = append(granted, uid)
 	}
 	writeJSON(w, http.StatusOK, grantMentionAccessResponse{Granted: granted})
+}
+
+func (h *Handler) requireCanGrantMentionAccess(w http.ResponseWriter, r *http.Request, noteID, ownerUUID pgtype.UUID) bool {
+	noteRow, err := h.Cerebro.GetNote(r.Context(), noteID)
+	if err != nil || !noteRow.OwnerID.Valid || !ownerUUID.Valid || noteRow.OwnerID.Bytes != ownerUUID.Bytes {
+		writeError(w, http.StatusForbidden, "only the note owner can give access")
+		return false
+	}
+	return true
 }
 
 // membersWithoutNoteAccess returns the subset of memberIDs that cannot currently

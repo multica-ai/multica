@@ -120,6 +120,24 @@ func TestGrantMentionAccessEndpoint(t *testing.T) {
 	}
 }
 
+// A viewer/commenter can ask who lacks access, but cannot expand the note's
+// audience. Only the note owner may give access from the prompt.
+func TestGrantMentionAccessEndpointRequiresOwner(t *testing.T) {
+	if w3Pool == nil {
+		t.Skip("no DB")
+	}
+	ctx := context.Background()
+	folder := makeFolder(t, ctx, "ma-grant-owner", pgtype.UUID{})
+	note := makeNoteInFolder(t, ctx, folder)
+	grantFolder(t, ctx, folder, "member", w3UserB, "viewer")
+
+	body := `{"member_ids":["` + uuidStr(w3UserB) + `"]}`
+	w := doMentionAccessAs(t, http.MethodPost, note, uuidStr(w3UserB), "", body)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("viewer grant: expected 403, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
 // The MentionAccessCheck endpoint reports who lacks access.
 func TestMentionAccessCheckEndpoint(t *testing.T) {
 	if w3Pool == nil {
@@ -148,6 +166,10 @@ func TestMentionAccessCheckEndpoint(t *testing.T) {
 // chi {id} they read, mirroring the other handler DB tests. userA (owner) is the
 // caller.
 func doMentionAccess(t *testing.T, method string, noteID pgtype.UUID, query, body string) *httptest.ResponseRecorder {
+	return doMentionAccessAs(t, method, noteID, uuidStr(w3UserA), query, body)
+}
+
+func doMentionAccessAs(t *testing.T, method string, noteID pgtype.UUID, userID, query, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	url := "/api/notes/" + uuidStr(noteID) + "/mention-access"
 	if query != "" {
@@ -160,7 +182,7 @@ func doMentionAccess(t *testing.T, method string, noteID pgtype.UUID, query, bod
 		reader = strings.NewReader("")
 	}
 	r := httptest.NewRequest(method, url, reader)
-	r.Header.Set("X-User-ID", uuidStr(w3UserA))
+	r.Header.Set("X-User-ID", userID)
 	ctx := middleware.SetMemberContext(r.Context(), uuidStr(w3WsID), db.Member{})
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", uuidStr(noteID))
