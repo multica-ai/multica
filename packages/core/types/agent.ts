@@ -4,6 +4,47 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// ---------------------------------------------------------------------------
+// Agent invocation permissions (MUL-3963)
+//
+// `permission_mode` + `invocation_targets` are the AUTHORITATIVE gate for who
+// may TRIGGER / assign / @mention / chat an agent. The legacy `visibility`
+// field REMAINS but is now DERIVED on the backend from these two: a
+// `public_to` agent WITH a workspace target maps to `visibility: "workspace"`;
+// everything else (private, or public_to scoped only to member/team targets)
+// maps to `visibility: "private"`.
+//
+// Invocation semantics:
+//   - owner: always
+//   - permission_mode "private": ONLY the owner (workspace admins no longer
+//     bypass — the key behavior change vs the old visibility model)
+//   - permission_mode "public_to" + workspace target: any workspace member
+//   - permission_mode "public_to" + member target: only the matching user
+//   - team target: reserved, INERT in v1 (never grants)
+// ---------------------------------------------------------------------------
+
+export type AgentPermissionMode = "private" | "public_to";
+
+/**
+ * A single invocation grant on an agent. `target_id` is `null` for the
+ * workspace target (the grant covers every workspace member); it carries the
+ * member / team id for the scoped grants.
+ */
+export interface AgentInvocationTarget {
+  target_type: "workspace" | "member" | "team";
+  target_id: string | null;
+}
+
+/**
+ * Wire shape for invocation targets on CREATE / UPDATE requests. For a
+ * workspace target the client may omit `target_id` (the backend fills the
+ * workspace id); member / team targets REQUIRE it.
+ */
+export interface AgentInvocationTargetInput {
+  target_type: "workspace" | "member" | "team";
+  target_id?: string;
+}
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -281,7 +322,36 @@ export interface Agent {
    * Older backends omit this field; treat `undefined` as false.
    */
   mcp_config_redacted?: boolean;
+  /**
+   * The subset of Composio toolkit slugs this agent is allowed to mount as
+   * MCP servers at task dispatch — but only when the run originator is the
+   * agent owner (MUL-3869 / MUL-3721). `null`/`[]`/omitted all mean "no
+   * overlay regardless of who triggers". Owner-only data: the server hands
+   * it through verbatim to the owner and redacts it to `undefined` +
+   * `composio_toolkit_allowlist_redacted=true` for everyone else (same
+   * contract as `mcp_config`). Treat `undefined` as "unknown — assume none".
+   */
+  composio_toolkit_allowlist?: string[];
+  /**
+   * True when the server stripped `composio_toolkit_allowlist` from this
+   * response because the caller is not the agent owner. The MCP tab is
+   * creator-only so a redacted value should never reach the editor, but the
+   * UI renders a "hidden" fallback defensively. Older backends omit this
+   * field; treat `undefined` as false.
+   */
+  composio_toolkit_allowlist_redacted?: boolean;
   visibility: AgentVisibility;
+  /**
+   * Authoritative invocation permission mode (MUL-3963). The `visibility`
+   * field above is DERIVED from this on the backend. The current backend
+   * always returns this field.
+   */
+  permission_mode: AgentPermissionMode;
+  /**
+   * Invocation grants backing `permission_mode === "public_to"` (empty for a
+   * private agent). See `AgentInvocationTarget`.
+   */
+  invocation_targets: AgentInvocationTarget[];
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
@@ -327,6 +397,16 @@ export interface CreateAgentRequest {
   custom_env?: Record<string, string>;
   custom_args?: string[];
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
@@ -377,6 +457,16 @@ export interface CreateAgentFromTemplateRequest {
   runtime_id: string;
   model?: string;
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   /** Optional overrides applied to the template before creation. nil/omit
    *  uses the template's own value. */
@@ -432,7 +522,29 @@ export interface UpdateAgentRequest {
    *     validate / translate it according to their own MCP integration
    */
   mcp_config?: unknown | null;
+  /**
+   * Composio toolkit allowlist. Tri-state semantics, mirroring the backend
+   * gate (MUL-3869):
+   *   - field omitted → no change
+   *   - `null` → clear the column (no MCP overlay for anyone)
+   *   - string[] → wholesale replace; the server lowercases / trims / dedupes
+   *     the slugs before persisting
+   * Writes are silently dropped server-side unless the caller is the agent
+   * owner, so the UI only ever exposes this field through the creator-only
+   * MCP tab.
+   */
+  composio_toolkit_allowlist?: string[] | null;
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;

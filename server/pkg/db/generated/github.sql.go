@@ -17,8 +17,7 @@ INSERT INTO github_installation (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-ON CONFLICT (installation_id) DO UPDATE SET
-    workspace_id = EXCLUDED.workspace_id,
+ON CONFLICT (workspace_id, installation_id) DO UPDATE SET
     account_login = EXCLUDED.account_login,
     account_type = EXCLUDED.account_type,
     account_avatar_url = EXCLUDED.account_avatar_url,
@@ -74,7 +73,7 @@ func (q *Queries) DeleteGitHubInstallation(ctx context.Context, arg DeleteGitHub
 	return err
 }
 
-const deleteGitHubInstallationByInstallationID = `-- name: DeleteGitHubInstallationByInstallationID :one
+const deleteGitHubInstallationByInstallationID = `-- name: DeleteGitHubInstallationByInstallationID :many
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id
 `
@@ -84,11 +83,27 @@ type DeleteGitHubInstallationByInstallationIDRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) DeleteGitHubInstallationByInstallationID(ctx context.Context, installationID int64) (DeleteGitHubInstallationByInstallationIDRow, error) {
-	row := q.db.QueryRow(ctx, deleteGitHubInstallationByInstallationID, installationID)
-	var i DeleteGitHubInstallationByInstallationIDRow
-	err := row.Scan(&i.ID, &i.WorkspaceID)
-	return i, err
+// GitHub-side uninstall/suspend removes trust in the installation entirely, so
+// drop every workspace binding. Returns one row per deleted binding so the
+// handler can broadcast to each affected workspace.
+func (q *Queries) DeleteGitHubInstallationByInstallationID(ctx context.Context, installationID int64) ([]DeleteGitHubInstallationByInstallationIDRow, error) {
+	rows, err := q.db.Query(ctx, deleteGitHubInstallationByInstallationID, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeleteGitHubInstallationByInstallationIDRow{}
+	for rows.Next() {
+		var i DeleteGitHubInstallationByInstallationIDRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deletePendingGitHubInstallation = `-- name: DeletePendingGitHubInstallation :exec
@@ -183,28 +198,6 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
-const getGitHubInstallationByInstallationID = `-- name: GetGitHubInstallationByInstallationID :one
-SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
-WHERE installation_id = $1
-`
-
-func (q *Queries) GetGitHubInstallationByInstallationID(ctx context.Context, installationID int64) (GithubInstallation, error) {
-	row := q.db.QueryRow(ctx, getGitHubInstallationByInstallationID, installationID)
-	var i GithubInstallation
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.InstallationID,
-		&i.AccountLogin,
-		&i.AccountType,
-		&i.AccountAvatarUrl,
-		&i.ConnectedByID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
 SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
@@ -282,6 +275,31 @@ func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID
 	return i, err
 }
 
+const getIssueReviewHeadSha = `-- name: GetIssueReviewHeadSha :one
+SELECT pr.head_sha
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+LIMIT 1
+`
+
+// Returns the head SHA of the commit currently "under review" for an issue:
+// the most-recently-updated linked PR that still has an open/draft state and a
+// non-empty head_sha. Used by the reviewer-loop dedup (TEN-356) so a pending
+// review task pinned to an old head does not satisfy a request after HEAD
+// advanced. Prefers in-flight PRs (open/draft) over merged/closed ones so a
+// stale merged sibling can't shadow the live review target; falls back to the
+// newest linked PR with a head_sha when none are open. Returns no rows (empty
+// string) when the issue has no linked PR — callers treat that as "no SHA key"
+// and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
+func (q *Queries) GetIssueReviewHeadSha(ctx context.Context, issueID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getIssueReviewHeadSha, issueID)
+	var head_sha string
+	err := row.Scan(&head_sha)
+	return head_sha, err
+}
+
 const getPendingGitHubInstallation = `-- name: GetPendingGitHubInstallation :one
 SELECT installation_id, account_login, account_type, account_avatar_url, received_at, updated_at FROM github_pending_installation WHERE installation_id = $1
 `
@@ -341,6 +359,45 @@ func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPul
 		arg.PreserveCloseIntent,
 	)
 	return err
+}
+
+const listGitHubInstallationsByInstallationID = `-- name: ListGitHubInstallationsByInstallationID :many
+SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
+WHERE installation_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+// One installation_id can be bound to several workspaces; webhook routing lists
+// every binding and picks the target workspace via the repos registry. Ordered
+// so the oldest binding is the deterministic routing fallback (insts[0]).
+func (q *Queries) ListGitHubInstallationsByInstallationID(ctx context.Context, installationID int64) ([]GithubInstallation, error) {
+	rows, err := q.db.Query(ctx, listGitHubInstallationsByInstallationID, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GithubInstallation{}
+	for rows.Next() {
+		var i GithubInstallation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InstallationID,
+			&i.AccountLogin,
+			&i.AccountType,
+			&i.AccountAvatarUrl,
+			&i.ConnectedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGitHubInstallationsByWorkspace = `-- name: ListGitHubInstallationsByWorkspace :many
@@ -556,6 +613,61 @@ type UnlinkIssueFromPullRequestParams struct {
 func (q *Queries) UnlinkIssueFromPullRequest(ctx context.Context, arg UnlinkIssueFromPullRequestParams) error {
 	_, err := q.db.Exec(ctx, unlinkIssueFromPullRequest, arg.IssueID, arg.PullRequestID)
 	return err
+}
+
+const updateGitHubInstallationAccountByInstallationID = `-- name: UpdateGitHubInstallationAccountByInstallationID :many
+UPDATE github_installation
+SET account_login = $2,
+    account_type = $3,
+    account_avatar_url = $4,
+    updated_at = now()
+WHERE installation_id = $1
+RETURNING id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at
+`
+
+type UpdateGitHubInstallationAccountByInstallationIDParams struct {
+	InstallationID   int64       `json:"installation_id"`
+	AccountLogin     string      `json:"account_login"`
+	AccountType      string      `json:"account_type"`
+	AccountAvatarUrl pgtype.Text `json:"account_avatar_url"`
+}
+
+// Refresh the GitHub account display metadata across every workspace binding of
+// an installation (fired by installation.created/new_permissions_accepted/
+// unsuspend). Leaves workspace_id and connected_by_id untouched.
+func (q *Queries) UpdateGitHubInstallationAccountByInstallationID(ctx context.Context, arg UpdateGitHubInstallationAccountByInstallationIDParams) ([]GithubInstallation, error) {
+	rows, err := q.db.Query(ctx, updateGitHubInstallationAccountByInstallationID,
+		arg.InstallationID,
+		arg.AccountLogin,
+		arg.AccountType,
+		arg.AccountAvatarUrl,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GithubInstallation{}
+	for rows.Next() {
+		var i GithubInstallation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InstallationID,
+			&i.AccountLogin,
+			&i.AccountType,
+			&i.AccountAvatarUrl,
+			&i.ConnectedByID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertGitHubPullRequest = `-- name: UpsertGitHubPullRequest :one

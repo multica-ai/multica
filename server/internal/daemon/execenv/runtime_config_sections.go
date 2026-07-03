@@ -3,6 +3,8 @@ package execenv
 import (
 	"fmt"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // This file holds the slim runtime brief — the post-MUL-3560 path that
@@ -134,6 +136,48 @@ func writeWorkspaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Workspace Context\n\n")
 	b.WriteString(ctxText)
 	b.WriteString("\n\n")
+}
+
+func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.ConnectedApps) == 0 {
+		return
+	}
+	var lines strings.Builder
+	for _, app := range ctx.ConnectedApps {
+		serverName := sanitizeBriefCodeToken(app.ServerName)
+		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
+		if serverName == "" || toolkitSlug == "" {
+			continue
+		}
+		name := sanitizeNameForBriefMarkdown(app.ToolkitName)
+		if name == "" {
+			name = sanitizeNameForBriefMarkdown(runtimeapps.DisplayNameForToolkitSlug(toolkitSlug))
+		}
+		if name == "" {
+			name = toolkitSlug
+		}
+		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
+	}
+	if lines.Len() == 0 {
+		return
+	}
+	b.WriteString("## Connected Apps\n\n")
+	b.WriteString(lines.String())
+	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+}
+
+func sanitizeBriefCodeToken(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return ""
+	}
+	return s
 }
 
 // writeAvailableCommands emits the slim Available Commands section
@@ -465,9 +509,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
 // Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Task Initiator, Workspace Context, Workflow, Always
-// Use CLI, Output — are shared by every kind and emitted unconditionally
-// (or gated by their own data preconditions).
+// Requesting User, Task Initiator, Workspace Context, Connected Apps,
+// Workflow, Always Use CLI, Output — are shared by every kind and emitted
+// unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -478,6 +522,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeConnectedApps(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

@@ -179,13 +179,16 @@ server/internal/handler/issue_child_done.go       # dispatchParentAssigneeTrigge
 
 Contracts:
 
-- when child issue completes and parent is assigned to squad, parent squad
-  leader can be triggered (triggerChildDoneSquad at issue_child_done.go:304);
+- when a child issue closes a stage barrier and the parent is assigned to a
+  squad, the parent squad leader is triggered (triggerChildDoneSquad in
+  issue_child_done.go);
 - routing is leader-only — one `EnqueueTaskForSquadLeader` on the leader, no
-  member fan-out (issue_child_done.go:214-216, 344);
-- loop guards skip same squad, same effective leader, and shared-leader
-  cross-squad cases (issue_child_done.go:229-235, effectiveChildAgentOwner ~367,
-  childAssigneeIsSquad ~387).
+  member fan-out (triggerChildDoneSquad / dispatchParentAssigneeTrigger);
+- no self-trigger guard: a same-squad or shared-leader child still wakes the
+  parent squad leader — the wake is a serial handoff onto the PARENT and is the
+  only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,
+  mirrors the agent path from MUL-2808). Re-triggering is bounded only by
+  `HasPendingTaskForIssueAndAgent` (idempotent per parent issue + agent).
 
 ## Private Leader Access
 

@@ -210,6 +210,7 @@
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
+    "composio_mcp": "MCP 앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
@@ -227,6 +228,17 @@
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "visibility_label": "공개 범위",
+    "access": {
+      "label": "액세스",
+      "private_title": "비공개",
+      "private_desc": "본인만 이 에이전트를 실행할 수 있습니다",
+      "public_title": "공개",
+      "public_desc": "이 에이전트를 실행할 수 있는 사람을 선택하세요",
+      "public_workspace_option": "이 워크스페이스의 모든 사람",
+      "public_members_group": "특정 사용자",
+      "public_members_empty": "선택할 수 있는 워크스페이스 멤버가 없습니다",
+      "public_targets_empty_hint": "아래에서 최소 하나 이상을 선택하세요. 그렇지 않으면 에이전트는 비공개로 유지됩니다."
+    },
     "runtime_label": "런타임",
     "runtime_filter_mine": "내 것",
     "runtime_filter_all": "전체",
@@ -320,6 +332,22 @@
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 - 현재 보기에서는 숨김",
       "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+    },
+    "composio_mcp": {
+      "subtitle": "툴킷을 선택하면, 본인(이 에이전트의 생성자)이 직접 또는 하위 에이전트 체인을 통해 이 에이전트를 트리거할 때만 MCP 서버로 마운트됩니다.",
+      "loading": "연결을 불러오는 중…",
+      "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+      "empty_title": "아직 연결된 앱이 없습니다",
+      "empty_hint": "아직 서드파티 서비스를 연결하지 않았습니다. 먼저 하나를 인증한 뒤 여기서 허용하세요.",
+      "empty_link_to_settings": "설정 → 연동에서 연결하기",
+      "connected": "연결됨",
+      "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
+      "saving": "저장 중…",
+      "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요",
+      "redacted_title": "설정됨 — 보기에서 숨김",
+      "redacted_hint": "이 에이전트가 사용할 수 있는 앱은 생성자만 보거나 변경할 수 있습니다.",
+      "shared_warning": "이 에이전트는 공유되어 있습니다. 이 에이전트를 실행할 수 있는 사람은 여기서 활성화한 Composio 앱을 사용할 수 있습니다. 이러한 앱이 민감한 데이터를 노출한다면 Private로 설정하거나 접근 범위를 좁히세요.",
+      "workspace_warning": "워크스페이스에 공개: 워크스페이스의 모든 구성원이 이 에이전트를 통해 이러한 Composio 앱을 사용할 수 있습니다."
     },
     "runtime_config": {
       "intro": "OpenClaw 런타임이 이 에이전트의 각 턴을 어떻게 실행할지 선택하세요. Local 모드는 에이전트를 daemon 프로세스 내부에서 실행합니다. Gateway 모드는 각 턴을 OpenClaw Gateway로 전달합니다 — daemon 호스트가 가벼운 조율기 역할을 하고 실제 작업은 더 강력한 머신에서 돌리고 싶을 때 유용합니다.",
@@ -419,6 +447,28 @@
       "tooltip": "워크스페이스 · 이 워크스페이스의 모든 사람이 이 에이전트를 사용할 수 있습니다"
     }
   },
+  "access": {
+    "tooltip": "접근 권한 · 누가 이 에이전트를 실행할 수 있는지",
+    "trigger_private": "나만",
+    "trigger_workspace": "워크스페이스",
+    "trigger_members_count": "{{count}}명",
+    "trigger_members_empty": "특정 사용자",
+    "trigger_team": "팀",
+    "private_title": "비공개",
+    "private_desc": "나만 이 에이전트를 실행할 수 있습니다",
+    "workspace_title": "워크스페이스에 공개",
+    "workspace_desc": "이 워크스페이스의 모든 사람이 이 에이전트를 실행할 수 있습니다",
+    "members_title": "특정 사용자에게 공개",
+    "members_desc": "선택한 사람만 이 에이전트를 실행할 수 있습니다",
+    "team_title": "팀에 공개",
+    "team_desc": "팀 전체에 접근 권한을 부여합니다",
+    "team_coming_soon": "출시 예정",
+    "members_group": "구성원",
+    "public_group": "공개 액세스",
+    "owner_only_readonly": "이 에이전트를 실행할 수 있는 대상은 소유자만 변경할 수 있습니다.",
+    "members_empty": "선택할 워크스페이스 구성원이 없습니다",
+    "composio_switch_hint": "참고 — 이 에이전트에는 Composio 앱이 활성화되어 있습니다. 공유하면 접근 권한이 있는 모든 사람이 이 에이전트를 통해 해당 앱을 사용할 수 있습니다."
+  },
   "profile_card": {
     "unavailable": "에이전트를 사용할 수 없습니다",
     "detail_link": "자세히 →",
@@ -451,7 +501,11 @@
     "no_data": "기록된 실행 데이터가 없습니다.",
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",
-    "sort_newest_first": "최신 순"
+    "sort_newest_first": "최신 순",
+    "expand_visible": "표시 항목 펼치기",
+    "collapse_visible": "표시 항목 접기",
+    "preserve_filters": "필터 유지",
+    "default_expanded": "기본으로 세부 정보 펼치기"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",

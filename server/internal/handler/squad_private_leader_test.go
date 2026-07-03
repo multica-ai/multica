@@ -98,7 +98,7 @@ func TestCreateIssue_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -112,9 +112,10 @@ func TestCreateIssue_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// testUserID is workspace owner — should succeed.
+	// The AGENT OWNER assigns — allowed. (MUL-3963: workspace owner/admin no
+	// longer bypasses a private leader's invocation gate.)
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Owner assigns private-leader squad",
 		"assignee_type": "squad",
 		"assignee_id":   squadID,
@@ -205,7 +206,7 @@ func TestChildDone_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, memberID := privateAgentTestFixture(t)
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -219,9 +220,10 @@ func TestChildDone_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// Create parent issue assigned to the squad (as workspace owner).
+	// Create parent issue assigned to the squad (as the AGENT OWNER, who is
+	// allowed to invoke the private leader under MUL-3963).
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "parent with private-leader squad",
 		"assignee_type": "squad",
 		"assignee_id":   squadID,
@@ -297,7 +299,7 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 	otherAgentID := createHandlerTestAgent(t, "squad-private-leader-agent-actor", nil)
 
 	var squadID string
@@ -327,13 +329,16 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	// Create a task for the other agent so X-Agent-ID / X-Task-ID are valid.
+	// Create a task for the other agent whose top-of-chain originator is the
+	// private leader's OWNER. Under MUL-3963 A2A is judged by that originator,
+	// so the agent-actor squad mention resolves to the owner and may invoke
+	// the private leader.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, originator_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2, $3)
 		RETURNING id
-	`, otherAgentID, issueID).Scan(&taskID); err != nil {
+	`, otherAgentID, issueID, ownerID).Scan(&taskID); err != nil {
 		t.Fatalf("create agent task: %v", err)
 	}
 	t.Cleanup(func() {
@@ -353,8 +358,9 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// The private leader SHOULD have a queued task — agents bypass private gate
-	// for explicit routing.
+	// The private leader SHOULD have a queued task — the agent-actor mention's
+	// top-of-chain originator is the leader's owner, so A2A-by-originator
+	// admits it (MUL-3963).
 	var count int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
@@ -363,6 +369,6 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		t.Fatalf("count tasks: %v", err)
 	}
 	if count == 0 {
-		t.Fatalf("private leader got 0 queued tasks from agent actor squad mention; want >=1 (agents bypass private gate)")
+		t.Fatalf("private leader got 0 queued tasks; want >=1 (A2A originator is the leader owner)")
 	}
 }

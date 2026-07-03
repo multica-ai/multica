@@ -23,6 +23,7 @@ import {
   Waves,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -618,6 +619,33 @@ function DateSubContent({
 }
 
 // ---------------------------------------------------------------------------
+// ViewRefreshIndicator
+// ---------------------------------------------------------------------------
+
+/**
+ * Neutral "view is revalidating" slot for the header controls cluster.
+ * Driven by the surface's isRefreshing (placeholder-backed revalidation:
+ * sort/date change, grouped-board filter change) — trigger-agnostic on
+ * purpose, so any view change that puts a request in flight lights it.
+ *
+ * The slot is fixed-width so appearing/disappearing never shifts the
+ * controls; the 300ms appear delay keeps fast networks indicator-free
+ * (NN/g: sub-second responses need no feedback) while slow ones get a
+ * "working on it" signal instead of a dead click.
+ */
+export function ViewRefreshIndicator({ active }: { active: boolean }) {
+  return (
+    <span className="flex w-4 shrink-0 items-center justify-center">
+      {active && (
+        <span className="animate-in fade-in fill-mode-backwards [animation-delay:300ms]">
+          <Spinner className="size-3.5 text-muted-foreground" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
@@ -626,11 +654,13 @@ export function IssuesHeader({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  isRefreshing = false,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  isRefreshing?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -733,6 +763,7 @@ export function IssuesHeader({
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
           />
+          <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>
     </div>

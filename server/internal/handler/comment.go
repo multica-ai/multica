@@ -1042,6 +1042,11 @@ type commentAgentTrigger struct {
 
 type commentTriggerComputeOptions struct {
 	ExcludeTriggerCommentID pgtype.UUID
+	// OriginatorUserID is the top-of-chain human user id for this trigger
+	// (MUL-3963). Only consulted for AGENT actors — canInvokeAgent judges A2A
+	// by the originator, not the immediate agent principal. Members are their
+	// own originator so this may be empty for member-authored triggers.
+	OriginatorUserID string
 }
 
 func commentAgentTriggerReason(trigger commentAgentTrigger) string {
@@ -1140,6 +1145,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	opts.OriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
 	triggers := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{Agents: make([]CommentTriggerAgentResponse, 0, len(triggers))}
 	for _, trigger := range triggers {
@@ -1213,6 +1219,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request, so an agent legitimately commenting on a different issue must
 	// not be blocked by its current task's trigger. Assignment-triggered
 	// tasks (no TriggerCommentID) are also unaffected.
+	// sourceTaskID captures the agent's currently-executing task when it posts
+	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
+	// originator inheritance chain (resolveOriginatorFromTriggerComment →
+	// comment.source_task_id → parent task's originator_user_id) intact across
+	// the leader→worker mention hop. Without this stamp, a private squad
+	// leader's worker-agent whose completion wakes the leader via
+	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the
+	// worker's task originator is unattributed, effectiveUser resolves to "",
+	// and the private-agent gate denies the wake (MUL-4015).
+	var sourceTaskID pgtype.UUID
 	if authorType == "agent" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
@@ -1237,6 +1253,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
 						return
 					}
+					// Only stamp source_task_id for a task belonging to THIS
+					// issue. An agent legitimately commenting on a DIFFERENT
+					// issue than its current task must not stamp that task's
+					// id here — the resulting chain would then attribute the
+					// out-of-band comment to an unrelated task's originator.
+					sourceTaskID = taskUUID
 				}
 			}
 		}
@@ -1263,13 +1285,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  authorType,
-		AuthorID:    parseUUID(authorID),
-		Content:     req.Content,
-		Type:        req.Type,
-		ParentID:    parentID,
+		IssueID:      issue.ID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   authorType,
+		AuthorID:     parseUUID(authorID),
+		Content:      req.Content,
+		Type:         req.Type,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
@@ -1303,7 +1326,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelDeferredEscalationsForIssueAgent(r.Context(), issue.ID, comment.AuthorID)
 	}
 
-	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, suppressAgentIDs)
+	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
+	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -1326,12 +1350,13 @@ func isNoteComment(content string) bool {
 	return strings.EqualFold(firstToken, noteCommentPrefix)
 }
 
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, suppressAgentIDs []pgtype.UUID) {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) {
 	if isNoteComment(comment.Content) {
 		return
 	}
 	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
+		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
@@ -1461,7 +1486,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		// after MUL-3794 (MUL-3879): a worker-agent result comment on a
 		// squad-assigned issue can still wake the assigned squad leader, so
 		// the leader→worker→leader coordination loop stays closed. The leader
-		// self-trigger guard (lastTaskWasLeader) lives in
+		// self-trigger guard lives in
 		// routeAssignedSquadLeaderFallback. Explicit @agent / @squad mentions
 		// are already handled above, so this never double-enqueues a mentioned
 		// target alongside the assigned leader.
@@ -1542,7 +1567,7 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, parent.AuthorID, opts)
@@ -1660,7 +1685,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canAccessPrivateAgent(ctx, agent, "member", memberID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, opts)
@@ -1706,7 +1731,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
-		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
+		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1716,7 +1741,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, squad.LeaderID, opts)
@@ -1727,16 +1752,21 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
+	// Key dedup on the reviewed head so re-pushing to the PR mid-review
+	// invalidates dedup and a fresh run enqueues against the new HEAD (TEN-356).
+	headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, issueID)
 	if opts.ExcludeTriggerCommentID.Valid {
 		return h.Queries.HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx, db.HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams{
 			IssueID:                 issueID,
 			AgentID:                 agentID,
 			ExcludeTriggerCommentID: opts.ExcludeTriggerCommentID,
+			HeadSha:                 headSha,
 		})
 	}
 	return h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issueID,
 		AgentID: agentID,
+		HeadSha: headSha,
 	})
 }
 
@@ -1775,12 +1805,12 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			leaderID := squad.LeaderID
-			// Prevent self-trigger only when the agent's last activity on this
-			// issue was itself a leader task. An agent that holds both the
-			// leader and a worker role in the squad must still wake its
-			// leader role after posting a comment from its worker task.
+			// Prevent self-trigger unless the agent's last activity on this
+			// issue was a worker task for this same squad. Generic non-leader
+			// tasks (direct @agent mentions, thread-parent replies) are not a
+			// worker-role handoff and must not re-enqueue the leader.
 			if authorType == "agent" && authorID == uuidToString(leaderID) &&
-				h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
+				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
 				continue
 			}
 			// Verify leader agent is ready (has runtime, not archived).
@@ -1792,7 +1822,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
-			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+			if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
@@ -1821,7 +1851,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		}
 		// Private-agent gate (member→private requires allowed_principals;
 		// agent→agent always passes).
-		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
@@ -1955,7 +1985,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, suppressAgentIDs)
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
 		}
 	}
 

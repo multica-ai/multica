@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // Sub-issue Creation section — after MUL-2538 the platform posts the
@@ -547,6 +549,52 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 				t.Errorf("[%s] empty workspace context must NOT emit the heading", tc.name)
 			}
 		})
+	}
+}
+
+func TestConnectedAppsRenderedAcrossBriefModes(t *testing.T) {
+	ctx := TaskContextForEnv{
+		IssueID:          "11111111-2222-3333-4444-555555555555",
+		WorkspaceContext: "Prefer source-of-truth systems.",
+		ConnectedApps: []runtimeapps.ConnectedApp{{
+			Provider:    "composio",
+			ServerName:  "composio",
+			ToolkitSlug: "notion",
+			ToolkitName: "Notion",
+		}},
+	}
+
+	run := func(t *testing.T, label string) {
+		out := buildMetaSkillContent("claude", ctx)
+		for _, want := range []string{
+			"## Connected Apps",
+			"- Notion (`notion`) via MCP server `composio`",
+			"Use the listed MCP server when the task asks to read or act in one of these apps.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s brief missing connected app text %q\n---\n%s", label, want, out)
+			}
+		}
+		wsIdx := strings.Index(out, "## Workspace Context")
+		appIdx := strings.Index(out, "## Connected Apps")
+		cmdIdx := strings.Index(out, "## Available Commands")
+		if wsIdx == -1 || appIdx == -1 || cmdIdx == -1 || !(wsIdx < appIdx && appIdx < cmdIdx) {
+			t.Fatalf("%s connected apps should sit between workspace context and available commands (ws=%d app=%d cmd=%d)", label, wsIdx, appIdx, cmdIdx)
+		}
+	}
+
+	t.Run("legacy", func(t *testing.T) { run(t, "legacy") })
+	t.Run("slim", func(t *testing.T) {
+		withSlimBrief(t)
+		run(t, "slim")
+	})
+}
+
+func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"})
+	if strings.Contains(out, "## Connected Apps") {
+		t.Fatalf("empty connected apps must not emit the heading")
 	}
 }
 

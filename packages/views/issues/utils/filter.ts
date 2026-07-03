@@ -1,5 +1,6 @@
-import type { Issue, IssueAssigneeGroup, IssueStatus, IssuePriority } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
@@ -23,6 +24,32 @@ export interface IssueFilters {
   showSubIssues?: boolean;
 }
 
+export interface IssueFilterState {
+  statusFilters: IssueStatus[];
+  priorityFilters: IssuePriority[];
+  assigneeFilters: ActorFilterValue[];
+  includeNoAssignee: boolean;
+  creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
+  labelFilters: string[];
+  workingOnly: boolean;
+  /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
+  showSubIssues?: boolean;
+}
+
+export interface IssueFilterContext {
+  activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
+  runningIssueIds?: ReadonlySet<string>;
+}
+
+function issueIsWorking(issueId: string, context: IssueFilterContext) {
+  if (context.activityByIssueId) {
+    return context.activityByIssueId.get(issueId)?.isWorking === true;
+  }
+  return context.runningIssueIds?.has(issueId) === true;
+}
+
 /**
  * Filter issues using positive selection model.
  * Empty arrays = no filter (show all). Non-empty = show only matching.
@@ -32,21 +59,25 @@ export interface IssueFilters {
  * - When assigneeFilters has items → show only those assignees' issues
  * - When both → show matching assignees + unassigned
  */
-export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues } = filters;
+export function applyIssueFilters(
+  issues: Issue[],
+  filters: IssueFilterState,
+  context: IssueFilterContext = {},
+): Issue[] {
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
-  const applyAgentRunning = agentRunningFilter === true;
+  const applyWorkingOnly = workingOnly === true;
+  const hideSubIssues = filters.showSubIssues === false;
 
   return issues.filter((issue) => {
-    if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
+    if (applyWorkingOnly && !issueIsWorking(issue.id, context))
       return false;
 
-    // "Show sub-issues" off → keep only top-level issues.
-    if (showSubIssues === false && issue.parent_issue_id) return false;
+    if (hideSubIssues && issue.parent_issue_id) return false;
 
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
@@ -101,20 +132,32 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
   });
 }
 
+export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
+  return applyIssueFilters(
+    issues,
+    {
+      statusFilters: filters.statusFilters,
+      priorityFilters: filters.priorityFilters,
+      assigneeFilters: filters.assigneeFilters,
+      includeNoAssignee: filters.includeNoAssignee,
+      creatorFilters: filters.creatorFilters,
+      projectFilters: filters.projectFilters,
+      includeNoProject: filters.includeNoProject,
+      labelFilters: filters.labelFilters,
+      workingOnly: filters.agentRunningFilter === true,
+      showSubIssues: filters.showSubIssues,
+    },
+    { runningIssueIds: filters.runningIssueIds },
+  );
+}
+
 /**
- * Apply the client-only display filters to assignee-grouped board data.
- *
- * The assignee-grouped board renders from the server-provided `groups` array
- * rather than the flat `filterIssues` output, so display toggles that live
- * purely on the client — "Show sub-issues" and the "agents working" quick
- * filter — must be re-applied here or they silently bypass the assignee board.
- * Only these two are handled: everything else (status, priority, label, …) is
- * already enforced server-side when the groups are fetched, and re-running it
- * here could double-filter against stale query params.
- *
- * Filtered groups get their `total` recomputed and emptied groups dropped. When
- * neither toggle is active the original array is returned by reference so
- * callers don't churn renders.
+ * Re-apply the client-only display filters to a server-grouped response.
+ * The assignee-grouped board renders straight from `groups`, bypassing the
+ * flat `applyIssueFilters` output, so the "Show sub-issues" toggle and the
+ * agents-working quick filter must be applied per group here. Recomputes
+ * each group's total and drops emptied groups. Returns the input by
+ * reference when no client filter is active.
  */
 export function filterAssigneeGroups(
   groups: IssueAssigneeGroup[] | undefined,

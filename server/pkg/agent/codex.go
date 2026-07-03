@@ -312,9 +312,10 @@ func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *
 // servers to render (empty/null mcp_config) and the caller should only
 // strip the prior managed block.
 //
-// Claude-style camelCase keys (`args`, `env`, `command`, `url`) pass
-// through verbatim — Codex's config schema happens to use the same
-// names today. If they ever diverge, rename here rather than in the UI.
+// Stdio server keys (`args`, `env`, `command`) pass through verbatim —
+// Codex's config schema happens to use the same names today. Remote HTTP
+// servers use Codex-specific keys, so they are normalised here rather than
+// leaking provider details into the UI/dispatch layer.
 func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", false, nil
@@ -349,6 +350,7 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 		if serverVal == nil {
 			return "", false, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
 		}
+		serverVal = normalizeCodexMcpServerConfig(serverVal)
 		if i > 0 {
 			sb.WriteString("\n")
 		}
@@ -374,6 +376,37 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 	sb.WriteString(multicaCodexMcpEndMarker)
 	sb.WriteString("\n")
 	return sb.String(), true, nil
+}
+
+func normalizeCodexMcpServerConfig(server map[string]any) map[string]any {
+	if !isCodexRemoteMcpServer(server) {
+		return server
+	}
+
+	normalized := make(map[string]any, len(server)+1)
+	for k, v := range server {
+		switch k {
+		case "type":
+			continue
+		case "headers":
+			if _, ok := server["http_headers"]; !ok {
+				normalized["http_headers"] = v
+			}
+		default:
+			normalized[k] = v
+		}
+	}
+	normalized["experimental_use_rmcp_client"] = true
+	return normalized
+}
+
+func isCodexRemoteMcpServer(server map[string]any) bool {
+	if typ, ok := server["type"].(string); ok && strings.EqualFold(typ, "http") {
+		return true
+	}
+	_, hasURL := server["url"]
+	_, hasCommand := server["command"]
+	return hasURL && !hasCommand
 }
 
 // stripCodexUserMcpServerTables removes every `[mcp_servers.*]` table
@@ -833,13 +866,38 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// MUL-2339 — Trump's constraint that the three injection points
 		// must not drift independently).
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		waitingForTurn := true
+		var timeoutDiagnostic codexTimeoutDiagnostic
+		var processExitErr error
+		finishTurn := func(aborted bool) {
+			waitingForTurn = false
+			switch {
+			case aborted:
+				finalStatus = "aborted"
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalError = errMsg
+				} else {
+					finalError = "turn was aborted"
+				}
+			default:
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalStatus = "failed"
+					finalError = errMsg
+				}
+			}
+		}
 		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
-			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
-			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			select {
+			case aborted := <-turnDone:
+				finishTurn(aborted)
+			default:
+				drainAndWait() // flush os/exec stderr goroutine before sampling Tail
+				finalStatus = "failed"
+				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		lastSemanticActivity := time.Now()
@@ -861,26 +919,6 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 		defer stopFirstTurnNoProgressTimer()
 
-		waitingForTurn := true
-		var timeoutDiagnostic codexTimeoutDiagnostic
-		var processExitErr error
-		finishTurn := func(aborted bool) {
-			waitingForTurn = false
-			switch {
-			case aborted:
-				finalStatus = "aborted"
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalError = errMsg
-				} else {
-					finalError = "turn was aborted"
-				}
-			default:
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalStatus = "failed"
-					finalError = errMsg
-				}
-			}
-		}
 		finishRunContextDone := func() {
 			waitingForTurn = false
 			if runCtx.Err() == context.DeadlineExceeded {
@@ -1401,6 +1439,11 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	case res := <-pr.ch:
 		return res.result, res.err
 	case <-processDone:
+		select {
+		case res := <-pr.ch:
+			return res.result, res.err
+		default:
+		}
 		c.mu.Lock()
 		delete(c.pending, id)
 		err := c.processErr

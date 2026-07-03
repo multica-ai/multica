@@ -681,19 +681,13 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 	}
 	switch p.Action {
 	case "deleted", "suspend":
-		// User removed the App on GitHub — drop our row so the workspace
-		// stops trusting this installation_id. We DELETE … RETURNING so
-		// the broadcast can be scoped to the right workspace; events
-		// without WorkspaceID are dropped by the realtime listener and
-		// would leave already-open Settings tabs stale.
+		// User removed/suspended the App on GitHub — trust in this
+		// installation_id is gone entirely, so drop every workspace binding.
+		// We DELETE … RETURNING so each broadcast can be scoped to its
+		// workspace; events without WorkspaceID are dropped by the realtime
+		// listener and would leave already-open Settings tabs stale.
 		deleted, err := h.Queries.DeleteGitHubInstallationByInstallationID(ctx, p.Installation.ID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				if err := h.Queries.DeletePendingGitHubInstallation(ctx, p.Installation.ID); err != nil {
-					slog.Warn("github: delete pending installation failed", "err", err, "installation_id", p.Installation.ID)
-				}
-				return // already gone — nothing to broadcast
-			}
 			slog.Warn("github: delete installation failed", "err", err, "installation_id", p.Installation.ID)
 			return
 		}
@@ -703,10 +697,13 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		// Broadcast the internal row id only — the numeric installation_id is
 		// a management handle that non-admin members are not allowed to see.
 		// The frontend invalidates the installations query on this event and
-		// does not read the broadcast payload directly.
-		h.publish(protocol.EventGitHubInstallationDeleted, uuidToString(deleted.WorkspaceID), "system", "", map[string]any{
-			"id": uuidToString(deleted.ID),
-		})
+		// does not read the broadcast payload directly. One broadcast per
+		// deleted binding so every affected workspace's Settings tab refreshes.
+		for _, row := range deleted {
+			h.publish(protocol.EventGitHubInstallationDeleted, uuidToString(row.WorkspaceID), "system", "", map[string]any{
+				"id": uuidToString(row.ID),
+			})
+		}
 	case "created", "new_permissions_accepted", "unsuspend":
 		login, accountType, avatar, ok := githubInstallationAccountFromPayload(p)
 		if !ok {
@@ -714,33 +711,33 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 			return
 		}
 
-		// We don't know which workspace this maps to from the webhook alone.
-		// If the setup callback has not created the workspace binding yet,
+		// We don't know which workspace(s) this maps to from the webhook
+		// alone. If no setup callback has created a workspace binding yet,
 		// keep the account metadata and let the callback consume it after it
 		// creates github_installation.
-		existing, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+		existing, err := h.Queries.ListGitHubInstallationsByInstallationID(ctx, p.Installation.ID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				if _, err := h.Queries.UpsertPendingGitHubInstallation(ctx, db.UpsertPendingGitHubInstallationParams{
-					InstallationID:   p.Installation.ID,
-					AccountLogin:     login,
-					AccountType:      accountType,
-					AccountAvatarUrl: ptrToText(avatar),
-				}); err != nil {
-					slog.Warn("github: store pending installation failed", "err", err, "installation_id", p.Installation.ID)
-				}
-				return
-			}
 			slog.Warn("github: lookup installation failed", "err", err, "installation_id", p.Installation.ID)
 			return
 		}
-		inst, err := h.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-			WorkspaceID:      existing.WorkspaceID,
+		if len(existing) == 0 {
+			if _, err := h.Queries.UpsertPendingGitHubInstallation(ctx, db.UpsertPendingGitHubInstallationParams{
+				InstallationID:   p.Installation.ID,
+				AccountLogin:     login,
+				AccountType:      accountType,
+				AccountAvatarUrl: ptrToText(avatar),
+			}); err != nil {
+				slog.Warn("github: store pending installation failed", "err", err, "installation_id", p.Installation.ID)
+			}
+			return
+		}
+		// Refresh the account display metadata across every workspace binding;
+		// workspace_id and connected_by_id are left untouched.
+		refreshed, err := h.Queries.UpdateGitHubInstallationAccountByInstallationID(ctx, db.UpdateGitHubInstallationAccountByInstallationIDParams{
 			InstallationID:   p.Installation.ID,
 			AccountLogin:     login,
 			AccountType:      accountType,
 			AccountAvatarUrl: ptrToText(avatar),
-			ConnectedByID:    existing.ConnectedByID,
 		})
 		if err != nil {
 			slog.Warn("github: refresh installation failed", "err", err)
@@ -754,10 +751,12 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		// callback with the "unknown" placeholder (e.g. because GitHub
 		// App JWT auth wasn't configured, or this webhook arrived after
 		// the user already loaded the page) would stay visibly stale
-		// until the user manually refreshes.
-		h.publish(protocol.EventGitHubInstallationCreated, uuidToString(inst.WorkspaceID), "system", "", map[string]any{
-			"installation": githubInstallationToBroadcast(inst),
-		})
+		// until the user manually refreshes. One broadcast per bound workspace.
+		for _, inst := range refreshed {
+			h.publish(protocol.EventGitHubInstallationCreated, uuidToString(inst.WorkspaceID), "system", "", map[string]any{
+				"installation": githubInstallationToBroadcast(inst),
+			})
+		}
 	}
 }
 
@@ -809,15 +808,20 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	if p.Installation.ID == 0 {
 		return
 	}
-	inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+	insts, err := h.Queries.ListGitHubInstallationsByInstallationID(ctx, p.Installation.ID)
 	if err != nil {
-		// Webhook from an installation we never wired up — nothing we
-		// can attribute to a workspace, so drop it silently.
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("github: lookup installation failed", "err", err)
-		}
+		slog.Warn("github: lookup installation failed", "err", err)
 		return
 	}
+	if len(insts) == 0 {
+		// Webhook from an installation we never wired up — nothing we
+		// can attribute to a workspace, so drop it silently.
+		return
+	}
+	// One installation can be bound to several workspaces; delivery is routed
+	// per-repo, so the binding only supplies the delivering account and the
+	// fallback workspace. The oldest binding is a deterministic fallback.
+	inst := insts[0]
 
 	// Route to the workspace that owns this repo, not the installation's single
 	// workspace — one installation can serve repos across several workspaces.
@@ -1013,13 +1017,17 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 	if p.Installation.ID == 0 {
 		return
 	}
-	inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+	insts, err := h.Queries.ListGitHubInstallationsByInstallationID(ctx, p.Installation.ID)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("github: lookup installation failed", "err", err)
-		}
+		slog.Warn("github: lookup installation failed", "err", err)
 		return
 	}
+	if len(insts) == 0 {
+		return
+	}
+	// Oldest binding is the deterministic routing fallback; see
+	// handlePullRequestEvent.
+	inst := insts[0]
 	if len(p.CheckSuite.PullRequests) == 0 {
 		// Forks emit suites whose `pull_requests` array is empty for
 		// the upstream repo. We have no way to attribute the result
@@ -1229,11 +1237,13 @@ const githubWebhookHost = "github.com"
 
 // resolveWorkspaceForRepo routes a delivery to the workspace whose repos
 // registry owns github.com/owner/name, so one installation can serve repos in
-// several workspaces; falls back to the installation workspace when unmatched.
-// The registry is admin-editable, so it overrides the verified installation
-// binding only when owner == the delivering account (accountLogin) and the host
-// matches — no cross-account capture. On ties the installation's own workspace
-// wins, else the lowest id (query is ORDER BY id).
+// several workspaces; falls back to the caller-supplied workspace when
+// unmatched (callers pass the installation's oldest binding, since an
+// installation may now be bound to several workspaces). The registry is
+// admin-editable, so it overrides the verified installation binding only when
+// owner == the delivering account (accountLogin) and the host matches — no
+// cross-account capture. On ties the fallback workspace wins if it is among the
+// matches, else the lowest id (query is ORDER BY id).
 func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.UUID, accountLogin, owner, name string) pgtype.UUID {
 	owner = strings.TrimSpace(owner)
 	name = strings.TrimSpace(name)
