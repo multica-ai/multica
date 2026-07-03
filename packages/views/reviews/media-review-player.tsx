@@ -166,6 +166,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         The canvas editor is absolutely positioned exactly over the rendered pixels of the media. 
         pointer-events-auto ensures it catches mouse events for drawing. 
       */}
+      {/* @ts-ignore */}
       <canvas-drawing-editor 
         ref={canvasRef as any}
         class="absolute pointer-events-auto touch-none"
