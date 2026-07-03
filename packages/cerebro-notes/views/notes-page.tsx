@@ -883,7 +883,12 @@ export function NoteEditor({
   // Edit lock: while this note is open and the flag is on, hold the lock and
   // heartbeat. If someone else holds it live, drop to read-only + offer takeover.
   const editLock = useNoteEditLock(note.id, lockEnabled);
-  const readOnly = lockEnabled && editLock.blockedByOther;
+  // FIR-2595: the note is read-only when the caller lacks edit access — a viewer,
+  // or someone with no 'editor'/'full_access' grant on its folder — so they get a
+  // real read-only editor instead of a field that silently fails on save. It is
+  // also read-only while another user holds the live edit lock.
+  const readOnly =
+    note.can_edit === false || (lockEnabled && editLock.blockedByOther);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: comments = [] } = useNoteComments(note.id);

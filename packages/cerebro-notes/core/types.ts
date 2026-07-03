@@ -25,6 +25,13 @@ export const NoteSchema = z.object({
     .catch("private")
     .default("private"),
   pinned: z.boolean().default(false),
+  // FIR-2595: whether THIS caller may edit and save the note, driven by folder
+  // access (owner, or an 'editor'/'full_access' grant on the note's folder). The
+  // editor renders read-only when false instead of letting a viewer type into a
+  // field that silently fails to save. Defaults to true so older server builds
+  // (and lightweight list rows that omit it) keep today's editable behavior; the
+  // single-note read the editor uses always sends the real value.
+  can_edit: z.boolean().default(true),
   // FIR-1852: a note now shares the same issue/project scope a document carries,
   // so the editor renders "on FIR-XXX" and the note lands in the issue's
   // document list. Defaulted to null for older server builds that omit them.

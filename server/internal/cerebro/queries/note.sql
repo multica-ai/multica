@@ -79,6 +79,25 @@ SELECT EXISTS (
       )
 ) AS allowed;
 
+-- name: CanUserEditNote :one
+-- Returns true when the user may EDIT and SAVE the note (not just read it).
+-- FIR-2595 Phase 4: edit/save is driven by folder access. A user may write when
+--   * they own the note (baseline — nobody is ever locked out of their own note,
+--     including personal notes at the workspace root that carry no folder), OR
+--   * they hold an 'editor' or 'full_access' Collections grant on the note's
+--     folder or any ancestor. A 'viewer' grant grants read only, never write.
+-- This is purely ADDITIVE to the legacy owner-only write gate: it only ever
+-- GRANTS write to folder editors; it never removes anyone's existing access.
+SELECT EXISTS (
+    SELECT 1 FROM cerebro_note n
+    JOIN artifact a ON a.id = n.artifact_id
+    WHERE n.artifact_id = $1
+      AND (
+        n.owner_id = $2
+        OR cerebro_artifact_folder_grant_role(a.folder_id, $2) IN ('editor', 'full_access')
+      )
+) AS allowed;
+
 -- name: CanUserCommentOnArtifact :one
 -- FIR-1621: comments are not note-only — a plain document (any artifact, kind
 -- != 'note') can carry comments too, so the same note-comments panel works in

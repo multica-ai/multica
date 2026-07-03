@@ -302,8 +302,15 @@ type NoteResponse struct {
 	ProjectID *string `json:"project_id"`
 	// FIR-2145: populated on list reads; 0 on single-note detail reads.
 	CommentCount int64  `json:"comment_count"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	// FIR-2595: whether THIS caller may edit and save the note. Driven by folder
+	// access (owner, or an 'editor'/'full_access' grant on the note's folder).
+	// Populated on the single-note reads (create/get/update) that feed the
+	// editor; the editor uses it to render read-only for viewers instead of
+	// letting them type into a field that silently fails to save. Absent on the
+	// lightweight list rows (the editor always refetches the single note).
+	CanEdit   bool   `json:"can_edit"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // --- handlers ---
@@ -458,6 +465,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		CanEdit:     true, // the creator owns the note
 		IssueID:     uuidPtr(artifact.IssueID),
 		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
@@ -581,6 +589,17 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
+	// FIR-2595: tell the editor whether this caller may edit and save, so a
+	// viewer gets a read-only editor instead of a field that silently fails on
+	// save. Owner or an 'editor'/'full_access' folder grant → true.
+	canEdit, err := h.Cerebro.CanUserEditNote(r.Context(), cerebrodb.CanUserEditNoteParams{
+		ArtifactID: noteID,
+		OwnerID:    ownerUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load note")
+		return
+	}
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(artifact.ID),
 		WorkspaceID: uuidStr(artifact.WorkspaceID),
@@ -590,6 +609,7 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		CanEdit:     canEdit,
 		IssueID:     uuidPtr(artifact.IssueID),
 		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
@@ -597,9 +617,11 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateNote edits a note's title and/or body. Only the owner may edit. The
-// body/title live on the underlying artifact, so this loads the artifact,
-// merges the provided fields, and writes it back via the upstream update.
+// UpdateNote edits a note's title and/or body. The owner may always edit; a
+// user with an 'editor' / 'full_access' Collections grant on the note's folder
+// (or an ancestor) may edit and save too (FIR-2595). The body/title live on the
+// underlying artifact, so this loads the artifact, merges the provided fields,
+// and writes it back via the upstream update.
 func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -613,7 +635,7 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, noteID, ownerUUID) {
+	if !h.requireCanEdit(w, r, noteID, ownerUUID) {
 		return
 	}
 	var req updateNoteRequest
@@ -689,6 +711,7 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		CanEdit:     true, // caller just passed requireCanEdit
 		IssueID:     uuidPtr(updated.IssueID),
 		ProjectID:   uuidPtr(updated.ProjectID),
 		CreatedAt:   tsStr(updated.CreatedAt),
@@ -860,6 +883,36 @@ func (h *Handler) scope(w http.ResponseWriter, r *http.Request, userID string) (
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	return wsUUID, ownerUUID, true
+}
+
+// requireCanEdit returns true when the caller may edit and save the note.
+// FIR-2595 Phase 4: edit/save is driven by folder access — the caller may write
+// when they own the note (baseline; covers personal root notes) OR they hold an
+// 'editor' / 'full_access' Collections grant on the note's folder or an
+// ancestor. A 'viewer' grant is read-only. This is additive to the legacy
+// owner-only gate: it only ever GRANTS write to folder editors.
+func (h *Handler) requireCanEdit(w http.ResponseWriter, r *http.Request, noteID, callerUUID pgtype.UUID) bool {
+	if _, err := h.Cerebro.GetNote(r.Context(), noteID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "note not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to load note")
+		}
+		return false
+	}
+	allowed, err := h.Cerebro.CanUserEditNote(r.Context(), cerebrodb.CanUserEditNoteParams{
+		ArtifactID: noteID,
+		OwnerID:    callerUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load note")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "you don't have edit access to this note")
+		return false
+	}
+	return true
 }
 
 // requireOwner returns true only when the caller owns the note.
