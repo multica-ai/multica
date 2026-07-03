@@ -221,11 +221,11 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 1.2 Asset Upload
 
-- [ ] **Backend:** Pre-signed URL generation endpoint for S3 direct upload (bypass Next.js API routes for large files)
-- [ ] **Backend:** Upload completion webhook — extract metadata (dimensions, duration via ffprobe or similar)
+- [x] **Backend:** Pre-signed URL generation endpoint for S3 direct upload (bypass Next.js API routes for large files)
+- [x] **Backend:** Upload completion webhook — extract metadata (dimensions, duration via ffprobe or similar)
 - [ ] **Backend:** Thumbnail generation for videos (extract frame at 1s mark)
-- [ ] **Core:** `packages/core/reviews/` — queries, mutations, upload hooks
-- [ ] **UI:** Drag-and-drop upload zone in issue detail page
+- [x] **Core:** `packages/core/reviews/` — queries, mutations, upload hooks
+- [x] **UI:** Drag-and-drop upload zone in issue detail page
 - [ ] **UI:** Upload progress indicator with cancel support
 
 ### 1.3 Media Player Component
@@ -265,15 +265,15 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 ### 1.6 Review Workflow
 
 - [ ] **Asset versioning:** Upload new version of an asset (v1, v2, v3...) with version switcher
-- [ ] **Approval status:** Pending → Approved / Changes Requested per asset
-- [ ] **Bulk approval:** Approve all assets on an issue at once
-- [ ] **Notifications:** Notify assignees when new review comments are added
-- [ ] **WebSocket:** Real-time comment updates via existing WS infrastructure
+- [x] **Approval status:** Pending → Approved / Changes Requested per asset
+- [x] **Bulk approval:** Approve all assets on an issue at once
+- [x] **Notifications:** Notify assignees when new review comments are added
+- [x] **WebSocket:** Real-time comment updates via existing WS infrastructure
 
 ### 1.7 Integration with Issues
 
-- [ ] **Issue detail:** "Review" tab alongside existing comments/PR tabs
-- [ ] **Issue status:** Option to block issue completion until all review assets are approved
+- [x] **Issue detail:** "Review" tab alongside existing comments/PR tabs
+- [x] **Issue status:** Option to block issue completion until all review assets are approved
 - [ ] **Board view:** Visual indicator on issue cards that have pending reviews
 - [ ] **Agent integration:** Agents can view review comments and respond (future enhancement)
 
