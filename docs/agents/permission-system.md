@@ -66,18 +66,29 @@ Keep these apart. This doc answers question 2 honestly.
 > `cerebro_member_override` above is SELF-only — it lets a member's own row
 > override their group, never anyone else's. A separate, distinct mechanism now
 > exists for authoring ANOTHER member's access: two ordinary tool-keys,
-> `manage_group_overrides` and `manage_workspace_overrides`, resolved through the
-> same chain as `manage_credential_access` (Base=Allow, tighten-only — grant one
-> by authoring an Allow row for it). Holding either lets that user author a
+> `manage_group_overrides` and `manage_workspace_overrides`. Unlike
+> `manage_credential_access` (Base=Allow, tighten-only), these two resolve
+> through `Store.ResolveOptIn` — **OFF by default; granted only by an explicit
+> Allow at the User or Group layer.** A Base=Allow check here would make every
+> workspace member hold override power with zero rows authored, exactly
+> backwards for "a permission you GIVE to users" (caught in adversarial
+> review, Tine, 2026-07-03, finding 1). Holding either lets that user author a
 > LayerUser `/tool-policy` row for someone else (general tool-policy AND
 > Connections share this one write path) — group-scope reaches only a user who
-> shares a group with the actor, workspace-scope reaches anyone. **Hard rule,
-> enforced in `cerebroRequireDelegatedOverridePolicy` /
-> `toolpolicy.CanAuthorDelegatedOverride`: neither capability may EVER be used on
-> the holder's own row — self-target is always rejected**, independent of scope.
-> Workspace owner/admin is unaffected and still bypasses both capabilities (as
-> before). Credentials remain untouched by this — `credential.*` keys stay on
-> `manage_credential_access` only.
+> shares a group with the actor, workspace-scope reaches any OTHER real member
+> of THIS workspace (a target UUID that only resolves to membership in a
+> different workspace is rejected — finding 2 of the same review). **Hard
+> rule, enforced in `cerebroRequireDelegatedOverridePolicy` /
+> `toolpolicy.CanAuthorDelegatedOverride`: neither capability may EVER be used
+> on the holder's own row — self-target is always rejected**, independent of
+> scope. Workspace owner/admin is a deliberate, documented exception and still
+> bypasses both capabilities (including on their own row) — every other
+> capability gate in this file (`manage_credential_access`,
+> `manage_connections`, `create_local_runtime`) checks admin first too; this is
+> not a gap in the self-target rule, which is scoped to capability holders, not
+> to admins who already hold unrestricted authority. Credentials remain
+> untouched by this — `credential.*` keys stay on `manage_credential_access`
+> only.
 
 ---
 

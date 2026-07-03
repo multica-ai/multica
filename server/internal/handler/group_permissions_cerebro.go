@@ -32,6 +32,7 @@ import (
 	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy resolve for local runtime creation.
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated" // CEREBRO-PATCH(delegated-override-grant): FIR-2351 workspace-membership check for workspace-scope overrides.
 )
 
 // GroupPermissionsInvoker is the upstream-side seam that the cerebro group-
@@ -416,11 +417,21 @@ func (h *Handler) toolPolicyWriteIsCredential(r *http.Request) bool {
 // cerebroRequireDelegatedOverridePolicy gates a LayerUser /tool-policy write
 // on the two delegated override capabilities (FIR-2351): manage_group_overrides
 // and manage_workspace_overrides, resolved through the unified tool-policy
-// chain exactly like manage_credential_access. Admins always pass unchanged.
+// chain exactly like manage_credential_access.
 //
-// This is the ONLY place the self-target rule from the product decision is
-// enforced ("en bruger skal ikke kunne override sin egen adgang, men andre
-// brugere med den permission skal kunne det") — see
+// DELIBERATE, DOCUMENTED EXCEPTION: workspace owner/admin bypasses this gate
+// entirely, INCLUDING when subjectID == the admin's own user id — same as
+// every other capability gate in this file (cerebroRequireCredentialGrantPolicy,
+// cerebroRequireConnectionsPolicy, cerebroRequireLocalRuntimePolicy all check
+// IsAdmin first). The self-target ban below is a property of the two NEW
+// delegated capabilities, not a blanket rule over every actor in the system —
+// Jesper's rule was scoped to "andre brugere MED DEN PERMISSION" (other users
+// WITH THAT PERMISSION), i.e. capability holders, not admins who already hold
+// unrestricted authority here. See TestCerebroRequireDelegatedOverridePolicy_AdminCanTargetSelf.
+//
+// For everyone else: this is the ONLY place the self-target rule from the
+// product decision is enforced ("en bruger skal ikke kunne override sin egen
+// adgang, men andre brugere med den permission skal kunne det") — see
 // toolpolicy.CanAuthorDelegatedOverride for the pure rule. targetUserID is the
 // write's subject_id; callers MUST have already confirmed the write is
 // LayerUser before calling this (Group/Workspace/Runtime/Agent/System rows
@@ -447,29 +458,49 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 		return false
 	}
 
+	// FIR-2351 fix (Tine, adversarial review, finding 1): these are OPT-IN
+	// capabilities — nobody holds either until an explicit Allow is authored
+	// at the User or Group layer. ResolveOptIn (not Resolve/Base=Allow) is the
+	// correct primitive: Resolve's Base=Allow default would make every
+	// workspace member hold override power by default with no row at all,
+	// which is exactly backwards for "a permission you GIVE to users."
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	wsEff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	hasWorkspaceScope, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
 		UserID:      viewer.UserID,
-		Base:        toolpolicy.SettingAllow,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
-	grpEff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	hasGroupScope, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     toolpolicy.CapabilityManageGroupOverrides,
 		UserID:      viewer.UserID,
-		Base:        toolpolicy.SettingAllow,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
-	hasWorkspaceScope := wsEff.Setting == toolpolicy.SettingAllow
-	hasGroupScope := grpEff.Setting == toolpolicy.SettingAllow
+	if !hasWorkspaceScope && !hasGroupScope {
+		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin")
+		return false
+	}
+
+	// FIR-2351 fix (Tine, adversarial review, finding 2): workspace-scope must
+	// resolve to a REAL member of THIS workspace, not any syntactically valid
+	// UUID — otherwise it could author a row keyed to a non-member or a user
+	// from a different workspace. Demote (not reject outright) so a holder of
+	// BOTH capabilities still falls through to group-scope correctly.
+	if hasWorkspaceScope {
+		if _, merr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      targetUserID,
+			WorkspaceID: wsUUID,
+		}); merr != nil {
+			hasWorkspaceScope = false
+		}
+	}
 
 	var actorGroups, targetGroups []pgtype.UUID
 	if h.GroupPermissions != nil && hasGroupScope {

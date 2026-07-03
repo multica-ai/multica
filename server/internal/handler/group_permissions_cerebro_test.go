@@ -595,3 +595,128 @@ func TestCerebroViewerOwnsAgentWithCapability_OwnerWithoutCapability(t *testing.
 		t.Fatalf("owner without create_agent: expected (false, nil), got (%v, %v)", exempt, err)
 	}
 }
+
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 DB-backed integration
+// coverage for the two adversarial-review fixes (Tine, 2026-07-03):
+//   - finding 1: the two capabilities are opt-in (ResolveOptIn) — a plain
+//     member with NO authored Allow row must be denied, not allowed by a
+//     Base=Allow default.
+//   - finding 2: workspace-scope must resolve to a real member of THIS
+//     workspace — a syntactically valid UUID belonging only to a different
+//     workspace must be denied.
+//
+// Also pins the deliberate admin-bypass-before-self-check exception (see the
+// function doc on cerebroRequireDelegatedOverridePolicy): an owner/admin may
+// still target their own row, unaffected by the new capabilities.
+func TestCerebroRequireDelegatedOverridePolicy_Integration(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var actorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Override Actor', 'fir2351-override-actor@multica.test')
+		RETURNING id
+	`).Scan(&actorID); err != nil {
+		t.Fatalf("create actor user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("add actor as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, actorID)
+	})
+
+	var targetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Override Target', 'fir2351-override-target@multica.test')
+		RETURNING id
+	`).Scan(&targetID); err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, targetID); err != nil {
+		t.Fatalf("add target as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, targetID)
+	})
+
+	var foreignWorkspaceID, foreignTargetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('FIR-2351 Foreign Override Workspace', 'fir2351-foreign-override', 'workspace-scope membership test', 'FOV')
+		RETURNING id
+	`).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Foreign Target', 'fir2351-foreign-target@multica.test')
+		RETURNING id
+	`).Scan(&foreignTargetID); err != nil {
+		t.Fatalf("create foreign target user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, foreignTargetID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, foreignWorkspaceID, foreignTargetID); err != nil {
+		t.Fatalf("add foreign target as member of the foreign workspace: %v", err)
+	}
+
+	clearPolicy := func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = 'manage_workspace_overrides' AND subject_id = $2
+		`, testWorkspaceID, actorID)
+	}
+	clearPolicy()
+	t.Cleanup(clearPolicy)
+
+	targetUUID := mustTestUUID(t, targetID)
+	foreignTargetUUID := mustTestUUID(t, foreignTargetID)
+	actorUUID := mustTestUUID(t, actorID)
+	newActorReq := func() *http.Request {
+		return newRequestAsUser(actorID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	}
+
+	// Finding 1: no Allow row anywhere — the gate must default CLOSED.
+	w := httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("no Allow row: gate must be opt-in (default closed), got allowed, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
+		VALUES ($1, 'manage_workspace_overrides', 'user', $2, '', 'allow')
+	`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("seed workspace-scope allow for actor: %v", err)
+	}
+
+	// With the Allow row in place, workspace-scope reaches a real in-workspace target.
+	w = httptest.NewRecorder()
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("workspace-scope: expected allow for a real in-workspace target, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Finding 2: workspace-scope must NOT reach a user who is not a member of THIS workspace.
+	w = httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, foreignTargetUUID) {
+		t.Fatalf("workspace-scope: must deny a target outside this workspace, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Self-target stays banned even for a workspace-scope holder.
+	w = httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, actorUUID) {
+		t.Fatalf("workspace-scope holder must never target their own row, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Deliberate exception: workspace owner/admin (testUserID) may still act on
+	// their OWN row via this same gate — the admin bypass runs before the
+	// self-target check by design (see the function doc).
+	w = httptest.NewRecorder()
+	adminSelfReq := newRequestAsUser(testUserID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, adminSelfReq, testWorkspaceID, mustTestUUID(t, testUserID)) {
+		t.Fatalf("admin must still be able to target their own row (deliberate exception), status=%d body=%q", w.Code, w.Body.String())
+	}
+}
