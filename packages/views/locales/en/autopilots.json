@@ -276,8 +276,6 @@
     "section_assignee": "Assignee",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
-    "section_team": "Team",
-    "no_team": "No team",
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",
@@ -331,7 +329,9 @@
       "thursday": "Thursday",
       "friday": "Friday",
       "saturday": "Saturday"
-    }
+    },
+    "title_required": "Title is required",
+    "assignee_required": "An assignee is required — pick an agent or squad"
   },
   "trigger_config": {
     "frequencies": {

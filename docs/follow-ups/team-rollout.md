@@ -58,3 +58,22 @@
 - [ ] 撤销:Linear 移动支持 Cmd+Z,我们无 undo 体系,记为已知差异。
 - [ ] `apps/docs/content/docs/developers/conventions.mdx:73` issue 编号章节仍是旧语义(workspace 前缀、最长 10 位、改前缀重编号),需按 team key(≤7 位、per-team 编号、编号不变)重写。
 - [ ] issue 详情页 team 字段展示(`team_key`/`team_name` 有类型无 UI 消费点)—— 本次加 Properties 行后即覆盖,验证后可勾掉。
+
+## 全产品面扫描补充(2026-07-03,对照 Linear)
+
+### P1 — 用户会很快撞上
+- [ ] 邀请成员时选团队(Linear 同款):Invitation 加 team_ids,AcceptInvitation 按其入队(现在只进默认团队)。成员管理闭环的最大剩余豁口。
+- [ ] 全局搜索(⌘K)的 team facet:按 team 过滤/分组搜索结果。
+- [ ] 移动端 team parity:identifier 显示、team 筛选、创建归属(mobile 目前只有 schema 字段)。按 apps/mobile/CLAUDE.md 流程单独排期。
+
+### P2 — 架构已留位,按需接线
+- [ ] Slack 频道 ↔ team 路由:channel 配置加 team_id,`/issue` 建到对应团队(quick-create 已支持显式 team,纯配置接线;现在一律默认团队)。
+- [ ] 订阅整个 team(入队即默认订阅该团队新 issue)—— membership 表已就位,通知系统的自然延伸。
+- [ ] team 级 dashboard/usage 统计(数据列已在,加 group-by)。
+- [ ] 团队 unarchive(现在只能归档不能恢复;一个端点 + 列表按钮)。
+- [ ] GitHub 仓库 ↔ team 关联(Linear 用于自动化路由;暂无必要)。
+
+### 有意不做(决策记录,勿误判为遗漏)
+- per-team workflow/状态、team 级 labels、cycles:Linear 换 team 清理复杂度的全部来源;我们 status/labels 为 workspace 级是刻意简化(清理判定准则见上文)。
+- 私有团队(team 作为可见性边界):v1 定为纯组织标签;若做,动整个查询层权限模型,属独立大项目。
+- squad/agent 不归属 team:workspace 资产、跨团队服务;其名下 issue 各有各的 team,无冲突。

@@ -601,17 +601,24 @@ function LoadingSkeleton() {
 // Page
 // ---------------------------------------------------------------------------
 
-export function AutopilotsPage() {
+// `teamId` narrows the list to that team's autopilots — used by the team
+// surface pages (/team/:key/autopilots). Client-side filter over the shared
+// list cache.
+export function AutopilotsPage({ teamId }: { teamId?: string } = {}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
   const {
-    data: autopilots = [],
+    data: allAutopilots = [],
     isLoading,
     error: listError,
     refetch: refetchList,
   } = useQuery(autopilotListOptions(wsId));
+  const autopilots = useMemo(
+    () => (teamId ? allAutopilots.filter((a) => a.team_id === teamId) : allAutopilots),
+    [allAutopilots, teamId],
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
@@ -967,8 +974,11 @@ export function AutopilotsPage() {
           mode="create"
           open={createOpen}
           onOpenChange={setCreateOpen}
-          initial={
-            selectedTemplate
+          initial={{
+            // Opening from a team surface injects that team as the seed —
+            // the dialog itself stays the same everywhere (switchable).
+            ...(teamId ? { team_id: teamId } : {}),
+            ...(selectedTemplate
               ? {
                   // Template title pulls from i18n so the user-visible default
                   // matches their locale, while the prompt body stays raw EN
@@ -976,8 +986,8 @@ export function AutopilotsPage() {
                   title: t(($) => $.templates[selectedTemplate.id].title),
                   description: selectedTemplate.prompt,
                 }
-              : undefined
-          }
+              : {}),
+          }}
           initialTriggerConfig={
             selectedTemplate
               ? {

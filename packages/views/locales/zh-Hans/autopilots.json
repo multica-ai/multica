@@ -276,8 +276,6 @@
     "section_assignee": "执行方",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
-    "section_team": "Team",
-    "no_team": "无 Team",
     "section_project": "关联项目",
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
@@ -331,7 +329,9 @@
       "thursday": "周四",
       "friday": "周五",
       "saturday": "周六"
-    }
+    },
+    "title_required": "需要填写标题",
+    "assignee_required": "需要选择执行者 —— 选择智能体或小队"
   },
   "trigger_config": {
     "frequencies": {

@@ -53,7 +53,7 @@ function ListGridHeader({
     <div
       role="row"
       className={cn(
-        "group/header sticky top-0 z-10 col-span-full grid h-9 grid-cols-subgrid items-center bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-gradient-to-b after:from-background after:to-transparent",
+        "group/header sticky top-0 z-10 col-span-full grid h-9 grid-cols-subgrid items-center bg-background",
         className,
       )}
       {...props}

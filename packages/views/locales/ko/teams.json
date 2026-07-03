@@ -7,7 +7,7 @@
     "create_first": "첫 팀 만들기"
   },
   "table": {
-    "key": "키",
+    "key": "식별자",
     "name": "이름",
     "issues": "이슈",
     "state": "상태",
@@ -28,17 +28,30 @@
   "dialog": {
     "create_title": "팀 만들기",
     "edit_title": "팀 편집",
-    "description": "팀은 이슈 식별자와 안정적인 작업 영역을 소유합니다. v1의 멤버십은 표시용입니다."
+    "description": "팀은 이슈 식별자와 안정적인 작업 영역을 소유합니다. v1의 멤버십은 표시용입니다.",
+    "tab_main": "기본 정보",
+    "tab_members": "멤버 ({{count}})",
+    "member_search": "멤버 검색…",
+    "creator_row": "생성자 · 리드",
+    "name_required": "이름을 입력해야 합니다",
+    "members_entry": "멤버",
+    "member_count": "{{count}}명 선택",
+    "members_pick_title": "멤버 선택",
+    "back": "뒤로"
   },
   "form": {
     "name": "이름",
     "name_placeholder": "Engineering",
-    "key": "키",
-    "key_hint": "1-7자의 대문자 또는 숫자이며, 첫 글자는 문자여야 합니다.",
-    "key_locked": "이미 이슈가 생성되어 이 키는 잠겨 있습니다.",
+    "key": "식별자",
+    "key_hint": "이 팀의 이슈 번호에 사용됩니다(예: ENG-123). 1-7자의 대문자 또는 숫자, 문자로 시작.",
+    "key_locked": "이슈가 생성된 후에는 식별자를 변경할 수 없습니다.",
     "icon": "아이콘",
     "description": "설명",
-    "description_placeholder": "이 팀이 담당하는 작업은 무엇인가요?"
+    "description_placeholder": "이 팀이 담당하는 작업은 무엇인가요?",
+    "members": "멤버",
+    "members_placeholder": "팀원 추가…",
+    "members_selected": "{{count}}명 선택됨",
+    "icon_name": "아이콘 및 이름"
   },
   "picker": {
     "placeholder": "팀",
@@ -49,5 +62,20 @@
   "toast_updated": "팀을 업데이트했습니다",
   "toast_archived": "팀을 보관했습니다",
   "toast_archive_failed": "팀을 보관하지 못했습니다",
-  "toast_save_failed": "팀을 저장하지 못했습니다"
+  "toast_save_failed": "팀을 저장하지 못했습니다",
+  "surface": {
+    "not_found": "팀을 찾을 수 없습니다"
+  },
+  "settings": {
+    "stats_title": "현황",
+    "stats_issues": "이슈",
+    "stats_projects": "프로젝트",
+    "stats_autopilots": "자동화",
+    "danger_title": "위험 구역",
+    "archive_hint": "보관하면 새 작업을 받지 않습니다. 기존 이슈는 계속 볼 수 있습니다.",
+    "members": "멤버",
+    "archive_confirm_title": "팀을 보관할까요?",
+    "archive_confirm_body": "모든 멤버를 제거하면 {{name}}이(가) 보관됩니다. 기존 이슈는 계속 볼 수 있습니다.",
+    "default_cannot_archive": "기본 팀은 보관할 수 없습니다"
+  }
 }

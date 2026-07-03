@@ -772,7 +772,10 @@ function ProjectBatchToolbar({
 // Page
 // ---------------------------------------------------------------------------
 
-export function ProjectsPage() {
+// `teamId` narrows the list to projects associated with that team — used by
+// the team surface pages (/team/:key/projects). Association is a creation-time
+// tag, so this stays a client-side filter over the shared list cache.
+export function ProjectsPage({ teamId }: { teamId?: string } = {}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -795,7 +798,11 @@ export function ProjectsPage() {
   const isCompact = viewMode === "compact";
   const isColVisible = (key: ProjectColumnKey) => !hiddenColumns.includes(key);
 
-  const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const { data: allProjects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const projects = useMemo(
+    () => (teamId ? allProjects.filter((p) => p.team_ids?.includes(teamId)) : allProjects),
+    [allProjects, teamId],
+  );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),

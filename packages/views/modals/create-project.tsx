@@ -99,7 +99,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
-  const workspaceName = workspace?.name;
   const wsPaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -329,7 +328,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
+            {/* Owning teams lead the breadcrumb — same slot as the issue
+                modal's team picker, multi-select since projects can span
+                teams. */}
+            <TeamMultiPicker
+              teamIds={teamIds}
+              onChange={setTeamIds}
+              triggerRender={<PillButton />}
+              align="start"
+            />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
@@ -576,13 +583,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               onOpenChange={setDueDatePickerOpen}
             />
           )}
-
-          <TeamMultiPicker
-            teamIds={teamIds}
-            onChange={setTeamIds}
-            triggerRender={<PillButton />}
-            align="start"
-          />
 
           <Popover
             open={repoPopoverOpen}

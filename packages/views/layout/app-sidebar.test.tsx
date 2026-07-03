@@ -162,6 +162,8 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: 
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
+vi.mock("@multica/core/teams/queries", () => ({ myTeamListOptions: () => ({ queryKey: ["teams"] }) }));
+vi.mock("@multica/core/teams/mutations", () => ({ useUpdateTeamMembership: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
@@ -225,7 +227,10 @@ describe("PinRow", () => {
       "data-active",
       "true",
     );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    // The workspace-wide Issues nav left with the team rollout, so the pin
+    // must be the ONLY active element — no nav entry lights up alongside it.
+    expect(container.querySelector('button[data-href="/acme/issues"]')).toBeNull();
+    expect(container.querySelectorAll('[data-active="true"]')).toHaveLength(1);
   });
 });
 

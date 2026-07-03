@@ -120,13 +120,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
+    // Shared links are identifier-canonical (readable, and they survive a
+    // team move via the server-side identifier alias); internal navigation
+    // keeps passing UUIDs to the same route.
+    const url = navigation.getShareableUrl(paths.issueDetail(issue?.identifier || issueId));
     if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
     } else {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
-  }, [paths, issueId, navigation, t]);
+  }, [paths, issueId, issue?.identifier, navigation, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;

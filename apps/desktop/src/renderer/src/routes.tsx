@@ -12,6 +12,12 @@ import {
   RuntimeSettingsPage,
 } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
+import {
+  TeamIssuesRoute,
+  TeamProjectsRoute,
+  TeamAutopilotsRoute,
+  TeamSettingsRoute,
+} from "./pages/team-surface-pages";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { TeamsPage } from "@multica/views/teams";
@@ -129,6 +135,15 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issues" },
           },
           {
+            // Canonical issue-detail route: identifier-first (/issue/NAI-3),
+            // also accepts a UUID.
+            path: "issue/:id",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
+            // Legacy alias — persisted tabs from older builds still point at
+            // /issues/:id; keep them opening instead of dropping the tab.
             path: "issues/:id",
             element: <IssueDetailPage />,
             handle: { title: "Issue" },
@@ -142,6 +157,26 @@ export const appRoutes: RouteObject[] = [
             path: "teams",
             element: <TeamsPage />,
             handle: { title: "Teams" },
+          },
+          {
+            path: "team/:teamKey/issues",
+            element: <TeamIssuesRoute />,
+            handle: { title: "Team issues" },
+          },
+          {
+            path: "team/:teamKey/projects",
+            element: <TeamProjectsRoute />,
+            handle: { title: "Team projects" },
+          },
+          {
+            path: "team/:teamKey/autopilots",
+            element: <TeamAutopilotsRoute />,
+            handle: { title: "Team autopilots" },
+          },
+          {
+            path: "team/:teamKey/settings",
+            element: <TeamSettingsRoute />,
+            handle: { title: "Team settings" },
           },
           {
             path: "projects/:id",

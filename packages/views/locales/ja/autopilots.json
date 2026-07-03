@@ -276,8 +276,6 @@
     "section_assignee": "担当者",
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
-    "section_team": "チーム",
-    "no_team": "チームなし",
     "section_project": "プロジェクト",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
@@ -331,7 +329,9 @@
       "thursday": "木曜日",
       "friday": "金曜日",
       "saturday": "土曜日"
-    }
+    },
+    "title_required": "タイトルが必要です",
+    "assignee_required": "実行者が必要です — エージェントまたはスクワッドを選択"
   },
   "trigger_config": {
     "frequencies": {

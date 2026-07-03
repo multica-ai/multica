@@ -33,6 +33,7 @@ import {
   CircleUser,
   FolderKanban,
   BarChart3,
+  MoreHorizontal,
   X,
   Zap,
   Users,
@@ -50,6 +51,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -81,6 +83,11 @@ import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
+import { myTeamListOptions } from "@multica/core/teams/queries";
+import { useUpdateTeamMembership } from "@multica/core/teams/mutations";
+import { useSidebarStore } from "@multica/core/layout/sidebar-store";
+import { TeamIcon } from "../teams/components/team-icon";
+import type { Team } from "@multica/core/types";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
@@ -119,7 +126,6 @@ type NavKey =
   | "inbox"
   | "chat"
   | "myIssues"
-  | "issues"
   | "teams"
   | "projects"
   | "autopilots"
@@ -135,12 +141,12 @@ type NavLabelKey =
   | "inbox"
   | "chat"
   | "my_issues"
-  | "issues"
   | "teams"
   | "projects"
   | "autopilots"
   | "agents"
   | "squads"
+  | "more"
   | "usage"
   | "runtimes"
   | "skills"
@@ -152,26 +158,157 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
+// The workspace-wide issues list left the nav with the team rollout: issues
+// live under their team (Teams section below) or under My Issues. Teams
+// management moved to Settings-adjacent /teams (reachable from the Teams
+// group), and Usage/Runtimes are demoted into the More subgroup.
+// Autopilots are team-scoped like issues (team_id NOT NULL, their output
+// lands in their team), so they live under each team below — no global
+// entry, same rationale as the removed workspace-wide Issues.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "issues", labelKey: "issues", icon: ListTodo },
-  { key: "teams", labelKey: "teams", icon: Users },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
-  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
-const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+const moreNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "skills", labelKey: "skills", icon: BookOpenText },
-  { key: "settings", labelKey: "settings", icon: Settings },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
+  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
 ];
+
+// Per-team children under the Teams group. Hrefs are built per team key.
+const teamChildNav = [
+  { pathKey: "teamIssues", labelKey: "issues", icon: ListTodo },
+  { pathKey: "teamProjects", labelKey: "projects", icon: FolderKanban },
+  { pathKey: "teamAutopilots", labelKey: "autopilots", icon: Zap },
+] as const;
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+}
+
+// Controlled collapse state persisted per workspace (sidebar-store). Absent
+// key = expanded, so new groups (and fresh workspaces) start open.
+function useGroupCollapse(key: string) {
+  const collapsed = useSidebarStore((s) => s.collapsed[key] === true);
+  const setGroupCollapsed = useSidebarStore((s) => s.setGroupCollapsed);
+  const onOpenChange = useCallback(
+    (open: boolean) => setGroupCollapsed(key, !open),
+    [key, setGroupCollapsed],
+  );
+  return { open: !collapsed, onOpenChange };
+}
+
+// One team's collapsible nav group inside the Teams section: draggable via
+// the same dnd-kit setup the Pinned section uses (PointerSensor distance 5,
+// so plain clicks still toggle the collapse), children are the team's
+// surfaces addressed by team key.
+function SortableTeamGroup({
+  team,
+  pathname,
+  buildHref,
+  settingsHref,
+}: {
+  team: Team;
+  pathname: string;
+  buildHref: (pathKey: (typeof teamChildNav)[number]["pathKey"], teamKey: string) => string;
+  settingsHref: string;
+}) {
+  const { t } = useT("layout");
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: team.id });
+  const collapse = useGroupCollapse(`team:${team.id}`);
+  // Same trap the pinned rows hit: the click that ends a drag would follow
+  // the row's link and reload the page. Mirror SortablePinItem's guard —
+  // remember the drag and swallow exactly that one click.
+  const wasDragged = useRef(false);
+  useEffect(() => {
+    if (isDragging) wasDragged.current = true;
+  }, [isDragging]);
+  // The row itself is the team's home (overview/settings). It stays
+  // highlighted anywhere inside the team (issues/projects/autopilots too) so
+  // the sidebar always shows which team you're in.
+  const teamBase = settingsHref.replace(/\/settings$/, "");
+  const isTeamActive = isNavActive(pathname, teamBase);
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "opacity-30")}
+    >
+      <Collapsible open={collapse.open} onOpenChange={collapse.onOpenChange}>
+        {/* The whole row navigates to the team page (and expands the group —
+            navigation is context). The chevron sits right after the name like
+            every other group label — always visible, secondary color, primary
+            only when hovered (the one independently-clickable element: it
+            toggles the collapse without navigating). Drag listeners live on
+            the row; the 5px activation distance keeps clicks working. */}
+        <div {...attributes} {...listeners}>
+          <SidebarGroupLabel
+            render={<AppLink href={settingsHref} draggable={false} />}
+            onClick={(event) => {
+              if (wasDragged.current) {
+                wasDragged.current = false;
+                event.preventDefault();
+                return;
+              }
+              collapse.onOpenChange(true);
+            }}
+            className={cn(
+              "w-full cursor-pointer gap-1.5 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+              isTeamActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+              isDragging && "pointer-events-none",
+            )}
+          >
+            <TeamIcon team={team} className="size-3.5" />
+            <span className="truncate">{team.name}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                // Toggle only — never follow the surrounding link.
+                e.preventDefault();
+                e.stopPropagation();
+                collapse.onOpenChange(!collapse.open);
+              }}
+              className="ml-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn(
+                  "!size-3 stroke-[2.5] transition-transform duration-200",
+                  collapse.open && "rotate-90",
+                )}
+              />
+            </button>
+          </SidebarGroupLabel>
+        </div>
+        <CollapsibleContent>
+          {/* pt-0.5 breathes the children away from their team row; the
+              group container's gap-0.5 covers the space below. pl-5 lands
+              child icons exactly under the team name's text start. */}
+          <SidebarMenu className="gap-0.5 pt-0.5 pl-5">
+            {teamChildNav.map((child) => {
+              const href = buildHref(child.pathKey, team.key);
+              const isActive = isNavActive(pathname, href);
+              return (
+                <SidebarMenuItem key={child.pathKey}>
+                  <SidebarMenuButton
+                    isActive={isActive}
+                    render={<AppLink href={href} />}
+                    className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                  >
+                    <child.icon />
+                    <span>{t(($) => $.nav[child.labelKey])}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
 }
 
 /**
@@ -430,6 +567,66 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  // Persisted collapse state per group; per-team groups manage their own
+  // inside SortableTeamGroup.
+  const pinnedCollapse = useGroupCollapse("pinned");
+  const workspaceCollapse = useGroupCollapse("workspace");
+  const teamsCollapse = useGroupCollapse("teams");
+
+  // Teams section: only teams the user joined, in their personal order.
+  const { data: myTeams = [] } = useQuery({
+    ...myTeamListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const updateTeamMembership = useUpdateTeamMembership();
+  // Local presentational copy for drop-animation stability — same trick as
+  // the pinned rows below: follow TQ at rest, freeze during a drag so the
+  // optimistic cache re-sort can't reorder the DOM while dnd-kit's drop
+  // animation is still interpolating (that's what made drops snap back).
+  const [localTeams, setLocalTeams] = useState(myTeams);
+  const [localTeamsWsId, setLocalTeamsWsId] = useState<string | null>(wsId ?? null);
+  const isTeamDraggingRef = useRef(false);
+  useEffect(() => {
+    if (!isTeamDraggingRef.current) {
+      setLocalTeams(myTeams);
+    }
+  }, [myTeams]);
+  useEffect(() => {
+    setLocalTeamsWsId(wsId ?? null);
+  }, [wsId]);
+  const visibleTeams = localTeamsWsId === (wsId ?? null) ? localTeams : [];
+  const handleTeamDragStart = useCallback(() => {
+    isTeamDraggingRef.current = true;
+  }, []);
+  // Fractional reorder (Linear-style): the dragged team takes the midpoint
+  // of its new neighbors, so a drag is a single-row membership update. The
+  // local array is rearranged first so the dropped row lands exactly where
+  // the animation ends.
+  const handleTeamDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      isTeamDraggingRef.current = false;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = localTeams.findIndex((t) => t.id === active.id);
+      const newIndex = localTeams.findIndex((t) => t.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const reordered = arrayMove(localTeams, oldIndex, newIndex);
+      setLocalTeams(reordered);
+      const prev = reordered[newIndex - 1];
+      const next = reordered[newIndex + 1];
+      const sortOrder =
+        prev && next
+          ? (prev.sort_order + next.sort_order) / 2
+          : prev
+            ? prev.sort_order + 1
+            : next
+              ? next.sort_order - 1
+              : 1;
+      updateTeamMembership.mutate({ id: String(active.id), sort_order: sortOrder });
+    },
+    [localTeams, updateTeamMembership],
+  );
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
   const getPinHref = useCallback(
@@ -633,6 +830,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
+                    <DropdownMenuItem render={<AppLink href={p.settings()} />}>
+                      <Settings className="h-3.5 w-3.5" />
+                      {t(($) => $.nav.settings)}
+                    </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
                       {t(($) => $.sidebar.log_out)}
@@ -668,7 +869,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
         {/* Navigation */}
         <SidebarContent ref={sidebarScrollRef} style={sidebarFadeStyle}>
-          <SidebarGroup>
+          <SidebarGroup className="py-1">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {personalNav.map((item) => {
@@ -704,8 +905,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           {visiblePinned.length > 0 && (
-            <Collapsible defaultOpen>
-              <SidebarGroup className="group/pinned">
+            <Collapsible open={pinnedCollapse.open} onOpenChange={pinnedCollapse.onOpenChange}>
+              <SidebarGroup className="group/pinned py-1">
                 <SidebarGroupLabel
                   render={<CollapsibleTrigger />}
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
@@ -738,58 +939,149 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </Collapsible>
           )}
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
+          {/* Workspace — shared resources, with low-frequency entries tucked
+              into the More subgroup. */}
+          <Collapsible open={workspaceCollapse.open} onOpenChange={workspaceCollapse.onOpenChange}>
+            <SidebarGroup className="group/ws py-1">
+              <SidebarGroupLabel
+                render={<CollapsibleTrigger />}
+                className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+              >
+                <span>{t(($) => $.sidebar.workspace_group)}</span>
+                <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+              </SidebarGroupLabel>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu className="gap-0.5">
+                    {workspaceNav.map((item) => {
+                      const href = p[item.key]();
+                      const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
+                      return (
+                        <SidebarMenuItem key={item.key}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            render={<AppLink href={href} />}
+                            className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                          >
+                            <item.icon />
+                            <span>{t(($) => $.nav[item.labelKey])}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                    {/* More is a button opening a menu (not an inline
+                        collapse) — low-frequency destinations stay one click
+                        away without adding permanent rows. */}
+                    <SidebarMenuItem>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <SidebarMenuButton className="text-muted-foreground hover:bg-sidebar-accent/70" />
+                          }
+                        >
+                          <MoreHorizontal />
+                          <span>{t(($) => $.nav.more)}</span>
+                          {/* Update dot surfaces on the More row so runtime
+                              updates stay visible while tucked away. */}
+                          {hasRuntimeUpdates && (
+                            <span className="size-1.5 rounded-full bg-destructive" />
+                          )}
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent side="right" align="start" className="w-44">
+                          {moreNav.map((item) => (
+                            <DropdownMenuItem
+                              key={item.key}
+                              render={<AppLink href={p[item.key]()} />}
+                            >
+                              <item.icon className="h-3.5 w-3.5" />
+                              <span>{t(($) => $.nav[item.labelKey])}</span>
+                              {item.key === "runtimes" && hasRuntimeUpdates && (
+                                <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {configureNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {/* Teams — joined teams only, in the user's personal order.
+              Drag a team header to reorder; the first team doubles as the
+              issue-creation default. The + action opens team management. */}
+          {myTeams.length > 0 && (
+            <Collapsible open={teamsCollapse.open} onOpenChange={teamsCollapse.onOpenChange}>
+              <SidebarGroup className="group/teams relative py-1">
+                <SidebarGroupLabel
+                  render={<CollapsibleTrigger />}
+                  className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                >
+                  <span>{t(($) => $.nav.teams)}</span>
+                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+                </SidebarGroupLabel>
+                {/* Hover-revealed, secondary until hovered itself — mirrors
+                    the pinned-count affordance. Opens the create-team modal
+                    directly; sized like the team-row chevron buttons. */}
+                {/* right-4 = group px-2 + label px-2, so the icon's right
+                    edge sits on the same inset line as row content; top-3
+                    centers the 16px button in the 32px label row (group
+                    py-1). */}
+                <SidebarGroupAction
+                  title={t(($) => $.sidebar.new_team)}
+                  className="top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/teams:opacity-100 [&>svg]:size-3"
+                  onClick={() => useModalStore.getState().open("create-team")}
+                >
+                  <Plus />
+                </SidebarGroupAction>
+                <CollapsibleContent>
+                  {/* pt-0.5 mirrors the team rows' own children breathing
+                      (py-0.5): team rows are row-styled, not plain content,
+                      so they need the same gap above as below. */}
+                  {/* gap-0.5 keeps a constant 2px rhythm between team
+                      blocks whether they're collapsed (row→row) or expanded
+                      (children→next row) — same spacing as SidebarMenu rows
+                      everywhere else. */}
+                  <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd}>
+                      <SortableContext items={visibleTeams.map((team) => team.id)} strategy={verticalListSortingStrategy}>
+                        {visibleTeams.map((team) => (
+                          <SortableTeamGroup
+                            key={team.id}
+                            team={team}
+                            pathname={pathname}
+                            buildHref={(pathKey, teamKey) => p[pathKey](teamKey)}
+                            settingsHref={p.teamSettings(team.key)}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
+                  </SidebarGroupContent>
+                </CollapsibleContent>
+              </SidebarGroup>
+            </Collapsible>
+          )}
+
         </SidebarContent>
 
         <SidebarFooter className="p-2">
           <JoinDiscordCard />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-1">
+            {/* Settings lives as a footer icon next to Help — it's a
+                low-frequency destination that doesn't earn a nav row. */}
+            <AppLink
+              href={p.settings()}
+              aria-label={t(($) => $.nav.settings)}
+              title={t(($) => $.nav.settings)}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                isNavActive(pathname, p.settings()) && "bg-accent text-foreground",
+              )}
+            >
+              <Settings className="size-4" />
+            </AppLink>
             <HelpLauncher />
           </div>
         </SidebarFooter>

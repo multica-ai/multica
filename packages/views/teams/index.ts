@@ -1,1 +1,10 @@
-export { TeamsPage, TeamPicker, TeamMultiPicker, TeamIcon } from "./components";
+export {
+  TeamsPage,
+  TeamPicker,
+  TeamMultiPicker,
+  TeamIcon,
+  TeamIssuesPage,
+  TeamProjectsPage,
+  TeamAutopilotsPage,
+  TeamSettingsPage,
+} from "./components";

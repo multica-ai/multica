@@ -12,7 +12,8 @@
     "usage": "使用量",
     "runtimes": "ランタイム",
     "skills": "スキル",
-    "settings": "設定"
+    "settings": "設定",
+    "more": "その他"
   },
   "help": {
     "trigger": "ヘルプ",
@@ -45,6 +46,7 @@
       "title": "Discord に参加",
       "description": "チームや他のユーザーと交流しましょう。",
       "dismiss": "閉じる"
-    }
+    },
+    "new_team": "新しいチーム"
   }
 }

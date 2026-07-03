@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -46,11 +47,11 @@ import {
 } from "@multica/ui/components/ui/select";
 import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeTeamListOptions } from "@multica/core/teams/queries";
+import { creationDefaultTeamId } from "@multica/core/teams/default-team";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -67,6 +68,7 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PillButton } from "../../common/pill-button";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { TeamPicker } from "../../teams/components/team-picker";
@@ -281,7 +283,6 @@ function useNowTicker(intervalMs = 30_000): Date {
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { t } = useT("autopilots");
   const { open, onOpenChange } = props;
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
@@ -336,14 +337,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
-  // Default-team seeding applies only when no project is selected. With a
-  // project chosen, the team is constrained to the project's teams below.
-  useEffect(() => {
-    if (!open || teamId || teams.length === 0 || projectId) return;
-    const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
-    if (defaultTeam) setTeamId(defaultTeam.id);
-  }, [open, teamId, teams, projectId]);
-
   const initialEventFilters: WebhookEventFilter[] =
     !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
   const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
@@ -377,25 +370,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
-  const selectedTeam = useMemo(
-    () => teams.find((team) => team.id === teamId) ?? null,
-    [teams, teamId],
-  );
-
-  // A project belongs to one or more teams; an issue's team must be one of
-  // them. With a project selected, constrain the team picker to its teams;
-  // no project selected leaves it unconstrained (default seeding above).
-  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
-  useEffect(() => {
-    if (!open || !projectId) return;
-    const allowed = selectedProject?.team_ids ?? [];
-    const [only] = allowed;
-    if (allowed.length === 1 && only) {
-      setTeamId(only);
-      return;
-    }
-    if (teamId && !allowed.includes(teamId)) setTeamId(null);
-  }, [open, projectId, selectedProject, teamId]);
+  // Team is required and always resolves to a value — same model as the
+  // issue modal. Associations are creation-time defaults, never constraints:
+  // explicit pick → single-team project → the user's first team. The picker
+  // is never restricted to the project's team set.
+  const defaultTeamId = useMemo(() => creationDefaultTeamId(teams), [teams]);
+  const projectTeamId =
+    selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;
+  const effectiveTeamId = teamId ?? projectTeamId ?? defaultTeamId ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -426,7 +408,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: executionMode === "create_issue" ? projectId : null,
-          team_id: teamId,
+          team_id: effectiveTeamId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -480,7 +462,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || null,
           project_id: executionMode === "create_issue" ? projectId : null,
-          team_id: teamId,
+          team_id: effectiveTeamId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -582,6 +564,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0 border-b">
           <div className="flex items-center gap-2 text-xs">
+            {/* Owning team leads the breadcrumb — same grammar as the
+                issue/project modals: [team] › action. Required single-select,
+                seeded from context, switchable. */}
+            <TeamPicker
+              teamId={effectiveTeamId}
+              onChange={setTeamId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
+            <ChevronRight className="size-3 text-muted-foreground/40" />
             <div className="flex items-center gap-1.5">
               <span className="inline-flex size-5 items-center justify-center rounded-md bg-primary/15 text-primary">
                 <Rocket className="size-3" />
@@ -594,12 +586,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             </div>
             <span className="text-muted-foreground/60">·</span>
             <span className="text-muted-foreground">{t(($) => $.dialog.subtitle)}</span>
-            {workspaceName && (
-              <>
-                <ChevronRight className="size-3 text-muted-foreground/40" />
-                <span className="text-muted-foreground">{workspaceName}</span>
-              </>
-            )}
           </div>
           <div className="flex items-center gap-1">
             {!isCreate && props.canManageAccess && (
@@ -718,13 +704,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               selectedDescription={selectedAssignee?.description}
             />
 
-            <TeamSection
-              teamId={teamId}
-              selectedTeam={selectedTeam}
-              onChange={setTeamId}
-              allowedTeamIds={projectTeamIds}
-            />
-
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
             {executionMode === "create_issue" && (
@@ -769,10 +748,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t shrink-0 bg-background">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
-            <Zap className="size-3.5 text-amber-500 shrink-0" />
-            <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
-          </div>
+          {/* Left slot: blocking-validation warnings take precedence over the
+              ambient auto-run hint — one message at a time, in the order the
+              form asks for them (title, then assignee). */}
+          {title.trim().length === 0 || assigneeId.length === 0 ? (
+            <div className="flex items-center gap-1.5 text-xs text-destructive min-w-0">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {title.trim().length === 0
+                  ? t(($) => $.dialog.title_required)
+                  : t(($) => $.dialog.assignee_required)}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+              <Zap className="size-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 shrink-0">
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
               {t(($) => $.dialog.cancel)}
@@ -920,54 +913,6 @@ function OutputModeSection({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function TeamSection({
-  teamId,
-  selectedTeam,
-  onChange,
-  allowedTeamIds,
-}: {
-  teamId: string | null;
-  selectedTeam: { name: string; key: string } | null;
-  onChange: (teamId: string | null) => void;
-  allowedTeamIds?: string[];
-}) {
-  const { t } = useT("autopilots");
-  return (
-    <div>
-      <SectionLabel>{t(($) => $.dialog.section_team)}</SectionLabel>
-      <TeamPicker
-        teamId={teamId}
-        onChange={onChange}
-        align="start"
-        allowedTeamIds={allowedTeamIds}
-        triggerRender={
-          <button
-            type="button"
-            className={cn(
-              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
-              "hover:bg-accent/40 transition-colors cursor-pointer",
-            )}
-          >
-            {selectedTeam ? (
-              <span className="inline-flex h-5 min-w-8 items-center justify-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
-                {selectedTeam.key}
-              </span>
-            ) : (
-              <span className="inline-flex size-5 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Users className="size-3.5" />
-              </span>
-            )}
-            <span className="flex-1 min-w-0 truncate text-sm font-medium">
-              {selectedTeam?.name ?? t(($) => $.dialog.no_team)}
-            </span>
-            <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
-          </button>
-        }
-      />
     </div>
   );
 }

@@ -136,12 +136,27 @@ export function TeamMultiPicker({
         }
         render={triggerRender}
       >
-        <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">
-          {selected.length === 0
-            ? t(($) => $.picker.placeholder)
-            : t(($) => $.picker.selected_count, { count: selected.length })}
-        </span>
+        {/* Mirror the single picker's icon+key trigger when exactly one team
+            is selected; degrade to icons+count for multiple. */}
+        {selected.length === 0 ? (
+          <>
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.picker.placeholder)}</span>
+          </>
+        ) : selected.length === 1 ? (
+          <TeamBadge team={selected[0]!} />
+        ) : (
+          <>
+            <span className="flex shrink-0 items-center gap-0.5">
+              {selected.slice(0, 3).map((team) => (
+                <TeamIcon key={team.id} team={team} />
+              ))}
+            </span>
+            <span className="truncate">
+              {t(($) => $.picker.selected_count, { count: selected.length })}
+            </span>
+          </>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-56">
         {teams.map((team) => {

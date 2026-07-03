@@ -276,8 +276,6 @@
     "section_assignee": "담당자",
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
-    "section_team": "팀",
-    "no_team": "팀 없음",
     "section_project": "프로젝트",
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
@@ -331,7 +329,9 @@
       "thursday": "목요일",
       "friday": "금요일",
       "saturday": "토요일"
-    }
+    },
+    "title_required": "제목을 입력해야 합니다",
+    "assignee_required": "실행자를 선택해야 합니다 — 에이전트 또는 스쿼드 선택"
   },
   "trigger_config": {
     "frequencies": {

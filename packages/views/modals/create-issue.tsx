@@ -50,6 +50,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeTeamListOptions } from "@multica/core/teams/queries";
+import { creationDefaultTeamId } from "@multica/core/teams/default-team";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -279,10 +280,7 @@ export function ManualCreatePanel({
   // a value. Associations are creation-time defaults, never constraints:
   // explicit pick → parent's team → single-team project → workspace default.
   const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
-  const defaultTeamId = useMemo(
-    () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
-    [teams],
-  );
+  const defaultTeamId = useMemo(() => creationDefaultTeamId(teams), [teams]);
   const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
   const projectTeamId =
     selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;

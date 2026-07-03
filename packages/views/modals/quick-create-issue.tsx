@@ -12,6 +12,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeTeamListOptions } from "@multica/core/teams/queries";
+import { creationDefaultTeamId } from "@multica/core/teams/default-team";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
@@ -131,8 +132,6 @@ export function AgentCreatePanel({
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
-  const lastTeamId = useQuickCreateStore((s) => s.lastTeamId);
-  const setLastTeamId = useQuickCreateStore((s) => s.setLastTeamId);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -205,10 +204,11 @@ export function AgentCreatePanel({
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
   });
-  const [teamId, setTeamId] = useState<string | null>(() => {
-    const seed = (data?.team_id as string | undefined) ?? lastTeamId;
-    return seed ?? null;
-  });
+  // No "last picked" memory for teams: the default is always the first team
+  // in the user's personal order (predictable), unless context seeds one.
+  const [teamId, setTeamId] = useState<string | null>(
+    (data?.team_id as string | undefined) ?? null,
+  );
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -225,10 +225,7 @@ export function AgentCreatePanel({
   // constraints: explicit pick (incl. remembered) → parent's team →
   // single-team project → workspace default.
   const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
-  const defaultTeamId = useMemo(
-    () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
-    [teams],
-  );
+  const defaultTeamId = useMemo(() => creationDefaultTeamId(teams), [teams]);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -343,7 +340,6 @@ export function AgentCreatePanel({
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
       });
       setLastActor(actor.type, actor.id);
-      setLastTeamId(effectiveTeamId);
       setLastProjectId(projectId);
       clearPrompt();
       setLastMode("agent");

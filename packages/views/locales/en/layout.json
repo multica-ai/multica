@@ -12,7 +12,8 @@
     "usage": "Usage",
     "runtimes": "Runtimes",
     "skills": "Skills",
-    "settings": "Settings"
+    "settings": "Settings",
+    "more": "More"
   },
   "help": {
     "trigger": "Help",
@@ -45,6 +46,7 @@
       "title": "Join our Discord",
       "description": "Chat with the team and other builders.",
       "dismiss": "Dismiss"
-    }
+    },
+    "new_team": "New team"
   }
 }

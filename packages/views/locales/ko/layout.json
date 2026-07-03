@@ -12,7 +12,8 @@
     "usage": "사용량",
     "runtimes": "런타임",
     "skills": "스킬",
-    "settings": "설정"
+    "settings": "설정",
+    "more": "더 보기"
   },
   "help": {
     "trigger": "도움말",
@@ -45,6 +46,7 @@
       "title": "Discord 참여하기",
       "description": "팀과 다른 사용자들과 교류해 보세요.",
       "dismiss": "닫기"
-    }
+    },
+    "new_team": "새 팀"
   }
 }

@@ -7,7 +7,7 @@
     "create_first": "Create your first team"
   },
   "table": {
-    "key": "Key",
+    "key": "Identifier",
     "name": "Name",
     "issues": "Issues",
     "state": "State",
@@ -28,17 +28,30 @@
   "dialog": {
     "create_title": "Create team",
     "edit_title": "Edit team",
-    "description": "Teams own issue identifiers and stable work areas. Membership is informational in v1."
+    "description": "Teams own issue identifiers and stable work areas. Membership is informational in v1.",
+    "tab_main": "Main",
+    "tab_members": "Members ({{count}})",
+    "member_search": "Search members…",
+    "creator_row": "Creator · Lead",
+    "name_required": "Name is required",
+    "members_entry": "Members",
+    "member_count": "{{count}} selected",
+    "members_pick_title": "Pick members",
+    "back": "Back"
   },
   "form": {
     "name": "Name",
     "name_placeholder": "Engineering",
-    "key": "Key",
-    "key_hint": "1-7 uppercase letters or numbers, starting with a letter.",
-    "key_locked": "This key is locked because issues have already been created.",
+    "key": "Identifier",
+    "key_hint": "Numbers this team’s issues — e.g. ENG-123. 1-7 uppercase letters or numbers, starting with a letter.",
+    "key_locked": "The identifier is locked because issues have already been created.",
     "icon": "Icon",
     "description": "Description",
-    "description_placeholder": "What work does this team own?"
+    "description_placeholder": "What work does this team own?",
+    "members": "Members",
+    "members_placeholder": "Add teammates…",
+    "members_selected": "{{count}} teammates selected",
+    "icon_name": "Icon & name"
   },
   "picker": {
     "placeholder": "Team",
@@ -50,5 +63,20 @@
   "toast_updated": "Team updated",
   "toast_archived": "Team archived",
   "toast_archive_failed": "Failed to archive team",
-  "toast_save_failed": "Failed to save team"
+  "toast_save_failed": "Failed to save team",
+  "surface": {
+    "not_found": "Team not found"
+  },
+  "settings": {
+    "stats_title": "At a glance",
+    "stats_issues": "Issues",
+    "stats_projects": "Projects",
+    "stats_autopilots": "Autopilots",
+    "danger_title": "Danger zone",
+    "archive_hint": "Archiving stops new work; existing issues stay readable.",
+    "members": "Members",
+    "archive_confirm_title": "Archive team?",
+    "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
+    "default_cannot_archive": "The default team cannot be archived"
+  }
 }

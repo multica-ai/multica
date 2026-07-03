@@ -708,7 +708,30 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Route boundary: the /issue/:id route is identifier-first (NAI-3) but also
+ * accepts a UUID. Everything downstream (detail cache key, WS patches,
+ * comments, mutations) is keyed by UUID, so an identifier is resolved to its
+ * UUID once here — the server accepts identifiers on GET /api/issues/:id and
+ * falls back to the alias table for pre-move identifiers.
+ */
+export function IssueDetail({ issueId, ...rest }: IssueDetailProps) {
+  const wsId = useWorkspaceId();
+  const isUuid = UUID_RE.test(issueId);
+  const { data: resolved, isError } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !isUuid,
+  });
+  const canonicalId = isUuid ? issueId : resolved?.id;
+  if (!canonicalId) {
+    return isError ? <IssueDetailInner issueId={issueId} {...rest} /> : null;
+  }
+  return <IssueDetailInner issueId={canonicalId} {...rest} />;
+}
+
+function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;

@@ -7,7 +7,7 @@
     "create_first": "创建第一个 Team"
   },
   "table": {
-    "key": "Key",
+    "key": "标识符",
     "name": "名称",
     "issues": "Issues",
     "state": "状态",
@@ -28,17 +28,30 @@
   "dialog": {
     "create_title": "创建 Team",
     "edit_title": "编辑 Team",
-    "description": "Team 拥有 issue 编号命名空间和稳定工作域。v1 中成员关系仅用于展示。"
+    "description": "Team 拥有 issue 编号命名空间和稳定工作域。v1 中成员关系仅用于展示。",
+    "tab_main": "主要信息",
+    "tab_members": "成员 ({{count}})",
+    "member_search": "搜索成员…",
+    "creator_row": "创建人 · 负责人",
+    "name_required": "需要填写名称",
+    "members_entry": "成员",
+    "member_count": "已选 {{count}} 人",
+    "members_pick_title": "选择成员",
+    "back": "返回"
   },
   "form": {
     "name": "名称",
     "name_placeholder": "Engineering",
-    "key": "Key",
-    "key_hint": "1-7 位大写字母或数字，必须以字母开头。",
-    "key_locked": "已有 issue 创建后，Key 会被锁定。",
+    "key": "标识符",
+    "key_hint": "用于该团队的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
+    "key_locked": "已有 issue 创建后，标识符会被锁定。",
     "icon": "图标",
     "description": "描述",
-    "description_placeholder": "这个 Team 负责哪些工作？"
+    "description_placeholder": "这个 Team 负责哪些工作？",
+    "members": "成员",
+    "members_placeholder": "添加同事…",
+    "members_selected": "已选 {{count}} 位同事",
+    "icon_name": "图标与名称"
   },
   "picker": {
     "placeholder": "Team",
@@ -49,5 +62,20 @@
   "toast_updated": "Team 已更新",
   "toast_archived": "Team 已归档",
   "toast_archive_failed": "归档 Team 失败",
-  "toast_save_failed": "保存 Team 失败"
+  "toast_save_failed": "保存 Team 失败",
+  "surface": {
+    "not_found": "未找到团队"
+  },
+  "settings": {
+    "stats_title": "概况",
+    "stats_issues": "Issues",
+    "stats_projects": "项目",
+    "stats_autopilots": "自动化",
+    "danger_title": "危险区",
+    "archive_hint": "归档后停止接收新工作;已有 issue 仍可查看。",
+    "members": "成员",
+    "archive_confirm_title": "归档团队？",
+    "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
+    "default_cannot_archive": "默认团队不能归档"
+  }
 }
