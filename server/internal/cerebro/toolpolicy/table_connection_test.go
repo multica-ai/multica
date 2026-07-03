@@ -792,3 +792,34 @@ func TestConnectionEndpointEffective_OnBehalfOfDenyOnly(t *testing.T) {
 		t.Fatalf("on_behalf_of Allow must NOT grant on a default-deny connection, got %s want deny", got)
 	}
 }
+
+// TestEndpointMethodTools_CarriesSummary asserts the OpenAPI summary captured on
+// an endpoint permission flows onto the synthetic per-method tool as its
+// Description, and that connectionToolTitle prefers it for api rows only.
+func TestEndpointMethodTools_CarriesSummary(t *testing.T) {
+	raw := []byte(`[
+		{"path": "/data-sources/9be2/execute", "methods": ["POST"], "summary": "Execute data source: Orders"},
+		{"path": "/manifest", "methods": ["GET"]}
+	]`)
+	tools := endpointMethodTools(raw)
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d: %+v", len(tools), tools)
+	}
+	if tools[0].Description != "Execute data source: Orders" {
+		t.Errorf("expected summary on first tool, got %q", tools[0].Description)
+	}
+	if tools[1].Description != "" {
+		t.Errorf("expected empty description on unlabeled tool, got %q", tools[1].Description)
+	}
+	if got := connectionToolTitle("api", tools[0]); got != "Execute data source: Orders" {
+		t.Errorf("api title should be the summary, got %q", got)
+	}
+	if got := connectionToolTitle("api", tools[1]); got != "GET /manifest" {
+		t.Errorf("api title without summary should be the name, got %q", got)
+	}
+	// MCP tools keep their name even when a description exists.
+	mcpTool := connectionTool{Name: "get_secrets", Description: "Long prose description."}
+	if got := connectionToolTitle("mcp_http", mcpTool); got != "get_secrets" {
+		t.Errorf("mcp title should stay the tool name, got %q", got)
+	}
+}

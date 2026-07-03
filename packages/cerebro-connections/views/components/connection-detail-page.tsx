@@ -78,17 +78,27 @@ const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 // by path so the list stays stable across discoveries.
 function mergeEndpoints(
   current: EndpointPermission[],
-  discovered: { path: string; methods: string[] }[],
+  discovered: { path: string; methods: string[]; summary?: string }[],
 ): EndpointPermission[] {
   const byPath = new Map<string, Set<string>>();
-  for (const ep of current) byPath.set(ep.path, new Set(ep.methods));
+  const summaries = new Map<string, string>();
+  for (const ep of current) {
+    byPath.set(ep.path, new Set(ep.methods));
+    if (ep.summary) summaries.set(ep.path, ep.summary);
+  }
   for (const ep of discovered) {
     const set = byPath.get(ep.path) ?? new Set<string>();
     for (const m of ep.methods) set.add(m.toUpperCase());
     byPath.set(ep.path, set);
+    // A freshly discovered summary wins: the spec is the source of truth for labels.
+    if (ep.summary) summaries.set(ep.path, ep.summary);
   }
   return Array.from(byPath.entries())
-    .map(([path, methods]) => ({ path, methods: Array.from(methods).sort() }))
+    .map(([path, methods]) => ({
+      path,
+      methods: Array.from(methods).sort(),
+      ...(summaries.has(path) ? { summary: summaries.get(path) } : {}),
+    }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -661,7 +671,13 @@ function ConnectionFormBody({
               ) : (
                 <div className="space-y-2">
                   {endpoints.map((ep, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className="space-y-0.5">
+                      {ep.summary && (
+                        <p className="text-xs text-muted-foreground truncate" title={ep.summary}>
+                          {ep.summary}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2">
                       <Input
                         value={ep.path}
                         onChange={(e) => setEndpointPath(i, e.target.value)}
@@ -695,6 +711,7 @@ function ConnectionFormBody({
                       >
                         <Trash2 className="size-3.5" />
                       </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
