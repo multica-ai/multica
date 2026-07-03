@@ -684,6 +684,28 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "manage_group_overrides",
+		Title:         "Override group members' access",
+		Category:      CategoryPermissions,
+		Description:   "Author another member's own (User-layer) tool-policy or Connections access row, for members who share a group with you. Can never be used on your own access (FIR-2351).",
+		DescriptionZh: "为与你共享群组的其他成员，编写其个人（User 层）工具策略或 Connections 访问规则。永远不能用于你自己的访问权限（FIR-2351）。",
+		Evidence: []string{
+			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
+			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride
+		},
+	},
+	{
+		Key:           "manage_workspace_overrides",
+		Title:         "Override any member's access",
+		Category:      CategoryPermissions,
+		Description:   "Author another member's own (User-layer) tool-policy or Connections access row, for anyone in the workspace. Can never be used on your own access (FIR-2351).",
+		DescriptionZh: "为工作区内任何其他成员编写其个人（User 层）工具策略或 Connections 访问规则。永远不能用于你自己的访问权限（FIR-2351）。",
+		Evidence: []string{
+			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
+			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride
+		},
+	},
+	{
 		Key:           "manage_agent_vault_access",
 		Title:         "Manage Agent Vault access",
 		Category:      CategoryPermissions,
