@@ -153,3 +153,116 @@ describe("task transcript timeline", () => {
     expect(original.secret).toBe("sk-abcdef0123456789abcdef");
   });
 });
+
+function toolUseP(
+  seq: number,
+  tool: string,
+  callId?: string,
+  createdAt?: string,
+): TaskMessagePayload {
+  return { task_id: "t", issue_id: "i", seq, type: "tool_use", tool, input: {}, call_id: callId, created_at: createdAt };
+}
+
+function toolResultP(
+  seq: number,
+  output: string,
+  opts: { callId?: string; isError?: boolean; createdAt?: string } = {},
+): TaskMessagePayload {
+  return {
+    task_id: "t",
+    issue_id: "i",
+    seq,
+    type: "tool_result",
+    output,
+    call_id: opts.callId,
+    is_error: opts.isError,
+    created_at: opts.createdAt,
+  };
+}
+
+describe("pairToolCalls (tool status + pairing)", () => {
+  it("pairs a tool_use with its result: status done, output linked, result row dropped", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-1"),
+      toolResultP(2, "ok", { callId: "call-1" }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ seq: 1, type: "tool_use", status: "done", output: "ok", resultSeq: 2 });
+  });
+
+  it("derives error status from a failed result", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-1"),
+      toolResultP(2, "boom", { callId: "call-1", isError: true }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "tool_use", status: "error", is_error: true, output: "boom" });
+  });
+
+  it("leaves an unresolved tool_use as running", () => {
+    const items = buildTimeline([toolUseP(1, "bash", "call-1")]);
+    expect(items).toEqual([expect.objectContaining({ type: "tool_use", status: "running" })]);
+  });
+
+  it("pairs two same-named tools to the correct results by call_id", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-a"),
+      toolUseP(2, "bash", "call-b"),
+      toolResultP(3, "result-b", { callId: "call-b" }),
+      toolResultP(4, "result-a", { callId: "call-a", isError: true }),
+    ]);
+
+    expect(items).toHaveLength(2);
+    // Even though the results arrive out of call order, each pairs by id.
+    expect(items[0]).toMatchObject({ seq: 1, call_id: "call-a", output: "result-a", status: "error" });
+    expect(items[1]).toMatchObject({ seq: 2, call_id: "call-b", output: "result-b", status: "done" });
+  });
+
+  it("falls back to positional (FIFO) pairing for legacy null call_id rows", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash"),
+      toolResultP(2, "legacy-output"),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ seq: 1, type: "tool_use", status: "done", output: "legacy-output" });
+  });
+
+  it("keeps a secret in the copied tool output redacted (pair before redact)", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-1"),
+      toolResultP(2, "token sk-abcdef0123456789abcdef leaked", { callId: "call-1" }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.output).not.toContain("sk-abcdef0123456789abcdef");
+  });
+
+  it("drops one array item per paired result so step counts stay in sync", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-1"),
+      toolResultP(2, "ok", { callId: "call-1" }),
+      toolUseP(3, "read", "call-2"),
+      toolResultP(4, "file", { callId: "call-2" }),
+    ]);
+    // 4 raw messages → 2 merged cards.
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.type === "tool_use")).toBe(true);
+  });
+
+  it("computes duration from call→result created_at timestamps", () => {
+    const items = buildTimeline([
+      toolUseP(1, "bash", "call-1", "2026-07-03T00:00:00.000Z"),
+      toolResultP(2, "ok", { callId: "call-1", createdAt: "2026-07-03T00:00:01.500Z" }),
+    ]);
+
+    expect(items[0]?.duration_ms).toBe(1500);
+  });
+
+  it("keeps an orphan tool_result as a standalone row", () => {
+    const items = buildTimeline([toolResultP(1, "stray", { callId: "nope" })]);
+    expect(items).toEqual([expect.objectContaining({ seq: 1, type: "tool_result", output: "stray" })]);
+  });
+});
