@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { ToolStatusChip } from "./status-chip";
 import { GenericToolBody } from "./generic";
+import { BashToolBody } from "./bash";
+import { ReadToolBody } from "./read";
 import { getToolSummary } from "./util";
 
 /** Renders the body (below the shared header) of a single tool card. */
@@ -10,9 +12,12 @@ export type ToolRenderer = (item: ChatTimelineItem) => ReactNode;
 /**
  * tool name (lowercased) → purpose-built body renderer. Unmapped tools fall
  * back to GenericToolBody, so nothing ever renders worse than the old generic
- * row. Registered renderers are added as they land (bash/read/edit).
+ * row.
  */
-export const toolRenderers: Record<string, ToolRenderer> = {};
+export const toolRenderers: Record<string, ToolRenderer> = {
+  bash: (item) => <BashToolBody item={item} />,
+  read: (item) => <ReadToolBody item={item} />,
+};
 
 export function renderToolBody(item: ChatTimelineItem): ReactNode {
   const key = item.tool?.toLowerCase();
