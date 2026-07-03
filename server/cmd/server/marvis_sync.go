@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -25,10 +26,15 @@ func registerMarvisOfficeSync(bus *events.Bus) {
 		}
 
 		go func() {
-			// 127.0.0.1:8080 is the default port for the multica-office-sync Go gateway we built earlier.
-			resp, err := http.Post("http://127.0.0.1:8080/webhook/multica", "application/json", bytes.NewReader(payload))
+			webhookURL := os.Getenv("MARVIS_WEBHOOK_URL")
+			if webhookURL == "" {
+				// Use host.docker.internal so Docker containers can reach the host machine.
+				// Use port 8081 to avoid conflict with Multica's default 8080 backend.
+				webhookURL = "http://host.docker.internal:8081/webhook/multica"
+			}
+			resp, err := http.Post(webhookURL, "application/json", bytes.NewReader(payload))
 			if err != nil {
-				slog.Debug("failed to send webhook to marvis-office (is the sync gateway running?)", "error", err)
+				slog.Debug("failed to send webhook to marvis-office (is the sync gateway running?)", "error", err, "url", webhookURL)
 				return
 			}
 			resp.Body.Close()
