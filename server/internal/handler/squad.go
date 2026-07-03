@@ -904,22 +904,23 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 
 // ── Squad Trigger Logic ─────────────────────────────────────────────────────
 
-// lastTaskWasLeader returns true when the agent's most recent task on the
-// issue was enqueued in the squad-leader role. Used by the self-trigger
-// guards to tell apart a comment posted while the agent was acting as
-// leader (skip) from one posted while it was acting as a worker (do not
-// skip). When the agent has no prior task on this issue the role is
-// undetermined and we treat it as non-leader so a brand-new external
-// trigger can still reach the leader.
-func (h *Handler) lastTaskWasLeader(ctx context.Context, issueID, agentID pgtype.UUID) bool {
-	flag, err := h.Queries.GetLatestTaskIsLeaderForIssueAndAgent(ctx, db.GetLatestTaskIsLeaderForIssueAndAgentParams{
+// shouldSuppressSquadLeaderSelfTrigger reports whether a squad leader's own
+// comment should be blocked from re-enqueuing that same leader. The only
+// leader-authored non-leader task allowed to wake the assigned leader is a
+// same-squad worker task; generic agent tasks such as direct mentions and
+// thread-parent replies are not worker-role proof and must not self-trigger.
+func (h *Handler) shouldSuppressSquadLeaderSelfTrigger(ctx context.Context, issueID, leaderID, squadID pgtype.UUID) bool {
+	latest, err := h.Queries.GetLatestTaskRoleForIssueAndAgent(ctx, db.GetLatestTaskRoleForIssueAndAgentParams{
 		IssueID: issueID,
-		AgentID: agentID,
+		AgentID: leaderID,
 	})
 	if err != nil {
 		return false
 	}
-	return flag
+	if latest.IsLeaderTask {
+		return true
+	}
+	return !latest.SquadID.Valid || uuidToString(latest.SquadID) != uuidToString(squadID)
 }
 
 // commentMentionsAnyone returns true when the comment body contains at least

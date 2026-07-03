@@ -1486,7 +1486,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		// after MUL-3794 (MUL-3879): a worker-agent result comment on a
 		// squad-assigned issue can still wake the assigned squad leader, so
 		// the leader→worker→leader coordination loop stays closed. The leader
-		// self-trigger guard (lastTaskWasLeader) lives in
+		// self-trigger guard lives in
 		// routeAssignedSquadLeaderFallback. Explicit @agent / @squad mentions
 		// are already handled above, so this never double-enqueues a mentioned
 		// target alongside the assigned leader.
@@ -1731,7 +1731,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
-		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
+		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1805,12 +1805,12 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			leaderID := squad.LeaderID
-			// Prevent self-trigger only when the agent's last activity on this
-			// issue was itself a leader task. An agent that holds both the
-			// leader and a worker role in the squad must still wake its
-			// leader role after posting a comment from its worker task.
+			// Prevent self-trigger unless the agent's last activity on this
+			// issue was a worker task for this same squad. Generic non-leader
+			// tasks (direct @agent mentions, thread-parent replies) are not a
+			// worker-role handoff and must not re-enqueue the leader.
 			if authorType == "agent" && authorID == uuidToString(leaderID) &&
-				h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
+				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
 				continue
 			}
 			// Verify leader agent is ready (has runtime, not archived).

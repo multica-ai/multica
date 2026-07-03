@@ -2139,29 +2139,32 @@ func (q *Queries) GetLastTaskStartedAtForIssueAndAgent(ctx context.Context, arg 
 	return started_at, err
 }
 
-const getLatestTaskIsLeaderForIssueAndAgent = `-- name: GetLatestTaskIsLeaderForIssueAndAgent :one
-SELECT is_leader_task FROM agent_task_queue
+const getLatestTaskRoleForIssueAndAgent = `-- name: GetLatestTaskRoleForIssueAndAgent :one
+SELECT is_leader_task, squad_id FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
 ORDER BY created_at DESC
 LIMIT 1
 `
 
-type GetLatestTaskIsLeaderForIssueAndAgentParams struct {
+type GetLatestTaskRoleForIssueAndAgentParams struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	AgentID pgtype.UUID `json:"agent_id"`
 }
 
-// Returns the is_leader_task flag of the agent's most recent task on this
-// issue, or NULL if the agent has never had a task on this issue. Used by
-// the squad-leader self-trigger guard to tell whether the agent's last
-// activity on the issue was in the leader role or the worker role (an
-// agent that holds both roles in a squad would otherwise be skipped by
-// the role-blind authorID == leaderID check).
-func (q *Queries) GetLatestTaskIsLeaderForIssueAndAgent(ctx context.Context, arg GetLatestTaskIsLeaderForIssueAndAgentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, getLatestTaskIsLeaderForIssueAndAgent, arg.IssueID, arg.AgentID)
-	var is_leader_task bool
-	err := row.Scan(&is_leader_task)
-	return is_leader_task, err
+type GetLatestTaskRoleForIssueAndAgentRow struct {
+	IsLeaderTask bool        `json:"is_leader_task"`
+	SquadID      pgtype.UUID `json:"squad_id"`
+}
+
+// Returns the role markers from the agent's most recent task on this issue.
+// Used by the squad-leader self-trigger guard to tell apart leader tasks,
+// same-squad worker tasks, and generic agent tasks such as direct mentions or
+// thread-parent replies.
+func (q *Queries) GetLatestTaskRoleForIssueAndAgent(ctx context.Context, arg GetLatestTaskRoleForIssueAndAgentParams) (GetLatestTaskRoleForIssueAndAgentRow, error) {
+	row := q.db.QueryRow(ctx, getLatestTaskRoleForIssueAndAgent, arg.IssueID, arg.AgentID)
+	var i GetLatestTaskRoleForIssueAndAgentRow
+	err := row.Scan(&i.IsLeaderTask, &i.SquadID)
+	return i, err
 }
 
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many

@@ -57,9 +57,9 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 		t.Fatalf("seed worker task: %v", err)
 	}
 
-	// Seed a completed leader task for L so lastTaskWasLeader would return
-	// true if the guard triggered by author-id was flipped in the wrong
-	// direction. The completed status keeps it out of the pending-task dedup.
+	// Seed a completed leader task for L so the self-trigger guard would
+	// suppress if it were keyed only on the leader's own history. The completed
+	// status keeps it out of the pending-task dedup.
 	var leaderRuntimeID string
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
 		t.Fatalf("load leader runtime: %v", err)
