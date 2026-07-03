@@ -9,12 +9,14 @@ import enIssues from "../../locales/en/issues.json";
 
 const mockListTasksByIssue = vi.hoisted(() => vi.fn());
 const mockListTaskMessages = vi.hoisted(() => vi.fn());
+const mockRerunIssue = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
   api: {
     listTasksByIssue: mockListTasksByIssue,
     listTaskMessages: mockListTaskMessages,
     cancelTask: vi.fn(),
+    rerunIssue: mockRerunIssue,
   },
 }));
 
@@ -22,7 +24,7 @@ vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div data-testid="actor-avatar" />,
 }));
 
-const mockToast = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn() }));
+const mockToast = vi.hoisted(() => ({ error: vi.fn() }));
 vi.mock("sonner", () => ({
   toast: mockToast,
 }));
@@ -83,11 +85,8 @@ describe("ExecutionLogSection", () => {
     expect(retryButton).toHaveClass("cursor-pointer", "hover:-translate-y-px");
     fireEvent.click(retryButton);
 
-    // TODO: 暂时打日志验证传参，确认无误后恢复 api.rerunIssue 断言
     await waitFor(() =>
-      expect(mockToast.info).toHaveBeenCalledWith(
-        "Retry logged: issueId=issue-1 taskId=task-failed — check console",
-      ),
+      expect(mockRerunIssue).toHaveBeenCalledWith("issue-1", "task-failed"),
     );
   });
 });

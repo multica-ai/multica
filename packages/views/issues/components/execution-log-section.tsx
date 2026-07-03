@@ -370,16 +370,12 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     if (retrying) return;
     setRetrying(true);
     try {
-      // TODO: 暂时打日志验证传参，确认无误后恢复 api.rerunIssue 调用
-      console.log(
-        "%c[ExecutionLogSection] rerunIssue params",
-        "color: #f59e0b; font-weight: bold;",
-        { issueId, taskId: task.id },
+      await api.rerunIssue(issueId, task.id);
+      queryClient.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed),
       );
-      toast.info(
-        `Retry logged: issueId=${issueId} taskId=${task.id} — check console`,
-      );
-    } finally {
       setRetrying(false);
     }
   };

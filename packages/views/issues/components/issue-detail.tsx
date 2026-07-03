@@ -70,7 +70,7 @@ import { useModalStore } from "@multica/core/modals";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions, issueKeys } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -413,16 +413,12 @@ function ActivityRetryButton({
     if (retrying) return;
     setRetrying(true);
     try {
-      // TODO: 暂时打日志验证传参，确认无误后恢复 api.rerunIssue 调用
-      console.log(
-        "%c[ActivityRetryButton] rerunIssue params",
-        "color: #f59e0b; font-weight: bold;",
-        { issueId, taskId },
+      await api.rerunIssue(issueId, taskId);
+      queryClient.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed),
       );
-      toast.info(
-        `Retry logged: issueId=${issueId} taskId=${taskId ?? "undefined"} — check console`,
-      );
-    } finally {
       setRetrying(false);
     }
   };
