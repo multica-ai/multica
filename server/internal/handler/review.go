@@ -175,3 +175,88 @@ func (h *Handler) CompleteReviewAssetUpload(w http.ResponseWriter, r *http.Reque
 	// Stub for upload completion (triggers ffprobe metadata extraction in background)
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
+
+// Comments endpoints
+
+func (h *Handler) ListReviewComments(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	assetUUID, ok := parseUUIDOrBadRequest(w, r.URL.Query().Get("asset_id"), "asset_id")
+	if !ok {
+		return
+	}
+
+	comments, err := h.Queries.ListReviewCommentsByAsset(ctx, assetUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch comments")
+		return
+	}
+
+	var res []ReviewCommentResponse
+	for _, c := range comments {
+		res = append(res, reviewCommentToResponse(c))
+	}
+	if res == nil {
+		res = []ReviewCommentResponse{}
+	}
+
+	writeJSON(w, http.StatusOK, res)
+}
+
+type CreateReviewCommentRequest struct {
+	AssetID   string          `json:"asset_id"`
+	Content   string          `json:"content"`
+	Timestamp *float32        `json:"timestamp"`
+	Shapes    json.RawMessage `json:"shapes"`
+	ParentID  *string         `json:"parent_id"`
+}
+
+func (h *Handler) CreateReviewComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req CreateReviewCommentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+
+	assetUUID, ok := parseUUIDOrBadRequest(w, req.AssetID, "asset_id")
+	if !ok {
+		return
+	}
+
+	var parentUUID pgtype.UUID
+	if req.ParentID != nil {
+		parentUUID = util.MustParseUUID(*req.ParentID)
+	}
+
+	var shapes json.RawMessage
+	if len(req.Shapes) > 0 {
+		shapes = req.Shapes
+	} else {
+		shapes = json.RawMessage(`[]`)
+	}
+
+	var timestamp pgtype.Float4
+	if req.Timestamp != nil {
+		timestamp = pgtype.Float4{Float32: *req.Timestamp, Valid: true}
+	}
+
+	comment, err := h.Queries.CreateReviewComment(ctx, db.CreateReviewCommentParams{
+		AssetID:   assetUUID,
+		AuthorID:  util.MustParseUUID(userID),
+		Content:   req.Content,
+		Timestamp: timestamp,
+		Shapes:    shapes,
+		ParentID:  parentUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create comment")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, reviewCommentToResponse(comment))
+}
