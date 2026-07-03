@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueidentifier"
+	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2193,15 +2194,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		requestedTeamUUID = tid
 	}
-	// A sub-issue inherits its parent's Team; the resolved parent Team is fed
-	// into the shared resolver as the requested Team so it goes through the same
-	// active-team + project-association validation as an explicit team_id.
+	// A sub-issue seeds its Team from the parent when the caller didn't pick
+	// one — a creation-time default, not a constraint; an explicit team_id
+	// always wins and parent/child may diverge afterwards.
 	teamUUID := requestedTeamUUID
-	if parentIssueUUID.Valid && parentIssue.TeamID.Valid {
-		if teamUUID.Valid && teamUUID != parentIssue.TeamID {
-			writeError(w, http.StatusBadRequest, "child issue must use the same team as parent")
-			return
-		}
+	if !teamUUID.Valid && parentIssueUUID.Valid && parentIssue.TeamID.Valid {
 		teamUUID = parentIssue.TeamID
 	}
 	team, err := service.ResolveTeam(r.Context(), h.Queries, wsUUID, teamUUID, projectUUID)
@@ -2582,10 +2579,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeTeamResolveError(w, err) {
 		return
 	}
-	if errors.Is(err, service.ErrCrossTeamChild) {
-		writeError(w, http.StatusBadRequest, "child issue must use the same team as parent")
-		return
-	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2612,7 +2605,10 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	// TeamID moves the issue to another team. Numbers are per-team, so the
+	// move renumbers the issue and records the old identifier as an alias.
+	TeamID *string `json:"team_id"`
+	Stage  *int32  `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2747,17 +2743,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "an issue cannot be its own parent")
 				return
 			}
-			// Validate parent exists in the same workspace.
-			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			// Validate parent exists in the same workspace. Cross-team
+			// parent/child is allowed — team only binds at creation time.
+			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			})
-			if err != nil {
+			}); err != nil {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
-				return
-			}
-			if prevIssue.TeamID.Valid && parent.TeamID.Valid && prevIssue.TeamID != parent.TeamID {
-				writeError(w, http.StatusBadRequest, "parent issue must be in the same team")
 				return
 			}
 			// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -2791,17 +2783,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "project not found in this workspace")
 				return
 			}
-			if prevIssue.TeamID.Valid {
-				hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
-					WorkspaceID: prevIssue.WorkspaceID,
-					ProjectID:   projectUUID,
-					TeamID:      prevIssue.TeamID,
-				})
-				if err != nil || !hasTeam {
-					writeError(w, http.StatusBadRequest, "project is not associated with this issue team")
-					return
-				}
-			}
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
@@ -2834,6 +2815,85 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
+	}
+
+	// team_id — moving an issue between teams renumbers it (numbers are
+	// per-team). Runs in its own tx before the field update: allocate the
+	// next number in the destination team, take a fresh top position in the
+	// destination column, and record the old identifier as an alias so
+	// external references (CLI/API lookups, GitHub branch/PR auto-linking)
+	// keep resolving. Everything else (project, parent, labels) is left
+	// untouched — those associations only bind at creation time.
+	teamChanged := false
+	if _, ok := rawFields["team_id"]; ok {
+		if req.TeamID == nil {
+			writeError(w, http.StatusBadRequest, "team_id cannot be null")
+			return
+		}
+		newTeamID, ok := parseUUIDOrBadRequest(w, *req.TeamID, "team_id")
+		if !ok {
+			return
+		}
+		if newTeamID != prevIssue.TeamID {
+			if _, err := service.ValidateActiveTeam(r.Context(), h.Queries, prevIssue.WorkspaceID, newTeamID); err != nil {
+				if !writeTeamResolveError(w, err) {
+					writeError(w, http.StatusBadRequest, err.Error())
+				}
+				return
+			}
+			tx, err := h.TxStarter.Begin(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to move issue to team")
+				return
+			}
+			defer tx.Rollback(r.Context())
+			qtx := h.Queries.WithTx(tx)
+			newNumber, err := qtx.IncrementTeamIssueCounter(r.Context(), db.IncrementTeamIssueCounterParams{
+				ID:          newTeamID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
+				return
+			}
+			newPosition, err := issueposition.NextTopPositionForTeam(r.Context(), tx, prevIssue.WorkspaceID, newTeamID, prevIssue.Status)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to position issue")
+				return
+			}
+			if _, err := qtx.MoveIssueToTeam(r.Context(), db.MoveIssueToTeamParams{
+				ID:       prevIssue.ID,
+				TeamID:   newTeamID,
+				Number:   newNumber,
+				Position: newPosition,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to move issue to team")
+				return
+			}
+			// Preserve the pre-move identifier so it keeps resolving.
+			if prevIssue.TeamID.Valid {
+				oldTeam, err := qtx.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
+					ID:          prevIssue.TeamID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				})
+				if err == nil && oldTeam.Key != "" {
+					if err := qtx.UpsertIssueIdentifierAlias(r.Context(), db.UpsertIssueIdentifierAliasParams{
+						WorkspaceID:  prevIssue.WorkspaceID,
+						TeamKeyLower: strings.ToLower(oldTeam.Key),
+						Number:       prevIssue.Number,
+						IssueID:      prevIssue.ID,
+					}); err != nil {
+						writeError(w, http.StatusInternalServerError, "failed to record identifier alias")
+						return
+					}
+				}
+			}
+			if err := tx.Commit(r.Context()); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to move issue to team")
+				return
+			}
+			teamChanged = true
+		}
 	}
 
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
@@ -2878,6 +2938,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
 		"project_changed":     projectChanged,
+		"team_changed":        teamChanged,
+		"prev_team_id":        uuidToPtr(prevIssue.TeamID),
 		"start_date_changed":  startDateChanged,
 		"due_date_changed":    dueDateChanged,
 		"description_changed": descriptionChanged,

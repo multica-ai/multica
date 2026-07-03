@@ -589,6 +589,14 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueIdentifierAlias struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	TeamKeyLower string             `json:"team_key_lower"`
+	Number       int32              `json:"number"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

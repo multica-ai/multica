@@ -145,10 +145,6 @@ var ErrTeamNotFound = errors.New("team not found in this workspace")
 // return a clear "team is archived" message instead of a misleading "not found".
 var ErrTeamArchived = errors.New("team is archived")
 
-// ErrProjectTeamMismatch signals that an issue is being created into a Team
-// that is not associated with its Project.
-var ErrProjectTeamMismatch = errors.New("project is not associated with this team")
-
 // ErrProjectTeamAmbiguous signals that a Team was not specified for an issue
 // whose Project belongs to more than one Team, so no single Team can be
 // inferred. Callers translate this into a 400 that names the candidate Team
@@ -169,10 +165,6 @@ func (e *ProjectTeamAmbiguousError) Error() string {
 func (e *ProjectTeamAmbiguousError) Is(target error) bool {
 	return target == ErrProjectTeamAmbiguous
 }
-
-// ErrCrossTeamChild signals that a child issue attempted to use a different
-// Team from its parent. v1 keeps parent/child trees within one Team.
-var ErrCrossTeamChild = errors.New("child issue must use the same team as parent")
 
 // IssueCreateResult is the typed return from IssueService.Create.
 //
@@ -245,10 +237,10 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
-		if parent.TeamID.Valid {
-			if teamID.Valid && teamID != parent.TeamID {
-				return IssueCreateResult{}, ErrCrossTeamChild
-			}
+		// Team is a creation-time default, not a constraint: a sub-issue
+		// seeds its team from the parent only when the caller didn't pick
+		// one. Parent and child may diverge afterwards.
+		if !teamID.Valid && parent.TeamID.Valid {
 			teamID = parent.TeamID
 		}
 	}
@@ -379,8 +371,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 //     Project with no Team links falls through;
 //   - otherwise the workspace default Team is used.
 //
-// The chosen Team must be active (ErrTeamNotFound / ErrTeamArchived) and, when
-// a Project is given, associated with it (ErrProjectTeamMismatch).
+// The chosen Team must be active (ErrTeamNotFound / ErrTeamArchived). The
+// project association is a creation-time default only — an explicit team is
+// never validated against the project's team set.
 func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamID, projectID pgtype.UUID) (db.WorkspaceTeam, error) {
 	teamID := requestedTeamID
 	if !teamID.Valid && projectID.Valid {
@@ -389,7 +382,7 @@ func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamI
 			ProjectID:   projectID,
 		})
 		if err != nil {
-			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
+			return db.WorkspaceTeam{}, fmt.Errorf("list project teams: %w", err)
 		}
 		switch {
 		case len(teams) == 1:
@@ -409,21 +402,7 @@ func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamI
 		}
 		teamID = team.ID
 	}
-	team, err := ValidateActiveTeam(ctx, q, workspaceID, teamID)
-	if err != nil {
-		return db.WorkspaceTeam{}, err
-	}
-	if projectID.Valid {
-		hasTeam, err := q.ProjectHasTeam(ctx, db.ProjectHasTeamParams{
-			WorkspaceID: workspaceID,
-			ProjectID:   projectID,
-			TeamID:      team.ID,
-		})
-		if err != nil || !hasTeam {
-			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
-		}
-	}
-	return team, nil
+	return ValidateActiveTeam(ctx, q, workspaceID, teamID)
 }
 
 // ValidateActiveTeam loads a Team by ID and returns it only if it exists in the

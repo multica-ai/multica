@@ -378,3 +378,15 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- name: MoveIssueToTeam :one
+-- Moving an issue between teams renumbers it: numbers are allocated
+-- per-team (uq_issue_team_number), so the caller passes a fresh number from
+-- IncrementTeamIssueCounter and a fresh position in the destination column.
+UPDATE issue
+SET team_id = $2,
+    number = $3,
+    position = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

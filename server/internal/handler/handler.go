@@ -768,7 +768,16 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 		Number:      parts.number,
 	})
 	if err != nil {
-		return db.Issue{}, false
+		// The identifier may be pre-move: moving an issue between teams
+		// renumbers it but records the old identifier as an alias.
+		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
+			WorkspaceID:  wsUUID,
+			TeamKeyLower: parts.prefix,
+			Number:       parts.number,
+		})
+		if err != nil {
+			return db.Issue{}, false
+		}
 	}
 	return issue, true
 }
