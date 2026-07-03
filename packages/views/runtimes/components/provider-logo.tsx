@@ -75,6 +75,20 @@ function OpenCodeLogo({ className }: { className: string }) {
   );
 }
 
+// DevEco Code — placeholder "D" monogram. No official Huawei DevEco Code mark
+// is bundled yet; swap this for the official asset when available.
+function DevecoLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-label="DevEco Code">
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="currentColor" />
+      <path
+        d="M9 7h3.6c2.8 0 4.6 1.9 4.6 5s-1.8 5-4.6 5H9V7Zm2.2 2v6h1.3c1.5 0 2.4-1.1 2.4-3s-.9-3-2.4-3h-1.3Z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
 // OpenClaw — lobster mascot, vector version based on official branding
 function OpenClawLogo({ className }: { className: string }) {
   return (
@@ -274,6 +288,8 @@ export function ProviderLogo({
       return <CodexLogo className={className} />;
     case "opencode":
       return <OpenCodeLogo className={className} />;
+    case "deveco":
+      return <DevecoLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
     case "hermes":
