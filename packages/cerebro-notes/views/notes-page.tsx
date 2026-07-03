@@ -7,9 +7,6 @@ import {
   Search,
   Pin,
   Trash2,
-  Lock,
-  Users,
-  Globe,
   NotebookPen,
   ChevronLeft,
   ChevronDown,
@@ -23,7 +20,6 @@ import {
   User,
   Pencil,
   Replace,
-  Share2,
   Check,
   Copy,
   GitMerge,
@@ -82,15 +78,13 @@ import {
   useUpdateNote,
   useDeleteNote,
   useSetNotePin,
-  useSetNoteVisibility,
   useNoteEditLock,
   useNoteComments,
   useSetNoteFolder,
   firstLineTitle,
-  VISIBILITY_LABELS,
   NoteConflictError,
 } from "../core";
-import type { Note, NoteVisibility } from "../core";
+import type { Note } from "../core";
 import {
   artifactFoldersOptions,
   useCreateArtifactFolder,
@@ -114,12 +108,6 @@ import {
 
 // drag-and-drop payload type for moving a note row onto a folder.
 const NOTE_DND_TYPE = "application/x-note-id";
-
-const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
-  private: <Lock className="size-3" />,
-  shared: <Users className="size-3" />,
-  workspace: <Globe className="size-3" />,
-};
 
 // A note carries an owner_id but no owner name (the wire shape is lightweight),
 // so resolve the display name from the workspace member list (FIR-1460). Used by
@@ -752,13 +740,11 @@ function NoteListSection({
             {previewBody(n)}
           </div>
           <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-            {VIS_ICON[n.visibility]}
-            <span>{VISIBILITY_LABELS[n.visibility]}</span>
-            {/* Show the owner when it isn't you, so a shared/team note's author
-                is always visible (FIR-1460, request 1). */}
+            {/* FIR-2595: per-note visibility ("Only you" / share) is removed —
+                folders drive who can open and edit a note. Show the owner when
+                it isn't you (FIR-1460, request 1). */}
             {n.owner_id && n.owner_id !== myId && (
               <>
-                <span className="opacity-50">·</span>
                 <User className="size-3" />
                 <span className="truncate">
                   {ownerName(n.owner_id, myId, members)}
@@ -768,7 +754,9 @@ function NoteListSection({
             {/* FIR-2145: comment count indicator — only shown when > 0. */}
             {n.comment_count > 0 && (
               <>
-                <span className="opacity-50">·</span>
+                {n.owner_id && n.owner_id !== myId && (
+                  <span className="opacity-50">·</span>
+                )}
                 <MessageSquare className="size-3" />
                 <span>{n.comment_count}</span>
               </>
@@ -801,7 +789,6 @@ export function NoteEditor({
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const setPin = useSetNotePin();
-  const setVisibility = useSetNoteVisibility();
 
   // Wave 3 (TECH-3556): each surface is independently feature-flagged.
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
@@ -831,12 +818,8 @@ export function NoteEditor({
   // FIR-1317 Plan A: active conflict waiting for user resolution.
   const [conflict, setConflict] = React.useState<NoteConflict | null>(null);
 
-  const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
-  // FIR-1873: sharing is managed from the "⋯" menu via this sheet, not a
-  // top-bar button (Jesper: "begge dele ind i 3 priks menuen").
-  const [showShare, setShowShare] = React.useState(false);
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
@@ -895,7 +878,6 @@ export function NoteEditor({
   const canEdit = isOwner || noteDetail?.can_edit === true;
   const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
 
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: comments = [] } = useNoteComments(note.id);
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
@@ -1011,26 +993,6 @@ export function NoteEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [readOnly]);
 
-  function applyVisibility(v: NoteVisibility) {
-    setVisibility.mutate({
-      id: note.id,
-      visibility: v,
-      sharedUserIds: v === "shared" ? sharedIds : undefined,
-    });
-  }
-
-  function toggleShare(userId: string) {
-    const next = sharedIds.includes(userId)
-      ? sharedIds.filter((id) => id !== userId)
-      : [...sharedIds, userId];
-    setSharedIds(next);
-    setVisibility.mutate({
-      id: note.id,
-      visibility: "shared",
-      sharedUserIds: next,
-    });
-  }
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {readOnly && editLock.lock && (
@@ -1107,17 +1069,6 @@ export function NoteEditor({
           </Badge>
         )}
 
-        {/* FIR-1873: the owner now manages sharing from the "⋯" menu (it opens
-            the Share sheet), and the owner badge is gone from this bar — the
-            owner is already shown under the title (EntityMetaHeader). A
-            non-owner can't change sharing, so they keep a read-only badge here
-            showing who can currently see the note. */}
-        {!isOwner && (
-          <Badge variant="outline" className="gap-1.5">
-            {VIS_ICON[note.visibility]}
-            <span>{VISIBILITY_LABELS[note.visibility]}</span>
-          </Badge>
-        )}
 
         {/* Comments button: surfaces directly in the action bar so the count
             badge is always visible when comments exist and the panel is closed.
@@ -1153,14 +1104,8 @@ export function NoteEditor({
               icon: linkCopied ? Check : Copy,
               onSelect: copyNoteLink,
             },
-            // Share lives in the menu now (FIR-1873). Owner-only — only the
-            // owner may change who can see the note; it opens the Share sheet.
-            isOwner && {
-              key: "share",
-              label: "Share",
-              icon: Share2,
-              onSelect: () => setShowShare(true),
-            },
+            // FIR-2595: per-note "Share" (visibility + share-with) is removed —
+            // access is managed on the folder via Collections, not per note.
             // Pin is an owner-only action on the backend (FIR-1460, request 2).
             isOwner && {
               key: "pin",
@@ -1352,68 +1297,6 @@ export function NoteEditor({
               }}
               onClose={closeComments}
             />
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {/* FIR-1873: Share moved out of the top bar into this sheet, opened from
-          the "⋯" menu. Same controls as before — visibility + share-with — so
-          behavior is unchanged, only the entry point moved. Owner-only. */}
-      {isOwner && (
-        <Sheet open={showShare} onOpenChange={setShowShare}>
-          <SheetContent
-            side="right"
-            className="flex flex-col gap-0 p-0 data-[side=right]:w-[94vw] data-[side=right]:sm:max-w-md"
-          >
-            <SheetHeader className="border-b px-5 py-3">
-              <SheetTitle className="flex items-center gap-2 text-base">
-                <Share2 className="size-4" /> Share
-              </SheetTitle>
-              <SheetDescription className="sr-only">
-                Choose who can see this note.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex flex-col gap-1 overflow-y-auto p-3">
-              <div className="px-1 pb-1 text-xs font-medium text-muted-foreground">
-                Who can see it
-              </div>
-              {(
-                [
-                  ["private", "Only you"],
-                  ["shared", "Selected colleagues"],
-                  ["workspace", "Whole team"],
-                ] as [NoteVisibility, string][]
-              ).map(([v, label]) => (
-                <button
-                  key={v}
-                  onClick={() => applyVisibility(v)}
-                  className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
-                >
-                  {VIS_ICON[v]}
-                  <span className="flex-1">{label}</span>
-                  {note.visibility === v && <Check className="size-4" />}
-                </button>
-              ))}
-              {note.visibility === "shared" && members.length > 0 && (
-                <>
-                  <div className="mt-2 px-1 pb-1 text-xs font-medium text-muted-foreground">
-                    Share with
-                  </div>
-                  {members.map((m) => (
-                    <button
-                      key={m.user_id}
-                      onClick={() => toggleShare(m.user_id)}
-                      className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
-                    >
-                      <span className="flex-1 truncate">{m.name}</span>
-                      {sharedIds.includes(m.user_id) && (
-                        <Check className="size-4" />
-                      )}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
           </SheetContent>
         </Sheet>
       )}
