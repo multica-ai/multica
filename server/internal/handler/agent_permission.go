@@ -189,11 +189,21 @@ func parsePermissionInput(workspaceID pgtype.UUID, permissionMode *string, targe
 // replaceInvocationTargets rewrites an agent's invocation allow-list wholesale:
 // clear then re-insert. Called inside create/update after the agent row exists.
 func (h *Handler) replaceInvocationTargets(ctx context.Context, agentID pgtype.UUID, createdBy pgtype.UUID, targets []targetSpec) error {
-	if err := h.Queries.DeleteAgentInvocationTargets(ctx, agentID); err != nil {
+	return replaceInvocationTargetsWithQueries(ctx, h.Queries, agentID, createdBy, targets)
+}
+
+// replaceInvocationTargetsWithQueries is the tx-friendly variant: callers that
+// hold a `qtx := h.Queries.WithTx(tx)` can pass it here so the invocation
+// target rows are written inside the same transaction as the agent row (the
+// template create path in agent_template.go depends on this — a fresh agent
+// row must not observe a state where the row exists but its targets are
+// missing).
+func replaceInvocationTargetsWithQueries(ctx context.Context, q *db.Queries, agentID pgtype.UUID, createdBy pgtype.UUID, targets []targetSpec) error {
+	if err := q.DeleteAgentInvocationTargets(ctx, agentID); err != nil {
 		return err
 	}
 	for _, t := range targets {
-		if err := h.Queries.CreateAgentInvocationTarget(ctx, db.CreateAgentInvocationTargetParams{
+		if err := q.CreateAgentInvocationTarget(ctx, db.CreateAgentInvocationTargetParams{
 			AgentID:    agentID,
 			TargetType: t.targetType,
 			TargetID:   t.targetID,
