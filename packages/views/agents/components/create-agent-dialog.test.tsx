@@ -31,6 +31,23 @@ vi.mock("./model-dropdown", () => ({
   ModelDropdown: () => null,
 }));
 
+const mockModelsData = vi.hoisted(() => ({
+  current: null as { models: Array<{ id: string; label: string; provider?: string; default?: boolean; thinking?: { supported_levels: Array<{ value: string; label: string; description?: string }>; default_level?: string } }>; supported: boolean } | null,
+}));
+
+vi.mock("@multica/core/runtimes", () => ({
+  runtimeModelsOptions: () => ({
+    queryKey: ["runtimes", "models", "test"],
+    queryFn: () => {
+      if (mockModelsData.current) return Promise.resolve(mockModelsData.current);
+      return Promise.resolve({ models: [], supported: true });
+    },
+    enabled: true,
+    staleTime: 60_000,
+    retry: false,
+  }),
+}));
+
 // Provider logos don't matter for these assertions but they pull in SVGs.
 vi.mock("../../runtimes/components/provider-logo", () => ({
   ProviderLogo: () => null,
@@ -283,5 +300,203 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("CreateAgentDialog thinking level", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockModelsData.current = null;
+  });
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    mockModelsData.current = null;
+  });
+
+  it("shows thinking picker when model has supported_levels", async () => {
+    mockModelsData.current = {
+      models: [
+        {
+          id: "claude-sonnet-4",
+          label: "Claude Sonnet 4",
+          provider: "anthropic",
+          default: true,
+          thinking: {
+            supported_levels: [
+              { value: "low", label: "Low" },
+              { value: "medium", label: "Medium" },
+              { value: "high", label: "High" },
+            ],
+            default_level: "medium",
+          },
+        },
+      ],
+      supported: true,
+    };
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
+    renderDialog([mine]);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+  });
+
+  it("hides thinking picker when model has no supported_levels", async () => {
+    mockModelsData.current = {
+      models: [
+        {
+          id: "gpt-4",
+          label: "GPT-4",
+          provider: "openai",
+          default: true,
+        },
+      ],
+      supported: true,
+    };
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
+    renderDialog([mine]);
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("Thinking")).toBeNull();
+  });
+
+  it("includes thinking_level in create payload", async () => {
+    mockModelsData.current = {
+      models: [
+        {
+          id: "claude-sonnet-4",
+          label: "Claude Sonnet 4",
+          provider: "anthropic",
+          default: true,
+          thinking: {
+            supported_levels: [
+              { value: "low", label: "Low" },
+              { value: "high", label: "High" },
+            ],
+          },
+        },
+      ],
+      supported: true,
+    };
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
+    const { onCreate } = renderDialog([mine]);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
+    // Click the thinking picker trigger to open the popover
+    const pickerTrigger = screen.getByRole("button", { name: /Thinking/i });
+    fireEvent.click(pickerTrigger);
+
+    // Select "High"
+    await vi.waitFor(() => {
+      expect(screen.getByText("High")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("High"));
+
+    // Fill in a name and submit
+    const nameInput = screen.getByPlaceholderText("e.g. Deep Research Agent");
+    fireEvent.change(nameInput, { target: { value: "Test Agent" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    await vi.waitFor(() => {
+      expect(onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBe("high");
+  });
+
+  it("does not submit stale thinking_level when discovery is unavailable (offline runtime)", async () => {
+    // Simulate: duplicating an agent with thinking_level=high, but runtime
+    // is offline so discovery never fires and picker stays hidden.
+    mockModelsData.current = null;
+    const mine = makeRuntime({
+      id: "rt-mine",
+      name: "My Runtime",
+      owner_id: ME,
+      visibility: "private",
+      status: "offline",
+    });
+    const template = makeTemplate("rt-mine");
+    template.thinking_level = "high";
+    const { onCreate } = renderDialog([mine], template);
+
+    await new Promise((r) => setTimeout(r, 50));
+    // Thinking picker must not be visible
+    expect(screen.queryByText("Thinking")).toBeNull();
+
+    // Submit the form — the stale thinking_level must NOT be in the payload
+    fireEvent.click(screen.getByText("Create"));
+    await vi.waitFor(() => {
+      expect(onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBeUndefined();
+  });
+
+  it("does not submit stale thinking_level when model does not support thinking", async () => {
+    // Simulate: duplicating an agent with thinking_level=high onto a model
+    // that has no thinking levels (e.g. GPT-4).
+    mockModelsData.current = {
+      models: [
+        {
+          id: "gpt-4",
+          label: "GPT-4",
+          provider: "openai",
+          default: true,
+        },
+      ],
+      supported: true,
+    };
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
+    const template = makeTemplate("rt-mine");
+    template.thinking_level = "high";
+    const { onCreate } = renderDialog([mine], template);
+
+    await new Promise((r) => setTimeout(r, 50));
+    // Thinking picker must not be visible (model has no thinking levels)
+    expect(screen.queryByText("Thinking")).toBeNull();
+
+    // Submit
+    fireEvent.click(screen.getByText("Create"));
+    await vi.waitFor(() => {
+      expect(onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBeUndefined();
+  });
+
+  it("pre-fills thinking_level in duplicate mode when model supports it", async () => {
+    mockModelsData.current = {
+      models: [
+        {
+          id: "claude-sonnet-4",
+          label: "Claude Sonnet 4",
+          provider: "anthropic",
+          default: true,
+          thinking: {
+            supported_levels: [
+              { value: "low", label: "Low" },
+              { value: "high", label: "High" },
+            ],
+          },
+        },
+      ],
+      supported: true,
+    };
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
+    const template = makeTemplate("rt-mine");
+    template.thinking_level = "high";
+    const { onCreate } = renderDialog([mine], template);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("Thinking")).toBeInTheDocument();
+    });
+
+    // Submit without changing anything — should carry the pre-filled value
+    fireEvent.click(screen.getByText("Create"));
+    await vi.waitFor(() => {
+      expect(onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBe("high");
   });
 });

@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Globe, Lock } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarPicker } from "./avatar-picker";
+import { ThinkingPicker } from "./inspector/thinking-picker";
+import { pickModelEntry } from "./inspector/thinking-prop-row";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type {
   Agent,
@@ -87,6 +90,7 @@ export function CreateAgentDialog({
     template?.visibility ?? "workspace",
   );
   const [model, setModel] = useState(template?.model ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState(template?.thinking_level ?? "");
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
@@ -117,6 +121,27 @@ export function CreateAgentDialog({
   const selectedRuntimeLocked =
     selectedRuntime != null &&
     !isRuntimeUsableForUser(selectedRuntime, currentUserId);
+
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(
+      selectedRuntime?.status === "online" ? selectedRuntime.id : null,
+    ),
+  );
+  const models = useMemo(
+    () => modelsQuery.data?.models ?? [],
+    [modelsQuery.data],
+  );
+  const thinkingEntry = pickModelEntry(models, model);
+  const thinkingLevels = thinkingEntry?.thinking?.supported_levels ?? [];
+
+  useEffect(() => {
+    if (!thinkingLevel || !modelsQuery.data) return;
+    if (thinkingLevels.length === 0) {
+      setThinkingLevel("");
+    } else if (!thinkingLevels.some((l) => l.value === thinkingLevel)) {
+      setThinkingLevel("");
+    }
+  }, [thinkingLevels, thinkingLevel, modelsQuery.data]);
 
   // Shared squad-join follow-up. Returns nothing — the caller has
   // already shown its create-success toast; we only need to surface a
@@ -162,6 +187,8 @@ export function CreateAgentDialog({
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
+        thinking_level:
+          thinkingLevels.length > 0 ? thinkingLevel || undefined : undefined,
       };
       if (template) {
         // Duplicate path: forward the hidden config fields the source
@@ -341,6 +368,26 @@ export function CreateAgentDialog({
               onChange={setModel}
               disabled={!selectedRuntime}
             />
+
+            {thinkingLevels.length > 0 && (
+              <div className="flex flex-col min-w-0">
+                <div className="flex h-6 items-center">
+                  <Label className="text-xs text-muted-foreground">
+                    {t(($) => $.create_dialog.thinking_label)}
+                  </Label>
+                </div>
+                <div className="mt-1.5 flex items-center rounded-lg border border-border bg-background px-3 py-2.5">
+                  <ThinkingPicker
+                    value={thinkingLevel}
+                    levels={thinkingLevels}
+                    onChange={(next) => setThinkingLevel(next)}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t(($) => $.create_dialog.thinking_help)}
+                </p>
+              </div>
+            )}
 
             {/* --- Optional sections (instructions / skills) ---
                 Collapsed by default so quick-create stays fast.
