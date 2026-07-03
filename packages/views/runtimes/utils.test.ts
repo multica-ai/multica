@@ -10,6 +10,8 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatHoldUntil,
+  formatLastSeen,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -1015,5 +1017,83 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+describe("formatHoldUntil", () => {
+  // Fixed injected "now" so the countdown math is deterministic.
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const inMs = (ms: number) => new Date(now + ms).toISOString();
+
+  it("returns null when there is no hold", () => {
+    expect(formatHoldUntil(null, now)).toBeNull();
+    expect(formatHoldUntil(undefined, now)).toBeNull();
+  });
+
+  it("returns the localized soon label once the margin has passed", () => {
+    const hold = inMs(-10 * 60_000); // 10m past hold_until (> 5m margin)
+    expect(formatHoldUntil(hold, now, "en", "soon")).toBe("soon");
+    expect(formatHoldUntil(hold, now, "zh-Hans", "即将")).toBe("即将");
+  });
+
+  it("formats a compound hours+minutes countdown (margin included)", () => {
+    const hold = inMs(5 * 3_600_000 + 18 * 60_000); // +5h18m, +5m margin => 5h23m
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 5h 23m");
+    expect(formatHoldUntil(hold, now, "ja")).toBe("5時間23分後");
+    expect(formatHoldUntil(hold, now, "ko")).toBe("5시간 23분 후");
+    expect(formatHoldUntil(hold, now, "zh-Hans")).toBe("5小时23分钟后");
+  });
+
+  it("drops the minutes when they round to zero", () => {
+    const hold = inMs(115 * 60_000); // +1h55m, +5m margin => exactly 2h
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 2h");
+  });
+
+  it("formats a minutes-only countdown", () => {
+    const hold = inMs(7 * 60_000); // +7m, +5m margin => 12m
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 12m");
+    expect(formatHoldUntil(hold, now, "ja")).toBe("12分後");
+  });
+});
+
+describe("formatLastSeen", () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  it("returns the localized never label when last seen is null", () => {
+    expect(formatLastSeen(null, "en", { never: "Never" }, now)).toBe("Never");
+    expect(formatLastSeen(null, "zh-Hans", { never: "从未" }, now)).toBe("从未");
+  });
+
+  it("returns the just-now label within the 5s window", () => {
+    expect(formatLastSeen(ago(2_000), "en", { justNow: "Just now" }, now)).toBe(
+      "Just now",
+    );
+  });
+
+  it("formats a seconds-only timestamp", () => {
+    expect(formatLastSeen(ago(45_000), "en", {}, now)).toBe("45s ago");
+  });
+
+  it("formats compound minutes+seconds and localizes it", () => {
+    const t = ago(2 * 60_000 + 14_000); // 2m14s
+    expect(formatLastSeen(t, "en", {}, now)).toBe("2m 14s ago");
+    expect(formatLastSeen(t, "ja", {}, now)).toBe("2分14秒前");
+  });
+
+  it("formats compound days+hours and localizes it", () => {
+    const t = ago(6 * 86_400_000 + 19 * 3_600_000); // 6d19h
+    expect(formatLastSeen(t, "en", {}, now)).toBe("6d 19h ago");
+    expect(formatLastSeen(t, "ko", {}, now)).toBe("6일 19시간 전");
+  });
+
+  it("drops the secondary unit when it is zero", () => {
+    const t = ago(3 * 3_600_000); // exactly 3h
+    expect(formatLastSeen(t, "en", {}, now)).toBe("3h ago");
+  });
+
+  it("keeps a coincidentally shared leading digit with its number", () => {
+    const t = ago(6 * 86_400_000 + 6 * 3_600_000); // 6d6h — shared "6"
+    expect(formatLastSeen(t, "en", {}, now)).toBe("6d 6h ago");
   });
 });

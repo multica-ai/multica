@@ -284,7 +284,7 @@ function HealthCell({
   workload: RuntimeWorkload;
   now: number;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
   const timeAgo = useTimeAgo();
@@ -332,7 +332,12 @@ function HealthCell({
   const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
-  const holdTime = formatHoldUntil(runtime.hold_until);
+  const holdTime = formatHoldUntil(
+    runtime.hold_until,
+    now,
+    i18n.language,
+    t(($) => $.health.on_hold.soon),
+  );
   const active = workload.runningCount + workload.queuedCount;
 
   return (

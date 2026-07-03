@@ -28,7 +28,8 @@
     "just_now": "刚刚",
     "minutes_ago": "{{count}} 分钟前",
     "hours_ago": "{{count}} 小时前",
-    "days_ago": "{{count}} 天前"
+    "days_ago": "{{count}} 天前",
+    "never": "从未"
   },
   "lark_bind": {
     "page_title": "绑定飞书账号",

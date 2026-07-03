@@ -284,7 +284,7 @@ function HeroCard({
   daemonShort: string | null;
   canDelete: boolean;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
   const wsId = useWorkspaceId();
   const resumeMutation = useResumeRuntime(wsId);
@@ -314,7 +314,12 @@ function HeroCard({
               <span className="min-w-0 flex-1">
                 {t(($) => $.health.on_hold.label)} —{" "}
                 {t(($) => $.health.on_hold.resumes_in, {
-                  time: formatHoldUntil(runtime.hold_until)!,
+                  time: formatHoldUntil(
+                    runtime.hold_until,
+                    Date.now(),
+                    i18n.language,
+                    t(($) => $.health.on_hold.soon),
+                  )!,
                 })}
               </span>
               {canDelete && (

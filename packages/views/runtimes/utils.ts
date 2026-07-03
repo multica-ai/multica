@@ -23,24 +23,126 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // badge doesn't say "soon" while the runtime is still genuinely held.
 export const HOLD_EXPIRY_MARGIN_MS = 5 * 60_000;
 
-// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m",
-// "in 3m" during the margin window, "soon" once the margin also passes).
-// Returns null when holdUntil is null/undefined so callers can gate on truthiness.
-// `now` defaults to Date.now() but can be injected for testability.
+// ---------------------------------------------------------------------------
+// Locale-aware relative-time formatting
+//
+// formatHoldUntil / formatLastSeen render compact compound countdowns
+// ("6d 19h ago", "in 5h 23m") in the active UI locale. Intl.RelativeTimeFormat
+// only speaks single units, so the compound case formats each unit on its own
+// and splices them into one shared direction frame — see formatRelativeParts.
+// ---------------------------------------------------------------------------
+
+// RelativeTimeFormat instances aren't free to build and these formatters run
+// on every runtime row / countdown tick, so we memoize one per locale. The
+// locale set is tiny and bounded, so this is intentionally process-lifetime.
+// `numeric: "always"` is required, not cosmetic: it keeps -1 day as "1d ago"
+// rather than the idiomatic "yesterday", so every unit renders in the uniform
+// <number><unit><direction> shape the compound splice below depends on.
+const relativeTimeFormatCache = new Map<string, Intl.RelativeTimeFormat>();
+function getRelativeTimeFormat(locale: string): Intl.RelativeTimeFormat {
+  let rtf = relativeTimeFormatCache.get(locale);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(locale, {
+      numeric: "always",
+      style: "narrow",
+    });
+    relativeTimeFormatCache.set(locale, rtf);
+  }
+  return rtf;
+}
+
+interface RelativeUnitPart {
+  value: number;
+  unit: Intl.RelativeTimeFormatUnit;
+}
+
+const isAsciiDigit = (ch: string): boolean => ch >= "0" && ch <= "9";
+
+// Longest common prefix of `a`/`b`, minus any trailing digits. Trimming digits
+// keeps a coincidentally shared leading number ("6d ago" vs "6h ago") with its
+// unit instead of mistaking it for part of the (numberless) direction frame.
+function directionPrefix(a: string, b: string): string {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charAt(i) === b.charAt(i)) i++;
+  while (i > 0 && isAsciiDigit(a.charAt(i - 1))) i--;
+  return a.slice(0, i);
+}
+
+// Longest common suffix of `a`/`b`, minus any leading digits (mirror of
+// directionPrefix, for suffix-direction locales like "6d 19h ago" / "6日19時間前").
+function directionSuffix(a: string, b: string): string {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charAt(a.length - 1 - i) === b.charAt(b.length - 1 - i)) i++;
+  let start = a.length - i;
+  while (start < a.length && isAsciiDigit(a.charAt(start))) start++;
+  return a.slice(start);
+}
+
+// Separator between the two units of a compound countdown. CJK convention runs
+// number-unit pairs together ("6日19時間"); most other locales space them
+// ("6d 19h"). Unknown/future locales default to a space.
+function compoundSeparator(locale: string): string {
+  const base = locale.toLowerCase().split("-")[0];
+  return base === "ja" || base === "zh" ? "" : " ";
+}
+
+// Render one or two same-direction (signed) relative-time parts as a single
+// localized string. One part is plain Intl.RelativeTimeFormat. For two parts we
+// format each, peel the shared direction frame (a prefix like "in " or a suffix
+// like " ago" / "前") off both, then rejoin as
+// <prefix><primary><separator><secondary><suffix>.
+function formatRelativeParts(
+  locale: string,
+  primary: RelativeUnitPart,
+  secondary?: RelativeUnitPart,
+): string {
+  const rtf = getRelativeTimeFormat(locale);
+  if (!secondary) return rtf.format(primary.value, primary.unit);
+
+  const p = rtf.format(primary.value, primary.unit);
+  const s = rtf.format(secondary.value, secondary.unit);
+  const prefix = directionPrefix(p, s);
+  const pRest = p.slice(prefix.length);
+  const sRest = s.slice(prefix.length);
+  const suffix = directionSuffix(pRest, sRest);
+  const primaryCore = pRest.slice(0, pRest.length - suffix.length);
+  const secondaryCore = sRest.slice(0, sRest.length - suffix.length);
+  return (
+    prefix + primaryCore + compoundSeparator(locale) + secondaryCore + suffix
+  );
+}
+
+// Localized countdown until a hold expires ("in 5h 23m", "in 12m", `soon` once
+// the margin has also passed), using Intl.RelativeTimeFormat so the output
+// matches the active UI locale while keeping the compact compound precision.
+// Returns null when holdUntil is null/undefined so callers can gate on
+// truthiness. `now` defaults to Date.now() but can be injected for testability.
+// `soon` is the caller-supplied translation of the imminent-hold label
+// (runtimes.health.on_hold.soon).
 export function formatHoldUntil(
   holdUntil: string | null | undefined,
   now: number = Date.now(),
+  locale: string = "en",
+  soon: string = "soon",
 ): string | null {
   if (!holdUntil) return null;
   const holdMs = new Date(holdUntil).getTime();
   const effectiveExpiryMs = holdMs + HOLD_EXPIRY_MARGIN_MS;
   const diffMs = effectiveExpiryMs - now;
-  if (diffMs <= 0) return "soon";
+  if (diffMs <= 0) return soon;
   const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
-  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
-  return `in ${minutes}m`;
+  if (hours > 0) {
+    return formatRelativeParts(
+      locale,
+      { value: hours, unit: "hour" },
+      mins > 0 ? { value: mins, unit: "minute" } : undefined,
+    );
+  }
+  return formatRelativeParts(locale, { value: minutes, unit: "minute" });
 }
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",
