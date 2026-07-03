@@ -42,7 +42,6 @@
   },
   "picker": {
     "placeholder": "Team",
-    "clear": "Clear team",
     "empty": "No active teams",
     "selected_count_one": "{{count}} team",
     "selected_count_other": "{{count}} teams"

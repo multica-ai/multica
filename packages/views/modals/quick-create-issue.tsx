@@ -9,9 +9,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeTeamListOptions } from "@multica/core/teams/queries";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -85,7 +86,6 @@ export function AgentCreatePanel({
 }) {
   const { t } = useT("modals");
   const sendShortcut = useShortcut("send");
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -220,6 +220,41 @@ export function AgentCreatePanel({
   const parentIssueIdentifier =
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
+  // Every issue belongs to exactly one team, so the header picker always
+  // resolves to a value: explicit pick → remembered pick → workspace default
+  // team. Sub-issues are pinned to the parent's team (the server enforces
+  // inheritance), so the picker locks.
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const defaultTeamId = useMemo(
+    () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
+    [teams],
+  );
+  const { data: parentIssue } = useQuery({
+    ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
+  const effectiveTeamId = parentTeamId ?? teamId ?? defaultTeamId ?? null;
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
+  useEffect(() => {
+    if (!projectId || parentTeamId) return;
+    const allowed = selectedProject?.team_ids ?? [];
+    if (allowed.length === 0) return;
+    // Converge instead of clearing: the issue must keep a team, so a pick the
+    // newly-chosen project doesn't include snaps to that project's own team.
+    if (allowed.length === 1) {
+      if (teamId !== allowed[0]) setTeamId(allowed[0]);
+      return;
+    }
+    const current = teamId ?? defaultTeamId;
+    if (current && !allowed.includes(current)) setTeamId(allowed[0]);
+  }, [projectId, selectedProject, teamId, defaultTeamId, parentTeamId]);
+
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
@@ -315,13 +350,13 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
-        team_id: teamId ?? undefined,
+        team_id: effectiveTeamId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
       });
       setLastActor(actor.type, actor.id);
-      setLastTeamId(teamId);
+      setLastTeamId(effectiveTeamId);
       setLastProjectId(projectId);
       clearPrompt();
       setLastMode("agent");
@@ -407,7 +442,7 @@ export function AgentCreatePanel({
     // through.
     const carry: Record<string, unknown> = {};
     if (projectId) carry.project_id = projectId;
-    if (teamId) carry.team_id = teamId;
+    if (effectiveTeamId) carry.team_id = effectiveTeamId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -420,7 +455,16 @@ export function AgentCreatePanel({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
+            {/* The issue's team namespace — leads the breadcrumb like the
+                workspace name used to, but as a required single-select. */}
+            <TeamPicker
+              teamId={effectiveTeamId}
+              onChange={setTeamId}
+              allowedTeamIds={projectTeamIds}
+              disabled={!!parentTeamId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
@@ -528,12 +572,6 @@ export function AgentCreatePanel({
           <ProjectPicker
             projectId={projectId}
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
-            triggerRender={<PillButton />}
-            align="start"
-          />
-          <TeamPicker
-            teamId={teamId}
-            onChange={setTeamId}
             triggerRender={<PillButton />}
             align="start"
           />
