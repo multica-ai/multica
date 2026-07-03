@@ -130,13 +130,24 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 	testRuntimeID = runtimeID
 
-	if _, err := pool.Exec(ctx, `
+	var seededAgentID string
+	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
-	`, workspaceID, "Handler Test Agent", runtimeID, userID); err != nil {
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 'public_to', 1, $4)
+		RETURNING id
+	`, workspaceID, "Handler Test Agent", runtimeID, userID).Scan(&seededAgentID); err != nil {
+		return "", "", err
+	}
+	// MUL-3963: the seeded workspace-visible agent is invocable by workspace
+	// members and A2A triggers, so seed its workspace invocation target.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+		VALUES ($1, 'workspace', $2)
+		ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
+	`, seededAgentID, workspaceID); err != nil {
 		return "", "", err
 	}
 
@@ -208,13 +219,25 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args, mcp_config
 		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 'public_to', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
 		RETURNING id
 	`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID, mcpConfig).Scan(&agentID); err != nil {
 		t.Fatalf("failed to create handler test agent: %v", err)
+	}
+	// Generic test agents are workspace-invocable (MUL-3963): seed the
+	// matching workspace invocation target so canInvokeAgent admits workspace
+	// members and A2A triggers, mirroring the pre-permission-model behavior
+	// where a workspace-visible agent could be triggered by anyone in the
+	// workspace. Dedicated private-agent tests use privateAgentTestFixture.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+		VALUES ($1, 'workspace', $2)
+		ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
+	`, agentID, testWorkspaceID); err != nil {
+		t.Fatalf("failed to seed workspace invocation target: %v", err)
 	}
 
 	t.Cleanup(func() {

@@ -79,11 +79,12 @@ describe("DesktopRouteErrorPage", () => {
       "feedback",
       expect.objectContaining({
         initialMessage: expect.stringContaining("kind: desktop_route_error"),
+        kind: "bug",
       }),
     );
   });
 
-  it("documents the structured kind/context follow-up debt in the report template", () => {
+  it("documents the structured context follow-up debt in the report template", () => {
     const report = formatRouteErrorReport({
       error: new Error("bad route"),
       url: "app://desktop/acme/issues",
@@ -93,6 +94,6 @@ describe("DesktopRouteErrorPage", () => {
 
     expect(report).toContain("kind: desktop_route_error");
     expect(report).toContain("trigger: route-errorElement");
-    expect(report).toContain("TODO: promote kind/context to structured feedback fields");
+    expect(report).toContain("TODO: promote error context to structured feedback fields");
   });
 });

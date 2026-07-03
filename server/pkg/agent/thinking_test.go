@@ -58,6 +58,39 @@ Options:
 	}
 }
 
+func TestClaudeEffortLevelsFromHelp_DriftedFormatFallsBackToFullSuperset(t *testing.T) {
+	t.Parallel()
+	// The flag is advertised but the parenthesised value list is gone —
+	// genuine help drift, so keep offering the last known good superset.
+	help := `Usage: claude [options]
+
+Options:
+  --effort <level>    Choose how hard the model thinks
+`
+	got := claudeEffortLevelsFromHelp(help)
+	if !reflect.DeepEqual(got, claudeStaticEffortFullSuperset) {
+		t.Fatalf("claudeEffortLevelsFromHelp: got %v, want full superset %v", got, claudeStaticEffortFullSuperset)
+	}
+}
+
+func TestClaudeEffortLevelsFromHelp_PreEffortCLIReturnsNoLevels(t *testing.T) {
+	t.Parallel()
+	// A CLI released before --effort existed (e.g. claude 2.1.2) has no
+	// mention of the flag anywhere in --help. This must yield NO levels —
+	// the old fallback-to-full-superset here made the daemon inject
+	// --effort, which the binary rejects with "unknown option", failing
+	// the task outright.
+	help := `Usage: claude [options]
+
+Options:
+  --model <model>     Model to use
+  --verbose
+`
+	if got := claudeEffortLevelsFromHelp(help); got != nil {
+		t.Fatalf("claudeEffortLevelsFromHelp: expected nil for pre-effort CLI, got %v", got)
+	}
+}
+
 func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 	t.Parallel()
 	superset := []string{"low", "medium", "high", "xhigh", "max"}
@@ -376,6 +409,42 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 }
 
+func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	// End-to-end guard for the daemon's pre-execution check against a CLI
+	// that predates --effort: the catalog must offer no levels, so any
+	// persisted thinking_level is dropped (with a warning) instead of being
+	// injected as a flag the binary rejects with "unknown option".
+	fakeClaude := writeFakeClaudePreEffortHelpBinary(t)
+	resetThinkingCacheForTests()
+	defer resetThinkingCacheForTests()
+
+	ctx := context.Background()
+
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", level)
+		if err != nil {
+			t.Fatalf("unexpected err for %q: %v", level, err)
+		}
+		if ok {
+			t.Errorf("level %q must be invalid on a pre-effort CLI; got true", level)
+		}
+	}
+
+	// Empty value still means "use runtime default" and must stay valid.
+	ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Errorf("empty value must always be valid")
+	}
+}
+
 func TestValidateThinkingLevel_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
@@ -447,6 +516,25 @@ func writeFakeClaudeHelpBinary(t *testing.T) string {
 	// Same ForkLock rationale as TestRunCodexDebugModels_ArgvSeenByBinary —
 	// the parser tests that consume this helper exec the script in parallel,
 	// so a sibling fork can otherwise inherit our write fd and trip ETXTBSY.
+	writeTestExecutable(t, path, []byte(script))
+	return path
+}
+
+// writeFakeClaudePreEffortHelpBinary mimics a Claude Code release from
+// before the --effort flag existed (e.g. 2.1.2): --help succeeds but has
+// no --effort line at all.
+func writeFakeClaudePreEffortHelpBinary(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\n" +
+		"cat <<'EOF'\n" +
+		"Usage: claude [options]\n" +
+		"\n" +
+		"Options:\n" +
+		"  --model <model>     Model to use\n" +
+		"  --verbose\n" +
+		"EOF\n"
 	writeTestExecutable(t, path, []byte(script))
 	return path
 }

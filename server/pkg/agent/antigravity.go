@@ -186,9 +186,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// produced) without writing anything to stdout, leaving a blank but
 			// "completed" run none of the guards above catch (MUL-3726). Recover
 			// the assistant text agy persisted to its conversation transcript so
-			// the user sees the actual answer instead of an empty result.
+			// the user sees the actual answer instead of an empty result. Also
+			// emit it as a MessageText event so the task transcript catches up;
+			// otherwise Result.Output becomes visible only in the synthesized
+			// final comment while the execution transcript remains blank.
 			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
 				finalOutput = recovered
+				trySend(msgCh, Message{Type: MessageText, Content: recovered})
 				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
 			}
 		}

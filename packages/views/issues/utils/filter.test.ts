@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
-import { filterIssues, filterAssigneeGroups, type IssueFilters } from "./filter";
+import {
+  applyIssueFilters,
+  filterAssigneeGroups,
+  filterIssues,
+  type IssueFilters,
+} from "./filter";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -247,6 +252,24 @@ describe("filterIssues", () => {
     });
     // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
     // in the running set → only "1" survives.
+    expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  it("applies workingOnly from activity context without treating queued issues as working", () => {
+    const result = applyIssueFilters(
+      issues,
+      {
+        ...NO_FILTER,
+        workingOnly: true,
+      },
+      {
+        activityByIssueId: new Map([
+          ["1", { isWorking: true, isQueued: false, runningTasks: [], queuedTasks: [] }],
+          ["2", { isWorking: false, isQueued: true, runningTasks: [], queuedTasks: [] }],
+        ]),
+      },
+    );
+
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 

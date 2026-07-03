@@ -110,7 +110,7 @@ func TestCreateAutopilot_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -124,9 +124,10 @@ func TestCreateAutopilot_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// testUserID is workspace owner — should succeed.
+	// The AGENT OWNER creates the autopilot — allowed under MUL-3963 (workspace
+	// owner/admin no longer bypasses a private leader's invocation gate).
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "owner creates private-leader squad ap",
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
@@ -154,7 +155,7 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -168,9 +169,10 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// Create autopilot as owner.
+	// Create autopilot as the AGENT OWNER (MUL-3963: only owner/allow-listed
+	// may invoke the private leader; workspace admin no longer bypasses).
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "dispatch test private leader squad",
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,

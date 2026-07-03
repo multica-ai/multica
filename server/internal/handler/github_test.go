@@ -438,13 +438,18 @@ func TestWebhook_UninstallReturnsWorkspaceForBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteGitHubInstallationByInstallationID: %v", err)
 	}
-	if uuidToString(deleted.WorkspaceID) != testWorkspaceID {
-		t.Errorf("expected returned workspace_id %s, got %s", testWorkspaceID, uuidToString(deleted.WorkspaceID))
+	if len(deleted) != 1 {
+		t.Fatalf("expected 1 deleted binding, got %d", len(deleted))
 	}
-	// Re-deleting must surface ErrNoRows so the handler can short-circuit
-	// the broadcast (and not panic).
-	if _, err := testHandler.Queries.DeleteGitHubInstallationByInstallationID(ctx, installationID); err == nil {
-		t.Error("expected ErrNoRows on second delete, got nil")
+	if uuidToString(deleted[0].WorkspaceID) != testWorkspaceID {
+		t.Errorf("expected returned workspace_id %s, got %s", testWorkspaceID, uuidToString(deleted[0].WorkspaceID))
+	}
+	// Re-deleting must return no rows so the handler skips the broadcast
+	// (and does not panic).
+	if again, err := testHandler.Queries.DeleteGitHubInstallationByInstallationID(ctx, installationID); err != nil {
+		t.Errorf("second delete errored: %v", err)
+	} else if len(again) != 0 {
+		t.Errorf("expected 0 rows on second delete, got %d", len(again))
 	}
 }
 
@@ -2504,10 +2509,14 @@ func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
 	}
 
 	// (a) The row's account_login must be the real login, not "unknown".
-	got, err := testHandler.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
 	if err != nil {
-		t.Fatalf("get installation: %v", err)
+		t.Fatalf("list installations: %v", err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 installation row, got %d", len(rows))
+	}
+	got := rows[0]
 	if got.AccountLogin != "real-octocat" {
 		t.Errorf("account_login = %q, want %q (refresh did not overwrite the unknown placeholder)",
 			got.AccountLogin, "real-octocat")
@@ -2633,10 +2642,14 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 		t.Fatalf("setup callback redirect = %q, want github_connected=1", loc)
 	}
 
-	got, err := testHandler.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
 	if err != nil {
-		t.Fatalf("get installation: %v", err)
+		t.Fatalf("list installations: %v", err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 installation row, got %d", len(rows))
+	}
+	got := rows[0]
 	if got.AccountLogin != "pending-octocat" {
 		t.Errorf("account_login = %q, want pending-octocat (callback left the unknown placeholder)", got.AccountLogin)
 	}
@@ -2904,5 +2917,170 @@ func TestWebhook_RegistryDoesNotCaptureForeignAccount(t *testing.T) {
 	// The gate refused the registry, so the squatter workspace got nothing.
 	if linked, _ := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID)); len(linked) != 0 {
 		t.Fatalf("foreign-account repo must not link to the squatter workspace, got %d links", len(linked))
+	}
+}
+
+// TestSecondWorkspaceBindDoesNotUnbindFirst is the #4823 regression: binding
+// the same GitHub App installation in a second workspace must NOT overwrite the
+// first workspace's binding. Both bindings coexist, and re-binding an existing
+// (workspace, installation) pair upserts its row in place.
+func TestSecondWorkspaceBindDoesNotUnbindFirst(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const installationID int64 = 909090909
+
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "multi-bind-ws-b")
+	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        "multi-bind-ws-b",
+		Slug:        "multi-bind-ws-b",
+		IssuePrefix: "MBB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
+	})
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace A: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    wsB.ID,
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace B: %v", err)
+	}
+
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 bindings to coexist (silent unbind regression), got %d", len(rows))
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		seen[uuidToString(r.WorkspaceID)] = true
+	}
+	if !seen[testWorkspaceID] || !seen[uuidToString(wsB.ID)] {
+		t.Errorf("both workspaces must retain a binding; got %v", seen)
+	}
+
+	// Re-binding workspace A must upsert its own row in place, not add a third.
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org-renamed",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("re-bind workspace A: %v", err)
+	}
+	rows, err = testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations after re-bind: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("re-binding an existing (workspace, installation) must upsert, got %d rows", len(rows))
+	}
+}
+
+// TestWebhook_UninstallDeletesAllBindings verifies a GitHub-side app uninstall
+// drops every workspace binding for the installation and broadcasts to each
+// affected workspace so their Settings tabs refresh.
+func TestWebhook_UninstallDeletesAllBindings(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "uninstall-all-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 707070707
+
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "uninstall-all-ws-b")
+	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        "uninstall-all-ws-b",
+		Slug:        "uninstall-all-ws-b",
+		IssuePrefix: "UAB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
+	})
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace A: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    wsB.ID,
+		InstallationID: installationID,
+		AccountLogin:   "shared-org",
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("bind workspace B: %v", err)
+	}
+
+	gotWS := make(chan string, 2)
+	testHandler.Bus.Subscribe(protocol.EventGitHubInstallationDeleted, func(e events.Event) {
+		select {
+		case gotWS <- e.WorkspaceID:
+		default:
+		}
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"action":       "deleted",
+		"installation": map[string]any{"id": installationID},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "installation")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list installations: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected all bindings deleted, got %d", len(rows))
+	}
+
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case ws := <-gotWS:
+			seen[ws] = true
+		case <-deadline:
+			t.Fatalf("expected 2 deleted broadcasts (one per workspace), saw %v", seen)
+		}
+	}
+	if !seen[testWorkspaceID] || !seen[uuidToString(wsB.ID)] {
+		t.Errorf("deleted broadcasts must cover both workspaces; saw %v", seen)
 	}
 }

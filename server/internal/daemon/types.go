@@ -1,6 +1,10 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -38,6 +42,10 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// ConnectedAppData keeps the claim-response field local to daemon types while
+// sharing the canonical JSON shape with the runtime app metadata package.
+type ConnectedAppData = runtimeapps.ConnectedApp
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -53,6 +61,7 @@ type Task struct {
 	WorkspaceContext         string                `json:"workspace_context,omitempty"`
 	ThreadName               string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                    *AgentData            `json:"agent,omitempty"`
+	ConnectedApps            []ConnectedAppData    `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                    []RepoData            `json:"repos,omitempty"`
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection

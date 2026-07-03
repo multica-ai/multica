@@ -858,6 +858,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
+	// assignee_types narrows the list to issues assigned to the given actor
+	// kinds (member / agent / squad). Mirrors the same param on
+	// ListGroupedIssues so the workspace Members/Agents tabs can filter
+	// server-side instead of post-filtering loaded pages on the client.
+	assigneeTypesFilter := splitCommaParam(r.URL.Query().Get("assignee_types"))
+	for _, assigneeType := range assigneeTypesFilter {
+		if !isIssueActorType(assigneeType) {
+			writeError(w, http.StatusBadRequest, "invalid assignee_types")
+			return
+		}
+	}
+
 	// scheduled=true restricts the result to issues that have at least one of
 	// start_date / due_date set. Used by the Project Gantt view, which only
 	// renders schedulable rows and shouldn't pay for the full project list.
@@ -916,6 +928,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(assigneeIdsFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	if len(assigneeTypesFilter) > 0 {
+		where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypesFilter)))
 	}
 	if creatorFilter.Valid {
 		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
@@ -2653,7 +2668,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID) {
+		if !h.canInvokeAgent(ctx, agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 			return http.StatusForbidden, "cannot assign to private agent"
 		}
 		return 0, ""
@@ -2673,7 +2688,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+		if !h.canInvokeAgent(ctx, leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 			return http.StatusForbidden, "cannot assign to squad with private leader"
 		}
 		return 0, ""
@@ -2717,7 +2732,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
-	if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers

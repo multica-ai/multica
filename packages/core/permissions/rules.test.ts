@@ -30,6 +30,8 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [{ target_type: "workspace", target_id: null }],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "default",
@@ -141,38 +143,118 @@ describe("canEditAgent", () => {
 });
 
 describe("canAssignAgentToIssue", () => {
-  it("allows any member to assign workspace-visibility agents", () => {
-    const a = makeAgent({ visibility: "workspace", owner_id: ALICE });
+  const workspaceTargets = [
+    { target_type: "workspace" as const, target_id: null },
+  ];
+
+  it("allows any member to assign a public_to-workspace agent", () => {
+    const a = makeAgent({
+      visibility: "workspace",
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+      owner_id: ALICE,
+    });
     expect(
       canAssignAgentToIssue(a, { userId: BOB, role: "member" }).allowed,
     ).toBe(true);
   });
-  it("denies non-members from assigning workspace agents", () => {
-    const a = makeAgent({ visibility: "workspace", owner_id: ALICE });
+
+  it("denies non-members from assigning a public_to-workspace agent", () => {
+    const a = makeAgent({
+      visibility: "workspace",
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+      owner_id: ALICE,
+    });
     const d = canAssignAgentToIssue(a, { userId: BOB, role: null });
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("not_member");
   });
+
   it("allows the owner to assign their private agent", () => {
-    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "private",
+      invocation_targets: [],
+      owner_id: ALICE,
+    });
     expect(
       canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
     ).toBe(true);
   });
-  it("allows workspace admin to assign someone else's private agent", () => {
-    const a = makeAgent({ visibility: "private", owner_id: ALICE });
-    expect(
-      canAssignAgentToIssue(a, { userId: BOB, role: "admin" }).allowed,
-    ).toBe(true);
+
+  it("denies a workspace admin from assigning someone else's private agent (MUL-3963: admins no longer bypass)", () => {
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "private",
+      invocation_targets: [],
+      owner_id: ALICE,
+    });
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
   });
+
   it("denies a plain member from assigning someone else's private agent", () => {
-    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "private",
+      invocation_targets: [],
+      owner_id: ALICE,
+    });
     const d = canAssignAgentToIssue(a, { userId: BOB, role: "member" });
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("private_visibility");
   });
+
+  it("allows a targeted member to assign a public_to-member agent", () => {
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "member", target_id: BOB }],
+      owner_id: ALICE,
+    });
+    expect(
+      canAssignAgentToIssue(a, { userId: BOB, role: "member" }).allowed,
+    ).toBe(true);
+  });
+
+  it("denies a non-targeted member from assigning a public_to-member agent", () => {
+    const CAROL = "user-carol";
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "member", target_id: BOB }],
+      owner_id: ALICE,
+    });
+    const d = canAssignAgentToIssue(a, { userId: CAROL, role: "member" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
+  });
+
+  it("treats a team target as inert — it never grants (v1 reserved)", () => {
+    const a = makeAgent({
+      visibility: "private",
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "team", target_id: "team-1" }],
+      owner_id: ALICE,
+    });
+    // Even an admin who belongs to the team gets no invocation grant.
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
+    // The owner still passes (owner always may invoke).
+    expect(
+      canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
+    ).toBe(true);
+  });
+
   it("denies logged-out users", () => {
-    const a = makeAgent({ visibility: "workspace" });
+    const a = makeAgent({
+      visibility: "workspace",
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+    });
     const d = canAssignAgentToIssue(a, { userId: null, role: null });
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("not_authenticated");

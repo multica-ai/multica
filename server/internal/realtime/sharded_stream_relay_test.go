@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,40 +78,54 @@ func TestShardedStreamRelayDeliverMessageUsesEnvelopeScope(t *testing.T) {
 	}
 }
 
-func TestShardedRelayReplayStartIDUsesBoundedTimeWindow(t *testing.T) {
-	now := time.UnixMilli(1710000005000)
-	got := shardedRelayReplayStartID(now, 5*time.Second)
-	if got != "1710000000000-0" {
-		t.Fatalf("replay start ID = %q, want bounded time-window cursor", got)
-	}
+func TestShardedStreamRelayReplayStartIDIsBounded(t *testing.T) {
+	grace := 5 * time.Minute
+	relay := NewShardedStreamRelay(NewHub(), nil, nil, ShardedStreamRelayConfig{
+		ReplayGrace: grace,
+	})
 
-	got = shardedRelayReplayStartID(time.UnixMilli(1000), 5*time.Second)
-	if got != "0-0" {
-		t.Fatalf("replay start ID before Unix epoch = %q, want 0-0 floor", got)
+	before := time.Now().Add(-grace).UnixMilli()
+	id := relay.replayStartID()
+	after := time.Now().Add(-grace).UnixMilli()
+
+	// The ID should be in the format "<millis>-0".
+	var ms int64
+	var seq int
+	n, _ := fmt.Sscanf(id, "%d-%d", &ms, &seq)
+	if n != 2 {
+		t.Fatalf("replayStartID() = %q, want format <millis>-0", id)
+	}
+	if seq != 0 {
+		t.Fatalf("replayStartID() sequence = %d, want 0", seq)
+	}
+	// The timestamp should be within [before, after] (inclusive).
+	if ms < before || ms > after {
+		t.Fatalf("replayStartID() timestamp %d outside expected window [%d, %d]", ms, before, after)
 	}
 }
 
-func TestShardedStreamRelayReadShardReplaysBoundedRetainedMessages(t *testing.T) {
+func TestShardedStreamRelayReadShardOnceReplaysRetainedMessages(t *testing.T) {
 	hub := NewHub()
 	client := attachRealtimeTestClient(hub, ScopeTask, "task-replay")
 	rdb, mock := redismock.NewClientMock()
 	t.Cleanup(func() { _ = rdb.Close() })
 
+	grace := 5 * time.Minute
 	relay := NewShardedStreamRelay(hub, rdb, rdb, ShardedStreamRelayConfig{
-		Shards:    1,
-		ReadCount: 2,
-		ReadBlock: time.Millisecond,
+		Shards:      1,
+		ReadCount:   2,
+		ReadBlock:   time.Millisecond,
+		ReplayGrace: grace,
 	})
 	stream := ShardedStreamKey(0)
-	lastID := "1710000000000-0"
-	msgID := "1710000001000-0"
-	ev := envelope{
-		EventID:     "event-replayed",
-		Scope:       ScopeTask,
-		ScopeID:     "task-replay",
-		PayloadJSON: `{"type":"task:updated"}`,
+
+	// The initial cursor must be a bounded time-window, not "$".
+	lastID := relay.replayStartID()
+	if lastID == "$" {
+		t.Fatal("replayStartID() returned \"$\", want a bounded time-window cursor")
 	}
 
+	// Expect an XREAD starting from the bounded cursor (not "$").
 	mock.ExpectXRead(&redis.XReadArgs{
 		Streams: []string{stream, lastID},
 		Count:   relay.config.ReadCount,
@@ -118,16 +133,21 @@ func TestShardedStreamRelayReadShardReplaysBoundedRetainedMessages(t *testing.T)
 	}).SetVal([]redis.XStream{{
 		Stream: stream,
 		Messages: []redis.XMessage{{
-			ID:     msgID,
-			Values: envelopeRedisValues(ev),
+			ID: "1710000000000-0",
+			Values: envelopeRedisValues(envelope{
+				EventID:     "event-replayed",
+				Scope:       ScopeTask,
+				ScopeID:     "task-replay",
+				PayloadJSON: `{"type":"task:updated"}`,
+			}),
 		}},
 	}})
 
 	if !relay.readShardOnce(context.Background(), 0, stream, &lastID) {
 		t.Fatal("expected shard reader to continue after a successful replay read")
 	}
-	if lastID != msgID {
-		t.Fatalf("expected last ID to advance to %q, got %q", msgID, lastID)
+	if lastID != "1710000000000-0" {
+		t.Fatalf("expected last ID to advance to %q, got %q", "1710000000000-0", lastID)
 	}
 
 	select {
@@ -136,11 +156,11 @@ func TestShardedStreamRelayReadShardReplaysBoundedRetainedMessages(t *testing.T)
 		if err := json.Unmarshal(raw, &frame); err != nil {
 			t.Fatalf("delivered frame is not JSON: %v", err)
 		}
-		if frame["event_id"] != ev.EventID {
-			t.Fatalf("expected replayed event_id %q, got %v", ev.EventID, frame["event_id"])
+		if frame["event_id"] != "event-replayed" {
+			t.Fatalf("expected replayed event_id %q, got %v", "event-replayed", frame["event_id"])
 		}
 	case <-time.After(time.Second):
-		t.Fatal("expected retained stream message to be delivered")
+		t.Fatal("expected retained stream message to be delivered on replay")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

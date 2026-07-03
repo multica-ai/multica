@@ -18,7 +18,7 @@ const (
 	defaultShardedRelayStreamMaxLen = 100000
 	defaultShardedRelayReadCount    = 128
 	defaultShardedRelayReadBlock    = 5 * time.Second
-	defaultShardedRelayReplayGrace  = 2 * time.Minute
+	defaultShardedRelayReplayGrace  = 5 * time.Minute
 )
 
 // ShardedStreamKey returns the Redis Stream key used by a fixed relay shard.
@@ -32,7 +32,11 @@ type ShardedStreamRelayConfig struct {
 	StreamMaxLen int64
 	ReadCount    int64
 	ReadBlock    time.Duration
-	ReplayGrace  time.Duration
+	// ReplayGrace is the lookback window on startup: the shard reader starts
+	// consuming from (now - ReplayGrace) rather than "$" so that any events
+	// published while this pod was down are replayed. Events are bounded by
+	// the stream's MAXLEN, and downstream consumers must be idempotent.
+	ReplayGrace time.Duration
 }
 
 // DefaultShardedStreamRelayConfig returns production-safe defaults: a small
@@ -199,12 +203,25 @@ func (r *ShardedStreamRelay) shardFor(scopeType, scopeID string) int {
 	return int(h.Sum32() % uint32(r.config.Shards))
 }
 
+// replayStartID returns a Redis stream ID anchored to (now - ReplayGrace) so
+// that a freshly started shard reader replays only the recent grace window
+// rather than the entire retained stream. The "-0" suffix matches any
+// sequence number at that millisecond.
+func (r *ShardedStreamRelay) replayStartID() string {
+	ms := time.Now().Add(-r.config.ReplayGrace).UnixMilli()
+	if ms < 0 {
+		ms = 0
+	}
+	return fmt.Sprintf("%d-0", ms)
+}
+
 func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 	stream := ShardedStreamKey(shard)
-	// Start from a recent time window on reader startup. This catches events
-	// retained during a normal restart/deploy gap without re-reading the whole
-	// retained stream on every pod start.
-	lastID := shardedRelayReplayStartID(time.Now(), r.config.ReplayGrace)
+	// Start from a bounded lookback window, not "$", so that events
+	// published while this pod was down are replayed. The grace window is
+	// short enough that replay volume stays manageable, and downstream
+	// consumers (daemon wakeups, client reconnects) are idempotent.
+	lastID := r.replayStartID()
 	for {
 		if ctx.Err() != nil || r.isStopping() {
 			return
@@ -215,14 +232,9 @@ func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 	}
 }
 
-func shardedRelayReplayStartID(now time.Time, grace time.Duration) string {
-	ms := now.Add(-grace).UnixMilli()
-	if ms < 0 {
-		ms = 0
-	}
-	return fmt.Sprintf("%d-0", ms)
-}
-
+// readShardOnce performs a single XREAD iteration for one shard. It returns
+// true when the caller should continue reading, false when the context is
+// done and the loop should exit. lastID is advanced past any messages read.
 func (r *ShardedStreamRelay) readShardOnce(ctx context.Context, shard int, stream string, lastID *string) bool {
 	readCtx, cancel := context.WithTimeout(ctx, r.config.ReadBlock+time.Second)
 	res, err := r.readRDB.XRead(readCtx, &redis.XReadArgs{

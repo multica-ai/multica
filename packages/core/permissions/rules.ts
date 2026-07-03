@@ -42,9 +42,17 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
 }
 
 /**
- * Assign an agent to an issue. Workspace-visibility agents are assignable by
- * any workspace member; private agents are restricted to their owner plus
- * workspace admins/owners. Mirrors `issue.go:1471-1490`.
+ * Invoke an agent — assign it to an issue, @mention it, chat with it, or
+ * otherwise trigger a run. Mirrors the MUL-3963 backend invocation gate,
+ * which reads `permission_mode` + `invocation_targets` (NOT the derived
+ * `visibility` field):
+ *
+ *   - owner: always
+ *   - permission_mode "private": ONLY the owner. This is the key behavior
+ *     change — workspace admins NO LONGER bypass a private agent.
+ *   - permission_mode "public_to" + workspace target: any workspace member
+ *   - permission_mode "public_to" + member target: only the matching user
+ *   - team target: reserved, INERT in v1 (never grants)
  */
 export function canAssignAgentToIssue(
   agent: Agent,
@@ -53,18 +61,42 @@ export function canAssignAgentToIssue(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to assign agents.");
   }
-  if (agent.visibility === "workspace") {
+
+  // The owner may always invoke their own agent, regardless of mode.
+  if (agent.owner_id !== null && agent.owner_id === ctx.userId) {
+    return ALLOW;
+  }
+
+  if (agent.permission_mode === "private") {
+    return deny(
+      "private_visibility",
+      "Personal agent — only the owner can assign work.",
+    );
+  }
+
+  // permission_mode === "public_to": resolve the invocation grants. A
+  // workspace grant opens invocation to any workspace member.
+  const targets = agent.invocation_targets;
+  if (targets.some((t) => t.target_type === "workspace")) {
     if (ctx.role === null) {
       return deny("not_member", "Join this workspace to assign agents.");
     }
     return ALLOW;
   }
-  // visibility === "private"
-  if (isAdminLike(ctx.role)) return ALLOW;
-  if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
+
+  // A member grant opens invocation to exactly the targeted user. Team
+  // targets are reserved and INERT in v1 — they never grant.
+  if (
+    targets.some(
+      (t) => t.target_type === "member" && t.target_id === ctx.userId,
+    )
+  ) {
+    return ALLOW;
+  }
+
   return deny(
     "private_visibility",
-    "Personal agent — only the owner and workspace admins can assign work.",
+    "Restricted agent — you don't have access to assign work to it.",
   );
 }
 

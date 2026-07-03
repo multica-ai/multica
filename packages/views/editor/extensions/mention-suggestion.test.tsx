@@ -64,6 +64,11 @@ function fakeQc(data: {
     archived_at: string | null;
     visibility?: "workspace" | "private";
     owner_id?: string | null;
+    permission_mode?: "private" | "public_to";
+    invocation_targets?: Array<{
+      target_type: "workspace" | "member" | "team";
+      target_id: string | null;
+    }>;
   }>;
   squads?: Array<{
     id: string;
@@ -74,7 +79,22 @@ function fakeQc(data: {
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
-  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  // MUL-3963: the mention filter runs through canAssignAgentToIssue, which
+  // reads permission_mode + invocation_targets (not the legacy `visibility`).
+  // Fixtures still express intent via `visibility`, so derive the permission
+  // fields from it here (public_to + workspace target for "workspace";
+  // private + no targets otherwise) unless a fixture sets them explicitly.
+  const agentsWithPermissions = (data.agents ?? []).map((a) => ({
+    ...a,
+    permission_mode:
+      a.permission_mode ?? (a.visibility === "private" ? "private" : "public_to"),
+    invocation_targets:
+      a.invocation_targets ??
+      (a.visibility === "private"
+        ? []
+        : [{ target_type: "workspace" as const, target_id: null }]),
+  }));
+  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), agentsWithPermissions);
   map.set(JSON.stringify(workspaceKeys.squads("ws-1")), data.squads ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -367,10 +387,11 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
-  it("shows everyone's personal agents to a workspace admin", () => {
+  it("hides another owner's personal agent from a workspace admin (MUL-3963)", () => {
     // Role lives in the member fixture, not in authState — promoting Alice
-    // to admin here is enough to flip the gate. Backend gate allows admins
-    // to assign anyone's personal agent, so the @mention list mirrors that.
+    // to admin here exercises the gate. MUL-3963 removed the admin bypass:
+    // a private agent is invocable only by its owner, so the @mention list
+    // must NOT surface Bob's personal agent to admin Alice.
     const qc = fakeQc({
       members: [
         { user_id: "u1", name: "Alice", role: "admin" },
@@ -392,7 +413,7 @@ describe("createMentionSuggestion", () => {
     const result = config.items!(itemArgs("a"));
     const items = result as MentionItem[];
 
-    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(true);
+    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
   it("includes cached issues in the synchronous response", () => {
