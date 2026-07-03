@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { BaseComposer, type ComposerDraftHandle } from "./base-composer";
 
 // The real ContentEditor is a heavy Tiptap mount; the composer's submit-enable
@@ -126,6 +126,20 @@ describe("BaseComposer draft parity", () => {
     expect(submit()).toBeEnabled();
     fireEvent.click(submit());
     expect(onSubmit).toHaveBeenCalledWith("hi", undefined);
+  });
+
+  it("keeps the draft when submit rejects", async () => {
+    const draft = makeDraft("unsent comment");
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Session expired"));
+    render(
+      <BaseComposer draft={draft} onSubmit={onSubmit} editorKey="s1" />,
+    );
+
+    fireEvent.click(submit());
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("unsent comment", undefined));
+    expect(draft.clear).not.toHaveBeenCalled();
+    expect(submit()).toBeEnabled();
   });
 
   it("re-seeds Submit-enable when editorKey switches to a key with a draft", () => {

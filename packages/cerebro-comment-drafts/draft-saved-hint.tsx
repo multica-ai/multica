@@ -9,10 +9,8 @@ export interface DraftSavedHintProps {
 }
 
 /**
- * TECH-3491 — tiny "Kladde gemt" cue shown beside a composer once its draft is
- * persisted, so the user can trust the text is safe to walk away from. Danish
- * is hardcoded on purpose: the Firtal workspace is Danish-only and this is a
- * cerebro-zone component, so there is no i18n key to thread through upstream.
+ * TECH-3491 — tiny "Draft saved" cue shown beside a composer once its draft is
+ * persisted, so the user can trust the text is safe to walk away from.
  */
 export function DraftSavedHint({ show, className }: DraftSavedHintProps) {
   if (!show) return null;
@@ -25,7 +23,7 @@ export function DraftSavedHint({ show, className }: DraftSavedHintProps) {
       }
     >
       <Check className="h-3 w-3" aria-hidden />
-      Kladde gemt
+      Draft saved
     </span>
   );
 }

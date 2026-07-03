@@ -33,12 +33,21 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import { ApiError } from "@multica/core/api";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 
 type TLCache = TimelineEntry[];
+
+// CEREBRO-PATCH(FIR-2648): Preserve draft text when comment submit fails after auth expiry.
+function commentSubmitErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+    return "Your session expired. Your draft is still saved locally. Sign in again, then press Submit.";
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
@@ -264,11 +273,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         await createComment({ content, attachmentIds });
       } catch (err) {
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.comment.send_failed),
-        );
+        toast.error(commentSubmitErrorMessage(err, t(($) => $.comment.send_failed)));
+        throw err;
       }
     },
     [userId, createComment, t],
@@ -284,8 +290,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           parentId,
           attachmentIds,
         });
-      } catch {
-        toast.error(t(($) => $.comment.send_reply_failed));
+      } catch (err) {
+        toast.error(commentSubmitErrorMessage(err, t(($) => $.comment.send_reply_failed)));
+        throw err;
       }
     },
     [userId, createComment, t],

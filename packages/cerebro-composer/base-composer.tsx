@@ -330,6 +330,8 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
           anchorRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
         });
       }
+    } catch {
+      // The submit handler owns user-facing errors. Keep the editor and draft intact.
     } finally {
       setSubmitting(false);
     }
