@@ -2365,6 +2365,70 @@ func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
 	}
 }
 
+func TestEnsureCodexMcpConfigDropsGenericDiscoveryAllowlist(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"gxg-kb":{"type":"http","url":"https://kb.example.test/mcp","headers":{"Authorization":"Bearer test-token"},"tools":{"include":["kb_get","kb_search"],"prompts":false,"resources":false}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.gxg-kb]`,
+		`url = "https://kb.example.test/mcp"`,
+		`http_headers = { Authorization = "Bearer test-token" }`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		`tools = `,
+		`include`,
+		`kb_get`,
+		`prompts`,
+		`resources`,
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("generic discovery key %q should not be written to Codex config.toml, got:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigPreservesCodexToolApprovals(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"local":{"command":"uvx","tools":{"read":"prompt","write":"approve"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	if !strings.Contains(got, `tools = { read = "prompt", write = "approve" }`) {
+		t.Fatalf("expected Codex-native tool approvals to be preserved, got:\n%s", got)
+	}
+}
+
 func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
 	t.Parallel()
 

@@ -379,15 +379,26 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 }
 
 func normalizeCodexMcpServerConfig(server map[string]any) map[string]any {
+	normalized := make(map[string]any, len(server)+1)
 	if !isCodexRemoteMcpServer(server) {
-		return server
+		for k, v := range server {
+			if shouldDropGenericMcpDiscoveryConfig(k, v) {
+				continue
+			}
+			normalized[k] = v
+		}
+		return normalized
 	}
 
-	normalized := make(map[string]any, len(server)+1)
 	for k, v := range server {
 		switch k {
 		case "type":
 			continue
+		case "tools":
+			if shouldDropGenericMcpDiscoveryConfig(k, v) {
+				continue
+			}
+			normalized[k] = v
 		case "headers":
 			if _, ok := server["http_headers"]; !ok {
 				normalized["http_headers"] = v
@@ -398,6 +409,24 @@ func normalizeCodexMcpServerConfig(server map[string]any) map[string]any {
 	}
 	normalized["experimental_use_rmcp_client"] = true
 	return normalized
+}
+
+func shouldDropGenericMcpDiscoveryConfig(key string, value any) bool {
+	switch key {
+	case "prompts", "resources":
+		return true
+	case "tools":
+		tools, ok := value.(map[string]any)
+		if !ok {
+			return false
+		}
+		_, hasInclude := tools["include"]
+		_, hasPrompts := tools["prompts"]
+		_, hasResources := tools["resources"]
+		return hasInclude || hasPrompts || hasResources
+	default:
+		return false
+	}
 }
 
 func isCodexRemoteMcpServer(server map[string]any) bool {
