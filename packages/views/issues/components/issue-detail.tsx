@@ -6,6 +6,8 @@
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+// CEREBRO-PATCH(description-drafts): FIR-2648 — recover a description edit that never reached the server.
+import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -1277,6 +1279,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
+  // CEREBRO-PATCH(description-drafts): FIR-2648 — mirror the description
+  // editor to per-device localStorage so a session-expiry mid-edit is
+  // recoverable instead of silently lost.
+  const descriptionDraft = useDescriptionDraft(id, issue?.description ?? "");
+  const [descRestoreEpoch, setDescRestoreEpoch] = useState(0);
+
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
   // shown for an issue that already has labels attached.
@@ -2364,12 +2372,25 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               instead, so the rich-text editor would be a duplicate. */}
           {!isChat && (
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+              {/* CEREBRO-PATCH(description-drafts): FIR-2648 — offer to restore text that never reached the server. */}
+              {descriptionDraft.hasRecoverableDraft && (
+                <DescriptionDraftBanner
+                  onRestore={() => {
+                    setDescRestoreEpoch((n) => n + 1);
+                    descriptionDraft.dismissBanner();
+                  }}
+                  onDiscard={() => descriptionDraft.discard()}
+                />
+              )}
               <ContentEditor
                 ref={descEditorRef}
-                key={id}
-                defaultValue={issue.description || ""}
+                key={`${id}-${descRestoreEpoch}`}
+                defaultValue={descRestoreEpoch > 0 ? descriptionDraft.draftValue : (issue.description || "")}
                 placeholder={t(($) => $.detail.desc_placeholder)}
-                onUpdate={(md) => handleUpdateField({ description: md })}
+                onUpdate={(md) => {
+                  descriptionDraft.save(md); // CEREBRO-PATCH(description-drafts): FIR-2648 — persist every keystroke locally, independent of save success.
+                  handleUpdateField({ description: md });
+                }}
                 onUploadFile={handleDescriptionUpload}
                 debounceMs={1500}
                 currentIssueId={id}

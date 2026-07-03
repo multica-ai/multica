@@ -18,7 +18,9 @@ import { defaultStorage } from "../../platform/storage";
 export type CommentDraftKey =
   | `new:${string}`              // top-level CommentInput, key = `new:${issueId}`
   | `reply:${string}:${string}`  // ReplyInput inside a thread, key = `reply:${issueId}:${rootCommentId}`
-  | `edit:${string}:${string}`;  // inline edit on existing comment, key = `edit:${issueId}:${commentId}`
+  | `edit:${string}:${string}`   // inline edit on existing comment, key = `edit:${issueId}:${commentId}`
+  // CEREBRO-PATCH(description-drafts): FIR-2648 — issue description editor, key = `desc:${issueId}`.
+  | `desc:${string}`;
 
 interface CommentDraft {
   content: string;
