@@ -331,3 +331,32 @@ func TestWithRegistryToolUsageHintIncludesConnectionGuidance(t *testing.T) {
 		t.Errorf("compat loop system prompt must include ConnectionGuidance when an api-connection tool is offered; got %q", out[0].Content)
 	}
 }
+
+func TestAPIToolDescriptionIncludesSummary(t *testing.T) {
+	conns := []connections.Connection{
+		{
+			Name: "registry", DisplayName: "Firtal Data Registry", Type: connections.TypeAPI,
+			URL: "http://registry.internal:3000/api/registry/v1", Enabled: true,
+			EndpointPermissions: []connections.EndpointPermission{
+				{Path: "/data-sources/9be2/execute", Methods: []string{"POST"}, Summary: "Execute data source: Orders"},
+				{Path: "/manifest", Methods: []string{"GET"}},
+			},
+		},
+	}
+	tools := buildAPIConnectionTools(conns, nil, nil)
+	byName := map[string]string{}
+	for _, tl := range tools {
+		byName[tl.Name()] = tl.Description()
+	}
+	labeled := byName["registry__post_data_sources_9be2_execute"]
+	if !strings.HasPrefix(labeled, "Execute data source: Orders. ") {
+		t.Errorf("expected summary to lead the description, got %q", labeled)
+	}
+	if !strings.Contains(labeled, "POST /data-sources/9be2/execute") {
+		t.Errorf("expected method+path retained in description, got %q", labeled)
+	}
+	plain := byName["registry__get_manifest"]
+	if !strings.HasPrefix(plain, "Call the Firtal Data Registry API: GET /manifest") {
+		t.Errorf("unexpected unlabeled description %q", plain)
+	}
+}

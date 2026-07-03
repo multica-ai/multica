@@ -67,11 +67,13 @@ type connectionTool struct {
 }
 
 // endpointPermission mirrors connections.EndpointPermission: one REST path and
-// the HTTP methods configured on it. Used to synthesize per-endpoint+method rows
-// for API connections.
+// the HTTP methods configured on it, plus the optional human-readable summary
+// captured from the API's OpenAPI spec at discovery time. Used to synthesize
+// per-endpoint+method rows for API connections.
 type endpointPermission struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // connectionRow pairs a connection's policy key with the human label its tools
@@ -155,7 +157,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 			row := TableRow{
 				ToolKey:         toolKey,
 				ResourcePattern: t.Name,
-				Title:           t.Name,
+				Title:           connectionToolTitle(conn.kind, t),
 				Category:        conn.displayName,
 				Source:          source,
 				Layers:          map[Layer]Setting{},
@@ -329,10 +331,25 @@ func endpointMethodTools(raw []byte) []connectionTool {
 			if m == "" {
 				continue
 			}
-			tools = append(tools, connectionTool{Name: m + " " + ep.Path})
+			tools = append(tools, connectionTool{Name: m + " " + ep.Path, Description: ep.Summary})
 		}
 	}
 	return tools
+}
+
+// connectionToolTitle is the human-facing label for a per-tool row. For API
+// endpoint rows the discovered one-line OpenAPI summary (e.g. "Execute data
+// source: Orders") beats the raw "<METHOD> <path>" — which for per-resource
+// registry paths is an unreadable UUID. MCP tools keep their name: their
+// descriptions are long-form prose, not labels. The resource_pattern keeps the
+// technical name either way, so the UI can show both.
+func connectionToolTitle(kind string, t connectionTool) string {
+	if kind == "api" {
+		if s := strings.TrimSpace(t.Description); s != "" {
+			return s
+		}
+	}
+	return t.Name
 }
 
 // ConnectionToolDenied reports whether a tool named toolName is denied as a

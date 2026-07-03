@@ -190,7 +190,7 @@ func buildAPIConnectionTools(conns []connections.Connection, client *http.Client
 				seen[name] = struct{}{}
 				tools = append(tools, &APIConnectionTool{
 					toolName:    name,
-					description: apiToolDescription(c, method, path),
+					description: apiToolDescription(c, method, path, ep.Summary),
 					schema:      apiToolSchema(method, path),
 					connName:    c.Name,
 					baseURL:     baseURL,
@@ -245,12 +245,21 @@ func sanitizeToolSegment(s string) string {
 }
 
 // apiToolDescription is the human/model-facing one-liner for an endpoint tool.
-func apiToolDescription(c connections.Connection, method, path string) string {
+// apiToolDescription is what the model reads to decide when to use the tool.
+// When discovery captured the endpoint's one-line OpenAPI summary (e.g.
+// "Execute data source: Orders"), it leads the description — for per-resource
+// registry paths the raw path is an opaque UUID, so the summary is the only
+// human-meaningful part.
+func apiToolDescription(c connections.Connection, method, path, summary string) string {
 	label := c.DisplayName
 	if label == "" {
 		label = c.Name
 	}
-	return fmt.Sprintf("Call the %s API: %s %s. Dispatched server-side with the connection's credentials.", label, method, path)
+	base := fmt.Sprintf("Call the %s API: %s %s. Dispatched server-side with the connection's credentials.", label, method, path)
+	if s := strings.TrimSpace(summary); s != "" {
+		return s + ". " + base
+	}
+	return base
 }
 
 // apiToolSchema derives a JSON-Schema input shape for an endpoint from its method
