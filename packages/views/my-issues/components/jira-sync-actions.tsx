@@ -16,7 +16,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { issueKeys } from "@multica/core/issues/queries";
+import { parseJiraInput } from "@multica/core/jira";
 import { useT } from "../../i18n";
 import { getJiraBridge, useJiraSync } from "../../settings/jira/use-jira-sync";
 
@@ -31,6 +41,8 @@ export function JiraSyncActions({ wsId }: { wsId: string }) {
   const qc = useQueryClient();
   const { syncNow, clearSynced, running, clearing, error } = useJiraSync();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncInput, setSyncInput] = useState("");
 
   useEffect(() => {
     if (error) toast.error(error);
@@ -41,7 +53,10 @@ export function JiraSyncActions({ wsId }: { wsId: string }) {
   const refresh = () => void qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
 
   const onSync = async () => {
-    const result = await syncNow();
+    const parsed = parseJiraInput(syncInput);
+    const result = parsed ? await syncNow({ jql: parsed.jql }) : await syncNow();
+    setSyncOpen(false);
+    setSyncInput("");
     if (result) {
       refresh();
       toast.success(
@@ -73,7 +88,7 @@ export function JiraSyncActions({ wsId }: { wsId: string }) {
               size="sm"
               aria-label={t(($) => $.jira.sync_now)}
               disabled={running || clearing}
-              onClick={() => void onSync()}
+              onClick={() => setSyncOpen(true)}
             >
               <RefreshCw className={running ? "size-3.5 animate-spin" : "size-3.5"} />
             </Button>
@@ -100,6 +115,48 @@ export function JiraSyncActions({ wsId }: { wsId: string }) {
         />
         <TooltipContent side="bottom">{t(($) => $.jira.clear_synced)}</TooltipContent>
       </Tooltip>
+
+      <Dialog
+        open={syncOpen}
+        onOpenChange={(v) => {
+          if (!v && !running) {
+            setSyncOpen(false);
+            setSyncInput("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.jira.sync_dialog_title)}</DialogTitle>
+            <DialogDescription>
+              {t(($) => $.jira.sync_dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            rows={3}
+            placeholder={t(($) => $.jira.sync_dialog_placeholder)}
+            value={syncInput}
+            onChange={(e) => setSyncInput(e.target.value)}
+            disabled={running}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSyncOpen(false);
+                setSyncInput("");
+              }}
+              disabled={running}
+            >
+              {t(($) => $.jira.sync_dialog_cancel)}
+            </Button>
+            <Button onClick={() => void onSync()} disabled={running}>
+              {running ? t(($) => $.jira.syncing) : t(($) => $.jira.sync_dialog_submit)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={confirmOpen}

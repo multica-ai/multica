@@ -61,6 +61,35 @@ export function parseJiraIssue(raw: unknown): JiraIssue | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** Parse user input from the sync dialog into a JQL string (or null for default).
+ *  - Empty/whitespace → null (use the configured default JQL)
+ *  - Jira URL (/browse/KEY or ?selectedIssue=KEY) → single-issue JQL
+ *  - Bare Jira key (PROJ-123) → single-issue JQL
+ *  - Anything else → treated as raw JQL */
+export function parseJiraInput(input: string): { jql: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // Jira URL patterns:
+  //   https://acme.atlassian.net/browse/PROJ-123
+  //   https://acme.atlassian.net/browse/PROJ-123?fields=...
+  //   .../boards/1?selectedIssue=PROJ-123
+  const urlMatch = trimmed.match(/\/browse\/([A-Z][A-Z0-9_]+-\d+)/);
+  const selectedMatch = trimmed.match(/selectedIssue=([A-Z][A-Z0-9_]+-\d+)/);
+  const match = urlMatch ?? selectedMatch;
+  if (match) {
+    return { jql: `key = ${match[1]}` };
+  }
+
+  // Bare Jira key (PROJ-123) — not a URL, not JQL, just a key
+  if (/^[A-Z][A-Z0-9_]+-\d+$/.test(trimmed)) {
+    return { jql: `key = ${trimmed}` };
+  }
+
+  // Otherwise treat as raw JQL
+  return { jql: trimmed };
+}
+
 /** Transport injected into the sync engine. In the desktop app this is backed
  *  by the main-process `jira:request` IPC channel; tests pass a fake. */
 export type JiraTransport = (req: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJiraSearch } from "./types";
+import { parseJiraSearch, parseJiraInput } from "./types";
 
 const RAW = {
   issues: [
@@ -41,5 +41,51 @@ describe("parseJiraSearch", () => {
     expect(res.issues[0]!.fields.priority).toBeNull();
     expect(res.issues[0]!.fields.subtasks).toEqual([]);
     expect(res.issues[0]!.fields.comment.comments).toEqual([]);
+  });
+});
+
+describe("parseJiraInput", () => {
+  it("returns null for empty input (use default JQL)", () => {
+    expect(parseJiraInput("")).toBeNull();
+    expect(parseJiraInput("   ")).toBeNull();
+    expect(parseJiraInput("\t\n")).toBeNull();
+  });
+
+  it("extracts issue key from a /browse/ URL", () => {
+    expect(parseJiraInput("https://acme.atlassian.net/browse/PROJ-123")).toEqual({
+      jql: "key = PROJ-123",
+    });
+    expect(
+      parseJiraInput("https://acme.atlassian.net/browse/PROJ-123?fields=summary"),
+    ).toEqual({ jql: "key = PROJ-123" });
+  });
+
+  it("extracts issue key from a selectedIssue query param", () => {
+    expect(
+      parseJiraInput(
+        "https://acme.atlassian.net/jira/software/projects/PROJ/boards/1?selectedIssue=PROJ-123",
+      ),
+    ).toEqual({ jql: "key = PROJ-123" });
+  });
+
+  it("converts a bare Jira key to single-issue JQL", () => {
+    expect(parseJiraInput("PROJ-123")).toEqual({ jql: "key = PROJ-123" });
+    expect(parseJiraInput("ABC-1")).toEqual({ jql: "key = ABC-1" });
+  });
+
+  it("treats arbitrary text as raw JQL", () => {
+    expect(parseJiraInput("assignee = currentUser()")).toEqual({
+      jql: "assignee = currentUser()",
+    });
+    expect(parseJiraInput("project = FOO AND status = Open")).toEqual({
+      jql: "project = FOO AND status = Open",
+    });
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseJiraInput("  PROJ-123  ")).toEqual({ jql: "key = PROJ-123" });
+    expect(parseJiraInput("  assignee = currentUser()  ")).toEqual({
+      jql: "assignee = currentUser()",
+    });
   });
 });

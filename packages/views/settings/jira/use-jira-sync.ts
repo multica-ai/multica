@@ -52,43 +52,46 @@ export function useJiraSync() {
   const [clearedCount, setClearedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const syncNow = useCallback(async (): Promise<SyncResult | null> => {
-    const bridge = getJiraBridge();
-    if (!bridge) {
-      setError("Jira sync is only available in the desktop app.");
-      return null;
-    }
-    if (!user) {
-      setError("You must be signed in to sync Jira issues.");
-      return null;
-    }
-    setRunning(true);
-    setError(null);
-    try {
-      const cfg = await bridge.getConfig();
-      const transport: JiraTransport = (req) => bridge.request(req);
-      const config: JiraConfig = {
-        siteUrl: cfg.siteUrl,
-        email: cfg.email,
-        jql: cfg.jql,
-        statusMapping: cfg.statusMapping as JiraConfig["statusMapping"],
-        pollIntervalMinutes: cfg.pollIntervalMinutes,
-      };
-      const result = await syncJiraIssues({
-        transport,
-        api,
-        config,
-        currentMemberId: user.id,
-      });
-      setLastResult(result);
-      return result;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return null;
-    } finally {
-      setRunning(false);
-    }
-  }, [user]);
+  const syncNow = useCallback(
+    async (options?: { jql?: string }): Promise<SyncResult | null> => {
+      const bridge = getJiraBridge();
+      if (!bridge) {
+        setError("Jira sync is only available in the desktop app.");
+        return null;
+      }
+      if (!user) {
+        setError("You must be signed in to sync Jira issues.");
+        return null;
+      }
+      setRunning(true);
+      setError(null);
+      try {
+        const cfg = await bridge.getConfig();
+        const transport: JiraTransport = (req) => bridge.request(req);
+        const config: JiraConfig = {
+          siteUrl: cfg.siteUrl,
+          email: cfg.email,
+          jql: options?.jql ?? cfg.jql,
+          statusMapping: cfg.statusMapping as JiraConfig["statusMapping"],
+          pollIntervalMinutes: cfg.pollIntervalMinutes,
+        };
+        const result = await syncJiraIssues({
+          transport,
+          api,
+          config,
+          currentMemberId: user.id,
+        });
+        setLastResult(result);
+        return result;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return null;
+      } finally {
+        setRunning(false);
+      }
+    },
+    [user],
+  );
 
   /** Delete all previously synced Jira issues so the next sync starts clean.
    *  Returns the number deleted, or null on error / when not on desktop. */

@@ -63,4 +63,22 @@ describe("useJiraSync", () => {
     expect(result.current.error).toMatch(/desktop app/i);
     expect(mockSync).not.toHaveBeenCalled();
   });
+
+  it("passes a custom JQL override to the sync engine when provided", async () => {
+    mockSync.mockResolvedValue({ created: 1, updated: 0, skipped: 0, commentsAdded: 0, errors: [] });
+    const { result } = renderHook(() => useJiraSync());
+    await act(async () => {
+      await result.current.syncNow({ jql: 'key = "PROJ-999"' });
+    });
+    expect(mockSync.mock.calls[0]![0].config.jql).toBe('key = "PROJ-999"');
+  });
+
+  it("falls back to the configured JQL when no override is given", async () => {
+    mockSync.mockResolvedValue({ created: 1, updated: 0, skipped: 0, commentsAdded: 0, errors: [] });
+    const { result } = renderHook(() => useJiraSync());
+    await act(async () => {
+      await result.current.syncNow();
+    });
+    expect(mockSync.mock.calls[0]![0].config.jql).toBe("assignee = currentUser()");
+  });
 });

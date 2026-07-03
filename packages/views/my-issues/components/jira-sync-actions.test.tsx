@@ -62,11 +62,45 @@ describe("JiraSyncActions", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("triggers a sync on click", async () => {
+  it("opens a sync dialog on click instead of syncing immediately", () => {
     (globalThis as unknown as { window: { jiraAPI: unknown } }).window.jiraAPI = {};
     render(<JiraSyncActions wsId="ws-1" />, { wrapper: Wrapper });
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    expect(mockSyncNow).not.toHaveBeenCalled();
+    expect(screen.getByText(/sync jira issues/i)).toBeInTheDocument();
+  });
+
+  it("syncs with default JQL when the dialog is submitted empty", async () => {
+    (globalThis as unknown as { window: { jiraAPI: unknown } }).window.jiraAPI = {};
+    render(<JiraSyncActions wsId="ws-1" />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^sync$/i }));
     await waitFor(() => expect(mockSyncNow).toHaveBeenCalledTimes(1));
+    expect(mockSyncNow).toHaveBeenCalledWith();
+  });
+
+  it("syncs with a JQL override when the user enters text", async () => {
+    (globalThis as unknown as { window: { jiraAPI: unknown } }).window.jiraAPI = {};
+    render(<JiraSyncActions wsId="ws-1" />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    fireEvent.change(screen.getByPlaceholderText(/JQL or Jira/i), {
+      target: { value: "project = FOO" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^sync$/i }));
+    await waitFor(() => expect(mockSyncNow).toHaveBeenCalledTimes(1));
+    expect(mockSyncNow).toHaveBeenCalledWith({ jql: "project = FOO" });
+  });
+
+  it("converts a pasted Jira URL into a single-issue JQL", async () => {
+    (globalThis as unknown as { window: { jiraAPI: unknown } }).window.jiraAPI = {};
+    render(<JiraSyncActions wsId="ws-1" />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+    fireEvent.change(screen.getByPlaceholderText(/JQL or Jira/i), {
+      target: { value: "https://acme.atlassian.net/browse/PROJ-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^sync$/i }));
+    await waitFor(() => expect(mockSyncNow).toHaveBeenCalledTimes(1));
+    expect(mockSyncNow).toHaveBeenCalledWith({ jql: "key = PROJ-123" });
   });
 
   it("clears only after confirming in the dialog", async () => {
@@ -81,7 +115,7 @@ describe("JiraSyncActions", () => {
       expect(screen.getAllByRole("button", { name: /clear synced/i }).length).toBeGreaterThan(1),
     );
     const buttons = screen.getAllByRole("button", { name: /clear synced/i });
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(buttons[buttons.length - 1]!);
     await waitFor(() => expect(mockClearSynced).toHaveBeenCalledTimes(1));
   });
 });
