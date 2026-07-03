@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -48,10 +50,9 @@ type mcpOverlayPayload struct {
 	MCPServers map[string]composioMCPServer `json:"mcpServers"`
 }
 
-// BuildTaskOverlay returns the JSON overlay to write into
-// agent_task_queue.runtime_mcp_overlay for a task dispatching `agent`, or
-// (nil, nil) when ANY of the gates below trip — meaning no Composio session is
-// created and no token is provisioned.
+// BuildTaskOverlay returns the overlay payload to write for a task dispatching
+// `agent`, or a zero result when ANY of the gates below trip — meaning no
+// Composio session is created and no token is provisioned.
 //
 // MUL-3963: Composio MCP now FOLLOWS the agent invocation permission instead
 // of requiring originator == owner. The security boundary is upstream —
@@ -82,18 +83,18 @@ type mcpOverlayPayload struct {
 // CreateSession is called with the owner as the session user, and with BOTH
 // the `toolkits.enable` allowlist filter and `connected_accounts` pinning so
 // the session is narrowed to (owner allowlist ∩ owner active connections).
-func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (json.RawMessage, error) {
+func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (runtimeapps.MCPOverlayResult, error) {
 	// Gate 1: the overlay is the agent OWNER's connected-apps view. Without an
 	// owner there is nothing to project.
 	if !agent.OwnerID.Valid {
-		return nil, nil
+		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	ownerUserID := agent.OwnerID
 	// Gate 2: agent owner has not allowlisted any toolkit. NULL and empty
 	// `{}` are treated identically — both mean "no overlay".
 	allowSet := normaliseAllowlistToSet(agent.ComposioToolkitAllowlist)
 	if len(allowSet) == 0 {
-		return nil, nil
+		return runtimeapps.MCPOverlayResult{}, nil
 	}
 
 	// Resolve the OWNER's active connections and intersect with the allowlist.
@@ -101,13 +102,13 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	// CreateSession call AND for the early bail-out below.
 	rows, err := s.store.ListActiveUserComposioConnections(ctx, ownerUserID)
 	if err != nil {
-		return nil, fmt.Errorf("composio: build task overlay: list connections: %w", err)
+		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("composio: build task overlay: list connections: %w", err)
 	}
 	pinned := pinConnectedAccounts(rows, allowSet)
 	if len(pinned) == 0 {
 		// Gate 3: owner allowlisted toolkits they have not connected — or have
 		// revoked since.
-		return nil, nil
+		return runtimeapps.MCPOverlayResult{}, nil
 	}
 	// `toolkits.enable` narrows what the tool-router exposes; pair it with
 	// the connected-account pin so the session can never surface an
@@ -116,6 +117,7 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	for slug := range pinned {
 		slugs = append(slugs, slug)
 	}
+	sort.Strings(slugs)
 
 	resp, err := s.sdk.CreateSession(ctx, sdk.CreateSessionRequest{
 		UserID:            util.UUIDToString(ownerUserID),
@@ -123,13 +125,13 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 		ConnectedAccounts: pinned,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("composio: build task overlay: create session: %w", err)
+		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("composio: build task overlay: create session: %w", err)
 	}
 	// Gate 4: Composio answered 200 with no MCP URL. Treat as "no overlay"
 	// rather than wire up a server with an empty URL — every runtime fails
 	// noisily on that.
 	if resp == nil || resp.MCP.URL == "" {
-		return nil, nil
+		return runtimeapps.MCPOverlayResult{}, nil
 	}
 
 	payload := mcpOverlayPayload{
@@ -143,9 +145,18 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("composio: marshal task overlay: %w", err)
+		return runtimeapps.MCPOverlayResult{}, fmt.Errorf("composio: marshal task overlay: %w", err)
 	}
-	return raw, nil
+	apps := make([]runtimeapps.ConnectedApp, 0, len(slugs))
+	for _, slug := range slugs {
+		apps = append(apps, runtimeapps.ConnectedApp{
+			Provider:    "composio",
+			ServerName:  mcpOverlayServerName,
+			ToolkitSlug: slug,
+			ToolkitName: runtimeapps.DisplayNameForToolkitSlug(slug),
+		})
+	}
+	return runtimeapps.MCPOverlayResult{MCPOverlay: raw, ConnectedApps: apps}, nil
 }
 
 // normaliseAllowlistToSet maps the agent.composio_toolkit_allowlist

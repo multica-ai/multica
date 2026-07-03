@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -44,21 +46,22 @@ type stubOverlayBuilder struct {
 	lastUser  pgtype.UUID
 	lastAgent db.Agent
 	resp      json.RawMessage
+	apps      []runtimeapps.ConnectedApp
 	err       error
 	respIsNil bool
 }
 
-func (s *stubOverlayBuilder) BuildTaskOverlay(_ context.Context, originatorUserID pgtype.UUID, agent db.Agent) (json.RawMessage, error) {
+func (s *stubOverlayBuilder) BuildTaskOverlay(_ context.Context, originatorUserID pgtype.UUID, agent db.Agent) (runtimeapps.MCPOverlayResult, error) {
 	s.calls++
 	s.lastUser = originatorUserID
 	s.lastAgent = agent
 	if s.err != nil {
-		return nil, s.err
+		return runtimeapps.MCPOverlayResult{}, s.err
 	}
 	if s.respIsNil {
-		return nil, nil
+		return runtimeapps.MCPOverlayResult{}, nil
 	}
-	return s.resp, nil
+	return runtimeapps.MCPOverlayResult{MCPOverlay: s.resp, ConnectedApps: s.apps}, nil
 }
 
 // seedOriginatorFanout builds the minimal fixture for an agent→agent
@@ -340,7 +343,15 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	}
 
 	overlay := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session"}}}`)
-	builder := &stubOverlayBuilder{resp: overlay}
+	builder := &stubOverlayBuilder{
+		resp: overlay,
+		apps: []runtimeapps.ConnectedApp{{
+			Provider:    "composio",
+			ServerName:  "composio",
+			ToolkitSlug: "notion",
+			ToolkitName: "Notion",
+		}},
+	}
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New(), Composio: builder}
 	userID := util.MustParseUUID(userIDStr)
 	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
@@ -361,12 +372,22 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	if len(task.RuntimeMcpOverlay) == 0 {
 		t.Fatalf("returned queued task has empty runtime_mcp_overlay")
 	}
-	var stored []byte
-	if err := pool.QueryRow(ctx, `SELECT runtime_mcp_overlay FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&stored); err != nil {
+	if len(task.RuntimeConnectedApps) == 0 {
+		t.Fatalf("returned queued task has empty runtime_connected_apps")
+	}
+	var storedOverlay []byte
+	var storedApps []byte
+	if err := pool.QueryRow(ctx, `SELECT runtime_mcp_overlay, runtime_connected_apps FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&storedOverlay, &storedApps); err != nil {
 		t.Fatalf("read stored overlay: %v", err)
 	}
-	if len(stored) == 0 {
+	if len(storedOverlay) == 0 {
 		t.Fatal("stored queued task has empty runtime_mcp_overlay")
+	}
+	if len(storedApps) == 0 {
+		t.Fatal("stored queued task has empty runtime_connected_apps")
+	}
+	if !strings.Contains(string(storedApps), `"toolkit_slug":"notion"`) {
+		t.Fatalf("stored connected apps missing notion: %s", string(storedApps))
 	}
 }
 

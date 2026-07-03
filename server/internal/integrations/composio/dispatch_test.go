@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -82,11 +83,11 @@ func TestBuildTaskOverlay_FollowsOwnerRegardlessOfOriginator(t *testing.T) {
 	agent := makeAgent(owner, "notion")
 	seedActiveConnection(t, store, owner, "notion", "ca_owner_notion")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), pgtype.UUID{}, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), pgtype.UUID{}, agent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(overlay) == 0 {
+	if len(result.MCPOverlay) == 0 {
 		t.Fatalf("expected overlay from owner connection even with no originator")
 	}
 	if sdkFake.lastSessReq.UserID != uuidToString(owner) {
@@ -123,11 +124,11 @@ func TestBuildTaskOverlay_UsesOwnerConnectionNotOriginator(t *testing.T) {
 		// The originator also has a matching connection; it must NOT be used.
 		seedActiveConnection(t, store, other, "notion", "ca_other_notion")
 
-		overlay, err := svc.BuildTaskOverlay(context.Background(), other, agent)
+		result, err := svc.BuildTaskOverlay(context.Background(), other, agent)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(overlay) == 0 {
+		if len(result.MCPOverlay) == 0 {
 			t.Fatalf("expected overlay built from owner connection")
 		}
 		if sdkFake.lastSessReq.UserID != uuidToString(owner) {
@@ -146,12 +147,12 @@ func TestBuildTaskOverlay_UsesOwnerConnectionNotOriginator(t *testing.T) {
 		agent := makeAgent(owner, "notion")
 		seedActiveConnection(t, store, other, "notion", "ca_other_notion")
 
-		overlay, err := svc.BuildTaskOverlay(context.Background(), other, agent)
+		result, err := svc.BuildTaskOverlay(context.Background(), other, agent)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if overlay != nil {
-			t.Errorf("expected nil overlay: owner has no connection, originator's must be ignored, got %s", string(overlay))
+		if result.MCPOverlay != nil {
+			t.Errorf("expected nil overlay: owner has no connection, originator's must be ignored, got %s", string(result.MCPOverlay))
 		}
 		if sdkFake.createSessCalls != 0 {
 			t.Errorf("CreateSession must not run when owner has no matching connection, got %d", sdkFake.createSessCalls)
@@ -180,12 +181,12 @@ func TestBuildTaskOverlay_EmptyAllowlistIsNoOp(t *testing.T) {
 			agent := makeAgent(owner, allowlist...)
 			seedActiveConnection(t, store, owner, "notion", "ca_owner_notion")
 
-			overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+			result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if overlay != nil {
-				t.Errorf("expected nil overlay for empty allowlist, got %s", string(overlay))
+			if result.MCPOverlay != nil {
+				t.Errorf("expected nil overlay for empty allowlist, got %s", string(result.MCPOverlay))
 			}
 			if sdkFake.createSessCalls != 0 {
 				t.Errorf("CreateSession must not run when allowlist is empty, got %d calls", sdkFake.createSessCalls)
@@ -210,12 +211,12 @@ func TestBuildTaskOverlay_NoMatchingConnectionIsNoOp(t *testing.T) {
 	// Owner connected SLACK only — not in allowlist.
 	seedActiveConnection(t, store, owner, "slack", "ca_owner_slack")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if overlay != nil {
-		t.Errorf("expected nil overlay for empty intersection, got %s", string(overlay))
+	if result.MCPOverlay != nil {
+		t.Errorf("expected nil overlay for empty intersection, got %s", string(result.MCPOverlay))
 	}
 	if sdkFake.createSessCalls != 0 {
 		t.Errorf("CreateSession must not run when intersection is empty, got %d calls", sdkFake.createSessCalls)
@@ -231,6 +232,7 @@ func TestBuildTaskOverlay_NoMatchingConnectionIsNoOp(t *testing.T) {
 //   - the slug set is exactly the intersection (allowlist ∩ active)
 //   - connected_accounts pins the correct connected_account_id per slug
 //   - the returned overlay JSON has the daemon-expected shape
+//   - connected app metadata is exactly the same intersection for prompt use
 //   - non-allowlisted active connections (slack here) do NOT leak through
 func TestBuildTaskOverlay_HappyPath_FiltersBothWays(t *testing.T) {
 	t.Parallel()
@@ -251,11 +253,11 @@ func TestBuildTaskOverlay_HappyPath_FiltersBothWays(t *testing.T) {
 	seedActiveConnection(t, store, owner, "github", "ca_owner_github")
 	seedActiveConnection(t, store, owner, "slack", "ca_owner_slack")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(overlay) == 0 {
+	if len(result.MCPOverlay) == 0 {
 		t.Fatalf("expected non-empty overlay, got nil")
 	}
 
@@ -278,14 +280,15 @@ func TestBuildTaskOverlay_HappyPath_FiltersBothWays(t *testing.T) {
 	if _, leaked := sdkFake.lastSessReq.ConnectedAccounts["slack"]; leaked {
 		t.Errorf("non-allowlisted slack leaked into connected_accounts")
 	}
+	assertConnectedApps(t, result.ConnectedApps, "github", "notion")
 
 	var payload mcpOverlayPayload
-	if err := json.Unmarshal(overlay, &payload); err != nil {
+	if err := json.Unmarshal(result.MCPOverlay, &payload); err != nil {
 		t.Fatalf("unmarshal overlay: %v", err)
 	}
 	srv, ok := payload.MCPServers[mcpOverlayServerName]
 	if !ok {
-		t.Fatalf("overlay missing %q server, got %s", mcpOverlayServerName, string(overlay))
+		t.Fatalf("overlay missing %q server, got %s", mcpOverlayServerName, string(result.MCPOverlay))
 	}
 	if srv.Type != "http" {
 		t.Errorf("type: got %q, want \"http\"", srv.Type)
@@ -337,11 +340,11 @@ func TestBuildTaskOverlay_CreateSessionWireContract(t *testing.T) {
 	seedActiveConnection(t, store, owner, "github", "ca_owner_github")
 	seedActiveConnection(t, store, owner, "slack", "ca_owner_slack")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err != nil {
 		t.Fatalf("BuildTaskOverlay: %v", err)
 	}
-	if len(overlay) == 0 {
+	if len(result.MCPOverlay) == 0 {
 		t.Fatal("expected non-empty overlay")
 	}
 	var posted map[string]any
@@ -395,12 +398,12 @@ func TestBuildTaskOverlay_EmptyURL(t *testing.T) {
 	agent := makeAgent(owner, "github")
 	seedActiveConnection(t, store, owner, "github", "ca_owner_github")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if overlay != nil {
-		t.Errorf("expected nil overlay when MCP URL is empty, got %s", string(overlay))
+	if result.MCPOverlay != nil {
+		t.Errorf("expected nil overlay when MCP URL is empty, got %s", string(result.MCPOverlay))
 	}
 }
 
@@ -419,15 +422,15 @@ func TestBuildTaskOverlay_SDKError(t *testing.T) {
 	agent := makeAgent(owner, "slack")
 	seedActiveConnection(t, store, owner, "slack", "ca_owner_slack")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err == nil {
 		t.Fatalf("expected error from SDK failure, got nil")
 	}
 	if !strings.Contains(err.Error(), "create session") {
 		t.Errorf("error should mention create session, got %v", err)
 	}
-	if overlay != nil {
-		t.Errorf("expected nil overlay on SDK error, got %s", string(overlay))
+	if result.MCPOverlay != nil {
+		t.Errorf("expected nil overlay on SDK error, got %s", string(result.MCPOverlay))
 	}
 }
 
@@ -455,11 +458,11 @@ func TestBuildTaskOverlay_NormalisesAllowlistAndConnectionSlugs(t *testing.T) {
 	// is what the connect flow always writes).
 	seedActiveConnection(t, store, owner, "notion", "ca_a")
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
+	result, err := svc.BuildTaskOverlay(context.Background(), owner, agent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if overlay == nil {
+	if result.MCPOverlay == nil {
 		t.Fatalf("expected non-empty overlay despite uppercase/padded allowlist")
 	}
 	assertPinnedAccount(t, sdkFake.lastSessReq, "notion", "ca_a")
@@ -509,5 +512,34 @@ func assertPinnedAccount(t *testing.T, req sdk.CreateSessionRequest, slug, want 
 	}
 	if len(got) != 1 || got[0] != want {
 		t.Errorf("connected_accounts[%s] = %v, want [%s]", slug, got, want)
+	}
+}
+
+func assertConnectedApps(t *testing.T, apps []runtimeapps.ConnectedApp, want ...string) {
+	t.Helper()
+	if len(apps) != len(want) {
+		t.Fatalf("connected apps = %+v, want slugs %v", apps, want)
+	}
+	got := make(map[string]runtimeapps.ConnectedApp, len(apps))
+	for _, app := range apps {
+		got[app.ToolkitSlug] = app
+	}
+	for _, slug := range want {
+		app, ok := got[slug]
+		if !ok {
+			t.Fatalf("connected apps = %+v, missing %q", apps, slug)
+		}
+		if app.Provider != "composio" {
+			t.Errorf("%s provider = %q, want composio", slug, app.Provider)
+		}
+		if app.ServerName != mcpOverlayServerName {
+			t.Errorf("%s server = %q, want %q", slug, app.ServerName, mcpOverlayServerName)
+		}
+		if app.ToolkitName == "" {
+			t.Errorf("%s has empty display name", slug)
+		}
+	}
+	if _, leaked := got["slack"]; leaked {
+		t.Fatalf("non-allowlisted slack leaked into connected apps: %+v", apps)
 	}
 }

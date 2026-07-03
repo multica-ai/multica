@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -50,10 +51,10 @@ type AgentResponse struct {
 	// across the API surface. Reading values requires the dedicated, audited
 	// `GET /api/agents/{id}/env` endpoint; writing requires `PUT` to the
 	// same path. agent-actor tokens are denied there. See MUL-2600.
-	HasCustomEnv       bool   `json:"has_custom_env"`
-	CustomEnvKeyCount  int    `json:"custom_env_key_count"`
-	McpConfigRedacted  bool   `json:"mcp_config_redacted"`
-	Visibility         string `json:"visibility"`
+	HasCustomEnv      bool   `json:"has_custom_env"`
+	CustomEnvKeyCount int    `json:"custom_env_key_count"`
+	McpConfigRedacted bool   `json:"mcp_config_redacted"`
+	Visibility        string `json:"visibility"`
 	// PermissionMode is the invocation-permission mode (MUL-3963):
 	// "private" (owner only) or "public_to" (allow-list in InvocationTargets).
 	// Replaces Visibility as the authorization source; Visibility is kept as a
@@ -64,8 +65,8 @@ type AgentResponse struct {
 	// responses that load it; broadcast payloads leave it empty.
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             string                     `json:"status"`
-	MaxConcurrentTasks int32  `json:"max_concurrent_tasks"`
-	Model              string `json:"model"`
+	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
+	Model              string                     `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -257,6 +258,10 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// ConnectedAppData keeps the daemon-claim wire field local to handler types
+// while sharing the canonical JSON shape with the runtime app metadata package.
+type ConnectedAppData = runtimeapps.ConnectedApp
+
 type AgentTaskResponse struct {
 	ID          string `json:"id"`
 	AgentID     string `json:"agent_id"`
@@ -282,6 +287,7 @@ type AgentTaskResponse struct {
 	MaxAttempts        int32                 `json:"max_attempts"`
 	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
 	Agent              *TaskAgentData        `json:"agent,omitempty"`
+	ConnectedApps      []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
 	Repos              []RepoData            `json:"repos,omitempty"`
 	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
@@ -730,26 +736,26 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeID          string            `json:"runtime_id"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	Visibility         string            `json:"visibility"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	Instructions  string            `json:"instructions"`
+	AvatarURL     *string           `json:"avatar_url"`
+	RuntimeID     string            `json:"runtime_id"`
+	RuntimeConfig any               `json:"runtime_config"`
+	CustomEnv     map[string]string `json:"custom_env"`
+	CustomArgs    []string          `json:"custom_args"`
+	McpConfig     json.RawMessage   `json:"mcp_config"`
+	Visibility    string            `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
 	// (private -> private, workspace -> public_to+workspace target). On create
 	// only the caller can be the owner, so targets are accepted unconditionally.
 	PermissionMode     *string                    `json:"permission_mode"`
-	InvocationTargets  []AgentInvocationTargetDTO  `json:"invocation_targets"`
-	MaxConcurrentTasks int32                       `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
-	ThinkingLevel      string            `json:"thinking_level"`
+	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
+	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
+	Model              string                     `json:"model"`
+	ThinkingLevel      string                     `json:"thinking_level"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -992,9 +998,9 @@ type UpdateAgentRequest struct {
 	// actually unchanged, and so a client that round-tripped a
 	// previously-returned masked map cannot silently overwrite real
 	// secret values with literal `****`. See MUL-2600.
-	CustomArgs         *[]string        `json:"custom_args"`
-	McpConfig          *json.RawMessage `json:"mcp_config"`
-	Visibility         *string          `json:"visibility"`
+	CustomArgs *[]string        `json:"custom_args"`
+	McpConfig  *json.RawMessage `json:"mcp_config"`
+	Visibility *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
 	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
 	// non-owner admin passing them is silently ignored, because the invoke
@@ -1002,10 +1008,10 @@ type UpdateAgentRequest struct {
 	// confuse the owner about who can run their agent. permission_mode is
 	// authoritative when present; otherwise legacy visibility is mapped.
 	PermissionMode     *string                     `json:"permission_mode"`
-	InvocationTargets  *[]AgentInvocationTargetDTO  `json:"invocation_targets"`
+	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             *string                     `json:"status"`
-	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
-	Model              *string          `json:"model"`
+	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
+	Model              *string                     `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
 	//   - field present with "" → explicit clear (use runtime default)

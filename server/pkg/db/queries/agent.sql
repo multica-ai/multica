@@ -163,7 +163,7 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, originator_user_id, runtime_mcp_overlay
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -173,7 +173,8 @@ VALUES (
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
     sqlc.narg(originator_user_id),
-    sqlc.narg(runtime_mcp_overlay)
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 )
 RETURNING *;
 
@@ -183,9 +184,14 @@ RETURNING *;
 -- daemon detects this variant via context.type == "quick_create".
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    runtime_mcp_overlay
+    runtime_mcp_overlay, runtime_connected_apps
 )
-VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(originator_user_id), sqlc.narg(runtime_mcp_overlay))
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
+)
 RETURNING *;
 
 -- name: CreateDeferredAgentTask :one
@@ -240,7 +246,7 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -252,7 +258,8 @@ SELECT
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
-    sqlc.narg(runtime_mcp_overlay)
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
