@@ -54,6 +54,7 @@ import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
+import { DetailsBlockExtension } from "./details";
 import { HighlightExtension } from "./highlight";
 import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
 import { codeLowlight } from "../syntax-highlight";
@@ -215,6 +216,7 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
+    DetailsBlockExtension,
     HighlightExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
