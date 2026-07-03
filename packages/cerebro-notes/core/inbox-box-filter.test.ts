@@ -12,6 +12,7 @@ function note(p: Partial<Note>): Note {
     owner_id: "",
     visibility: p.visibility ?? "private",
     pinned: p.pinned ?? false,
+    can_edit: p.can_edit ?? true,
     issue_id: p.issue_id ?? null,
     project_id: p.project_id ?? null,
     comment_count: p.comment_count ?? 0,
