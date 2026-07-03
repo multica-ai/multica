@@ -87,6 +87,16 @@ Open-source CLI agent. Dynamically discovers available models from its own confi
 | Install | Follow the official guide at [opencode.ai](https://opencode.ai/) or the GitHub repo at [github.com/sst/opencode](https://github.com/sst/opencode). The typical route is the install script or the npm package. |
 | Authentication | Configure your model provider(s) per OpenCode's docs (Anthropic, OpenAI, etc.). |
 
+### DevEco Code (Huawei)
+
+Huawei's HarmonyOS coding-agent CLI (`deveco`), an OpenCode fork. Driven over the same `run --format json` event stream as OpenCode, with models discovered dynamically from `deveco models` (built-in `deveco/GLM-5.1`). MCP is not wired up yet — configure tools through DevEco's own config for now.
+
+| | |
+|---|---|
+| Daemon looks for | `deveco` |
+| Install | See the project at [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code). Typically installed via the npm package `@deveco/deveco-code`. |
+| Authentication | Run `deveco auth login` once to complete the Huawei-account OAuth flow (token persists under `~/.config/deveco/`). |
+
 ### Kiro CLI (Amazon)
 
 ACP-over-stdio transport. Session resumption works through ACP `session/load`; MCP config is passed through ACP `mcpServers`; skills are copied into `.kiro/skills/`.
