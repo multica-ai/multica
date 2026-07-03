@@ -17,6 +17,7 @@ import {
 } from "@multica/ui/components/ui/table";
 import {
   RUN_STATUS_BADGE,
+  cerebroWorkflowLoopRunsOptions,
   cerebroWorkflowRunsOptions,
   cerebroWorkflowsListOptions,
 } from "../core";
@@ -41,6 +42,10 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
 
   const workflows = useQuery(cerebroWorkflowsListOptions(wsId));
   const runs = useQuery(cerebroWorkflowRunsOptions(wsId, selectedWorkflowId, PAGE_SIZE, offset));
+  // FIR-2283 v2 point 7 — the issues that ran through the selected recipe.
+  // Only meaningful for one workflow at a time, so it loads when a workflow is
+  // picked (or the page is the per-workflow route).
+  const loopRuns = useQuery(cerebroWorkflowLoopRunsOptions(wsId, selectedWorkflowId ?? ""));
 
   if (!enabled) return null;
   if (!workspace) {
@@ -105,6 +110,46 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
               </NativeSelect>
             </FilterField>
           </div>
+
+          {/* FIR-2283 v2 point 7 — issues that ran through the selected recipe. */}
+          {selectedWorkflowId && (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground">
+                Issues in this workflow
+              </h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[12%]">Issue</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead className="w-[16%]">Status</TableHead>
+                    <TableHead className="w-[22%]">Last activated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(loopRuns.data?.issue_runs.length ?? 0) === 0 && !loopRuns.isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                        No issues have run through this workflow yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {(loopRuns.data?.issue_runs ?? []).map((run) => (
+                    <TableRow key={run.issue_id}>
+                      <TableCell className="text-xs">#{run.issue_number}</TableCell>
+                      <TableCell className="text-xs">{run.issue_title}</TableCell>
+                      <TableCell className="text-xs">{run.issue_status}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {run.last_activated_at
+                          ? new Date(run.last_activated_at).toLocaleString()
+                          : ""}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
 
           {runs.isError && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">

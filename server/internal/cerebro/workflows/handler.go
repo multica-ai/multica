@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -949,6 +950,61 @@ func (h *Handler) Runs(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// issueRunResponse is one row of the point-7 issue log: an issue that has run
+// through a recipe's loop, with its current status and when it first/last
+// entered the loop.
+type issueRunResponse struct {
+	IssueID          string `json:"issue_id"`
+	IssueNumber      int32  `json:"issue_number"`
+	IssueTitle       string `json:"issue_title"`
+	IssueStatus      string `json:"issue_status"`
+	FirstActivatedAt string `json:"first_activated_at"`
+	LastActivatedAt  string `json:"last_activated_at"`
+}
+
+// LoopRuns handles GET /api/cerebro/workflows/{id}/loop-runs — FIR-2283 v2
+// point 7: the list of issues that have run through this issue_loop recipe.
+// Unlike Runs (which reads cerebro_workflow_run, empty for a recipe because a
+// recipe compiles into child rules that produce the runs), this derives the
+// issue log from the generated child rows' generated_for_issue_id.
+func (h *Handler) LoopRuns(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	if h.issueLoopColumns == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow activation is not wired on this server")
+		return
+	}
+	wfID, ok := pathUUIDOr400(w, r, "id")
+	if !ok {
+		return
+	}
+	existing, err := h.Cerebro.GetCerebroWorkflow(r.Context(), wfID)
+	if err != nil || !inWorkspace(r, existing.WorkspaceID) {
+		writeError(w, http.StatusNotFound, "workflow not found")
+		return
+	}
+
+	runs, err := h.issueLoopColumns.ListIssueRunsForWorkflow(r.Context(), wfID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue runs")
+		return
+	}
+
+	out := make([]issueRunResponse, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, issueRunResponse{
+			IssueID:          run.IssueID,
+			IssueNumber:      run.IssueNumber,
+			IssueTitle:       run.IssueTitle,
+			IssueStatus:      run.IssueStatus,
+			FirstActivatedAt: run.FirstActivatedAt.Format(time.RFC3339),
+			LastActivatedAt:  run.LastActivatedAt.Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issue_runs": out})
 }
 
 // loopStateResponse is the control strip's live-state read for an issue_loop

@@ -6,11 +6,13 @@ import {
   EMPTY_REGENERATE_INBOUND_SECRET,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_REGENERATE_OUTBOUND_SECRET,
+  EMPTY_ISSUE_LOOP_RUNS,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
   activateWorkflowSchema,
   activeWorkflowForIssueSchema,
+  issueLoopRunsSchema,
   loopStateSchema,
   regenerateInboundSigningSecretSchema,
   regenerateInboundTokenSchema,
@@ -23,6 +25,7 @@ import type {
   ActivateWorkflowResponse,
   ActiveWorkflowForIssueResponse,
   CerebroWorkflow,
+  IssueLoopRunsResponse,
   LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
@@ -180,5 +183,17 @@ export async function fetchActiveWorkflowForIssue(
   );
   return parseWithFallback(raw, activeWorkflowForIssueSchema, EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE, {
     endpoint: "activeWorkflowForIssue",
+  });
+}
+
+// FIR-2283 v2 point 7 — the issues that have run through workflowId's loop.
+export async function fetchWorkflowLoopRuns(
+  workflowId: string,
+): Promise<IssueLoopRunsResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${encodeURIComponent(workflowId)}/loop-runs`,
+  );
+  return parseWithFallback(raw, issueLoopRunsSchema, EMPTY_ISSUE_LOOP_RUNS, {
+    endpoint: "workflowLoopRuns",
   });
 }

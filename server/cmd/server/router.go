@@ -2025,6 +2025,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation-routes): FIR-2283 v2 point 8 — activate a recipe on one issue, and read back which recipe (if any) an issue is running.
 				r.Post("/{id}/activate", cerebroWorkflowsHandler.ActivateWorkflow)
 				r.Get("/for-issue/{issueId}", cerebroWorkflowsHandler.ActiveWorkflowForIssue)
+				// CEREBRO-PATCH(cerebro-workflows-issue-loop-runs-route): FIR-2283 v2 point 7 — list the issues that have run through a recipe's loop.
+				r.Get("/{id}/loop-runs", cerebroWorkflowsHandler.LoopRuns)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
 			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.

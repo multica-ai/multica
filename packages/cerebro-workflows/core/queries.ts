@@ -5,6 +5,7 @@ import {
   fetchActiveWorkflowForIssue,
   fetchLoopState,
   fetchWorkflow,
+  fetchWorkflowLoopRuns,
   fetchWorkflowRuns,
   fetchWorkflows,
   regenerateInboundSigningSecret,
@@ -22,6 +23,8 @@ export const cerebroWorkflowsKeys = {
     [...cerebroWorkflowsKeys.all(wsId), "loop-state", workflowId, issueId] as const,
   activeForIssue: (wsId: string, issueId: string) =>
     [...cerebroWorkflowsKeys.all(wsId), "active-for-issue", issueId] as const,
+  loopRuns: (wsId: string, workflowId: string) =>
+    [...cerebroWorkflowsKeys.all(wsId), "loop-runs", workflowId] as const,
 };
 
 export function cerebroWorkflowsListOptions(wsId: string) {
@@ -128,6 +131,15 @@ export function cerebroActiveWorkflowForIssueOptions(wsId: string, issueId: stri
   });
 }
 
+// FIR-2283 v2 point 7 — the issues that have run through a recipe's loop.
+export function cerebroWorkflowLoopRunsOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: cerebroWorkflowsKeys.loopRuns(wsId, workflowId),
+    queryFn: () => fetchWorkflowLoopRuns(workflowId),
+    enabled: !!wsId && !!workflowId,
+  });
+}
+
 export function useActivateWorkflowMutation(wsId: string, issueId: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -135,6 +147,23 @@ export function useActivateWorkflowMutation(wsId: string, issueId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: cerebroWorkflowsKeys.activeForIssue(wsId, issueId),
+      });
+    },
+  });
+}
+
+// FIR-2283 v2 point 8 — activate a chosen recipe on a freshly created issue.
+// Unlike useActivateWorkflowMutation (keyed to a known issue), the create-issue
+// modal only learns the issue id after the create mutation resolves, so this
+// hook takes both ids at call time.
+export function useActivateWorkflowForCreate(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { issueId: string; workflowId: string }) =>
+      activateWorkflow(input.workflowId, input.issueId),
+    onSuccess: (_data, input) => {
+      queryClient.invalidateQueries({
+        queryKey: cerebroWorkflowsKeys.activeForIssue(wsId, input.issueId),
       });
     },
   });

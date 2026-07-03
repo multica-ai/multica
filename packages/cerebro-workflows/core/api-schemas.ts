@@ -3,6 +3,7 @@ import type {
   ActivateWorkflowResponse,
   ActiveWorkflowForIssueResponse,
   CerebroWorkflow,
+  IssueLoopRunsResponse,
   LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
@@ -157,6 +158,24 @@ export const activeWorkflowForIssueSchema = z
   })
   .passthrough();
 
+// FIR-2283 v2 point 7 — the list of issues that have run through a recipe.
+export const issueLoopRunSchema = z
+  .object({
+    issue_id: z.string(),
+    issue_number: z.number().default(0),
+    issue_title: z.string().default(""),
+    issue_status: z.string().default(""),
+    first_activated_at: z.string().default(""),
+    last_activated_at: z.string().default(""),
+  })
+  .passthrough();
+
+export const issueLoopRunsSchema = z
+  .object({
+    issue_runs: z.array(issueLoopRunSchema).default([]),
+  })
+  .passthrough();
+
 // Empty / fallback values used by parseWithFallback at call sites. Defined
 // once here so the values stay consistent across api.ts and queries.ts.
 export const EMPTY_WORKFLOWS_LIST: WorkflowsListResponse = { workflows: [] };
@@ -165,6 +184,7 @@ export const EMPTY_WORKFLOW_RUNS_LIST: WorkflowRunsListResponse = {
   limit: 0,
   offset: 0,
 };
+export const EMPTY_ISSUE_LOOP_RUNS: IssueLoopRunsResponse = { issue_runs: [] };
 export const EMPTY_REGENERATE_INBOUND_TOKEN: RegenerateInboundTokenResponse = {
   inbound_webhook_token: "",
   inbound_webhook_url: "",

@@ -96,8 +96,9 @@ function wireTypeForRow(row: VerificationRow): LoopCheckType {
 interface LoopFormState {
   name: string;
   enabled: boolean;
+  // FIR-2283 v2 point 4 — one skill-taggable prompt replaces Goal +
+  // Definition of done. Stored on the wire as `goal`.
   goal: string;
-  definitionOfDone: string;
   planning: boolean;
   planSkill: string;
   buildAgentId: string;
@@ -115,7 +116,6 @@ const EMPTY_LOOP_FORM: LoopFormState = {
   name: "",
   enabled: true,
   goal: "",
-  definitionOfDone: "",
   planning: false,
   planSkill: "",
   buildAgentId: "",
@@ -180,8 +180,9 @@ function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
   return {
     name: wf.name,
     enabled: wf.enabled,
-    goal: spec.goal ?? "",
-    definitionOfDone: spec.definition_of_done ?? "",
+    // Fold any legacy definition_of_done into the single prompt so old
+    // recipes still show their full instruction after the point-4 collapse.
+    goal: [spec.goal, spec.definition_of_done].filter(Boolean).join("\n\n"),
     planning: spec.planning === true,
     planSkill: spec.plan_skill ?? "",
     buildAgentId: spec.build_agent_id ?? "",
@@ -205,8 +206,9 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
 
   return {
     version: 1,
+    // Point 4 — the single prompt is stored as `goal`; definition_of_done is
+    // no longer authored (left unset on the wire).
     goal: form.goal,
-    definition_of_done: form.definitionOfDone,
     verification: verificationFromRows(form.verification),
     caps: {
       max_iterations: attempts,
@@ -413,23 +415,32 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
               onChange={(id) => setForm({ ...form, buildAgentId: id })}
             />
           </Field>
-          <Field label="Goal">
+          <Field label="Prompt">
             <Textarea
               value={form.goal}
               onChange={(e) => setForm({ ...form, goal: e.target.value })}
-              rows={3}
-              required
-              placeholder="What should the agent build?"
+              rows={4}
+              placeholder="Describe how the agent should work. Tag a skill with @, or use the picker below."
+              data-testid="issue-loop-prompt"
             />
-          </Field>
-          <Field label="Definition of done">
-            <Textarea
-              value={form.definitionOfDone}
-              onChange={(e) => setForm({ ...form, definitionOfDone: e.target.value })}
-              rows={3}
-              required
-              placeholder="What does 'done' look like?"
-            />
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">Tag a skill:</span>
+              <SkillNamePicker
+                value=""
+                onChange={(name) => {
+                  if (!name) return;
+                  setForm((f) => ({
+                    ...f,
+                    goal: f.goal.trim() ? `${f.goal.trimEnd()} @${name} ` : `@${name} `,
+                  }));
+                }}
+                placeholder="Add a skill…"
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Replaces the old Goal / Definition of done. The recipe describes HOW
+              to work — &quot;done&quot; is decided by the gates below, not a fixed text.
+            </p>
           </Field>
         </Section>
 

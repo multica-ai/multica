@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -251,4 +252,57 @@ func (s *IssueLoopColumnStore) ActiveWorkflowForIssue(ctx context.Context, issue
 		return pgtype.UUID{}, false, fmt.Errorf("load active workflow for issue: %w", err)
 	}
 	return id, true, nil
+}
+
+// IssueLoopRun is one issue that has run through a recipe's loop — FIR-2283 v2
+// point 7's "which issues hit this workflow" log. Derived from the generated
+// child rows (each carries generated_from_workflow_id + generated_for_issue_id),
+// so it needs no separate run table, exactly as ActiveWorkflowForIssue derives
+// the reverse direction.
+type IssueLoopRun struct {
+	IssueID          string
+	IssueNumber      int32
+	IssueTitle       string
+	IssueStatus      string
+	FirstActivatedAt time.Time
+	LastActivatedAt  time.Time
+}
+
+// ListIssueRunsForWorkflow returns every issue that has been activated on
+// recipeID's loop, newest activation first. One row per issue: FIRST/LAST
+// activation collapse a re-activated issue into a single entry. This is the
+// read model behind the run-history page's issue list (point 7).
+func (s *IssueLoopColumnStore) ListIssueRunsForWorkflow(ctx context.Context, recipeID pgtype.UUID) ([]IssueLoopRun, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT i.id, i.number, i.title, i.status,
+		        MIN(w.created_at) AS first_activated_at,
+		        MAX(w.created_at) AS last_activated_at
+		 FROM cerebro_workflow w
+		 JOIN issue i ON i.id = w.generated_for_issue_id
+		 WHERE w.generated_from_workflow_id = $1
+		   AND w.generated_for_issue_id IS NOT NULL
+		 GROUP BY i.id, i.number, i.title, i.status
+		 ORDER BY max(w.created_at) DESC`,
+		recipeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list issue runs for workflow: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]IssueLoopRun, 0)
+	for rows.Next() {
+		var id pgtype.UUID
+		var run IssueLoopRun
+		if err := rows.Scan(&id, &run.IssueNumber, &run.IssueTitle, &run.IssueStatus,
+			&run.FirstActivatedAt, &run.LastActivatedAt); err != nil {
+			return nil, fmt.Errorf("scan issue run: %w", err)
+		}
+		run.IssueID = util.UUIDToString(id)
+		out = append(out, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate issue runs: %w", err)
+	}
+	return out, nil
 }

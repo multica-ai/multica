@@ -3,12 +3,14 @@ import { parseWithFallback } from "@multica/core/api";
 import {
   EMPTY_ACTIVATE_WORKFLOW,
   EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+  EMPTY_ISSUE_LOOP_RUNS,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
   activateWorkflowSchema,
   activeWorkflowForIssueSchema,
+  issueLoopRunsSchema,
   regenerateInboundTokenSchema,
   workflowRunsListSchema,
   workflowSchema,
@@ -199,6 +201,52 @@ describe("activeWorkflowForIssueSchema (parseWithFallback wiring)", () => {
       { endpoint: "activeWorkflowForIssue" },
     );
     expect(out).toEqual({ active: true, workflow_id: "wf-1" });
+  });
+});
+
+describe("issueLoopRunsSchema", () => {
+  it("parses a full issue-runs response", () => {
+    const out = parseWithFallback(
+      {
+        issue_runs: [
+          {
+            issue_id: "i-1",
+            issue_number: 42,
+            issue_title: "Ship it",
+            issue_status: "in_progress",
+            first_activated_at: "2026-07-03T10:00:00Z",
+            last_activated_at: "2026-07-03T12:00:00Z",
+          },
+        ],
+      },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    expect(out.issue_runs).toHaveLength(1);
+    expect(out.issue_runs[0]?.issue_number).toBe(42);
+  });
+
+  it("falls back to an empty list when the body is malformed", () => {
+    const out = parseWithFallback(
+      { issue_runs: "definitely-not-an-array" },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    expect(out).toEqual({ issue_runs: [] });
+  });
+
+  it("drops a row missing issue_id but keeps the response shape", () => {
+    const out = parseWithFallback(
+      { issue_runs: [{ issue_number: 1 }] },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    // A row without the required issue_id fails the array element parse, so the
+    // whole response falls back rather than rendering a keyless row.
+    expect(out).toEqual({ issue_runs: [] });
   });
 });
 

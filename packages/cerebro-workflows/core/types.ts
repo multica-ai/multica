@@ -152,8 +152,12 @@ export interface LoopCaps {
 
 export interface LoopSpec {
   version: 1;
-  goal: string;
-  definition_of_done: string;
+  // FIR-2283 v2 point 4 — one free-text prompt (skill-taggable) replaces the
+  // old fixed Goal / Definition-of-done pair. Both stay optional on the wire
+  // (the backend spec already treats them as human-notes, not required); the
+  // editor now writes only `goal` and leaves `definition_of_done` unset.
+  goal?: string;
+  definition_of_done?: string;
   verification: LoopVerification[];
   caps: LoopCaps;
   planning?: boolean;
@@ -245,6 +249,22 @@ export interface WorkflowRunsListResponse {
   runs: CerebroWorkflowRun[];
   limit: number;
   offset: number;
+}
+
+// FIR-2283 v2 point 7 — one issue that has run through a recipe's loop, for
+// the run-history page's issue log. Derived server-side from the generated
+// child rows; no separate run table.
+export interface IssueLoopRun {
+  issue_id: string;
+  issue_number: number;
+  issue_title: string;
+  issue_status: string;
+  first_activated_at: string;
+  last_activated_at: string;
+}
+
+export interface IssueLoopRunsResponse {
+  issue_runs: IssueLoopRun[];
 }
 
 // Phase-3 regenerate-endpoint responses (JEH-1108). The plaintext secret /
