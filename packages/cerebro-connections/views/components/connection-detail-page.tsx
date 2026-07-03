@@ -451,7 +451,7 @@ function ConnectionFormBody({
                   <p className="text-xs text-muted-foreground">
                     {form.type === "mcp_http"
                       ? "Server reachable — no tools returned (server may require initialize handshake)."
-                      : "Server reachable — no OpenAPI/Swagger spec found. Add endpoints manually below."}
+                      : "Server reachable — no OpenAPI/Swagger spec found next to this URL. If the API's docs live under a base path (e.g. /api/registry/v1), set the URL to that base and test again, or add endpoints manually below."}
                   </p>
                 )}
             </div>
@@ -894,9 +894,15 @@ export function ConnectionCreatePage() {
       scopable_args: scopableArgs,
       default_access: form.default_access,
     };
-    await create.mutateAsync(input);
+    const created = await create.mutateAsync(input);
     toast.success("Connection created.");
-    router.push(wsPaths.settings());
+    // Stay on the connection after creating: land on its edit page so the admin
+    // can keep configuring (test, permissions) without re-finding it in the list.
+    if (created.id) {
+      router.push(wsPaths.connectionEdit(created.id));
+    } else {
+      router.push(wsPaths.settings());
+    }
   }
 
   return (
@@ -918,8 +924,6 @@ export function ConnectionCreatePage() {
 
 export function ConnectionEditPage({ connId }: { connId: string }) {
   const wsId = useWorkspaceId();
-  const router = useNavigation();
-  const wsPaths = useWorkspacePaths();
   const { data: conn, isLoading } = useConnection(wsId ?? "", connId);
   const update = useUpdateConnection(wsId ?? "", connId);
 
@@ -991,8 +995,9 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       default_access: form.default_access,
     };
     await update.mutateAsync(input);
+    // Stay on the page after saving — jumping back to the settings list loses
+    // the admin's place mid-configuration (FIR-2640).
     toast.success("Connection updated.");
-    router.push(wsPaths.settings());
   }
 
   return (

@@ -242,6 +242,9 @@ export function useUpdateConnection(wsId: string, connId: string) {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: connectionsKeys.all(wsId) });
+      // The edit page stays open after saving (FIR-2640), so refresh the
+      // single-connection cache it renders from, not just the list.
+      void qc.invalidateQueries({ queryKey: connectionsKeys.one(wsId, connId) });
     },
   });
 }
