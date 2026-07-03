@@ -118,5 +118,18 @@
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
     }
+  },
+  "tool": {
+    "status_running": "実行中",
+    "status_error": "エラー",
+    "status_done": "完了",
+    "section_input": "入力",
+    "section_preview": "プレビュー",
+    "section_diff": "差分",
+    "new_file": "新規ファイル",
+    "copy_output": "出力をコピー",
+    "lines_range": "{{start}}–{{end}} 行目",
+    "lines_first": "先頭 {{count}} 行",
+    "lines_from": "{{start}} 行目から"
   }
 }

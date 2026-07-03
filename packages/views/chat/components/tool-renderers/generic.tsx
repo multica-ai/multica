@@ -7,6 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { useT } from "../../../i18n";
 
 /**
  * Fallback body for tools without a purpose-built renderer. Preserves the
@@ -14,6 +15,7 @@ import type { ChatTimelineItem } from "@multica/core/chat";
  * so an unmapped tool never renders worse than before.
  */
 export function GenericToolBody({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [openInput, setOpenInput] = useState(false);
   const [openOutput, setOpenOutput] = useState(false);
   const hasInput = !!item.input && Object.keys(item.input).length > 0;
@@ -25,7 +27,7 @@ export function GenericToolBody({ item }: { item: ChatTimelineItem }) {
         <Collapsible open={openInput} onOpenChange={setOpenInput}>
           <CollapsibleTrigger className="flex items-center gap-1 text-2xs text-muted-foreground/70 hover:text-foreground transition-colors">
             <ChevronRight className={cn("size-3 transition-transform", openInput && "rotate-90")} />
-            <span>input</span>
+            <span>{t(($) => $.tool.section_input)}</span>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <pre className="mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-all">

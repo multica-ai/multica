@@ -118,5 +118,18 @@
       "searching_web": "搜索网页",
       "fallback": "处理中"
     }
+  },
+  "tool": {
+    "status_running": "运行中",
+    "status_error": "错误",
+    "status_done": "完成",
+    "section_input": "输入",
+    "section_preview": "预览",
+    "section_diff": "差异",
+    "new_file": "新建文件",
+    "copy_output": "复制输出",
+    "lines_range": "第 {{start}}–{{end}} 行",
+    "lines_first": "前 {{count}} 行",
+    "lines_from": "从第 {{start}} 行起"
   }
 }

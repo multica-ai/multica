@@ -3,6 +3,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { UnicodeSpinner } from "@multica/ui/components/common/unicode-spinner";
 import type { ToolStatus } from "../../../common/task-transcript/build-timeline";
+import { useT } from "../../../i18n";
 import { formatToolDuration, prefersReducedMotion } from "./util";
 
 /**
@@ -25,6 +26,7 @@ export function ToolStatusChip({
   durationMs?: number;
   className?: string;
 }) {
+  const { t } = useT("chat");
   const duration = durationMs !== undefined ? formatToolDuration(durationMs) : "";
 
   if (status === "running") {
@@ -35,7 +37,7 @@ export function ToolStatusChip({
       >
         <Badge variant="secondary" className="gap-1 text-muted-foreground">
           <UnicodeSpinner name="braille" paused={prefersReducedMotion()} className="opacity-70" />
-          <span>Running</span>
+          <span>{t(($) => $.tool.status_running)}</span>
         </Badge>
       </span>
     );
@@ -49,7 +51,7 @@ export function ToolStatusChip({
       >
         <Badge variant="destructive" className="gap-1">
           <AlertTriangle aria-hidden className="size-3" />
-          <span>Error</span>
+          <span>{t(($) => $.tool.status_error)}</span>
         </Badge>
         {duration && <span className="text-xs text-muted-foreground tabular-nums">{duration}</span>}
       </span>
@@ -63,7 +65,7 @@ export function ToolStatusChip({
       className={cn("inline-flex items-center gap-1 text-xs text-muted-foreground", className)}
     >
       <Check aria-hidden className="size-3" />
-      <span className="sr-only">Done</span>
+      <span className="sr-only">{t(($) => $.tool.status_done)}</span>
       {duration && <span className="tabular-nums">{duration}</span>}
     </span>
   );

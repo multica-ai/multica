@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
+import { I18nProvider } from "@multica/core/i18n/react";
 import { computeLineDiff, diffStat, DiffBlock } from "@multica/ui/markdown/DiffBlock";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import enChat from "../../../locales/en/chat.json";
 import { EditToolBody } from "./edit";
+
+const RESOURCES = { en: { chat: enChat } };
+
+function renderEdit(item: ChatTimelineItem) {
+  return render(
+    <I18nProvider locale="en" resources={RESOURCES}>
+      <EditToolBody item={item} />
+    </I18nProvider>,
+  );
+}
 
 function editItem(input: Record<string, unknown>): ChatTimelineItem {
   return { seq: 1, type: "tool_use", tool: "Edit", input, status: "done" };
@@ -42,7 +54,7 @@ describe("DiffBlock", () => {
 
 describe("EditToolBody", () => {
   it("shows a +X/−Y summary for an edit with prior text", () => {
-    render(<EditToolBody item={editItem({ file_path: "/a/b.ts", old_string: "a\nb", new_string: "a\nB\nc" })} />);
+    renderEdit(editItem({ file_path: "/a/b.ts", old_string: "a\nb", new_string: "a\nB\nc" }));
     expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("−1")).toBeInTheDocument();
     // The diff body is expandable.
@@ -50,7 +62,7 @@ describe("EditToolBody", () => {
   });
 
   it("routes the diff into DiffBlock when expanded", () => {
-    render(<EditToolBody item={editItem({ file_path: "/a/b.ts", old_string: "a", new_string: "b" })} />);
+    renderEdit(editItem({ file_path: "/a/b.ts", old_string: "a", new_string: "b" }));
     act(() => {
       screen.getByText("diff").closest("button")?.click();
     });
@@ -58,7 +70,7 @@ describe("EditToolBody", () => {
   });
 
   it("falls back to a labeled block for a written (new) file with no prior text", () => {
-    render(<EditToolBody item={editItem({ file_path: "/a/new.ts", content: "export const x = 1;" })} />);
+    renderEdit(editItem({ file_path: "/a/new.ts", content: "export const x = 1;" }));
     expect(screen.getByText(/new file/)).toBeInTheDocument();
   });
 });

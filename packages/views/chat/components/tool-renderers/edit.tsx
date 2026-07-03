@@ -9,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { useT } from "../../../i18n";
 import { shortenPath } from "./util";
 
 function str(input: Record<string, unknown> | undefined, key: string): string {
@@ -24,6 +25,7 @@ function str(input: Record<string, unknown> | undefined, key: string): string {
  * against nothing would be all-green noise.
  */
 export function EditToolBody({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const input = item.input;
   const filePath = str(input, "file_path");
@@ -49,7 +51,8 @@ export function EditToolBody({ item }: { item: ChatTimelineItem }) {
         <CollapsibleTrigger className="flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors">
           <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
           <span>
-            new file{filePath ? ` · ${shortenPath(filePath)}` : ""}
+            {t(($) => $.tool.new_file)}
+            {filePath ? ` · ${shortenPath(filePath)}` : ""}
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -70,7 +73,7 @@ export function EditToolBody({ item }: { item: ChatTimelineItem }) {
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="flex items-center gap-1 text-2xs text-muted-foreground hover:text-foreground transition-colors">
           <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-          <span>diff</span>
+          <span>{t(($) => $.tool.section_diff)}</span>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="mt-0.5">

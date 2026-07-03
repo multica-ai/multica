@@ -118,5 +118,18 @@
       "searching_web": "웹 검색 중",
       "fallback": "작업 중"
     }
+  },
+  "tool": {
+    "status_running": "실행 중",
+    "status_error": "오류",
+    "status_done": "완료",
+    "section_input": "입력",
+    "section_preview": "미리보기",
+    "section_diff": "변경 사항",
+    "new_file": "새 파일",
+    "copy_output": "출력 복사",
+    "lines_range": "{{start}}–{{end}}번째 줄",
+    "lines_first": "처음 {{count}}줄",
+    "lines_from": "{{start}}번째 줄부터"
   }
 }

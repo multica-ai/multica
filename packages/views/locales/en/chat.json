@@ -121,5 +121,18 @@
       "searching_web": "Searching the web",
       "fallback": "Working"
     }
+  },
+  "tool": {
+    "status_running": "Running",
+    "status_error": "Error",
+    "status_done": "Done",
+    "section_input": "input",
+    "section_preview": "preview",
+    "section_diff": "diff",
+    "new_file": "new file",
+    "copy_output": "Copy output",
+    "lines_range": "lines {{start}}–{{end}}",
+    "lines_first": "first {{count}} lines",
+    "lines_from": "from line {{start}}"
   }
 }

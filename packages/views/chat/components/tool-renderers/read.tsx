@@ -8,24 +8,22 @@ import {
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
 import type { ChatTimelineItem } from "@multica/core/chat";
-
-function lineRange(input: Record<string, unknown> | undefined): string {
-  if (!input) return "";
-  const offset = typeof input.offset === "number" ? input.offset : undefined;
-  const limit = typeof input.limit === "number" ? input.limit : undefined;
-  if (offset === undefined && limit === undefined) return "";
-  if (offset !== undefined && limit !== undefined) return `lines ${offset}–${offset + limit - 1}`;
-  if (offset !== undefined) return `from line ${offset}`;
-  return `first ${limit} lines`;
-}
+import { useT } from "../../../i18n";
 
 /**
  * read renderer. The card header already shows the (shortened) file path; the
  * body adds a default-visible line range and an expandable content preview.
  */
 export function ReadToolBody({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
-  const range = lineRange(item.input);
+  const input = item.input;
+  const offset = typeof input?.offset === "number" ? input.offset : undefined;
+  const limit = typeof input?.limit === "number" ? input.limit : undefined;
+  let range = "";
+  if (offset !== undefined && limit !== undefined) range = t(($) => $.tool.lines_range, { start: offset, end: offset + limit - 1 });
+  else if (offset !== undefined) range = t(($) => $.tool.lines_from, { start: offset });
+  else if (limit !== undefined) range = t(($) => $.tool.lines_first, { count: limit });
   const output = item.output ?? "";
 
   return (
@@ -35,7 +33,7 @@ export function ReadToolBody({ item }: { item: ChatTimelineItem }) {
         <Collapsible open={open} onOpenChange={setOpen}>
           <CollapsibleTrigger className="flex items-center gap-1 text-2xs text-muted-foreground/70 hover:text-foreground transition-colors">
             <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-            <span>preview</span>
+            <span>{t(($) => $.tool.section_preview)}</span>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="mt-0.5 max-h-[200px] overflow-auto rounded border bg-muted/40 p-2">

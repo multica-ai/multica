@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { useT } from "../../../i18n";
 import { lastLines } from "./util";
 
 /** Focusable copy button (visible focus ring via Button) for a text blob. */
@@ -48,6 +49,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
  * error chip + tinted preview) rather than a parsed exit status.
  */
 export function BashToolBody({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
@@ -71,7 +73,7 @@ export function BashToolBody({ item }: { item: ChatTimelineItem }) {
       <CollapsibleContent>
         <div className="relative mt-0.5 max-h-[200px] overflow-auto rounded border bg-muted/40 p-2">
           <CodeBlock code={output} mode="minimal" language="bash" />
-          <CopyButton text={output} label="Copy output" />
+          <CopyButton text={output} label={t(($) => $.tool.copy_output)} />
         </div>
       </CollapsibleContent>
     </Collapsible>
