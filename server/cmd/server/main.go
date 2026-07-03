@@ -392,6 +392,7 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	go runRuntimeProviderFailureMonitor(autopilotCtx, queries, bus, envRuntimeProviderFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per

@@ -161,11 +161,11 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 //   - It is in-flight in a state whose downstream side effect is
 //     observable:
 //
-//     * issue_created with a valid issue_id — the issue exists and
-//       the issue-event listener owns task creation from here.
+//   - issue_created with a valid issue_id — the issue exists and
+//     the issue-event listener owns task creation from here.
 //
-//     * running with a valid task_id — the task is queued, the
-//       listener will close the run when the task terminates.
+//   - running with a valid task_id — the task is queued, the
+//     listener will close the run when the task terminates.
 //
 // Anything else — most importantly issue_created/running with NULL
 // issue_id/task_id, or the brief 'pending' state — is a partial run:
@@ -665,6 +665,18 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
+		hasActive, err := s.Queries.HasActiveTaskForAutopilotRun(ctx, task.AutopilotRunID)
+		if err != nil {
+			slog.Warn("failed to check active tasks for run_only autopilot failure",
+				"run_id", util.UUIDToString(task.AutopilotRunID),
+				"task_id", util.UUIDToString(task.ID),
+				"error", err,
+			)
+			return
+		}
+		if hasActive {
+			return
+		}
 		reason := "task " + task.Status
 		if task.Error.Valid {
 			reason = task.Error.String
