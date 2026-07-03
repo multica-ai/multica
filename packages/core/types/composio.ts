@@ -9,9 +9,11 @@ export interface ComposioToolkit {
   name: string;
   logo?: string;
   category?: string;
-  /** Whether the project has an enabled auth config for this toolkit. When
-   * false the UI must not offer a working Connect button — BeginConnect would
-   * 400 with "toolkit not supported". */
+  /** Whether the project has an enabled auth config for this toolkit. Since
+   * MUL-4009 the backend only returns connectable toolkits, so this is always
+   * true on the wire; the field is kept for backward compatibility with older
+   * desktop builds that branch on it. The UI still guards the Connect button on
+   * it as a client-side backstop. */
   connectable: boolean;
 }
 

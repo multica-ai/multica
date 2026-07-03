@@ -8,9 +8,9 @@ export const composioKeys = {
   connections: () => [...composioKeys.all, "connections"] as const,
 };
 
-/** The full Composio toolkit catalog (with per-toolkit `connectable`). The
- * catalog changes rarely, so a long staleTime avoids refetching it every time
- * the Settings tab mounts. */
+/** The project's connectable Composio toolkits (those with an enabled auth
+ * config; see MUL-4009). The list changes rarely, so a long staleTime avoids
+ * refetching it every time the Settings tab mounts. */
 export const composioToolkitsOptions = () =>
   queryOptions({
     queryKey: composioKeys.toolkits(),

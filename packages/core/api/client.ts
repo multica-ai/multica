@@ -2306,8 +2306,10 @@ export class ApiClient {
   // Composio integration (MUL-3720). All routes are user-scoped (a connection
   // belongs to a user, not a workspace), so none take a workspaceId.
 
-  /** Full Composio toolkit catalog, each annotated with `connectable`
-   * (whether the project has an enabled auth config for it). */
+  /** The project's connectable Composio toolkits (those with an enabled auth
+   * config). Since MUL-4009 the backend filters out non-connectable toolkits,
+   * so every entry has `connectable: true`. A resolver/upstream failure is a
+   * 502 rather than an empty list. */
   async listComposioToolkits(): Promise<ComposioToolkit[]> {
     return this.fetch(`/api/integrations/composio/toolkits`);
   }
