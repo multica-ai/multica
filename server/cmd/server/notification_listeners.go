@@ -1073,7 +1073,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		// CEREBRO-PATCH(agent-comment-tag-split): TECH-2961 — agent-authored comments fan out to three routing keys based on who they tag, so users can mute monologues without losing hand-offs.
 		newCommentKey := pickAgentCommentRoutingKey(authorType, mentions)
 		// CEREBRO-PATCH(dm-push): FIR-308 — direct messages route under their own key.
-		if issueKind == "dm" {
+		// CEREBRO-PATCH(channel-dm-unify): FIR-2610 — channels/groups are the
+		// same conversational surface as a DM, just with more than 2 people, so
+		// they route under the same "Direct message" key (per Jesper).
+		if issueKind == "dm" || issueKind == "channel" || issueKind == "group" {
 			newCommentKey = "dm_message"
 		}
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
