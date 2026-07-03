@@ -263,7 +263,16 @@ export function useDeleteConnection(wsId: string) {
 
 export function useTestConnection(wsId: string) {
   return useMutation({
-    mutationFn: async (input: { url: string; type: string; auth_config: Connection["auth_config"]; connection_id?: string }): Promise<TestResult> => {
+    mutationFn: async (input: {
+      url: string;
+      type: string;
+      auth_config: Connection["auth_config"];
+      connection_id?: string;
+      // Explicit OpenAPI spec source (api type): a direct document URL, or the
+      // raw text of an uploaded document. spec_content wins over spec_url.
+      spec_url?: string;
+      spec_content?: string;
+    }): Promise<TestResult> => {
       const raw = await api.testCerebroConnection(wsId, input);
       return parseWithFallback(
         raw,

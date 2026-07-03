@@ -86,6 +86,28 @@ func discoverAPIEndpoints(ctx context.Context, client *http.Client, baseURL stri
 	return nil
 }
 
+// resolveExplicitSpec resolves the endpoint catalogue from an explicitly
+// provided spec — an uploaded document (specContent) or a direct spec URL.
+// Unlike the best-effort probing above, explicit input gets an explicit error
+// message back when it cannot be used, so the admin knows what to fix.
+func resolveExplicitSpec(ctx context.Context, client *http.Client, specURL, specContent string, auth AuthConfig) ([]discoveredEndpoint, string) {
+	if strings.TrimSpace(specContent) != "" {
+		if eps := parseSpec([]byte(specContent)); len(eps) > 0 {
+			return eps, ""
+		}
+		return nil, "the uploaded document is not a parsable OpenAPI/Swagger spec (no endpoints found)"
+	}
+	specURL = strings.TrimSpace(specURL)
+	body, ok := fetchSpec(ctx, client, specURL, auth)
+	if !ok {
+		return nil, "could not fetch the spec URL (unreachable or non-2xx response)"
+	}
+	if eps := parseSpec(body); len(eps) > 0 {
+		return eps, ""
+	}
+	return nil, "the spec URL did not return a parsable OpenAPI/Swagger document"
+}
+
 // specCandidates builds the ordered, de-duplicated list of URLs to probe for a
 // spec, given the connection's base URL.
 func specCandidates(baseURL string) []string {
