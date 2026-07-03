@@ -244,8 +244,12 @@ func Resolve(in Input) Effective {
 //	  own setting is authoritative for the member; group/workspace are the
 //	  inherited defaults it can override.
 //	Stage B — the AGENT inherits the member verdict as a CEILING, then Runtime,
-//	  Agent (and System) may only TIGHTEN it. An agent can never do more than its
-//	  member; a Deny on runtime/agent wins even when member/workspace say Allow.
+//	  Agent, on_behalf_of (and System) may only TIGHTEN it. An agent can never do
+//	  more than its member; a Deny on runtime/agent wins even when member/workspace
+//	  say Allow. on_behalf_of (the delegated task initiator, FIR-2441) is a peer of
+//	  runtime/agent here — tighten-only, same as under Resolve — so a member driving
+//	  someone else's agent can be restricted but can never widen what that agent's
+//	  own owner allows.
 //
 // CONTRAST WITH Resolve: Resolve is pure most-restrictive-wins (tighten-only at
 // every layer) and is the load-bearing invariant for the deny-by-default gates —
@@ -271,13 +275,13 @@ func ResolveMemberOverride(in Input) Effective {
 		}
 	}
 
-	// Stage B — the agent inherits the member ceiling; runtime/agent/system may
-	// only tighten it. A layer trying to loosen is ignored.
+	// Stage B — the agent inherits the member ceiling; runtime/agent/on_behalf_of/
+	// system may only tighten it. A layer trying to loosen is ignored.
 	resolved := memberEff
 	decidedBy := memberDecidedBy
 	var cappedBy Layer
 	memberRank := rank(memberEff)
-	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerSystem} {
+	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerOnBehalfOf, LayerSystem} {
 		v := in.Settings[layer]
 		if rank(v) < 0 {
 			continue // Inherit / absent — no opinion.

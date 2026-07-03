@@ -54,6 +54,13 @@ Keep these apart. This doc answers question 2 honestly.
 > Chinese), sourced from the `platformcatalog` register and exposed as
 > `description` / `description_zh` on each tool-policy row. This is display
 > metadata — it does not change any gate, the resolution chain, or the flag above.
+>
+> **FIR-2351 (parity fix, no flag):** `ResolveMemberOverride`'s ceiling stage was
+> missing `on_behalf_of` (the delegated task initiator, FIR-2441) — a workspace
+> with `cerebro_member_override` on would silently ignore an on_behalf_of
+> Deny/Ask that the tighten-only `Resolve` already honours. Fixed so both
+> resolvers agree: `on_behalf_of` always tightens, on either resolver, and never
+> loosens. No behavior change while the flag is off (the Firtal workspace today).
 
 ---
 

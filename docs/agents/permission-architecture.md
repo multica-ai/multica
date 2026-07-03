@@ -38,7 +38,9 @@ The unified tool-policy chain is the model we want **everything** to converge on
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
   so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),
-  Stage B lets `Runtime`/`Agent`/`System` only tighten that member ceiling. The **general gate
+  Stage B lets `Runtime`/`Agent`/`on_behalf_of`/`System` only tighten that member ceiling
+  (`on_behalf_of` — the delegated task initiator, FIR-2441 — closed a parity gap with `Resolve`:
+  it now tightens under both resolvers identically, never loosens either). The **general gate
   only** dispatches to it through `Store.ResolveGeneral(ctx, q, memberOverride)` (`store.go`),
   where `memberOverride` is the workspace flag read by the gate handler
   (`runtime.memberOverrideEnabled` / `handler.daemonMemberOverrideEnabled`, both fail-to-OFF).

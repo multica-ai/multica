@@ -138,3 +138,45 @@ func TestResolveMemberOverride_SystemAskBecomesDeny(t *testing.T) {
 		t.Fatalf("expected DecidedBy=system, got %q", e.DecidedBy)
 	}
 }
+
+// TestResolveMemberOverride_OnBehalfOfTightensOnly closes a parity gap with
+// Resolve (see TestResolve_OnBehalfOfTightensOnly): under the tighten-only
+// Resolve, on_behalf_of (the delegated task initiator, FIR-2441) can restrict a
+// tool across every agent that member drives but never widen it. Before this
+// test, ResolveMemberOverride's Stage B ceiling walked only
+// [Runtime, Agent, System] — on_behalf_of settings were silently dropped, so a
+// workspace that turns on cerebro_member_override (FIR-2175) would lose
+// on_behalf_of enforcement on the general gate even though the connection-grant
+// path (ConnectionEndpointEffective) already treats it as tighten-only. Both
+// resolvers must agree: on_behalf_of always tightens, never loosens.
+func TestResolveMemberOverride_OnBehalfOfTightensOnly(t *testing.T) {
+	// A delegated member Deny tightens an otherwise-allowed tool.
+	e := ResolveMemberOverride(Input{Settings: set(
+		LayerUser, SettingAllow,
+		LayerOnBehalfOf, SettingDeny,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Deny must tighten, got %s", e.Setting)
+	}
+	if e.CappedBy != LayerOnBehalfOf {
+		t.Fatalf("expected CappedBy=on_behalf_of, got %q", e.CappedBy)
+	}
+	if e.DecidedBy != LayerOnBehalfOf {
+		t.Fatalf("expected DecidedBy=on_behalf_of, got %q", e.DecidedBy)
+	}
+
+	// A delegated member Allow can NOT loosen a tighter agent Deny.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerAgent, SettingDeny,
+		LayerOnBehalfOf, SettingAllow, // tries to loosen — must be ignored
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Allow must not loosen an agent Deny, got %s", e.Setting)
+	}
+
+	// Absent on_behalf_of leaves resolution exactly as before (non-delegated path).
+	e = ResolveMemberOverride(Input{Settings: set(LayerUser, SettingAllow)})
+	if e.Setting != SettingAllow {
+		t.Fatalf("absent on_behalf_of must not change resolution, got %s", e.Setting)
+	}
+}
