@@ -17,24 +17,35 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var teamKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
+var nonTeamKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
 
+// defaultTeamKeyFromSlug derives the default team key by normalizing the
+// slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
 func defaultTeamKeyFromSlug(slug string) string {
-	letters := nonAlpha.ReplaceAllString(slug, "")
-	if len(letters) == 0 {
+	key := normalizeTeamKey(slug)
+	if key == "" {
 		return "T"
 	}
-	letters = strings.ToUpper(letters)
-	if len(letters) > 3 {
-		letters = letters[:3]
-	}
-	return letters
+	return key
 }
 
+// normalizeTeamKey mirrors pg_temp.normalize_team_key in migration 131 (minus
+// the 'TEAM' fallback, which callers decide): uppercase, strip characters
+// outside [A-Z0-9], truncate to 7, and prefix digit-leading keys with 'T'.
 func normalizeTeamKey(raw string) string {
-	return strings.ToUpper(strings.TrimSpace(raw))
+	key := nonTeamKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(raw)), "")
+	if len(key) > 7 {
+		key = key[:7]
+	}
+	if key != "" && key[0] >= '0' && key[0] <= '9' {
+		key = "T" + key
+		if len(key) > 7 {
+			key = key[:7]
+		}
+	}
+	return key
 }
 
 func validTeamKey(key string) bool {
@@ -232,7 +243,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	team, err := qtx.CreateWorkspaceTeam(r.Context(), db.CreateWorkspaceTeamParams{
 		WorkspaceID: ws.ID,
-		Name:        "Default",
+		Name:        ws.Name,
 		Key:         defaultTeamKey,
 		IsDefault:   true,
 		Description: pgtype.Text{},

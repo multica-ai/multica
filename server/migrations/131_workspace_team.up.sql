@@ -142,7 +142,7 @@ CREATE INDEX idx_autopilot_workspace_team
 INSERT INTO workspace_team (workspace_id, name, key, issue_counter, is_default, created_by)
 SELECT
     w.id,
-    'Default',
+    w.name,
     pg_temp.normalize_team_key(w.issue_prefix),
     w.issue_counter,
     true,
