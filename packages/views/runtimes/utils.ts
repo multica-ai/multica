@@ -156,6 +156,8 @@ const MODEL_PRICING: Record<
   // CEREBRO-PATCH(pricing-fable-5): Claude Fable 5 list price ($10/$50) so its cost renders correctly.
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
+  // CEREBRO-PATCH(pricing-sonnet-5): FIR-2661 Claude Sonnet 5 list price ($3/$15, same tier as Sonnet 4.6) so its cost renders correctly.
+  "claude-sonnet-5":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-opus-4-5":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },

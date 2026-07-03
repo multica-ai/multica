@@ -64,7 +64,9 @@ var modelPricing = map[string]Pricing{
 	"claude-opus-4-1": {InputCentsPerMtok: 1500, OutputCentsPerMtok: 7500, CacheReadCentsPerMtok: 150, CacheWriteCentsPerMtok: 1875},
 	"claude-opus-4":   {InputCentsPerMtok: 1500, OutputCentsPerMtok: 7500, CacheReadCentsPerMtok: 150, CacheWriteCentsPerMtok: 1875},
 
-	// Anthropic — Sonnet 4 family (uniform across 4 / 4.5 / 4.6).
+	// Anthropic — Sonnet 5 and the Sonnet 4 family (uniform price tier).
+	// CEREBRO-PATCH(pricing-sonnet-5): FIR-2661 add Claude Sonnet 5 list price — without it Sonnet 5 fell back to the Opus 4.1 fallback ($15/$75), a 5x over-charge vs actual $3/$15.
+	"claude-sonnet-5":   {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
 	"claude-sonnet-4-6": {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
 	"claude-sonnet-4-5": {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
 	"claude-sonnet-4":   {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},

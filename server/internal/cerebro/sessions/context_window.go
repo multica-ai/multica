@@ -44,7 +44,8 @@ var modelContextWindows = map[string]int64{
 	"claude-opus-4-1": 200_000,
 	"claude-opus-4":   200_000,
 
-	// Anthropic — Sonnet 4.x ships the 1M long-context window.
+	// Anthropic — Sonnet 5 and Sonnet 4.x ship the 1M long-context window.
+	"claude-sonnet-5":   1_000_000,
 	"claude-sonnet-4-6": 1_000_000,
 	"claude-sonnet-4-5": 1_000_000,
 	"claude-sonnet-4":   1_000_000,
