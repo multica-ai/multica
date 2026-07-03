@@ -294,6 +294,33 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.36",
+        date: "2026-07-03",
+        title: "Composio 应用互联（灰度）、任务日志偏好记忆，与协作与稳定性修复",
+        changes: [],
+        features: [
+          "接入 Composio 应用（首个是 Notion）：智能体可以直接调用你自己的连接工具；智能体拥有者选择每个智能体可挂载的 Composio 应用，并通过新的访问选择器决定谁能运行这个智能体——私有、工作区全体成员、指定成员，或它们的任意组合。发布期间通过特性开关灰度放量。",
+          "任务日志（Transcript）会记住你的过滤条件与展开状态，下次打开同一次运行时自动恢复。",
+          "自托管（Helm）：新增 `postgres.external.enabled` 开关，可将 Multica 指向外部托管的 PostgreSQL（RDS、CNPG、Cloud SQL、Neon 等），跳过内置数据库。",
+        ],
+        fixes: [
+          "评论草稿里有空的 `1. ` 列表项时，重新加载后光标不再卡在下方块。",
+          "登录 Shell 里挂了 hook 包装时，守护进程也能正确发现智能体 CLI（Claude、Codex 等）。",
+          "新提交推送后，PR 审查智能体会重新触发审查，不再复用旧提交的结论。",
+          "实时事件在服务端 Pod 重启期间不再被静默丢失，新增有界 5 分钟回放窗口覆盖这段时间。",
+          "Kiro ACP 运行时任务的用量再次被正确记入使用日志。",
+          "运行时离线时，自动驾驶（Autopilot）的「创建 Issue」运行仍然会出现在运行列表里。",
+          "正文只在 Slack 附件里的告警卡片（Grafana、Webhook 等）现在会从附件读取正文，而不是回落文本。",
+          "Codex 智能体任务能在任务主目录里看到守护进程的 Codex 模型目录。（社区反馈）",
+          "`/squads/…` 与 `/usage` 老路径不再 404，会重定向到当前对应页面。",
+          "桌面端「保存」对话框展示真实的附件文件名，不再默认成 `download.txt`。（社区贡献）",
+          "小队协作：Leader 通过 mention 派发的工作者智能体，在通过 HTTP API 发布完成评论时，能正确唤醒私有小队 Leader；Leader → Worker → Leader 协作链不再在第一跳后卡住。",
+          "Composio 设置页会隐藏没启用鉴权配置的应用（不再出现「未配置」的死卡片）；如果 Composio Cloud 不可达，会显示真实的加载失败状态，而不是「无可用应用」的误导态。",
+          "如果宿主机 Claude CLI 版本早于 `--effort` 参数，任务不再硬失败——守护进程会丢弃 effort 标志并打印告警，回落到普通模式运行。",
+          "新建智能体对话框现在使用与详情页同款的访问选择器（私有 / 全体成员 / 允许名单），避免在此处设置的可见性与调用门禁不一致。",
+        ],
+      },
+      {
         version: "0.3.35",
         date: "2026-07-02",
         title: "「显示子 Issue」开关、Issue 视图更快、智能体 CLI 更安全",
