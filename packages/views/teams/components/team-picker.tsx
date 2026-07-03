@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { Check, Users, X } from "lucide-react";
+import { Check, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { activeTeamListOptions } from "@multica/core/teams/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -10,36 +10,44 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { Team } from "@multica/core/types";
+import { TeamIcon } from "./team-icon";
 import { useT } from "../../i18n";
 
-function TeamKey({ team }: { team: Team }) {
+// icon + key: how a team is identified everywhere (picker rows, triggers).
+function TeamBadge({ team }: { team: Team }) {
   return (
-    <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
-      {team.key}
+    <span className="flex items-center gap-1.5 overflow-hidden">
+      <TeamIcon team={team} />
+      <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+        {team.key}
+      </span>
     </span>
   );
 }
 
+// Single-select and non-clearable by design: every issue belongs to exactly
+// one team, so the picker never offers an empty state — `teamId` is only
+// null while the team list is still loading.
 export function TeamPicker({
   teamId,
   onChange,
   triggerRender,
   align = "start",
-  allowClear = false,
   allowedTeamIds,
+  disabled = false,
 }: {
   teamId: string | null;
-  onChange: (teamId: string | null) => void;
+  onChange: (teamId: string) => void;
   triggerRender?: ReactElement;
   align?: "start" | "center" | "end";
-  allowClear?: boolean;
   // When set, restricts the offered teams to this id set (e.g. the selected
   // project's teams). Undefined means no constraint.
   allowedTeamIds?: string[];
+  // Locked display (e.g. sub-issues inherit the parent's team server-side).
+  disabled?: boolean;
 }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
@@ -47,46 +55,43 @@ export function TeamPicker({
   const teams = allowedTeamIds
     ? allTeams.filter((team) => allowedTeamIds.includes(team.id))
     : allTeams;
-  const current = teams.find((team) => team.id === teamId);
+  // Resolve the display label against the unfiltered list so a selection
+  // outside `allowedTeamIds` (e.g. before the caller converges it) still
+  // renders instead of flashing the placeholder.
+  const current = allTeams.find((team) => team.id === teamId);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        disabled={disabled}
         className={
           triggerRender
             ? undefined
-            : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"
+            : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden disabled:cursor-default disabled:hover:bg-transparent"
         }
         render={triggerRender}
       >
+        {/* Trigger shows icon + key only — the key IS the team's compact
+            identity; the full name lives in the menu items. */}
         {current ? (
-          <TeamKey team={current} />
+          <TeamBadge team={current} />
         ) : (
-          <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <>
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.picker.placeholder)}</span>
+          </>
         )}
-        <span className="truncate">
-          {current ? current.name : t(($) => $.picker.placeholder)}
-        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-56">
         {teams.map((team) => (
           <DropdownMenuItem key={team.id} onClick={() => onChange(team.id)}>
-            <TeamKey team={team} />
+            <TeamBadge team={team} />
             <span className="truncate">{team.name}</span>
             {team.id === teamId && (
               <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
             )}
           </DropdownMenuItem>
         ))}
-        {allowClear && teamId && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onChange(null)}>
-              <X className="h-3.5 w-3.5 text-muted-foreground" />
-              {t(($) => $.picker.clear)}
-            </DropdownMenuItem>
-          </>
-        )}
         {teams.length === 0 && (
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
             {t(($) => $.picker.empty)}
@@ -147,7 +152,7 @@ export function TeamMultiPicker({
               checked={checked}
               onCheckedChange={() => toggle(team.id)}
             >
-              <TeamKey team={team} />
+              <TeamBadge team={team} />
               <span className="truncate">{team.name}</span>
             </DropdownMenuCheckboxItem>
           );

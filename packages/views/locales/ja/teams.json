@@ -42,7 +42,6 @@
   },
   "picker": {
     "placeholder": "チーム",
-    "clear": "チームをクリア",
     "empty": "アクティブなチームはありません",
     "selected_count_other": "{{count}} チーム"
   },

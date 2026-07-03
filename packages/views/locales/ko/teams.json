@@ -42,7 +42,6 @@
   },
   "picker": {
     "placeholder": "팀",
-    "clear": "팀 지우기",
     "empty": "활성 팀이 없습니다",
     "selected_count_other": "{{count}}개 팀"
   },

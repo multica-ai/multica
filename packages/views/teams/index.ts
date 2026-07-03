@@ -1,1 +1,1 @@
-export { TeamsPage, TeamPicker, TeamMultiPicker } from "./components";
+export { TeamsPage, TeamPicker, TeamMultiPicker, TeamIcon } from "./components";

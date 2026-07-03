@@ -42,7 +42,6 @@
   },
   "picker": {
     "placeholder": "Team",
-    "clear": "清除 Team",
     "empty": "没有启用的 Team",
     "selected_count_other": "已选 {{count}} 个 Team"
   },

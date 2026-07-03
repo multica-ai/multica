@@ -41,13 +41,14 @@ import { ProjectPicker } from "../projects/components/project-picker";
 import { TeamPicker } from "../teams/components/team-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeTeamListOptions } from "@multica/core/teams/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
@@ -192,7 +193,6 @@ export function ManualCreatePanel({
   const { t } = useT("modals");
   const router = useNavigation();
   const p = useWorkspacePaths();
-  const workspaceName = useCurrentWorkspace()?.name;
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -272,17 +272,31 @@ export function ManualCreatePanel({
   // them. When a project is selected, constrain the team picker to its teams;
   // no project selected leaves the picker unconstrained.
   const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
+
+  // Every issue belongs to exactly one team, so the picker always resolves to
+  // a value: explicit pick → workspace default team. Sub-issues are pinned to
+  // the parent's team (the server enforces inheritance), so the picker locks.
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const defaultTeamId = useMemo(
+    () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
+    [teams],
+  );
+  const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
+  const effectiveTeamId = parentTeamId ?? teamId ?? defaultTeamId;
+
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || parentTeamId) return;
     const allowed = selectedProject?.team_ids ?? [];
-    // Exactly one team: auto-select it. Otherwise drop a stale pick that the
-    // newly-chosen project doesn't include.
+    if (allowed.length === 0) return;
+    // Converge instead of clearing: the issue must keep a team, so a pick the
+    // newly-chosen project doesn't include snaps to that project's own team.
     if (allowed.length === 1) {
-      setTeamId(allowed[0]);
+      if (teamId !== allowed[0]) setTeamId(allowed[0]);
       return;
     }
-    if (teamId && !allowed.includes(teamId)) setTeamId(undefined);
-  }, [projectId, selectedProject, teamId]);
+    const current = teamId ?? defaultTeamId;
+    if (current && !allowed.includes(current)) setTeamId(allowed[0]);
+  }, [projectId, selectedProject, teamId, defaultTeamId, parentTeamId]);
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -374,7 +388,7 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
-        team_id: teamId,
+        team_id: effectiveTeamId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
@@ -546,7 +560,7 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
-      ...(teamId ? { team_id: teamId } : {}),
+      ...(effectiveTeamId ? { team_id: effectiveTeamId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -559,7 +573,16 @@ export function ManualCreatePanel({
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-muted-foreground">{workspaceName}</span>
+                {/* The issue's team namespace — leads the breadcrumb like the
+                    workspace name used to, but as a required single-select. */}
+                <TeamPicker
+                  teamId={effectiveTeamId ?? null}
+                  onChange={setTeamId}
+                  allowedTeamIds={projectTeamIds}
+                  disabled={!!parentTeamId}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
@@ -666,15 +689,6 @@ export function ManualCreatePanel({
                 onUpdate={(u) => updateDueDate(u.due_date ?? null)}
                 triggerRender={<PillButton />}
                 align="start"
-              />
-
-              {/* Team */}
-              <TeamPicker
-                teamId={teamId ?? null}
-                onChange={(next) => setTeamId(next ?? undefined)}
-                triggerRender={<PillButton />}
-                align="start"
-                allowedTeamIds={projectTeamIds}
               />
 
               {/* Project */}
