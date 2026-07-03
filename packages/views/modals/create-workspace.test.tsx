@@ -103,7 +103,7 @@ describe("CreateWorkspaceModal", () => {
       "Choose a different workspace URL",
     );
     expect(mockCreateWorkspaceMutate).toHaveBeenCalledWith(
-      { name: "My Team", slug: "my-team", default_team_key: "MYT" },
+      { name: "My Team", slug: "my-team" },
       expect.any(Object),
     );
   });
