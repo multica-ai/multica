@@ -20,8 +20,19 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // Issue detail is identifier-first (Linear-style /issue/NAI-3): the team
+    // rides in the identifier, never in a nested path segment, so moving an
+    // issue between teams can't orphan the URL (old identifiers keep
+    // resolving via the server-side alias). The same route accepts a UUID —
+    // internal navigation passes ids, shared links pass identifiers.
+    issueDetail: (idOrIdentifier: string) => `${ws}/issue/${encode(idOrIdentifier)}`,
     teams: () => `${ws}/teams`,
+    // Team-scoped surfaces, addressed by team key (readable, stable: keys
+    // freeze once a team has issues) — /team/ENG/issues, Linear-style.
+    teamIssues: (key: string) => `${ws}/team/${encode(key)}/issues`,
+    teamProjects: (key: string) => `${ws}/team/${encode(key)}/projects`,
+    teamAutopilots: (key: string) => `${ws}/team/${encode(key)}/autopilots`,
+    teamSettings: (key: string) => `${ws}/team/${encode(key)}/settings`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

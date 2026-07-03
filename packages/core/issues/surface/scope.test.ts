@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  UnsupportedIssueScopeError,
-  issueScopeKey,
-} from "./scope";
+import { issueScopeKey } from "./scope";
 import { buildIssueSurfaceQueryPlan } from "./query-plan";
 
 describe("issue surface scope", () => {
@@ -145,10 +142,16 @@ describe("issue surface scope", () => {
     });
   });
 
-  it("throws for team until the issue API has a team filter", () => {
-    const scope = { type: "team" as const, teamId: "t1" };
-    expect(() => buildIssueSurfaceQueryPlan(scope)).toThrow(
-      UnsupportedIssueScopeError,
-    );
+  it("builds the team query plan mirroring the project shape", () => {
+    expect(
+      buildIssueSurfaceQueryPlan({ type: "team", teamId: "t1" }),
+    ).toMatchObject({
+      kind: "scoped",
+      scopeKey: "team:t1",
+      queryScope: "team:t1",
+      queryFilter: { team_id: "t1" },
+      groupedScopeFilter: { team_id: "t1" },
+      createDefaults: { team_id: "t1" },
+    });
   });
 });

@@ -26,6 +26,7 @@ import type {
   ListIssuesResponse,
   ListLabelsResponse,
   ListTeamsResponse,
+  ListTeamMembersResponse,
   ListWebhookDeliveriesResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
@@ -494,7 +495,34 @@ export const TeamSchema = z.object({
   created_by: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  is_member: z.boolean().default(false),
+  sort_order: z.number().default(0),
 }).loose();
+
+// PATCH /api/teams/{id}/membership — the caller's own sort position.
+export const TeamMembershipSchema = z.object({
+  team_id: z.string().default(""),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const TeamMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  role: z.string().default("member"),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListTeamMembersResponseSchema = z.object({
+  members: z.array(TeamMemberSchema).default([]),
+  total: z.number().default(0),
+});
+
+export const EMPTY_LIST_TEAM_MEMBERS_RESPONSE: ListTeamMembersResponse = {
+  members: [],
+  total: 0,
+};
 
 export const ListTeamsResponseSchema = z.object({
   teams: z.array(TeamSchema).default([]),
@@ -514,6 +542,8 @@ export const EMPTY_TEAM: Team = {
   created_by: null,
   created_at: "",
   updated_at: "",
+  is_member: false,
+  sort_order: 0,
 };
 
 export const EMPTY_LIST_TEAMS_RESPONSE: ListTeamsResponse = {

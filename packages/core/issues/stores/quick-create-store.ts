@@ -27,8 +27,6 @@ interface QuickCreateState {
   setLastActor: (type: QuickCreateActorType | null, id: string | null) => void;
   lastProjectId: string | null;
   setLastProjectId: (id: string | null) => void;
-  lastTeamId: string | null;
-  setLastTeamId: (id: string | null) => void;
   prompt: string;
   setPrompt: (prompt: string) => void;
   clearPrompt: () => void;
@@ -44,8 +42,6 @@ export const useQuickCreateStore = create<QuickCreateState>()(
       setLastActor: (type, id) => set({ lastActorType: type, lastActorId: id }),
       lastProjectId: null,
       setLastProjectId: (id) => set({ lastProjectId: id }),
-      lastTeamId: null,
-      setLastTeamId: (id) => set({ lastTeamId: id }),
       prompt: "",
       setPrompt: (prompt) => set({ prompt }),
       clearPrompt: () => set({ prompt: "" }),

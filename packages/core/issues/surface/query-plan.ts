@@ -3,11 +3,7 @@ import type {
   AssigneeGroupedIssuesFilter,
   MyIssuesFilter,
 } from "../queries";
-import {
-  issueScopeKey,
-  UnsupportedIssueScopeError,
-  type IssueScope,
-} from "./scope";
+import { issueScopeKey, type IssueScope } from "./scope";
 
 export type IssueSurfaceQueryPlan =
   | {
@@ -163,7 +159,22 @@ export function buildIssueSurfaceQueryPlan(
             : {},
       };
     }
-    case "team":
-      throw new UnsupportedIssueScopeError(scope, "issue surface query plan");
+    case "team": {
+      // Mirrors the project plan: team_id is a real server filter on both
+      // the list and grouped endpoints, so the team surface gets its own
+      // cache entry, and issues created from it default into the team.
+      const queryFilter = { team_id: scope.teamId };
+      return {
+        kind: "scoped",
+        scopeKey,
+        queryScope: scopeKey,
+        queryFilter,
+        groupedScopeFilter: queryFilter,
+        loadMoreScope: scopeKey,
+        loadMoreFilter: queryFilter,
+        userId: undefined,
+        createDefaults: { team_id: scope.teamId },
+      };
+    }
   }
 }
