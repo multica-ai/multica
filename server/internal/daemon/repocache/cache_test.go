@@ -15,6 +15,17 @@ func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
+func isolateGitGlobalConfig(t *testing.T, contents string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write isolated gitconfig: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+}
+
 func TestGitEnv(t *testing.T) {
 	t.Parallel()
 	env := gitEnv()
@@ -1129,10 +1140,11 @@ func TestGetRemoteDefaultBranchUsesBareHeadHintForCustomDefault(t *testing.T) {
 }
 
 // TestCreateWorktreeInstallsCoAuthoredByHook verifies that CreateWorktree
-// installs a prepare-commit-msg hook that appends a Co-authored-by trailer
-// for the Multica Agent to every commit made in the worktree.
+// installs a prepare-commit-msg hook only when Git cannot already resolve a
+// configured user identity.
 func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
-	t.Parallel()
+	isolateGitGlobalConfig(t, "")
+
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
@@ -1173,10 +1185,55 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeSkipsCoAuthoredByHookWhenGitIdentityConfigured(t *testing.T) {
+	isolateGitGlobalConfig(t, "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n")
+
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "c3d4e5f6-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	hookPath := filepath.Join(cache.Lookup("ws-1", sourceRepo), "hooks", "prepare-commit-msg")
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no Multica hook when git identity is configured, stat err=%v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if commitMsg := string(out); strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries fallback trailer despite configured identity.\ngot:\n%s", commitMsg)
+	}
+}
+
 // TestCoAuthoredByHookIdempotent verifies that the hook does not add a
 // duplicate Co-authored-by trailer if one is already present in the message.
 func TestCoAuthoredByHookIdempotent(t *testing.T) {
-	t.Parallel()
+	isolateGitGlobalConfig(t, "")
+
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
@@ -1226,7 +1283,8 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 // Otherwise commits keep getting the trailer even after the user disables the
 // workspace setting.
 func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
-	t.Parallel()
+	isolateGitGlobalConfig(t, "")
+
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
@@ -1288,6 +1346,69 @@ func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
 	commitMsg := string(out)
 	if strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
 		t.Errorf("commit unexpectedly carries the Co-authored-by trailer with setting disabled.\ngot:\n%s", commitMsg)
+	}
+}
+
+func TestCreateWorktreeRemovesLegacyAgentLocalHookWhenGitIdentityConfigured(t *testing.T) {
+	isolateGitGlobalConfig(t, "[user]\n\tname = Ada Lovelace\n\temail = ada@example.com\n")
+
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	const legacyAgentLocalHook = `#!/bin/sh
+# Multica: add Co-authored-by trailer for the Multica Agent.
+# Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+COMMIT_MSG_FILE="$1"
+TRAILER="Co-authored-by: Test Agent <test-agent@multica.local>"
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
+`
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(hookPath, []byte(legacyAgentLocalHook), 0o755); err != nil {
+		t.Fatalf("seed legacy hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "55555555-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy agent-local hook to be removed, stat err=%v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	if strings.Contains(commitMsg, "multica.local") || strings.Contains(commitMsg, "Co-authored-by: Test Agent") {
+		t.Errorf("commit unexpectedly carries stale agent-local trailer.\ngot:\n%s", commitMsg)
 	}
 }
 
