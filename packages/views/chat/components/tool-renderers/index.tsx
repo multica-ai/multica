@@ -4,6 +4,7 @@ import { ToolStatusChip } from "./status-chip";
 import { GenericToolBody } from "./generic";
 import { BashToolBody } from "./bash";
 import { ReadToolBody } from "./read";
+import { EditToolBody } from "./edit";
 import { getToolSummary } from "./util";
 
 /** Renders the body (below the shared header) of a single tool card. */
@@ -17,6 +18,8 @@ export type ToolRenderer = (item: ChatTimelineItem) => ReactNode;
 export const toolRenderers: Record<string, ToolRenderer> = {
   bash: (item) => <BashToolBody item={item} />,
   read: (item) => <ReadToolBody item={item} />,
+  edit: (item) => <EditToolBody item={item} />,
+  write: (item) => <EditToolBody item={item} />,
 };
 
 export function renderToolBody(item: ChatTimelineItem): ReactNode {
