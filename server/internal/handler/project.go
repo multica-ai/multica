@@ -675,42 +675,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	if replaceTeams {
-		next := map[string]struct{}{}
-		for _, id := range nextTeamIDs {
-			next[uuidToString(id)] = struct{}{}
-		}
-		prevTeams, err := qtx.ListProjectTeams(r.Context(), db.ListProjectTeamsParams{
-			WorkspaceID: wsUUID,
-			ProjectID:   prevProject.ID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to load project teams")
-			return
-		}
-		// Issues under a removed team keep their project untouched — the
-		// project↔team association is a creation-time default, not an
-		// invariant. Only active autopilots still block removal: they keep
-		// producing new issues from the (project, team) pairing.
-		for _, team := range prevTeams {
-			if _, keep := next[uuidToString(team.ID)]; keep {
-				continue
-			}
-			autopilotCount, err := qtx.CountActiveProjectAutopilotsByTeam(r.Context(), db.CountActiveProjectAutopilotsByTeamParams{
-				WorkspaceID: wsUUID,
-				ProjectID:   prevProject.ID,
-				TeamID:      team.ID,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to validate project teams")
-				return
-			}
-			if autopilotCount > 0 {
-				writeError(w, http.StatusConflict, "cannot remove a team used by active project autopilots")
-				return
-			}
-		}
-	}
+	// Removing a team association is unguarded by design: the project↔team
+	// link is a creation-time default, not an invariant. Issues keep their
+	// project, and autopilots carry their own team_id independently.
 	project, err := qtx.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")

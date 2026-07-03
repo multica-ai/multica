@@ -12,8 +12,8 @@ import (
 )
 
 const addWorkspaceTeamMember = `-- name: AddWorkspaceTeamMember :exec
-INSERT INTO workspace_team_member (workspace_id, team_id, user_id, role)
-VALUES ($1, $2, $3, $4)
+INSERT INTO workspace_team_member (workspace_id, team_id, user_id, role, sort_order)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (team_id, user_id) DO UPDATE SET role = EXCLUDED.role
 `
 
@@ -22,6 +22,7 @@ type AddWorkspaceTeamMemberParams struct {
 	TeamID      pgtype.UUID `json:"team_id"`
 	UserID      pgtype.UUID `json:"user_id"`
 	Role        string      `json:"role"`
+	SortOrder   float64     `json:"sort_order"`
 }
 
 func (q *Queries) AddWorkspaceTeamMember(ctx context.Context, arg AddWorkspaceTeamMemberParams) error {
@@ -30,6 +31,7 @@ func (q *Queries) AddWorkspaceTeamMember(ctx context.Context, arg AddWorkspaceTe
 		arg.TeamID,
 		arg.UserID,
 		arg.Role,
+		arg.SortOrder,
 	)
 	return err
 }
@@ -211,6 +213,31 @@ func (q *Queries) GetWorkspaceTeamByKey(ctx context.Context, arg GetWorkspaceTea
 	return i, err
 }
 
+const getWorkspaceTeamMember = `-- name: GetWorkspaceTeamMember :one
+SELECT workspace_id, team_id, user_id, role, created_at, sort_order FROM workspace_team_member
+WHERE team_id = $1
+  AND user_id = $2
+`
+
+type GetWorkspaceTeamMemberParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetWorkspaceTeamMember(ctx context.Context, arg GetWorkspaceTeamMemberParams) (WorkspaceTeamMember, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceTeamMember, arg.TeamID, arg.UserID)
+	var i WorkspaceTeamMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TeamID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.SortOrder,
+	)
+	return i, err
+}
+
 const incrementTeamIssueCounter = `-- name: IncrementTeamIssueCounter :one
 UPDATE workspace_team
 SET issue_counter = issue_counter + 1,
@@ -275,7 +302,7 @@ func (q *Queries) ListActiveWorkspaceTeams(ctx context.Context, workspaceID pgty
 }
 
 const listWorkspaceTeamMembers = `-- name: ListWorkspaceTeamMembers :many
-SELECT workspace_id, team_id, user_id, role, created_at FROM workspace_team_member
+SELECT workspace_id, team_id, user_id, role, created_at, sort_order FROM workspace_team_member
 WHERE workspace_id = $1
   AND team_id = $2
 ORDER BY role ASC, created_at ASC
@@ -301,6 +328,64 @@ func (q *Queries) ListWorkspaceTeamMembers(ctx context.Context, arg ListWorkspac
 			&i.UserID,
 			&i.Role,
 			&i.CreatedAt,
+			&i.SortOrder,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceTeamMembersWithUser = `-- name: ListWorkspaceTeamMembersWithUser :many
+SELECT m.workspace_id, m.team_id, m.user_id, m.role, m.sort_order, m.created_at,
+       u.name AS user_name, u.email AS user_email, u.avatar_url AS user_avatar_url
+FROM workspace_team_member m
+JOIN "user" u ON u.id = m.user_id
+WHERE m.workspace_id = $1
+  AND m.team_id = $2
+ORDER BY m.role ASC, m.created_at ASC
+`
+
+type ListWorkspaceTeamMembersWithUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+type ListWorkspaceTeamMembersWithUserRow struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	TeamID        pgtype.UUID        `json:"team_id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	Role          string             `json:"role"`
+	SortOrder     float64            `json:"sort_order"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UserName      string             `json:"user_name"`
+	UserEmail     string             `json:"user_email"`
+	UserAvatarUrl pgtype.Text        `json:"user_avatar_url"`
+}
+
+func (q *Queries) ListWorkspaceTeamMembersWithUser(ctx context.Context, arg ListWorkspaceTeamMembersWithUserParams) ([]ListWorkspaceTeamMembersWithUserRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceTeamMembersWithUser, arg.WorkspaceID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceTeamMembersWithUserRow{}
+	for rows.Next() {
+		var i ListWorkspaceTeamMembersWithUserRow
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.TeamID,
+			&i.UserID,
+			&i.Role,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UserName,
+			&i.UserEmail,
+			&i.UserAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -397,6 +482,66 @@ func (q *Queries) ListWorkspaceTeamsByIDs(ctx context.Context, arg ListWorkspace
 	return items, nil
 }
 
+const listWorkspaceTeamsForUser = `-- name: ListWorkspaceTeamsForUser :many
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at,
+       (m.user_id IS NOT NULL)::boolean AS is_member,
+       COALESCE(m.sort_order, 0)::double precision AS member_sort_order
+FROM workspace_team wt
+LEFT JOIN workspace_team_member m
+    ON m.team_id = wt.id AND m.user_id = $2
+WHERE wt.workspace_id = $1
+ORDER BY wt.is_default DESC, wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC
+`
+
+type ListWorkspaceTeamsForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+type ListWorkspaceTeamsForUserRow struct {
+	WorkspaceTeam   WorkspaceTeam `json:"workspace_team"`
+	IsMember        bool          `json:"is_member"`
+	MemberSortOrder float64       `json:"member_sort_order"`
+}
+
+// Team list enriched with the requesting user's membership (drives the
+// sidebar Teams section: only joined teams, ordered by member sort_order).
+func (q *Queries) ListWorkspaceTeamsForUser(ctx context.Context, arg ListWorkspaceTeamsForUserParams) ([]ListWorkspaceTeamsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceTeamsForUser, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceTeamsForUserRow{}
+	for rows.Next() {
+		var i ListWorkspaceTeamsForUserRow
+		if err := rows.Scan(
+			&i.WorkspaceTeam.ID,
+			&i.WorkspaceTeam.WorkspaceID,
+			&i.WorkspaceTeam.Name,
+			&i.WorkspaceTeam.Key,
+			&i.WorkspaceTeam.Description,
+			&i.WorkspaceTeam.Icon,
+			&i.WorkspaceTeam.IssueCounter,
+			&i.WorkspaceTeam.IsDefault,
+			&i.WorkspaceTeam.ArchivedAt,
+			&i.WorkspaceTeam.ArchivedBy,
+			&i.WorkspaceTeam.CreatedBy,
+			&i.WorkspaceTeam.CreatedAt,
+			&i.WorkspaceTeam.UpdatedAt,
+			&i.IsMember,
+			&i.MemberSortOrder,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockWorkspaceTeamForKeyUpdate = `-- name: LockWorkspaceTeamForKeyUpdate :one
 SELECT id, workspace_id, name, key, description, icon, issue_counter, is_default, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_team
 WHERE id = $1 AND workspace_id = $2
@@ -425,6 +570,81 @@ func (q *Queries) LockWorkspaceTeamForKeyUpdate(ctx context.Context, arg LockWor
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const nextTeamMemberSortOrder = `-- name: NextTeamMemberSortOrder :one
+SELECT (COALESCE(MAX(sort_order), 0) + 1)::double precision FROM workspace_team_member
+WHERE workspace_id = $1
+  AND user_id = $2
+`
+
+type NextTeamMemberSortOrderParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Next slot at the end of this user's team list (per-user ordering).
+func (q *Queries) NextTeamMemberSortOrder(ctx context.Context, arg NextTeamMemberSortOrderParams) (float64, error) {
+	row := q.db.QueryRow(ctx, nextTeamMemberSortOrder, arg.WorkspaceID, arg.UserID)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const removeWorkspaceTeamMember = `-- name: RemoveWorkspaceTeamMember :execrows
+DELETE FROM workspace_team_member
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND user_id = $3
+`
+
+type RemoveWorkspaceTeamMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) RemoveWorkspaceTeamMember(ctx context.Context, arg RemoveWorkspaceTeamMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeWorkspaceTeamMember, arg.WorkspaceID, arg.TeamID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateTeamMemberSortOrder = `-- name: UpdateTeamMemberSortOrder :one
+UPDATE workspace_team_member
+SET sort_order = $4
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND user_id = $3
+RETURNING workspace_id, team_id, user_id, role, created_at, sort_order
+`
+
+type UpdateTeamMemberSortOrderParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	SortOrder   float64     `json:"sort_order"`
+}
+
+func (q *Queries) UpdateTeamMemberSortOrder(ctx context.Context, arg UpdateTeamMemberSortOrderParams) (WorkspaceTeamMember, error) {
+	row := q.db.QueryRow(ctx, updateTeamMemberSortOrder,
+		arg.WorkspaceID,
+		arg.TeamID,
+		arg.UserID,
+		arg.SortOrder,
+	)
+	var i WorkspaceTeamMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TeamID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.SortOrder,
 	)
 	return i, err
 }

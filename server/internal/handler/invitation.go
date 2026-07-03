@@ -427,6 +427,24 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every system-placed member joins the default team: the sidebar shows
+	// joined teams only, and issue creation needs a per-user default. Hard
+	// failure (rolls the whole accept back) — a missing default team is data
+	// corruption, and silently skipping would mint a team-less member.
+	defTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), accepted.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		return
+	}
+	teamRole := "member"
+	if accepted.Role == "owner" || accepted.Role == "admin" {
+		teamRole = "lead"
+	}
+	if _, err := addTeamMember(r.Context(), qtx, accepted.WorkspaceID, defTeam.ID, user.ID, teamRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default team")
+		return
+	}
+
 	// Accepting an invite marks the invitee as onboarded. The web /
 	// desktop workspace layout has a hard onboarded_at gate; without
 	// this mark, an invitee landing on their first workspace would be

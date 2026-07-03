@@ -28,27 +28,6 @@ func (q *Queries) AddProjectTeam(ctx context.Context, arg AddProjectTeamParams) 
 	return err
 }
 
-const countActiveProjectAutopilotsByTeam = `-- name: CountActiveProjectAutopilotsByTeam :one
-SELECT count(*) FROM autopilot
-WHERE workspace_id = $1
-  AND project_id = $2
-  AND team_id = $3
-  AND status <> 'archived'
-`
-
-type CountActiveProjectAutopilotsByTeamParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ProjectID   pgtype.UUID `json:"project_id"`
-	TeamID      pgtype.UUID `json:"team_id"`
-}
-
-func (q *Queries) CountActiveProjectAutopilotsByTeam(ctx context.Context, arg CountActiveProjectAutopilotsByTeamParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveProjectAutopilotsByTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countIssuesByProject = `-- name: CountIssuesByProject :one
 SELECT count(*) FROM issue
 WHERE project_id = $1

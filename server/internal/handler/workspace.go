@@ -259,6 +259,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		TeamID:      team.ID,
 		UserID:      parseUUID(userID),
 		Role:        "lead",
+		SortOrder:   1,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add default team member: "+err.Error())
 		return
@@ -421,7 +422,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			Key:         params.IssuePrefix,
 		}); teamErr != nil {
 			if teamErr == errTeamKeyFrozen {
-				writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
+				writeError(w, http.StatusConflict, "team identifier cannot be changed after issues have been created")
 				return
 			}
 			if isUniqueViolation(teamErr) || isCheckViolation(teamErr) {
@@ -601,7 +602,18 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
+	// Member creation + default-team join are atomic: the sidebar shows
+	// joined teams only, so a member outside every team would see an empty
+	// Teams section and issue creation would lose its per-user default.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create member")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	member, err := qtx.CreateMember(r.Context(), db.CreateMemberParams{
 		WorkspaceID: requester.WorkspaceID,
 		UserID:      user.ID,
 		Role:        role,
@@ -612,6 +624,25 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("create member failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to create member")
+		return
+	}
+	// Hard failure (rolls the member insert back) — a missing default team is
+	// data corruption, and silently skipping would mint a team-less member.
+	defTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), requester.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		return
+	}
+	teamRole := "member"
+	if role == "owner" || role == "admin" {
+		teamRole = "lead"
+	}
+	if _, err := addTeamMember(r.Context(), qtx, requester.WorkspaceID, defTeam.ID, user.ID, teamRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default team")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}

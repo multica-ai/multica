@@ -72,9 +72,55 @@ WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;
 
 -- name: AddWorkspaceTeamMember :exec
-INSERT INTO workspace_team_member (workspace_id, team_id, user_id, role)
-VALUES ($1, $2, $3, $4)
+INSERT INTO workspace_team_member (workspace_id, team_id, user_id, role, sort_order)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (team_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+-- name: NextTeamMemberSortOrder :one
+-- Next slot at the end of this user's team list (per-user ordering).
+SELECT (COALESCE(MAX(sort_order), 0) + 1)::double precision FROM workspace_team_member
+WHERE workspace_id = $1
+  AND user_id = $2;
+
+-- name: GetWorkspaceTeamMember :one
+SELECT * FROM workspace_team_member
+WHERE team_id = $1
+  AND user_id = $2;
+
+-- name: UpdateTeamMemberSortOrder :one
+UPDATE workspace_team_member
+SET sort_order = $4
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND user_id = $3
+RETURNING *;
+
+-- name: ListWorkspaceTeamsForUser :many
+-- Team list enriched with the requesting user's membership (drives the
+-- sidebar Teams section: only joined teams, ordered by member sort_order).
+SELECT sqlc.embed(wt),
+       (m.user_id IS NOT NULL)::boolean AS is_member,
+       COALESCE(m.sort_order, 0)::double precision AS member_sort_order
+FROM workspace_team wt
+LEFT JOIN workspace_team_member m
+    ON m.team_id = wt.id AND m.user_id = $2
+WHERE wt.workspace_id = $1
+ORDER BY wt.is_default DESC, wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC;
+
+-- name: RemoveWorkspaceTeamMember :execrows
+DELETE FROM workspace_team_member
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND user_id = $3;
+
+-- name: ListWorkspaceTeamMembersWithUser :many
+SELECT m.workspace_id, m.team_id, m.user_id, m.role, m.sort_order, m.created_at,
+       u.name AS user_name, u.email AS user_email, u.avatar_url AS user_avatar_url
+FROM workspace_team_member m
+JOIN "user" u ON u.id = m.user_id
+WHERE m.workspace_id = $1
+  AND m.team_id = $2
+ORDER BY m.role ASC, m.created_at ASC;
 
 -- name: ListWorkspaceTeamMembers :many
 SELECT * FROM workspace_team_member
