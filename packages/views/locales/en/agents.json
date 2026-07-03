@@ -236,6 +236,17 @@
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
     "visibility_label": "Visibility",
+    "access": {
+      "label": "Access",
+      "private_title": "Private",
+      "private_desc": "Only you can run this agent",
+      "public_title": "Public",
+      "public_desc": "Choose who can run this agent",
+      "public_workspace_option": "Everyone in this workspace",
+      "public_members_group": "Specific people",
+      "public_members_empty": "No workspace members to choose from",
+      "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
+    },
     "runtime_label": "Runtime",
     "runtime_filter_mine": "Mine",
     "runtime_filter_all": "All",

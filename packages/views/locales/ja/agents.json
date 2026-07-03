@@ -220,6 +220,17 @@
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
     "visibility_label": "公開範囲",
+    "access": {
+      "label": "アクセス",
+      "private_title": "プライベート",
+      "private_desc": "このエージェントを実行できるのはあなただけです",
+      "public_title": "公開",
+      "public_desc": "このエージェントを実行できる人を選択します",
+      "public_workspace_option": "ワークスペース全員",
+      "public_members_group": "特定のメンバー",
+      "public_members_empty": "選択できるワークスペースメンバーがいません",
+      "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
+    },
     "runtime_label": "ランタイム",
     "runtime_filter_mine": "自分のもの",
     "runtime_filter_all": "すべて",

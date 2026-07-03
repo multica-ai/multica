@@ -228,6 +228,17 @@
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
     "visibility_label": "可见性",
+    "access": {
+      "label": "访问权限",
+      "private_title": "私有",
+      "private_desc": "只有你可以运行该智能体",
+      "public_title": "公开",
+      "public_desc": "选择谁可以运行该智能体",
+      "public_workspace_option": "工作区内所有人",
+      "public_members_group": "指定成员",
+      "public_members_empty": "没有可选择的工作区成员",
+      "public_targets_empty_hint": "至少勾选下方一项 —— 否则该智能体仍为私有。"
+    },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
     "runtime_filter_all": "全部",
