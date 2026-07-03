@@ -294,6 +294,37 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.35",
+        date: "2026-07-02",
+        title: "「显示子 Issue」开关、Issue 视图更快、智能体 CLI 更安全",
+        changes: [],
+        features: [
+          "Issue 视图新增「显示子 Issue」开关，看板、列表、泳道、甘特图一键聚焦父 Issue。",
+          "手动新建 Issue 弹窗新增标签选择器，截止日期收进 ⋯ 折叠菜单。",
+          "技能详情页支持一次把技能挂给多个智能体，选择器带智能体搜索。",
+          "自托管：S3 兼容对象存储支持 path-style 寻址。",
+        ],
+        improvements: [
+          "看板、列表、泳道、甘特图共用一套查询与缓存：成员／智能体 Tab 计数精确，跨项目移动按列表对账，慢网下新增共用刷新指示器。",
+          "对话实时时间线不再在每条流式任务消息到来时重新挂载，长时间智能体运行不再卡渲染。",
+        ],
+        fixes: [
+          "同一小队里子 Issue 完成时，父 Issue 所属小队的 Leader 会被叫醒，父 Issue 不再滞留处理中。",
+          "受守护进程托管的智能体 CLI 丢失任务 token 时立刻失败，写操作不再冒充成工作区拥有者。（社区反馈）",
+          "Slack 告警卡片（Grafana、Webhook 等）正文只在 Attachments / Blocks / rich_text 里时，也能被聊天智能体在历史阅读里读回。",
+          "内联 base64 图片（二维码、截图、图表）在 Markdown 与只读 Issue 评论中正常渲染。",
+          "评论跨 Issue 移动后附件链接仍能正确定位。",
+          "Antigravity 空输出完成时，找回的最终回复会补进运行时间线。",
+          "附件预览接受的文本文件类型与前端展示对齐。",
+          "Mermaid 语法出错时不再把内置错误图注入页面。",
+          "本地技能重新对 ACP 类运行时可见。",
+          "应用内反馈提交前会校验响应并透传错误类型。",
+          "守护进程调用仓库缓存的 git 命令带超时。（社区反馈）",
+          "集群部署下，运行时的 pending 键保留在同一个 Redis slot 里。（社区反馈）",
+          "Web Docker 镜像从 packageManager 字段推导 pnpm 版本。（社区反馈）",
+        ],
+      },
+      {
         version: "0.3.34",
         date: "2026-07-01",
         title: "Slack /issue 斜杠命令、字节跳动 TRAE CLI 智能体运行时、接入 Claude Sonnet 5",

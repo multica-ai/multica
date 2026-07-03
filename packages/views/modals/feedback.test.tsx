@@ -43,6 +43,7 @@ vi.mock("@multica/core/platform", () => ({
   enterKey: "enter",
 }));
 vi.mock("@multica/core/feedback", () => ({
+  FEEDBACK_KINDS: ["bug", "feature", "general", "praise"] as const,
   useCreateFeedback: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),
