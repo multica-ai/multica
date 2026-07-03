@@ -7,7 +7,7 @@ import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { configStore } from "@multica/core/config";
-import { AGENT_ACCESS_PICKER_FLAG } from "@multica/core/feature-flags";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -306,7 +306,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
   });
 
   it("keeps the legacy Workspace/Personal toggle when the flag is OFF", async () => {
-    configStore.getState().setFeatureFlags({ [AGENT_ACCESS_PICKER_FLAG]: false });
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 
@@ -328,7 +328,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
   });
 
   it("submits permission_mode=public_to + workspace target when the flag is ON (default)", async () => {
-    configStore.getState().setFeatureFlags({ [AGENT_ACCESS_PICKER_FLAG]: true });
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 
@@ -353,7 +353,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
   });
 
   it("submits permission_mode=private with empty targets when Private is chosen", async () => {
-    configStore.getState().setFeatureFlags({ [AGENT_ACCESS_PICKER_FLAG]: true });
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 
@@ -376,7 +376,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     // MUL-3963 normalisation: a public_to with zero grants is a no-op share.
     // The AccessPicker emits it as private; the create dialog does the same
     // so the backend never sees a bogus "public with nothing" request.
-    configStore.getState().setFeatureFlags({ [AGENT_ACCESS_PICKER_FLAG]: true });
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 
@@ -398,7 +398,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
   });
 
   it("includes ticked members in the invocation_targets payload", async () => {
-    configStore.getState().setFeatureFlags({ [AGENT_ACCESS_PICKER_FLAG]: true });
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 

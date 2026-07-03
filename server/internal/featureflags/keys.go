@@ -7,19 +7,16 @@ import (
 )
 
 const (
-	// ComposioMCPApps gates the Composio app management UI and runtime MCP
-	// overlay injection.
+	// ComposioMCPApps gates the Composio app management UI and — together with
+	// the MUL-3963 permission_mode / invocation_targets access model it depends
+	// on — the aligned Private / Public-to picker in the agent create flow.
+	// The access model exists to gate Composio sharing, so the two ship on the
+	// same switch.
 	ComposioMCPApps = "composio_mcp_apps"
-	// AgentAccessPicker gates the MUL-3963 permission_mode + invocation_targets
-	// picker in the agent create/duplicate flow. When OFF the create dialog
-	// keeps the legacy Workspace/Personal toggle; when ON it switches to the
-	// same private / public_to model used on the agent detail page.
-	AgentAccessPicker = "agent_access_picker"
 )
 
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
-	AgentAccessPicker,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
