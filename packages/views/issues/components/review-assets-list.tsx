@@ -1,8 +1,9 @@
+import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Video, Image as ImageIcon, Check, Clock, AlertCircle } from "lucide-react";
+import { Plus, Video, Image as ImageIcon, Check, Clock, AlertCircle, Loader2 } from "lucide-react";
 import { ReviewAsset } from "@multica/core/types";
 import { listReviewAssetsOptions } from "@multica/core/reviews/queries";
-import { useBulkApproveReviewAssets } from "@multica/core/reviews/mutations";
+import { useBulkApproveReviewAssets, useReviewAssetUpload } from "@multica/core/reviews/mutations";
 import { Button } from "@multica/ui/components/ui/button";
 
 interface ReviewAssetsListProps {
@@ -12,8 +13,10 @@ interface ReviewAssetsListProps {
 }
 
 export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAssetsListProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: assets, isLoading } = useQuery(listReviewAssetsOptions(workspaceId, issueId));
   const bulkApprove = useBulkApproveReviewAssets();
+  const uploadAsset = useReviewAssetUpload();
 
   if (isLoading) {
     return <div className="text-sm text-gray-500 animate-pulse">Loading review assets...</div>;
@@ -31,11 +34,36 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
   }
   const latestAssets = Array.from(latestAssetsMap.values());
 
-  if (latestAssets.length === 0) {
-    return null; // Or show a placeholder if we want to encourage uploading
-  }
-
   const hasPending = latestAssets.some(a => a.status === "pending" || a.status === "changes_requested");
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadAsset.mutate({ workspaceId, issueId, file });
+    }
+    // reset
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  if (latestAssets.length === 0 && !uploadAsset.isPending) {
+    // Show a placeholder dropzone-like area if no assets exist yet
+    return (
+      <div className="mt-8 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-10 bg-gray-50/50">
+        <Video className="w-10 h-10 text-gray-400 mb-3" />
+        <h3 className="text-sm font-semibold text-gray-700">No media reviews yet</h3>
+        <p className="text-xs text-gray-500 mb-4 text-center max-w-sm">
+          Upload a video or image to start a timestamped review and collaborate with your team.
+        </p>
+        <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadAsset.isPending}>
+          {uploadAsset.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+          Upload Asset
+        </Button>
+        <input type="file" ref={fileInputRef} className="hidden" accept="video/*,image/*" onChange={handleFileChange} />
+      </div>
+    );
+  }
 
   return (
     <div className="mt-8 flex flex-col gap-3">
@@ -53,10 +81,11 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
               Approve All
             </Button>
           )}
-          <Button variant="outline" size="sm">
-            <Plus className="w-4 h-4 mr-2" />
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadAsset.isPending}>
+            {uploadAsset.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
             Upload Asset
           </Button>
+          <input type="file" ref={fileInputRef} className="hidden" accept="video/*,image/*" onChange={handleFileChange} />
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

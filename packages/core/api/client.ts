@@ -2371,6 +2371,25 @@ export class ApiClient {
   }
 
   // Reviews
+  async presignReviewAssetUpload(workspaceId: string, issueId: string, payload: {
+    filename: string;
+    content_type: string;
+    size: number;
+    asset_group_id?: string;
+  }): Promise<{ upload_url: string; asset_id: string; upload_method: string }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/presign`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeReviewAssetUpload(workspaceId: string, issueId: string, assetId: string): Promise<ReviewAsset> {
+    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/complete`, {
+      method: "POST",
+      body: JSON.stringify({ asset_id: assetId }),
+    });
+  }
+
   async listReviewAssets(workspaceId: string, issueId: string): Promise<ReviewAsset[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets`);
   }

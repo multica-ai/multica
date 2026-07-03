@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest, ReviewAsset } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { reviewKeys } from "@multica/core/reviews/queries";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
@@ -35,6 +36,7 @@ export interface UseIssueActionsResult {
 export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -88,6 +90,26 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         });
         return;
       }
+      if (updates.status === "done") {
+        const assets = queryClient.getQueryData<ReviewAsset[]>(reviewKeys.assets(wsId, issueId));
+        if (assets) {
+          const latestAssetsMap = new Map<string, ReviewAsset>();
+          for (const a of assets) {
+            const existing = latestAssetsMap.get(a.asset_group_id);
+            if (!existing || existing.version < a.version) {
+              latestAssetsMap.set(a.asset_group_id, a);
+            }
+          }
+          const latestAssets = Array.from(latestAssetsMap.values());
+          const hasPending = latestAssets.some(a => a.status === "pending" || a.status === "changes_requested");
+          
+          if (hasPending) {
+            toast.error("Cannot close issue with pending review assets");
+            return;
+          }
+        }
+      }
+
       if (surfaceActions) {
         surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
@@ -106,7 +128,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         );
       }
     },
-    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
+    [issueId, issueStatus, wsId, queryClient, surfaceActions, updateIssue, openModal, t],
   );
 
   const togglePin = useCallback(() => {

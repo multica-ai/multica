@@ -62,3 +62,43 @@ export function useBulkApproveReviewAssets() {
     },
   });
 }
+
+export function useReviewAssetUpload() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: { workspaceId: string; issueId: string; file: File; assetGroupId?: string }) => {
+      const { workspaceId, issueId, file, assetGroupId } = params;
+      
+      // 1. Presign
+      const { upload_url, asset_id, upload_method } = await api.presignReviewAssetUpload(workspaceId, issueId, {
+        filename: file.name,
+        content_type: file.type,
+        size: file.size,
+        asset_group_id: assetGroupId,
+      });
+
+      // 2. Upload directly to S3 or local storage
+      const res = await fetch(upload_url, {
+        method: upload_method,
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to upload file to storage");
+      }
+
+      // 3. Complete
+      const asset = await api.completeReviewAssetUpload(workspaceId, issueId, asset_id);
+      return asset;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: reviewKeys.all(variables.workspaceId),
+      });
+    },
+  });
+}
