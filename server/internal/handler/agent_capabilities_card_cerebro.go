@@ -120,6 +120,10 @@ type AgentCapabilityRepo struct {
 type AgentCapabilityConnEndpoint struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	// Summary is the endpoint's one-line label captured from the API's OpenAPI
+	// spec at discovery time (e.g. "Execute data source: Orders"); empty when
+	// the spec declared none.
+	Summary string `json:"summary,omitempty"`
 }
 
 // AgentCapabilityConnTool is one MCP tool a connection exposes, with this agent's
@@ -552,7 +556,7 @@ func buildAgentCapabilityConnections(conns []cerebroconnections.Connection, conn
 			}
 		}
 		for _, ep := range c.EndpointPermissions {
-			entry.Endpoints = append(entry.Endpoints, AgentCapabilityConnEndpoint{Path: ep.Path, Methods: ep.Methods})
+			entry.Endpoints = append(entry.Endpoints, AgentCapabilityConnEndpoint{Path: ep.Path, Methods: ep.Methods, Summary: ep.Summary})
 		}
 		out = append(out, entry)
 	}

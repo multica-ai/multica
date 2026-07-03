@@ -117,7 +117,11 @@ const EMPTY_CONNECTION_STUB = (wsId: string): Connection => ({
 const ToolInfoSchema = z.object({ name: z.string(), description: z.string().optional() }).loose();
 
 const DiscoveredEndpointSchema = z
-  .object({ path: z.string(), methods: z.array(z.string()).default([]) })
+  .object({
+    path: z.string(),
+    methods: z.array(z.string()).default([]),
+    summary: z.string().optional(),
+  })
   .loose();
 
 export const TestResultSchema = z

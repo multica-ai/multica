@@ -184,10 +184,11 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	if err != nil {
 		return Effective{}, err
 	}
+	mode := ModeHardFloor
 	if memberOverride {
-		return ResolveMemberOverride(input), nil
+		mode = ModeOpenable
 	}
-	return Resolve(input), nil
+	return ResolveWithMode(mode, input), nil
 }
 
 // ResolveOptIn loads the explicit settings for the query's (workspace, user,

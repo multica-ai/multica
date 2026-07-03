@@ -28,9 +28,16 @@ import (
 )
 
 // discoveredEndpoint is one path and the HTTP methods declared on it in the spec.
+// Summary is the human-readable label the spec declares for the path — the path
+// item's own summary, or the first operation summary in verb order. A
+// personalized registry spec labels its per-resource paths with the resource's
+// name (e.g. "Execute data source: Orders"), so carrying it through lets the
+// permissions UI and the agent-facing tool description show that name instead
+// of a bare "<METHOD> /data-sources/<uuid>/execute".
 type discoveredEndpoint struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // httpVerbs is the set of OpenAPI path-item keys that are real HTTP operations.
@@ -184,10 +191,37 @@ func parseSpec(body []byte) []discoveredEndpoint {
 			continue
 		}
 		sort.Strings(methods)
-		out = append(out, discoveredEndpoint{Path: path, Methods: methods})
+		out = append(out, discoveredEndpoint{Path: path, Methods: methods, Summary: pathSummary(item)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// pathSummary picks the human-readable label for a path item: the path item's
+// own `summary`, or the first non-empty operation `summary` in deterministic
+// verb order. Descriptions are deliberately not used — they are long-form prose,
+// while summaries are the one-line labels specs put on operations.
+func pathSummary(item map[string]any) string {
+	if s, ok := item["summary"].(string); ok && strings.TrimSpace(s) != "" {
+		return strings.TrimSpace(s)
+	}
+	verbs := make([]string, 0, len(item))
+	for key := range item {
+		if _, isVerb := httpVerbs[strings.ToLower(key)]; isVerb {
+			verbs = append(verbs, key)
+		}
+	}
+	sort.Strings(verbs)
+	for _, verb := range verbs {
+		op, ok := item[verb].(map[string]any)
+		if !ok {
+			continue
+		}
+		if s, ok := op["summary"].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 // decodeSpecDoc decodes a spec body to a generic map, trying JSON first then

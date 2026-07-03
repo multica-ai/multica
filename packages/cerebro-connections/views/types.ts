@@ -18,6 +18,9 @@ export interface AuthConfig {
 export interface EndpointPermission {
   path: string;
   methods: string[];
+  // One-line label captured from the API's OpenAPI spec at discovery time
+  // (e.g. "Execute data source: Orders"). Optional; older rows have none.
+  summary?: string;
 }
 
 // Tool is one MCP tool discovered on a connection (mcp_http), persisted on the

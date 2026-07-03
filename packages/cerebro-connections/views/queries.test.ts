@@ -71,3 +71,25 @@ describe("TestResultSchema — endpoints", () => {
     ).toThrow();
   });
 });
+
+// Discovered endpoints now carry the optional one-line OpenAPI summary. Older
+// servers omit it; the schema must accept both shapes.
+describe("TestResultSchema — endpoint summary", () => {
+  it("parses an endpoint with a summary", () => {
+    const parsed = TestResultSchema.parse({
+      reachable: true,
+      endpoints: [
+        { path: "/data-sources/9be2/execute", methods: ["POST"], summary: "Execute data source: Orders" },
+      ],
+    });
+    expect(parsed.endpoints?.[0]?.summary).toBe("Execute data source: Orders");
+  });
+
+  it("accepts an endpoint without a summary", () => {
+    const parsed = TestResultSchema.parse({
+      reachable: true,
+      endpoints: [{ path: "/manifest", methods: ["GET"] }],
+    });
+    expect(parsed.endpoints?.[0]?.summary).toBeUndefined();
+  });
+});

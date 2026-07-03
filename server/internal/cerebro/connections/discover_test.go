@@ -138,3 +138,42 @@ func TestDiscoverAPIEndpoints_NoSpecReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil when no spec is served, got %+v", eps)
 	}
 }
+
+func TestParseSpec_CapturesSummary(t *testing.T) {
+	eps := parseSpec([]byte(openAPIv3JSON))
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+	// First non-empty operation summary in verb order: get before post.
+	if eps[0].Summary != "list orders" {
+		t.Fatalf("expected /orders summary %q, got %q", "list orders", eps[0].Summary)
+	}
+	if eps[1].Summary != "delete order" {
+		t.Fatalf("expected /orders/{id} summary %q, got %q", "delete order", eps[1].Summary)
+	}
+}
+
+func TestParseSpec_PathItemSummaryWins(t *testing.T) {
+	spec := `{
+  "openapi": "3.0.0",
+  "paths": {
+    "/data-sources/9be2/execute": {
+      "summary": "Execute data source: Orders",
+      "post": {"summary": "op-level summary"}
+    },
+    "/plain": {
+      "get": {}
+    }
+  }
+}`
+	eps := parseSpec([]byte(spec))
+	if len(eps) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(eps))
+	}
+	if eps[0].Summary != "Execute data source: Orders" {
+		t.Fatalf("expected path-item summary to win, got %q", eps[0].Summary)
+	}
+	if eps[1].Summary != "" {
+		t.Fatalf("expected empty summary for unlabeled path, got %q", eps[1].Summary)
+	}
+}

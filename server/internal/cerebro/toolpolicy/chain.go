@@ -163,7 +163,46 @@ type Effective struct {
 // Allowed reports whether the tool may run without an approval pause.
 func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 
-// Resolve folds the chain into a single Effective verdict.
+// Mode selects which resolution semantics a call site needs (FIR-2351). It is
+// the single switch that keeps chain resolution to ONE function body per
+// semantics instead of two hand-synced top-level algorithms: the on_behalf_of
+// parity gap between Resolve and ResolveMemberOverride (fixed just before this
+// change) drifted in precisely because the two were separate functions that
+// had to be updated in lockstep by hand. ResolveWithMode is now the single
+// place either algorithm is read or changed; Resolve and ResolveMemberOverride
+// below are thin, behavior-preserving wrappers kept for every existing caller.
+type Mode string
+
+const (
+	// ModeOpenable is the general tool-policy gate's semantics (FIR-2175): the
+	// member layers — Workspace (as the root default), Group, User — may OPEN a
+	// closed floor, the most specific explicit member setting winning. Runtime,
+	// Agent, on_behalf_of, and System sit above the member ceiling and may only
+	// TIGHTEN it, never loosen it. See ResolveMemberOverride for the full model.
+	ModeOpenable Mode = "openable"
+	// ModeHardFloor is the deny-by-default floors' semantics — credentials, the
+	// OS sandbox, repo checkout, the repo-approval cap. Every layer may only
+	// tighten below Base; a Base=Deny floor can never be loosened from below by
+	// any layer, member or not. See Resolve for the full model.
+	ModeHardFloor Mode = "hard_floor"
+)
+
+// ResolveWithMode folds the chain into one Effective verdict, in the semantics
+// mode selects. It is the only resolution algorithm in this package —
+// ModeHardFloor and ModeOpenable are two branches of one function, not two
+// independently maintained ones. New call sites should call this directly
+// with an explicit mode; Resolve and ResolveMemberOverride remain for the
+// existing call sites and are equivalent to ResolveWithMode(ModeHardFloor, in)
+// and ResolveWithMode(ModeOpenable, in) respectively.
+func ResolveWithMode(mode Mode, in Input) Effective {
+	if mode == ModeOpenable {
+		return resolveOpenable(in)
+	}
+	return resolveHardFloor(in)
+}
+
+// Resolve folds the chain into a single Effective verdict using the
+// tighten-only, deny-by-default-floor semantics (ModeHardFloor).
 //
 // Algorithm (walk base → ceiling):
 //
@@ -176,7 +215,16 @@ func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 //
 // Because step 3 is a monotonic max over restrictiveness, the effective setting
 // is independent of layer order; only DecidedBy / CappedBy depend on the walk.
+//
+// This is the load-bearing resolver for every deny-by-default floor —
+// credentials, the OS sandbox, repo checkout, the approval cap. It MUST NEVER
+// loosen a Base=Deny floor from below. See ResolveMemberOverride for the
+// openable, member-layer counterpart used by the general tool-policy gate.
 func Resolve(in Input) Effective {
+	return resolveHardFloor(in)
+}
+
+func resolveHardFloor(in Input) Effective {
 	base := in.Base
 	if rank(base) < 0 {
 		base = SettingAllow
@@ -258,6 +306,10 @@ func Resolve(in Input) Effective {
 // deny-by-default floor. It is for the general tool-policy chain only, behind the
 // member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
 func ResolveMemberOverride(in Input) Effective {
+	return resolveOpenable(in)
+}
+
+func resolveOpenable(in Input) Effective {
 	base := in.Base
 	if rank(base) < 0 {
 		base = SettingAllow

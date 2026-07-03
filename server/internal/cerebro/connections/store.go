@@ -140,10 +140,14 @@ type SessionExchangeConfig struct {
 }
 
 // EndpointPermission describes one REST path and the HTTP methods allowed on it.
-// Used to build per-endpoint CRUD controls in the permissions UI.
+// Used to build per-endpoint CRUD controls in the permissions UI. Summary is the
+// optional human-readable label captured from the API's OpenAPI spec at
+// discovery time (e.g. "Execute data source: Orders"); the permissions UI and
+// the agent-facing tool description prefer it over the raw path.
 type EndpointPermission struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // CreateParams are the fields required to create a connection.
