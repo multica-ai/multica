@@ -114,8 +114,85 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		if m.Type != MessageToolResult || m.CallID != "call-1" {
 			t.Fatalf("unexpected message: %+v", m)
 		}
+		if m.IsError {
+			t.Fatalf("expected IsError=false for a successful tool result, got %+v", m)
+		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+// A failed tool arrives as a tool_result content block carrying is_error:true
+// inside a type:"user" message. The per-tool bit must reach Message.IsError so
+// the timeline can render a real "error" status (MUL-27).
+func TestClaudeHandleUserToolResultError(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-err",
+					Content:   mustMarshal(t, "boom: command failed"),
+					IsError:   true,
+				},
+			},
+		}),
+	}
+
+	if b.handleUser(msg, ch) {
+		t.Fatal("did not expect async launch in error tool result")
+	}
+
+	select {
+	case m := <-ch:
+		if m.Type != MessageToolResult || m.CallID != "call-err" {
+			t.Fatalf("unexpected message: %+v", m)
+		}
+		if !m.IsError {
+			t.Fatalf("expected IsError=true for a failed tool result, got %+v", m)
+		}
+	default:
+		t.Fatal("expected message on channel")
+	}
+}
+
+// Guard against the trap the Eng review flagged: a session-level result message
+// (type:"result", is_error:true — whole-run failure) is NOT a tool_result and
+// must not flow through handleUser or flip any individual tool to error. Only
+// the per-tool block bit does. (MUL-27)
+func TestClaudeSessionResultIsErrorDoesNotEmitToolError(t *testing.T) {
+	t.Parallel()
+
+	// The session-level is_error lives on claudeSDKMessage, a different struct
+	// from the per-tool claudeContentBlock — decoding one does not populate the
+	// other.
+	raw := []byte(`{"type":"result","subtype":"error","is_error":true,"result":"run failed"}`)
+	var session claudeSDKMessage
+	if err := json.Unmarshal(raw, &session); err != nil {
+		t.Fatalf("unmarshal session result: %v", err)
+	}
+	if !session.IsError {
+		t.Fatal("expected session-level IsError=true on the result message")
+	}
+
+	// handleUser only processes tool_result blocks inside type:"user" messages;
+	// a result message carries no such blocks, so it emits nothing.
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	if b.handleUser(session, ch) {
+		t.Fatal("did not expect async launch")
+	}
+	select {
+	case m := <-ch:
+		t.Fatalf("session-level result must not emit a tool message, got %+v", m)
+	default:
 	}
 }
 

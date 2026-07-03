@@ -4272,10 +4272,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					s := seq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
-						Seq:   int(s),
-						Type:  "tool_use",
-						Tool:  msg.Tool,
-						Input: msg.Input,
+						Seq:    int(s),
+						Type:   "tool_use",
+						Tool:   msg.Tool,
+						Input:  msg.Input,
+						CallID: msg.CallID,
 					})
 					mu.Unlock()
 				case agent.MessageToolResult:
@@ -4307,10 +4308,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
-						Seq:    int(s),
-						Type:   "tool_result",
-						Tool:   toolName,
-						Output: output,
+						Seq:     int(s),
+						Type:    "tool_result",
+						Tool:    toolName,
+						Output:  output,
+						CallID:  msg.CallID,
+						IsError: msg.IsError,
 					})
 					mu.Unlock()
 				case agent.MessageThinking:

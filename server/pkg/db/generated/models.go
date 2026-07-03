@@ -777,6 +777,8 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	CallID    pgtype.Text        `json:"call_id"`
+	IsError   pgtype.Bool        `json:"is_error"`
 }
 
 type TaskToken struct {

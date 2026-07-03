@@ -2438,6 +2438,8 @@ type TaskMessageRequest struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`  // tool call id, pairs tool_use ↔ tool_result (MUL-27)
+	IsError bool           `json:"is_error,omitempty"` // tool_result reported failure (MUL-27)
 }
 
 type TaskMessageBatchRequest struct {
@@ -2494,6 +2496,11 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
 			Input:   inputJSON,
 			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
+			// call_id / is_error are only meaningful on tool messages. Store
+			// them nullable: NULL call_id on legacy/non-tool rows drives the
+			// frontend's positional-pairing fallback (MUL-27).
+			CallID:  pgtype.Text{String: msg.CallID, Valid: msg.CallID != ""},
+			IsError: pgtype.Bool{Bool: msg.IsError, Valid: msg.Type == "tool_result"},
 		})
 		if createErr != nil {
 			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
@@ -2529,6 +2536,11 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		Input:     input,
 		Output:    m.Output.String,
 		CreatedAt: createdAt,
+		// Nullable columns: legacy rows (pre-migration) carry Valid=false and
+		// serialize to the zero value, so the frontend falls back to positional
+		// pairing for them (MUL-27).
+		CallID:  m.CallID.String,
+		IsError: m.IsError.Bool,
 	}
 }
 

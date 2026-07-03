@@ -12,9 +12,9 @@ import (
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+INSERT INTO task_message (task_id, seq, type, tool, content, input, output, call_id, is_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, task_id, seq, type, tool, content, input, output, created_at, call_id, is_error
 `
 
 type CreateTaskMessageParams struct {
@@ -25,6 +25,8 @@ type CreateTaskMessageParams struct {
 	Content pgtype.Text `json:"content"`
 	Input   []byte      `json:"input"`
 	Output  pgtype.Text `json:"output"`
+	CallID  pgtype.Text `json:"call_id"`
+	IsError pgtype.Bool `json:"is_error"`
 }
 
 func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
@@ -36,6 +38,8 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		arg.Content,
 		arg.Input,
 		arg.Output,
+		arg.CallID,
+		arg.IsError,
 	)
 	var i TaskMessage
 	err := row.Scan(
@@ -48,6 +52,8 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		&i.Input,
 		&i.Output,
 		&i.CreatedAt,
+		&i.CallID,
+		&i.IsError,
 	)
 	return i, err
 }
@@ -63,7 +69,7 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, call_id, is_error FROM task_message
 WHERE task_id = $1
 ORDER BY seq ASC
 `
@@ -87,6 +93,8 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.CallID,
+			&i.IsError,
 		); err != nil {
 			return nil, err
 		}
@@ -99,7 +107,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 }
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, call_id, is_error FROM task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC
 `
@@ -128,6 +136,8 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.CallID,
+			&i.IsError,
 		); err != nil {
 			return nil, err
 		}

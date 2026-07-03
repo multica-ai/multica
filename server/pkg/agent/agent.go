@@ -102,6 +102,7 @@ type Message struct {
 	CallID    string         // tool call ID (ToolUse, ToolResult)
 	Input     map[string]any // tool input (ToolUse)
 	Output    string         // tool output (ToolResult)
+	IsError   bool           // tool reported failure (ToolResult)
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning

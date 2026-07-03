@@ -236,6 +236,10 @@ export interface TaskMessagePayload {
   input?: Record<string, unknown>;
   output?: string;
   created_at?: string;
+  /** Tool call id — pairs a tool_use with its tool_result. Null on legacy rows written before MUL-27; the timeline falls back to positional pairing then. */
+  call_id?: string;
+  /** True when a tool_result reported failure. Absent on legacy/non-tool rows. (MUL-27) */
+  is_error?: boolean;
 }
 
 export interface TaskQueuedPayload {

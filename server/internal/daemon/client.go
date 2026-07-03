@@ -251,6 +251,8 @@ type TaskMessageData struct {
 	Content string         `json:"content,omitempty"`
 	Input   map[string]any `json:"input,omitempty"`
 	Output  string         `json:"output,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`  // tool call id, pairs tool_use ↔ tool_result (MUL-27)
+	IsError bool           `json:"is_error,omitempty"` // tool_result reported failure (MUL-27)
 }
 
 func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages []TaskMessageData) error {

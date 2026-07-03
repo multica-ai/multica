@@ -62,6 +62,8 @@ type TaskMessagePayload struct {
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
 	CreatedAt string         `json:"created_at,omitempty"`
+	CallID    string         `json:"call_id,omitempty"`  // tool call id, pairs tool_use ↔ tool_result (MUL-27)
+	IsError   bool           `json:"is_error,omitempty"` // tool_result reported failure (MUL-27)
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

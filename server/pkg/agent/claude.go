@@ -321,9 +321,10 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 				}
 			}
 			trySend(ch, Message{
-				Type:   MessageToolResult,
-				CallID: block.ToolUseID,
-				Output: resultStr,
+				Type:    MessageToolResult,
+				CallID:  block.ToolUseID,
+				Output:  resultStr,
+				IsError: block.IsError,
 			})
 		}
 	}
@@ -522,6 +523,11 @@ type claudeContentBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
+	// IsError is the per-tool failure bit carried on a tool_result content
+	// block (inside a type:"user" message). It is distinct from the
+	// session-level claudeSDKMessage.IsError, which reports whether the whole
+	// run failed. See MUL-27.
+	IsError bool `json:"is_error,omitempty"`
 }
 
 type claudeControlRequestPayload struct {

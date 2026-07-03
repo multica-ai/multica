@@ -1,6 +1,6 @@
 -- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_message (task_id, seq, type, tool, content, input, output, call_id, is_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: ListTaskMessages :many
