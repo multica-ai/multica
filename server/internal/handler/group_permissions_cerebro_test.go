@@ -268,6 +268,68 @@ func TestRequireToolPolicyWritePolicy_RoutesPerKey(t *testing.T) {
 			t.Fatalf("non-credential key: expected a block status, got %d", w.Code)
 		}
 	})
+
+	// CEREBRO-PATCH(delegated-override-grant): FIR-2351 — a LayerUser write with a
+	// valid subject_id takes the new delegated-override branch, which fails open
+	// with nil CerebroQueries (same fail-open contract as every other gate here).
+	t.Run("LayerUser key with valid subject fails open to next", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"user","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if !called {
+			t.Fatalf("LayerUser + valid subject: expected next to run (nil-queries fail open), status=%d body=%q", w.Code, w.Body.String())
+		}
+	})
+
+	// A Group-layer (or any non-User-layer) write is NOT eligible for the
+	// delegated-override capability — it must still fall through to the
+	// unchanged owner/admin-only branch, which has no fail-open path.
+	t.Run("LayerGroup key still requires owner/admin", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"group","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if called {
+			t.Fatalf("LayerGroup: owner/admin branch must block an unauthenticated request, but next ran")
+		}
+	})
+
+	// A LayerUser write with an unparseable subject_id must not silently reach
+	// the delegated-override branch (which would then have no target to check
+	// self-override against) — it falls back to owner/admin, same as before.
+	t.Run("LayerUser key with invalid subject falls back to owner/admin", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"user","subject_id":"not-a-uuid"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if called {
+			t.Fatalf("LayerUser + invalid subject: expected owner/admin fallback to block, but next ran")
+		}
+	})
+}
+
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 tests for the new
+// delegated-override write gate — mirrors the credential-grant gate's
+// nil-fail-open contract test above.
+
+func TestCerebroRequireDelegatedOverridePolicy_NilQueriesPasses(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	w := httptest.NewRecorder()
+	target := pgtype.UUID{}
+	if err := target.Scan("11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("scan target uuid: %v", err)
+	}
+	if !h.cerebroRequireDelegatedOverridePolicy(w, r, "00000000-0000-0000-0000-000000000000", target) {
+		t.Fatalf("nil CerebroQueries: delegated-override gate must pass, got body=%q", w.Body.String())
+	}
 }
 
 func TestToolPolicyWriteIsCredential_RoutesByToolKey(t *testing.T) {

@@ -52,10 +52,16 @@ The unified tool-policy chain is the model we want **everything** to converge on
   resource_pattern). `setting ∈ inherit|allow|ask|deny`.
 - **Read model for UI:** `toolpolicy/table.go:101` (`Store.Table`) — one row per capability
   with per-layer settings, `Effective`, and `CappedByGroups` blame.
-- **Write surface:** `PUT/DELETE /api/workspaces/{id}/tool-policy` (`toolpolicy/handler.go`).
-  *(Note the asymmetry: the gate on this write is the **code-only** `RequireWorkspaceRole(
-  "owner","admin")`, section 4 — you must be an admin by a hardcoded role check to author
-  policy.)*
+- **Write surface:** `PUT/DELETE /api/workspaces/{id}/tool-policy` (`toolpolicy/handler.go`),
+  gated by `Handler.RequireToolPolicyWritePolicy` (`group_permissions_cerebro.go`). The base
+  case is still the **code-only** owner/admin role check (section 4) — but two carve-outs
+  delegate specific writes off that hardcoded role, both resolved through the SAME chain
+  they gate (a capability is just another tool_key): a `credential.*` key routes to
+  `manage_credential_access` (FIR-1479); a LayerUser row on any OTHER key routes to
+  `manage_group_overrides` / `manage_workspace_overrides` (FIR-2351) — group-scope reaches a
+  user sharing a group with the actor, workspace-scope reaches anyone, and **neither may ever
+  target the actor's own row** (`toolpolicy.CanAuthorDelegatedOverride`). Every other write
+  (Group/Workspace/Runtime/Agent/System layer, on a non-credential key) stays admin-only.*
 - **CLI surface (FIR-1609):** `multica permissions explain|set|clear`
   (`server/cmd/multica/cerebro_permissions.go`) wraps the read model + write surface above —
   `explain` (GET) prints per-tool `Effective` + `DecidedBy`/`CappedBy`/reason + group blame to
