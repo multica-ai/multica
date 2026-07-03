@@ -77,6 +77,7 @@ import { useEnsureNoteMentionScope } from "./note-mention-scope";
 import type { Editor } from "@tiptap/react";
 import {
   notesListOptions,
+  noteDetailOptions,
   useCreateNote,
   useUpdateNote,
   useDeleteNote,
@@ -883,12 +884,16 @@ export function NoteEditor({
   // Edit lock: while this note is open and the flag is on, hold the lock and
   // heartbeat. If someone else holds it live, drop to read-only + offer takeover.
   const editLock = useNoteEditLock(note.id, lockEnabled);
-  // FIR-2595: the note is read-only when the caller lacks edit access — a viewer,
-  // or someone with no 'editor'/'full_access' grant on its folder — so they get a
-  // real read-only editor instead of a field that silently fails on save. It is
-  // also read-only while another user holds the live edit lock.
-  const readOnly =
-    note.can_edit === false || (lockEnabled && editLock.blockedByOther);
+  // FIR-2595: authoritative edit permission comes from the SINGLE-note read.
+  // The editor is opened from a list row, and list rows omit can_edit (the
+  // schema defaults it to true), so trusting note.can_edit here made the editor
+  // writable for everyone — a non-owner could type into a save that then 403s
+  // silently. Fetch the note detail and gate on ITS can_edit. The owner is
+  // always allowed; a non-owner stays read-only until the fetch confirms edit
+  // access. It is also read-only while another user holds the live edit lock.
+  const { data: noteDetail } = useQuery(noteDetailOptions(wsId, note.id));
+  const canEdit = isOwner || noteDetail?.can_edit === true;
+  const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: comments = [] } = useNoteComments(note.id);
