@@ -22,6 +22,7 @@ export interface IssueChangedDims {
   assignee: boolean;
   project: boolean;
   status: boolean;
+  team: boolean;
 }
 
 /**
@@ -44,6 +45,7 @@ export function issueChangedDims(
       (has("assignee_type") && (!base || base.assignee_type !== p.assignee_type)),
     project: has("project_id") && (!base || base.project_id !== p.project_id),
     status: has("status") && p.status !== undefined && (!base || base.status !== p.status),
+    team: has("team_id") && (!base || base.team_id !== p.team_id),
   };
 }
 
@@ -72,6 +74,7 @@ export function listFilterDependsOn(
     return true;
   }
   if (changed.project && filter.project_id !== undefined) return true;
+  if (changed.team && filter.team_id !== undefined) return true;
   // creator_id filters never react to updates — creator is immutable.
   return false;
 }
@@ -122,6 +125,10 @@ export function issueMatchesListFilter(
   if (filter.project_id !== undefined) {
     if (issue.project_id === undefined) unknown = true;
     else if (issue.project_id !== filter.project_id) return false;
+  }
+  if (filter.team_id !== undefined) {
+    if (issue.team_id === undefined) unknown = true;
+    else if (issue.team_id !== filter.team_id) return false;
   }
   if (filter.involves_user_id !== undefined) {
     // Indirect-assignee predicate (owned agents / squads) — server-only.

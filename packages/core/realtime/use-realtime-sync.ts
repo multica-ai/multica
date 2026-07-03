@@ -809,6 +809,7 @@ export function useRealtimeSync(
           assigneeChanged: payload.assignee_changed,
           statusChanged: payload.status_changed,
           projectChanged: payload.project_changed,
+          teamChanged: payload.team_changed,
         });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);

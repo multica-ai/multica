@@ -112,6 +112,10 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  // Moving an issue between teams renumbers it and moves it across
+  // team-filtered lists; the flag drives the same membership reconcile as
+  // project_changed.
+  team_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {
