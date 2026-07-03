@@ -272,10 +272,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.36",
           date: "2026-07-03",
-          title: "Composio アプリ連携（フラグ配下）、Transcript の表示設定を記憶、コラボと信頼性の修正",
+          title: "Transcript の表示設定を記憶、Helm の外部 PostgreSQL 対応、信頼性の修正",
           changes: [],
           features: [
-            "Composio アプリ（まずは Notion）を Multica に接続し、エージェントがそのままツールとして呼び出せるようになりました。エージェント オーナーが自分の接続の中から各エージェントにマウントするアプリを選び、新しいアクセス ピッカーで実行できる相手を選択できます（プライベート、ワークスペース全員、指定メンバー、またはその組み合わせ）。ロールアウト中は機能フラグの配下です。",
             "タスクの Transcript（ログ）が絞り込みと展開状態を記憶し、同じ実行を次に開いたときに復元します。",
             "セルフホスト（Helm）：新しい `postgres.external.enabled` トグルで Multica を外部管理の PostgreSQL（RDS、CNPG、Cloud SQL、Neon など）に向けられ、内蔵データベースをスキップできます。",
           ],
@@ -291,9 +290,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             "レガシーの `/squads/…` と `/usage` の Web ルートが 404 ではなく現行ページへリダイレクトされます。",
             "デスクトップ アプリの保存ダイアログが `download.txt` にフォールバックせず、正しい添付ファイル名を使うようになりました。（コミュニティ貢献）",
             "スクワッド連携：Leader が mention でディスパッチしたワーカー エージェントが完了コメントを HTTP API で投稿したとき、プライベート スクワッドの Leader が正しく起動され、Leader → Worker → Leader のループが初回ホップで止まらなくなりました。",
-            "Composio 設定は有効な認証設定を持たないツールキットを非表示にし、以前の「未設定」の死んだカードを置き換えました。Composio Cloud に到達できない場合は、誤解を招く「アプリなし」ではなく本当の読み込み失敗状態を表示します。",
             "ホストの Claude CLI が `--effort` フラグより古い場合でも、タスクはハード フェイルせず、デーモンが effort フラグを警告付きで外して素の実行にフォールバックします。",
-            "エージェント作成ダイアログが詳細ページと同じアクセス ピッカー（プライベート／全員／許可リスト）を使うようになり、ここで設定した可視性が実際の呼び出しゲートと食い違わなくなりました。",
           ],
         },
         {

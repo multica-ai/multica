@@ -271,10 +271,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.36",
           date: "2026-07-03",
-          title: "Composio 앱 연동(플래그 뒤), Transcript 뷰 상태 기억, 협업·안정성 수정",
+          title: "Transcript 뷰 상태 기억, Helm 외부 PostgreSQL 지원, 안정성 수정",
           changes: [],
           features: [
-            "Composio 앱(우선 Notion)을 Multica에 연결해 에이전트가 도구로 바로 호출할 수 있습니다. 에이전트 오너가 자신의 연결 중 각 에이전트에 마운트할 앱을 고르고, 새 액세스 피커로 실행 가능한 대상을 선택합니다(비공개 / 워크스페이스 전체 / 특정 멤버 / 조합). 롤아웃 기간에는 기능 플래그 뒤에서 제공됩니다.",
             "태스크 Transcript가 필터·펼침 상태를 기억해, 같은 실행을 다시 열 때 그대로 복원합니다.",
             "셀프호스트(Helm): 새 `postgres.external.enabled` 토글로 Multica를 외부 관리형 PostgreSQL(RDS, CNPG, Cloud SQL, Neon 등)에 연결하고 내장 DB를 건너뛸 수 있습니다.",
           ],
@@ -290,9 +289,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "레거시 `/squads/…`, `/usage` 웹 경로가 404 대신 현재 대응 페이지로 리다이렉트됩니다.",
             "데스크톱 앱의 저장 대화상자가 `download.txt`로 폴백하지 않고 실제 첨부 파일명을 사용합니다. (커뮤니티 기여)",
             "스쿼드 협업: 리더가 mention으로 디스패치한 워커 에이전트가 완료 댓글을 HTTP API로 게시할 때, 프라이빗 스쿼드 리더가 정확히 깨어나며, 리더 → 워커 → 리더 루프가 첫 홉에서 멈추지 않습니다.",
-            "Composio 설정 페이지는 유효한 인증 설정이 없는 툴킷을 숨기고 기존의 죽은 '미설정' 카드를 없앴습니다. Composio Cloud에 접근할 수 없으면 오해를 주는 '앱 없음' 대신 실제 로드 실패 상태를 표시합니다.",
             "호스트의 Claude CLI가 `--effort` 플래그 이전 버전이어도 태스크가 하드 실패하지 않고, 데몬이 effort 플래그를 경고와 함께 제거하고 기본 실행으로 폴백합니다.",
-            "에이전트 생성 대화상자가 상세 페이지와 동일한 액세스 피커(비공개 / 전체 / 허용 리스트)를 사용해, 여기서 설정한 가시성이 실제 호출 게이트와 어긋나지 않습니다.",
           ],
         },
         {

@@ -296,10 +296,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.36",
         date: "2026-07-03",
-        title: "Composio 应用互联（灰度）、任务日志偏好记忆，与协作与稳定性修复",
+        title: "任务日志偏好记忆、Helm 外部 PostgreSQL 支持，与稳定性修复",
         changes: [],
         features: [
-          "接入 Composio 应用（首个是 Notion）：智能体可以直接调用你自己的连接工具；智能体拥有者选择每个智能体可挂载的 Composio 应用，并通过新的访问选择器决定谁能运行这个智能体——私有、工作区全体成员、指定成员，或它们的任意组合。发布期间通过特性开关灰度放量。",
           "任务日志（Transcript）会记住你的过滤条件与展开状态，下次打开同一次运行时自动恢复。",
           "自托管（Helm）：新增 `postgres.external.enabled` 开关，可将 Multica 指向外部托管的 PostgreSQL（RDS、CNPG、Cloud SQL、Neon 等），跳过内置数据库。",
         ],
@@ -315,9 +314,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "`/squads/…` 与 `/usage` 老路径不再 404，会重定向到当前对应页面。",
           "桌面端「保存」对话框展示真实的附件文件名，不再默认成 `download.txt`。（社区贡献）",
           "小队协作：Leader 通过 mention 派发的工作者智能体，在通过 HTTP API 发布完成评论时，能正确唤醒私有小队 Leader；Leader → Worker → Leader 协作链不再在第一跳后卡住。",
-          "Composio 设置页会隐藏没启用鉴权配置的应用（不再出现「未配置」的死卡片）；如果 Composio Cloud 不可达，会显示真实的加载失败状态，而不是「无可用应用」的误导态。",
           "如果宿主机 Claude CLI 版本早于 `--effort` 参数，任务不再硬失败——守护进程会丢弃 effort 标志并打印告警，回落到普通模式运行。",
-          "新建智能体对话框现在使用与详情页同款的访问选择器（私有 / 全体成员 / 允许名单），避免在此处设置的可见性与调用门禁不一致。",
         ],
       },
       {
