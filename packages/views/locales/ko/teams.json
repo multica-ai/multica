@@ -47,11 +47,12 @@
     "key_locked": "이슈가 생성된 후에는 식별자를 변경할 수 없습니다.",
     "icon": "아이콘",
     "description": "설명",
-    "description_placeholder": "이 팀이 담당하는 작업은 무엇인가요?",
+    "description_placeholder": "설명 추가…",
     "members": "멤버",
     "members_placeholder": "팀원 추가…",
     "members_selected": "{{count}}명 선택됨",
-    "icon_name": "아이콘 및 이름"
+    "icon_name": "아이콘 및 이름",
+    "description_limit": "최대 {{max}}자(현재 {{count}}자)"
   },
   "picker": {
     "placeholder": "팀",
@@ -76,6 +77,7 @@
     "members": "멤버",
     "archive_confirm_title": "팀을 보관할까요?",
     "archive_confirm_body": "모든 멤버를 제거하면 {{name}}이(가) 보관됩니다. 기존 이슈는 계속 볼 수 있습니다.",
-    "default_cannot_archive": "기본 팀은 보관할 수 없습니다"
+    "default_cannot_archive": "기본 팀은 보관할 수 없습니다",
+    "goto": "이동"
   }
 }

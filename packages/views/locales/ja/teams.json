@@ -47,11 +47,12 @@
     "key_locked": "issue が作成された後は識別子を変更できません。",
     "icon": "アイコン",
     "description": "説明",
-    "description_placeholder": "このチームが担当する作業は何ですか？",
+    "description_placeholder": "説明を追加…",
     "members": "メンバー",
     "members_placeholder": "メンバーを追加…",
     "members_selected": "{{count}} 人を選択済み",
-    "icon_name": "アイコンと名前"
+    "icon_name": "アイコンと名前",
+    "description_limit": "最大 {{max}} 文字（現在 {{count}}）"
   },
   "picker": {
     "placeholder": "チーム",
@@ -76,6 +77,7 @@
     "members": "メンバー",
     "archive_confirm_title": "チームをアーカイブしますか？",
     "archive_confirm_body": "全メンバーを外すと {{name}} はアーカイブされます。既存の issue は閲覧できます。",
-    "default_cannot_archive": "デフォルトチームはアーカイブできません"
+    "default_cannot_archive": "デフォルトチームはアーカイブできません",
+    "goto": "移動"
   }
 }

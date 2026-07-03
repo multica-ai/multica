@@ -27,7 +27,6 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useT } from "../i18n";
 
@@ -38,7 +37,7 @@ const underline =
 
 /**
  * Create-team modal (registry: "create-team"). Single-column underline form
- * (name+icon, key, description) with a drill-in member-pick view — tapping
+ * (name+icon, identifier) with a drill-in member-pick view — tapping
  * the Members row swaps the whole body, a back button returns. Fixed height
  * so the dialog never resizes between views.
  */
@@ -53,7 +52,6 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
   const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
-  const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -89,7 +87,6 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
       await createTeam.mutateAsync({
         name: name.trim(),
         key: normalizedKey,
-        description: description.trim(),
         icon: icon.trim() || null,
         member_ids: memberIds,
       });
@@ -186,17 +183,6 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="team-description">{t(($) => $.form.description)}</Label>
-                  <Textarea
-                    id="team-description"
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder={t(($) => $.form.description_placeholder)}
-                    rows={1}
-                    className={cn(underline, "min-h-8 resize-none")}
-                  />
-                </div>
 
                 {/* Members — drill-in entry: swaps the whole body. */}
                 <button

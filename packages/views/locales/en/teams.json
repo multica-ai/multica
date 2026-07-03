@@ -47,11 +47,12 @@
     "key_locked": "The identifier is locked because issues have already been created.",
     "icon": "Icon",
     "description": "Description",
-    "description_placeholder": "What work does this team own?",
+    "description_placeholder": "Add a description…",
     "members": "Members",
     "members_placeholder": "Add teammates…",
     "members_selected": "{{count}} teammates selected",
-    "icon_name": "Icon & name"
+    "icon_name": "Icon & name",
+    "description_limit": "Up to {{max}} characters ({{count}} now)"
   },
   "picker": {
     "placeholder": "Team",
@@ -77,6 +78,7 @@
     "members": "Members",
     "archive_confirm_title": "Archive team?",
     "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
-    "default_cannot_archive": "The default team cannot be archived"
+    "default_cannot_archive": "The default team cannot be archived",
+    "goto": "Go to"
   }
 }

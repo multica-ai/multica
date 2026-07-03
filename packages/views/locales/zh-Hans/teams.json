@@ -47,11 +47,12 @@
     "key_locked": "已有 issue 创建后，标识符会被锁定。",
     "icon": "图标",
     "description": "描述",
-    "description_placeholder": "这个 Team 负责哪些工作？",
+    "description_placeholder": "添加描述…",
     "members": "成员",
     "members_placeholder": "添加同事…",
     "members_selected": "已选 {{count}} 位同事",
-    "icon_name": "图标与名称"
+    "icon_name": "图标与名称",
+    "description_limit": "最多 {{max}} 个字符（当前 {{count}}）"
   },
   "picker": {
     "placeholder": "Team",
@@ -76,6 +77,7 @@
     "members": "成员",
     "archive_confirm_title": "归档团队？",
     "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
-    "default_cannot_archive": "默认团队不能归档"
+    "default_cannot_archive": "默认团队不能归档",
+    "goto": "前往"
   }
 }

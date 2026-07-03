@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, FolderKanban, ListTodo, Search, Zap } from "lucide-react";
+import { FolderKanban, ListTodo, Search, Zap } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
+import { PlainTextField } from "@multica/ui/components/common/plain-text-field";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -29,8 +30,6 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Popover,
   PopoverContent,
@@ -42,16 +41,16 @@ import { PageHeader } from "../../layout/page-header";
 import { TeamIcon } from "./team-icon";
 import { useT } from "../../i18n";
 
-// Same Linear-style underline fields as the create modal.
+// Underline style for the member search field inside the config popover.
 const underline =
   "rounded-none border-0 border-b border-input bg-transparent dark:bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground";
 
 /**
- * Team settings — /team/:key/settings. Single page: underline identity form
- * (no identifier — it's frozen once issues exist and already shown wherever
- * the team appears), a member avatar stack that opens the checkbox config
- * (anyone can edit anyone; saving an empty set archives the team after a
- * confirm), quick stats, and the archive danger zone.
+ * Team settings — /team/:key/settings, Linear team-page shape. Left column is
+ * the identity itself rendered as page text (icon picker applies on pick,
+ * name and description commit on blur — no save buttons); the right column
+ * holds members (avatar stack → checkbox config; saving an empty set
+ * archives behind a confirm), go-to links, and archive.
  */
 export function TeamSettingsPage({ teamKey }: { teamKey: string }) {
   const { t } = useT("teams");
@@ -78,35 +77,38 @@ export function TeamSettingsPage({ teamKey }: { teamKey: string }) {
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-6">
-          <IdentityForm team={team} />
-          <MembersRow team={team} />
-          <StatsRow team={team} />
-          <DangerZone team={team} />
+        <div className="mx-auto flex w-full max-w-3xl gap-10 px-6 py-8">
+          <div className="min-w-0 flex-1">
+            <Identity team={team} />
+          </div>
+          <aside className="flex w-52 shrink-0 flex-col gap-6">
+            <MembersSection team={team} />
+            <GotoSection team={team} />
+            <ArchiveSection team={team} />
+          </aside>
         </div>
       </div>
     </div>
   );
 }
 
-function IdentityForm({ team }: { team: Team }) {
+/**
+ * Icon + name + description rendered as page content. The icon applies on
+ * pick; name and description commit on blur (Escape restores) — there is no
+ * save button anywhere on this page.
+ */
+function Identity({ team }: { team: Team }) {
   const { t } = useT("teams");
   const updateTeam = useUpdateTeam();
   const [name, setName] = useState(team.name);
-  const [description, setDescription] = useState(team.description);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   // Re-seed when navigating between teams (or after a save round-trips).
   useEffect(() => {
     setName(team.name);
-    setDescription(team.description);
-  }, [team.id, team.name, team.description]);
+  }, [team.id, team.name]);
 
-  // Each field saves independently, with its button right under the field
-  // being edited; the icon applies immediately on pick.
   const saveField = async (patch: { name?: string; icon?: string | null; description?: string }) => {
-    setSaving(true);
     try {
       await updateTeam.mutateAsync({ id: team.id, ...patch });
       toast.success(t(($) => $.toast_updated));
@@ -114,81 +116,69 @@ function IdentityForm({ team }: { team: Team }) {
       toast.error(
         err instanceof Error && err.message ? err.message : t(($) => $.toast_save_failed),
       );
-    } finally {
-      setSaving(false);
     }
   };
 
-  const nameDirty = name.trim().length > 0 && name.trim() !== team.name;
-  const descriptionDirty = description.trim() !== team.description;
+  const commitName = () => {
+    const next = name.trim();
+    if (!next) {
+      setName(team.name);
+      return;
+    }
+    if (next !== team.name) void saveField({ name: next });
+  };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="space-y-1.5">
-        <Label htmlFor="team-settings-name">{t(($) => $.form.icon_name)}</Label>
-        <div className="flex items-end gap-3">
-          {/* Icon is emoji-only and applies immediately on pick. */}
-          <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.form.icon)}
-                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-xl transition-colors hover:bg-accent/60"
-                />
-              }
-            >
-              {team.icon || <TeamIcon team={{ icon: null }} className="size-5" />}
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto p-0">
-              <EmojiPicker
-                onSelect={(emoji) => {
-                  setIconPickerOpen(false);
-                  void saveField({ icon: emoji });
-                }}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        {/* Icon is emoji-only and applies immediately on pick. */}
+        <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                aria-label={t(($) => $.form.icon)}
+                className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-muted/60 text-2xl transition-colors hover:bg-accent"
               />
-            </PopoverContent>
-          </Popover>
-          <Input
-            id="team-settings-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && nameDirty) void saveField({ name: name.trim() });
-            }}
-            className={underline}
-          />
-        </div>
-        {nameDirty && (
-          <div>
-            <Button size="sm" disabled={saving} onClick={() => void saveField({ name: name.trim() })}>
-              {saving ? t(($) => $.actions.saving) : t(($) => $.actions.save)}
-            </Button>
-          </div>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="team-settings-description">{t(($) => $.form.description)}</Label>
-        <Textarea
-          id="team-settings-description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder={t(($) => $.form.description_placeholder)}
-          rows={1}
-          className={cn(underline, "min-h-8 resize-none")}
+            }
+          >
+            {team.icon || <TeamIcon team={{ icon: null }} className="size-5" />}
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-auto p-0">
+            <EmojiPicker
+              onSelect={(emoji) => {
+                setIconPickerOpen(false);
+                void saveField({ icon: emoji });
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+        <Input
+          aria-label={t(($) => $.form.name)}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setName(team.name);
+              event.currentTarget.blur();
+            }
+          }}
+          className="h-auto rounded-none border-0 bg-transparent px-0 py-1 !text-2xl font-bold leading-snug tracking-tight shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
-        {descriptionDirty && (
-          <div>
-            <Button
-              size="sm"
-              disabled={saving}
-              onClick={() => void saveField({ description: description.trim() })}
-            >
-              {saving ? t(($) => $.actions.saving) : t(($) => $.actions.save)}
-            </Button>
-          </div>
-        )}
       </div>
+      {/* Keyed by the server value so a committed save (or a WS update)
+          re-seeds the field without fighting in-progress typing. */}
+      <PlainTextField
+        key={`${team.id}:${team.description}`}
+        defaultValue={team.description}
+        placeholder={t(($) => $.form.description_placeholder)}
+        aria-label={t(($) => $.form.description)}
+        className="text-sm text-muted-foreground"
+        limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
+        onCommit={(value) => void saveField({ description: value })}
+      />
     </div>
   );
 }
@@ -199,7 +189,7 @@ function IdentityForm({ team }: { team: Team }) {
  * everyone means the team has no reason to exist — saving then archives it,
  * behind a confirm (blocked for the default team).
  */
-function MembersRow({ team }: { team: Team }) {
+function MembersSection({ team }: { team: Team }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(teamMembersOptions(wsId, team.id));
@@ -276,14 +266,16 @@ function MembersRow({ team }: { team: Team }) {
   const overflow = members.length - stack.length;
 
   return (
-    <div className="space-y-1.5">
-      <Label>{t(($) => $.settings.members)}</Label>
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-muted-foreground">
+        {t(($) => $.settings.members)}
+      </h3>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
             <button
               type="button"
-              className="flex w-full items-center gap-2 border-b border-input pb-2 text-left transition-colors hover:border-foreground"
+              className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent/60"
             />
           }
         >
@@ -310,10 +302,6 @@ function MembersRow({ team }: { team: Team }) {
               {t(($) => $.picker.empty)}
             </span>
           )}
-          <span className="ml-auto text-xs text-muted-foreground">
-            {t(($) => $.dialog.member_count, { count: members.length })}
-          </span>
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent align="start" className="flex w-80 flex-col gap-2 p-3">
           <div className="relative shrink-0">
@@ -384,7 +372,7 @@ function MembersRow({ team }: { team: Team }) {
   );
 }
 
-function StatsRow({ team }: { team: Team }) {
+function GotoSection({ team }: { team: Team }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
@@ -401,33 +389,33 @@ function StatsRow({ team }: { team: Team }) {
     [autopilots, team.id],
   );
 
-  const stats = [
+  const links = [
     { icon: ListTodo, label: t(($) => $.settings.stats_issues), value: team.issue_counter, href: p.teamIssues(team.key) },
     { icon: FolderKanban, label: t(($) => $.settings.stats_projects), value: projectCount, href: p.teamProjects(team.key) },
     { icon: Zap, label: t(($) => $.settings.stats_autopilots), value: autopilotCount, href: p.teamAutopilots(team.key) },
   ];
 
   return (
-    <div className="space-y-1.5">
-      <Label>{t(($) => $.settings.stats_title)}</Label>
-      <div className="grid grid-cols-3 gap-2">
-        {stats.map((stat) => (
-          <AppLink
-            key={stat.href}
-            href={stat.href}
-            className="flex items-center gap-2 rounded-md border px-3 py-2 transition-colors hover:bg-accent/40"
-          >
-            <stat.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="text-sm tabular-nums font-medium">{stat.value}</span>
-            <span className="truncate text-xs text-muted-foreground">{stat.label}</span>
-          </AppLink>
-        ))}
-      </div>
+    <div className="flex flex-col gap-1">
+      <h3 className="mb-1 text-xs font-medium text-muted-foreground">
+        {t(($) => $.settings.goto)}
+      </h3>
+      {links.map((link) => (
+        <AppLink
+          key={link.href}
+          href={link.href}
+          className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent/60"
+        >
+          <link.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{link.label}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{link.value}</span>
+        </AppLink>
+      ))}
     </div>
   );
 }
 
-function DangerZone({ team }: { team: Team }) {
+function ArchiveSection({ team }: { team: Team }) {
   const { t } = useT("teams");
   const archiveTeam = useArchiveTeam();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -447,21 +435,17 @@ function DangerZone({ team }: { team: Team }) {
   };
 
   return (
-    <div className="space-y-1.5">
-      <Label>{t(($) => $.settings.danger_title)}</Label>
-      <div className="flex items-center justify-between rounded-md border border-destructive/30 px-3 py-2">
-        <span className="text-sm text-muted-foreground">
-          {t(($) => $.settings.archive_hint)}
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive"
-          onClick={() => setConfirmOpen(true)}
-        >
-          {t(($) => $.actions.archive)}
-        </Button>
-      </div>
+    <div className="flex flex-col gap-1">
+      <h3 className="mb-1 text-xs font-medium text-muted-foreground">
+        {t(($) => $.settings.danger_title)}
+      </h3>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        className="-mx-1.5 flex items-center rounded-md px-1.5 py-1 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+      >
+        {t(($) => $.actions.archive)}
+      </button>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
