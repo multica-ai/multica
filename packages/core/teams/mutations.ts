@@ -54,6 +54,53 @@ export function useUpdateTeam() {
   });
 }
 
+export function useUpdateTeamMembership() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, sort_order }: { id: string; sort_order: number }) =>
+      api.updateTeamMembership(id, { sort_order }),
+    // Optimistic: sidebar ordering must not snap back while the PATCH is in
+    // flight. Fractional sort keys mean only the dragged team's row changes.
+    onMutate: async ({ id, sort_order }) => {
+      await qc.cancelQueries({ queryKey: teamKeys.list(wsId) });
+      const prevList = qc.getQueryData<ListTeamsResponse>(teamKeys.list(wsId));
+      qc.setQueryData<ListTeamsResponse>(teamKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              teams: old.teams.map((t) => (t.id === id ? { ...t, sort_order } : t)),
+            }
+          : old,
+      );
+      return { prevList };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevList) qc.setQueryData(teamKeys.list(wsId), ctx.prevList);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: teamKeys.all(wsId) });
+    },
+  });
+}
+
+export function useReplaceTeamMembers() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, member_ids }: { id: string; member_ids: string[] }) =>
+      api.replaceTeamMembers(id, member_ids),
+    // No optimistic patch: the config panel closes on save, and the
+    // caller's own is_member may flip (they can add/remove themselves), so
+    // one settled invalidation of the list + members caches is the simplest
+    // correct reconcile.
+    onSettled: (_data, _err, { id }) => {
+      qc.invalidateQueries({ queryKey: teamKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: teamKeys.members(wsId, id) });
+    },
+  });
+}
+
 export function useArchiveTeam() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

@@ -74,6 +74,8 @@ import type {
   SendChatMessageResponse,
   CancelTaskResponse,
   Team,
+  TeamMembership,
+  ListTeamMembersResponse,
   CreateTeamRequest,
   UpdateTeamRequest,
   ListTeamsResponse,
@@ -187,7 +189,10 @@ import {
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListTeamsResponseSchema,
+  ListTeamMembersResponseSchema,
+  EMPTY_LIST_TEAM_MEMBERS_RESPONSE,
   TeamSchema,
+  TeamMembershipSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -1601,6 +1606,31 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
     return parseOrWarn(raw, TeamSchema, { endpoint: "PATCH /api/teams/:id" });
+  }
+
+  async updateTeamMembership(id: string, data: { sort_order: number }): Promise<TeamMembership> {
+    const raw = await this.fetch<unknown>(`/api/teams/${id}/membership`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, TeamMembershipSchema, { endpoint: "PATCH /api/teams/:id/membership" });
+  }
+
+  async replaceTeamMembers(id: string, memberIds: string[]): Promise<ListTeamMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/teams/${id}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ member_ids: memberIds }),
+    });
+    return parseWithFallback(raw, ListTeamMembersResponseSchema, EMPTY_LIST_TEAM_MEMBERS_RESPONSE, {
+      endpoint: "PUT /api/teams/:id/members",
+    });
+  }
+
+  async listTeamMembers(id: string): Promise<ListTeamMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/teams/${id}/members`);
+    return parseWithFallback(raw, ListTeamMembersResponseSchema, EMPTY_LIST_TEAM_MEMBERS_RESPONSE, {
+      endpoint: "GET /api/teams/:id/members",
+    });
   }
 
   async archiveTeam(id: string): Promise<Team> {

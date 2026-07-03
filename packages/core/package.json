@@ -73,6 +73,8 @@
     "./teams": "./teams/index.ts",
     "./teams/queries": "./teams/queries.ts",
     "./teams/mutations": "./teams/mutations.ts",
+    "./teams/default-team": "./teams/default-team.ts",
+    "./layout/sidebar-store": "./layout/sidebar-store.ts",
     "./labels": "./labels/index.ts",
     "./labels/queries": "./labels/queries.ts",
     "./labels/mutations": "./labels/mutations.ts",

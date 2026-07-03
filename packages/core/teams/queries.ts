@@ -4,6 +4,8 @@ import { api } from "../api";
 export const teamKeys = {
   all: (wsId: string) => ["teams", wsId] as const,
   list: (wsId: string) => [...teamKeys.all(wsId), "list"] as const,
+  members: (wsId: string, teamId: string) =>
+    [...teamKeys.all(wsId), "members", teamId] as const,
 };
 
 export function teamListOptions(wsId: string) {
@@ -22,5 +24,27 @@ export function activeTeamListOptions(wsId: string) {
     queryKey: teamKeys.list(wsId),
     queryFn: () => api.listTeams(),
     select: (data) => data.teams.filter((team) => !team.archived_at),
+  });
+}
+
+export function teamMembersOptions(wsId: string, teamId: string) {
+  return queryOptions({
+    queryKey: teamKeys.members(wsId, teamId),
+    queryFn: () => api.listTeamMembers(teamId),
+    select: (data) => data.members,
+  });
+}
+
+export function myTeamListOptions(wsId: string) {
+  // The sidebar's Teams section: only teams the user joined, in their
+  // personal order. Same cache entry as teamListOptions (per-observer
+  // select), so reorder patches on the base key reflect here instantly.
+  return queryOptions({
+    queryKey: teamKeys.list(wsId),
+    queryFn: () => api.listTeams(),
+    select: (data) =>
+      data.teams
+        .filter((team) => team.is_member && !team.archived_at)
+        .sort((a, b) => a.sort_order - b.sort_order),
   });
 }
