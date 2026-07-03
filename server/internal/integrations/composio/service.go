@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -205,8 +204,10 @@ type MCPSession struct {
 // exactly the fields the Settings UI renders plus a Connectable flag.
 //
 // Connectable means the project has an enabled auth config for the toolkit, so
-// BeginConnect would succeed. When false the UI must not offer a working
-// "Connect" affordance — clicking it would 400 with ErrToolkitNotSupported.
+// BeginConnect would succeed. Since MUL-4009 ListToolkits only returns
+// connectable toolkits, so this is always true on the wire; the field is
+// retained for backward compatibility with older desktop clients that branch on
+// it (removing it would make them treat every entry as non-connectable).
 type ToolkitView struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
@@ -482,19 +483,28 @@ func rowToConnection(row db.UserComposioConnection) Connection {
 	return c
 }
 
-// ListToolkits returns the full Composio toolkit catalog annotated with a
-// Connectable flag (whether the project has an enabled auth config for each).
-// It fetches all pages (capped by maxToolkitPages) so the UI gets the complete
-// list in one call; the catalog is a few hundred entries, well within a single
-// JSON response. Connectable toolkits are surfaced first so the UI can lead
-// with what actually works.
+// ListToolkits returns only the Composio toolkits the project can actually
+// connect (those with an enabled auth config). Toolkits with no enabled auth
+// config are filtered out entirely (MUL-4009): a card the user can't act on is
+// noise, and the old "Not configured" grey label existed only to avoid a dead
+// button — dropping the entry removes the need for it. It fetches all pages
+// (capped by maxToolkitPages) so the UI gets the complete connectable list in
+// one call; the catalog is a few hundred entries, well within a single JSON
+// response. Every returned entry has Connectable == true, preserving Composio's
+// usage order.
+//
+// Unlike the previous behavior, a resolver error is NOT masked into an
+// everything-not-connectable catalog: with filtering in place that would render
+// as a silent "no apps configured" empty state, which is misleading. We return
+// the error so the handler can surface a 502 and the UI can show its honest
+// load-failed state instead.
 func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 	// connectable is the project's enabled toolkit_slug → auth_config_id map.
-	// On a transient resolver error we still render the catalog, just with
-	// everything marked not-connectable, rather than failing the whole list.
+	// It is the source of truth for what to surface: only slugs present here
+	// are returned.
 	connectable, err := s.authConfigMap(ctx)
 	if err != nil {
-		connectable = map[string]string{}
+		return nil, fmt.Errorf("composio: resolve connectable toolkits: %w", err)
 	}
 
 	out := []ToolkitView{}
@@ -518,17 +528,24 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 				continue
 			}
 			seen[slug] = struct{}{}
+			// Filter out toolkits with no enabled auth config: the user has no
+			// working action for them, so they are omitted from the catalog.
+			if _, canConnect := connectable[slug]; !canConnect {
+				continue
+			}
 			category := ""
 			if len(tk.Categories) > 0 {
 				category = tk.Categories[0]
 			}
-			_, canConnect := connectable[slug]
 			out = append(out, ToolkitView{
-				Slug:        tk.Slug,
-				Name:        tk.Name,
-				LogoURL:     toolkitLogoURL(slug, tk.LogoURL),
-				Category:    category,
-				Connectable: canConnect,
+				Slug:     tk.Slug,
+				Name:     tk.Name,
+				LogoURL:  toolkitLogoURL(slug, tk.LogoURL),
+				Category: category,
+				// Every surfaced toolkit is connectable by construction. The
+				// wire field is kept (see ComposioToolkitResponse) for backward
+				// compatibility with older desktop clients that branch on it.
+				Connectable: true,
 			})
 		}
 		if resp.NextCursor == "" {
@@ -537,14 +554,6 @@ func (s *Service) ListToolkits(ctx context.Context) ([]ToolkitView, error) {
 		cursor = resp.NextCursor
 	}
 
-	// Stable sort: connectable toolkits first, preserving Composio's usage
-	// order within each group.
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Connectable != out[j].Connectable {
-			return out[i].Connectable
-		}
-		return false
-	})
 	return out, nil
 }
 

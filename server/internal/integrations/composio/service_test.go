@@ -312,15 +312,16 @@ func TestBeginConnect_PrefersCustomAuthConfig(t *testing.T) {
 	}
 }
 
-// TestListToolkits_ConnectableFlagAndOrder: every toolkit is listed, but only
-// those with an enabled auth config are connectable, and connectable ones sort
-// first.
-func TestListToolkits_ConnectableFlagAndOrder(t *testing.T) {
+// TestListToolkits_FiltersToConnectable: only toolkits with an enabled auth
+// config are returned (MUL-4009); the rest are dropped from the catalog, and
+// every surfaced entry is Connectable by construction.
+func TestListToolkits_FiltersToConnectable(t *testing.T) {
 	t.Parallel()
 	sdkFake := &fakeSDK{
 		authConfigsSet: true,
 		authConfigs: []sdk.AuthConfig{
 			{ID: "ac_notion", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED"},
+			{ID: "ac_slack", Toolkit: sdk.Toolkit{Slug: "slack"}, Status: "ENABLED"},
 		},
 		toolkits: []sdk.Toolkit{
 			{Slug: "github", Name: "GitHub", LogoURL: "https://logo/gh", Categories: []string{"dev"}},
@@ -333,32 +334,39 @@ func TestListToolkits_ConnectableFlagAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListToolkits: %v", err)
 	}
-	if len(tks) != 3 {
-		t.Fatalf("expected 3 toolkits, got %d", len(tks))
+	// notion and slack have enabled auth configs; github is filtered out.
+	if len(tks) != 2 {
+		t.Fatalf("expected 2 connectable toolkits, got %d: %+v", len(tks), tks)
 	}
-	// Connectable (notion) sorts first.
-	if tks[0].Slug != "notion" || !tks[0].Connectable {
-		t.Errorf("first toolkit = %+v, want connectable notion", tks[0])
-	}
-	if tks[0].Name != "Notion" || tks[0].LogoURL != "https://logo/notion" || tks[0].Category != "productivity" {
-		t.Errorf("notion fields not mapped: %+v", tks[0])
-	}
-	for _, tk := range tks[1:] {
-		if tk.Connectable {
-			t.Errorf("toolkit %q should not be connectable", tk.Slug)
-		}
-	}
+	bySlug := make(map[string]ToolkitView, len(tks))
 	for _, tk := range tks {
-		if tk.Slug == "slack" && tk.LogoURL != "https://logos.composio.dev/api/slack" {
-			t.Errorf("slack default logo = %q", tk.LogoURL)
+		if !tk.Connectable {
+			t.Errorf("surfaced toolkit %q must be connectable", tk.Slug)
 		}
+		if tk.Slug == "github" {
+			t.Errorf("non-connectable toolkit %q should have been filtered out", tk.Slug)
+		}
+		bySlug[tk.Slug] = tk
+	}
+	notion, ok := bySlug["notion"]
+	if !ok {
+		t.Fatalf("expected notion in results: %+v", tks)
+	}
+	if notion.Name != "Notion" || notion.LogoURL != "https://logo/notion" || notion.Category != "productivity" {
+		t.Errorf("notion fields not mapped: %+v", notion)
+	}
+	// slack carried no upstream logo, so the composio default logo URL is derived.
+	if slack, ok := bySlug["slack"]; !ok || slack.LogoURL != "https://logos.composio.dev/api/slack" {
+		t.Errorf("slack default logo = %+v", bySlug["slack"])
 	}
 }
 
-// TestListToolkits_PaginatesAndResolverErrorIsSoft: a paginated catalog is
-// fully drained, and an /auth_configs failure degrades to "nothing
-// connectable" instead of failing the whole list.
-func TestListToolkits_ResolverErrorMarksNoneConnectable(t *testing.T) {
+// TestListToolkits_ResolverErrorReturnsError: an /auth_configs failure is
+// surfaced as an error rather than silently degrading to an empty catalog
+// (MUL-4009). With filtering in place, masking the error would render as a
+// misleading "no apps configured" empty state, so the handler must be able to
+// return a 502 instead.
+func TestListToolkits_ResolverErrorReturnsError(t *testing.T) {
 	t.Parallel()
 	sdkFake := &fakeSDK{
 		listAuthErr: errors.New("upstream blip"),
@@ -366,11 +374,11 @@ func TestListToolkits_ResolverErrorMarksNoneConnectable(t *testing.T) {
 	}
 	svc := newTestService(t, sdkFake, newFakeStore())
 	tks, err := svc.ListToolkits(context.Background())
-	if err != nil {
-		t.Fatalf("ListToolkits should not fail on auth-config error, got %v", err)
+	if err == nil {
+		t.Fatalf("ListToolkits should fail on auth-config resolver error, got %+v", tks)
 	}
-	if len(tks) != 1 || tks[0].Connectable {
-		t.Fatalf("expected 1 non-connectable toolkit, got %+v", tks)
+	if tks != nil {
+		t.Errorf("expected nil toolkits on error, got %+v", tks)
 	}
 }
 

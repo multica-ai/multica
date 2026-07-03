@@ -316,8 +316,6 @@
     "connected": "Connected",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
-    "not_connectable": "Not configured",
-    "not_connectable_hint": "This toolkit has no auth config in your Composio project yet, so it can't be connected. Add an auth config for it in the Composio dashboard to enable connecting.",
     "connect_failed": "Couldn't start the connection. Please try again.",
     "disconnect_failed": "Couldn't disconnect. Please try again.",
     "toast_disconnected": "Disconnected",

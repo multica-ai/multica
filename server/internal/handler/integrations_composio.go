@@ -44,9 +44,10 @@ type ComposioConnectionResponse struct {
 }
 
 // ComposioToolkitResponse is the wire shape for one toolkit in the catalog.
-// connectable is the key UX signal: false means the project has no enabled
-// auth config for the toolkit, so the UI must not offer a working Connect
-// button (BeginConnect would 400).
+// Since MUL-4009 the catalog only contains connectable toolkits, so
+// `connectable` is always true. The field is retained for backward
+// compatibility with older desktop clients that branch on it (dropping it would
+// make them treat every entry as non-connectable and hide the Connect button).
 type ComposioToolkitResponse struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
@@ -162,11 +163,13 @@ func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request
 }
 
 // ListComposioToolkits (GET /api/integrations/composio/toolkits) returns the
-// full Composio toolkit catalog for the Settings UI to render. Each entry
-// carries a `connectable` flag: only toolkits with an enabled auth config in
-// the project can actually be connected, so the UI gates its Connect button on
-// it. The catalog itself is project-global (not per-user), but the route is
-// user-scoped (requireUser) like the rest of the block.
+// connectable Composio toolkits for the Settings UI to render. Since MUL-4009
+// the service filters out toolkits with no enabled auth config in the project,
+// so every entry here is connectable; the `connectable` flag is kept on the
+// wire for backward compatibility. The catalog itself is project-global (not
+// per-user), but the route is user-scoped (requireUser) like the rest of the
+// block. A resolver/upstream failure is a 502, letting the UI show its
+// load-failed state rather than a misleading empty catalog.
 func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
 		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")

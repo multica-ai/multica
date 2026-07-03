@@ -224,16 +224,17 @@ func TestComposio_ListToolkits(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &toolkits); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(toolkits) != 2 {
-		t.Fatalf("expected 2 toolkits, got %d", len(toolkits))
+	// Only notion has an enabled auth config; github is filtered out server-side
+	// (MUL-4009), so a single connectable toolkit comes back.
+	if len(toolkits) != 1 {
+		t.Fatalf("expected 1 toolkit, got %d (%s)", len(toolkits), w.Body.String())
 	}
-	// notion has an enabled auth config in the fake → connectable + sorted first.
 	if toolkits[0].Slug != "notion" || !toolkits[0].Connectable {
-		t.Errorf("first toolkit = %+v, want connectable notion", toolkits[0])
+		t.Errorf("toolkit = %+v, want connectable notion", toolkits[0])
 	}
 	for _, tk := range toolkits {
-		if tk.Slug == "github" && tk.Connectable {
-			t.Error("github has no auth config and must not be connectable")
+		if tk.Slug == "github" {
+			t.Error("github has no auth config and must be filtered out")
 		}
 		if tk.Logo == "" {
 			t.Errorf("toolkit %q missing logo", tk.Slug)

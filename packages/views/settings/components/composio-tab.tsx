@@ -28,12 +28,16 @@ import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
 
-// ComposioTab renders the full Composio toolkit catalog and lets the user
-// connect / disconnect the apps their agents can act on.
+// ComposioTab renders the connectable Composio toolkit catalog and lets the
+// user connect / disconnect the apps their agents can act on.
 //
-// Key UX rule (MUL-3720): listing ≠ connectable. Only toolkits with an enabled
-// auth config in the Composio project carry `connectable: true`; the rest get a
-// muted "not configured" hint instead of a dead Connect button that would 400.
+// Key UX rule (MUL-4009): the backend only returns toolkits with an enabled
+// auth config in the Composio project, so every card here is connectable —
+// toolkits with no auth config are filtered out server-side rather than shown
+// with a dead "not configured" hint. The `toolkit.connectable` guard on the
+// Connect button is kept as a client-side backstop (older/misbehaving servers
+// could still send a non-connectable entry); such an entry simply renders no
+// action affordance rather than a broken Connect button that would 400.
 export function ComposioTab() {
   const { t } = useT("settings");
   const qc = useQueryClient();
@@ -351,14 +355,7 @@ function ToolkitCard({
             )}
             {connecting ? t(($) => $.composio.connecting) : t(($) => $.composio.connect)}
           </Button>
-        ) : (
-          <span
-            className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-            title={t(($) => $.composio.not_connectable_hint)}
-          >
-            {t(($) => $.composio.not_connectable)}
-          </span>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );

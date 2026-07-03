@@ -316,8 +316,6 @@
     "connected": "已连接",
     "disconnect": "断开",
     "disconnecting": "断开中…",
-    "not_connectable": "未配置",
-    "not_connectable_hint": "该 toolkit 在你的 Composio 项目中还没有 auth config，因此无法连接。请在 Composio 后台为它添加一个 auth config 后再连接。",
     "connect_failed": "无法发起连接，请重试。",
     "disconnect_failed": "无法断开连接，请重试。",
     "toast_disconnected": "已断开",
