@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1042,6 +1043,7 @@ type commentAgentTrigger struct {
 
 type commentTriggerComputeOptions struct {
 	ExcludeTriggerCommentID pgtype.UUID
+	SourceTaskID            pgtype.UUID
 	// OriginatorUserID is the top-of-chain human user id for this trigger
 	// (MUL-3963). Only consulted for AGENT actors — canInvokeAgent judges A2A
 	// by the originator, not the immediate agent principal. Members are their
@@ -1356,6 +1358,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	}
 	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
+		SourceTaskID:            comment.SourceTaskID,
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
@@ -1472,6 +1475,10 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return nil
 	}
 
+	if !hasRoutingMention(mentions) {
+		mentions = h.resolvePlainSquadLeaderAgentMentions(ctx, issue, content, actorType, actorID, opts)
+	}
+
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
 	}
@@ -1554,6 +1561,95 @@ func hasMemberMention(mentions []util.Mention) bool {
 		}
 	}
 	return false
+}
+
+func hasRoutingMention(mentions []util.Mention) bool {
+	for _, m := range mentions {
+		if m.Type == "agent" || m.Type == "squad" || m.Type == "member" || m.Type == "all" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) resolvePlainSquadLeaderAgentMentions(ctx context.Context, issue db.Issue, content, authorType, authorID string, opts commentTriggerComputeOptions) []util.Mention {
+	if authorType != "agent" || !opts.SourceTaskID.Valid {
+		return nil
+	}
+
+	task, err := h.Queries.GetAgentTask(ctx, opts.SourceTaskID)
+	if err != nil ||
+		!task.IssueID.Valid ||
+		uuidToString(task.IssueID) != uuidToString(issue.ID) ||
+		!task.AgentID.Valid ||
+		uuidToString(task.AgentID) != authorID ||
+		!task.IsLeaderTask ||
+		!task.SquadID.Valid {
+		return nil
+	}
+
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          task.SquadID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || uuidToString(squad.LeaderID) != authorID {
+		return nil
+	}
+
+	members, err := h.Queries.ListSquadMembers(ctx, squad.ID)
+	if err != nil {
+		return nil
+	}
+
+	type plainMentionCandidate struct {
+		name string
+		id   string
+	}
+	candidates := make([]plainMentionCandidate, 0)
+	ambiguousNames := make(map[string]bool)
+	matchedByName := make(map[string]string)
+	for _, member := range members {
+		if member.MemberType != "agent" || uuidToString(member.MemberID) == authorID {
+			continue
+		}
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          member.MemberID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			continue
+		}
+		name := strings.TrimSpace(agent.Name)
+		if name == "" || !containsPlainAtName(content, name) {
+			continue
+		}
+		nameKey := strings.ToLower(name)
+		if prevID, ok := matchedByName[nameKey]; ok && prevID != uuidToString(agent.ID) {
+			ambiguousNames[nameKey] = true
+			continue
+		}
+		matchedByName[nameKey] = uuidToString(agent.ID)
+		candidates = append(candidates, plainMentionCandidate{name: nameKey, id: uuidToString(agent.ID)})
+	}
+
+	mentions := make([]util.Mention, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if ambiguousNames[candidate.name] {
+			continue
+		}
+		if _, ok := seen[candidate.id]; ok {
+			continue
+		}
+		seen[candidate.id] = struct{}{}
+		mentions = append(mentions, util.Mention{Type: "agent", ID: candidate.id})
+	}
+	return mentions
+}
+
+func containsPlainAtName(content, name string) bool {
+	pattern := `(?i)(^|[^\pL\pN_])@` + regexp.QuoteMeta(name) + `($|[^\pL\pN_])`
+	return regexp.MustCompile(pattern).FindStringIndex(content) != nil
 }
 
 func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, parent *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {

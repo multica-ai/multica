@@ -455,6 +455,142 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	}
 }
 
+// TestCreateComment_SquadLeaderAgentMentionWakesMember pins GitHub #4601:
+// a squad leader running in leader mode must be able to delegate to an agent
+// squad member by posting the valid mention markdown from the squad briefing.
+// The mention should enqueue the member exactly once and must not also create
+// a leader self-trigger loop.
+func TestCreateComment_SquadLeaderAgentMentionWakesMember(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	var leaderRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
+		t.Fatalf("load leader runtime: %v", err)
+	}
+	var leaderTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
+		VALUES ($1, $2, $3, 'running', TRUE, $4)
+		RETURNING id
+	`, fx.LeaderID, leaderRuntimeID, issueID, fx.SquadID).Scan(&leaderTaskID); err != nil {
+		t.Fatalf("seed leader task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Other](mention://agent/" + fx.OtherID + ") please take this because it matches your role.",
+	})
+	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Task-ID", leaderTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workerTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = FALSE
+	`, issueID, fx.OtherID).Scan(&workerTasks); err != nil {
+		t.Fatalf("count worker tasks: %v", err)
+	}
+	if workerTasks != 1 {
+		t.Fatalf("leader @agent delegation queued %d worker tasks, want 1", workerTasks)
+	}
+
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 0 {
+		t.Fatalf("leader @agent delegation queued %d leader tasks, want 0", leaderTasks)
+	}
+}
+
+// TestCreateComment_SquadLeaderPlainNameMentionWakesMember is the bounded
+// compatibility path for GitHub #4601: if a leader posts plain @AgentName
+// from an active leader task, resolve it only against agent members of the
+// same squad. This keeps ordinary plain @text inert while preventing squad
+// handoffs from stalling when an agent emits a natural-language mention.
+func TestCreateComment_SquadLeaderPlainNameMentionWakesMember(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	var otherName string
+	if err := testPool.QueryRow(ctx, `SELECT name FROM agent WHERE id = $1`, fx.OtherID).Scan(&otherName); err != nil {
+		t.Fatalf("load other agent name: %v", err)
+	}
+	var leaderRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
+		t.Fatalf("load leader runtime: %v", err)
+	}
+	var leaderTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id)
+		VALUES ($1, $2, $3, 'running', TRUE, $4)
+		RETURNING id
+	`, fx.LeaderID, leaderRuntimeID, issueID, fx.SquadID).Scan(&leaderTaskID); err != nil {
+		t.Fatalf("seed leader task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "@" + otherName + " please take this because it matches your role.",
+	})
+	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Task-ID", leaderTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workerTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = FALSE
+	`, issueID, fx.OtherID).Scan(&workerTasks); err != nil {
+		t.Fatalf("count worker tasks: %v", err)
+	}
+	if workerTasks != 1 {
+		t.Fatalf("leader plain @name delegation queued %d worker tasks, want 1", workerTasks)
+	}
+
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 0 {
+		t.Fatalf("leader plain @name delegation queued %d leader tasks, want 0", leaderTasks)
+	}
+}
+
 // TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback
 // pins MUL-4024's direct-mention gap:
 //
