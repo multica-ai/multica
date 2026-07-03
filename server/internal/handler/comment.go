@@ -1209,39 +1209,59 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
-	// Defense against resumed-session drift: when an agent posts from inside a
-	// comment-triggered task AND the comment is being posted on that same
-	// issue, the parent_id must exactly match the task's trigger comment.
-	// Resumed Claude sessions otherwise carry forward a previous turn's
-	// --parent UUID and silently misplace the reply.
+	// For agent-authored comments the CLI stamps X-Task-ID on every request.
+	// We use it (when it resolves to an existing task) for three purposes:
 	//
-	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
-	// request, so an agent legitimately commenting on a different issue must
-	// not be blocked by its current task's trigger. Assignment-triggered
-	// tasks (no TriggerCommentID) are also unaffected.
+	//  1. Defense against resumed-session drift: when the task is a
+	//     comment-triggered task on THIS same issue, parent_id must exactly
+	//     match the task's trigger comment. Resumed Claude sessions otherwise
+	//     carry forward a previous turn's --parent UUID and silently misplace
+	//     the reply.
+	//  2. Reject writes on tasks the squad leader has already evaluated as
+	//     no_action.
+	//  3. Persist source_task_id on the created comment so downstream flows
+	//     can walk from an agent-authored comment back to the task that
+	//     produced it. This is load-bearing for multi-hop A→L→B chains
+	//     (MUL-4019): resolveOriginatorFromTriggerComment reads
+	//     comment.source_task_id → task.originator_user_id when the comment
+	//     author is an agent, and canInvokeAgent judges A2A permission by
+	//     that originator. Without the stamp the chain loses the human
+	//     originator at the first agent hop and a private / member-scoped
+	//     @agent mentioned by a squad leader is silently dropped.
+	//
+	// The (1)/(2) checks stay scoped to the current issue: the CLI stamps
+	// X-Task-ID on every request, so an agent legitimately commenting on a
+	// different issue must not be blocked by its current task's trigger.
+	// The (3) source_task_id stamp is unconditional (matching the internal
+	// TaskService.createAgentComment path in service/task.go) — the comment
+	// is produced by that task regardless of which issue it lands on.
+	var sourceTaskID pgtype.UUID
 	if authorType == "agent" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
 			if parseErr == nil {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if task.TriggerCommentID.Valid {
-						if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
-							writeError(w, http.StatusConflict,
-								"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+				if err == nil {
+					sourceTaskID = taskUUID
+					if task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+						if task.TriggerCommentID.Valid {
+							if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+								writeError(w, http.StatusConflict,
+									"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+								return
+							}
+						}
+						noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
+						if checkErr != nil {
+							slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
+								"error", checkErr,
+								"task_id", taskIDHeader,
+								"issue_id", issueID,
+							)...)
+						} else if noAction {
+							writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
 							return
 						}
-					}
-					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
-					if checkErr != nil {
-						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
-							"error", checkErr,
-							"task_id", taskIDHeader,
-							"issue_id", issueID,
-						)...)
-					} else if noAction {
-						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
-						return
 					}
 				}
 			}
@@ -1269,13 +1289,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  authorType,
-		AuthorID:    parseUUID(authorID),
-		Content:     req.Content,
-		Type:        req.Type,
-		ParentID:    parentID,
+		IssueID:      issue.ID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   authorType,
+		AuthorID:     parseUUID(authorID),
+		Content:      req.Content,
+		Type:         req.Type,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
