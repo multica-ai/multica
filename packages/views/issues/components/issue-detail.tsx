@@ -62,6 +62,9 @@ import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { ReviewAssetsList } from "./review-assets-list";
+import { MediaReviewLayout } from "../../reviews/media-review-layout";
+import { ReviewAsset } from "@multica/core/types";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -704,6 +707,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const [reviewAsset, setReviewAsset] = useState<ReviewAsset | null>(null);
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -2148,6 +2152,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
+            <ReviewAssetsList workspaceId={wsId} issueId={id} onOpenAsset={setReviewAsset} />
+
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and
                 doesn't compete with sticky banners in this content column.
@@ -2249,27 +2255,41 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
-        {detailContent}
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel
-        id="sidebar"
-        {...rightSidebarPanelMotionProps}
-        data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
-        defaultSize={desktopSidebarOpen ? 320 : 0}
-        minSize={260}
-        maxSize={420}
-        collapsible
-        groupResizeBehavior="preserve-pixel-size"
-        panelRef={sidebarRef}
-        onResize={handleDesktopSidebarResize}
-      >
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
-          {sidebarContent}
-        </AnimatedRightSidebar>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <Fragment>
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+        <ResizablePanel id="content" minSize="50%">
+          {detailContent}
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel
+          id="sidebar"
+          {...rightSidebarPanelMotionProps}
+          data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
+          defaultSize={desktopSidebarOpen ? 320 : 0}
+          minSize={260}
+          maxSize={420}
+          collapsible
+          groupResizeBehavior="preserve-pixel-size"
+          panelRef={sidebarRef}
+          onResize={handleDesktopSidebarResize}
+        >
+          <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
+            {sidebarContent}
+          </AnimatedRightSidebar>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      <Dialog open={!!reviewAsset} onOpenChange={(open) => !open && setReviewAsset(null)}>
+        <DialogContent className="max-w-[100vw] max-h-[100vh] w-screen h-screen p-0 border-0 bg-black">
+          {reviewAsset && (
+            <MediaReviewLayout
+              workspaceId={wsId}
+              asset={reviewAsset}
+              onAssetChange={setReviewAsset}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </Fragment>
   );
 }
