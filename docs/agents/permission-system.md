@@ -61,6 +61,29 @@ Keep these apart. This doc answers question 2 honestly.
 > Deny/Ask that the tighten-only `Resolve` already honours. Fixed so both
 > resolvers agree: `on_behalf_of` always tightens, on either resolver, and never
 > loosens. No behavior change while the flag is off (the Firtal workspace today).
+>
+> **FIR-2351 (resolver unification, "expand" step, no flag):** the exact bug
+> above — two hand-synced top-level algorithms drifting apart — is why `Resolve`
+> and `ResolveMemberOverride` are now thin wrappers over one function,
+> `ResolveWithMode(mode Mode, in Input) Effective` (`chain.go`). `ModeHardFloor`
+> is `Resolve`'s tighten-only body; `ModeOpenable` is `ResolveMemberOverride`'s
+> two-stage body. Behavior-preserving by construction and pinned by
+> `TestResolveWithMode_HardFloorMatchesResolve` /
+> `_OpenableMatchesResolveMemberOverride` (byte-for-byte equality against every
+> existing test case). `Store.ResolveGeneral` now calls `ResolveWithMode`
+> internally instead of branching between two function names; every other call
+> site is untouched. This is the FIR-2351 build-plan "expand" step only — the
+> plan's "authored vs default deny" distinction (a workspace row someone
+> deliberately set to Deny staying a hard ceiling even under `ModeOpenable`,
+> vs. an unset default staying openable) needs a schema change (an origin/
+> authored marker on `cerebro_tool_policy` rows) and is NOT built yet; today,
+> `ModeOpenable` treats every explicit Workspace/Group/User setting the same
+> regardless of why it was set, exactly like the pre-unification
+> `ResolveMemberOverride` did. The "contract" step (deleting `Resolve` /
+> `ResolveMemberOverride` and moving every call site onto `ResolveWithMode`
+> directly) is also deferred — it touches ~15 call sites across
+> `toolpolicy/table*.go` and is left for a follow-up PR per the plan's own
+> expand→shadow→flip→contract sequencing.
 
 ---
 

@@ -34,6 +34,20 @@ The unified tool-policy chain is the model we want **everything** to converge on
 - **Resolver:** `toolpolicy.Resolve` (pure fold, `chain.go:153`) / `Store.Resolve`
   (DB, `store.go:95`). Folds base→ceiling, most-restrictive-wins; `Inherit`/absent =
   pass-through; **Base default = Allow** (`chain.go:155-157`).
+- **FIR-2351 unification:** `Resolve` and `ResolveMemberOverride` are now thin wrappers
+  over one function, `toolpolicy.ResolveWithMode(mode Mode, in Input)` — `ModeHardFloor`
+  runs `Resolve`'s body, `ModeOpenable` runs `ResolveMemberOverride`'s body. This closes
+  the class of bug that caused the on_behalf_of parity gap above (two hand-synced
+  algorithms drifting apart): there is now one function body per mode, checked
+  byte-for-byte equal to the pre-unification functions by
+  `TestResolveWithMode_HardFloorMatchesResolve` / `_OpenableMatchesResolveMemberOverride`.
+  `Store.ResolveGeneral` calls `ResolveWithMode` internally; no other call site changed.
+  This is the build plan's "expand" step only (see FIR-2351 build plan artifact) — the
+  "authored vs default deny" distinction (a deliberately authored workspace Deny staying a
+  hard ceiling even under `ModeOpenable`, vs. an unset default staying openable) needs a
+  schema change and is deferred, and the "contract" step (deleting the two wrapper names
+  and moving every `Resolve(...)` call site onto `ResolveWithMode` directly) is deferred to
+  a follow-up PR.
 - **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
