@@ -323,6 +323,15 @@ func (s *Service) actionCreateSubIssue(ctx context.Context, wf workflow, te Trig
 // so no daemon-side change is needed — the daemon already understands how
 // to run an agent against a prompt-only task. workflow_id is included in
 // the context for log correlation.
+//
+// AgentID is optional (FIR-2283 v2): an Issue workflow step may leave its
+// agent picker empty so the recipe stays reusable across issues. When empty,
+// the build/plan agent falls back to whoever the triggering issue is
+// currently assigned to — the natural "default worker" for that issue.
+// There is deliberately no further fallback (e.g. workspace default agent):
+// an issue with no agent assignee and no agent pinned on the step has no
+// worker to dispatch to, and that must fail loudly rather than silently pick
+// an arbitrary agent.
 func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEvent) error {
 	var cfg ActionConfigRunSkill
 	if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
@@ -332,10 +341,25 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	if skillName == "" {
 		return errors.New("run_skill: skill_name is required")
 	}
-	if cfg.AgentID == "" {
-		return errors.New("run_skill: agent_id is required")
+	agentIDStr := cfg.AgentID
+	if agentIDStr == "" {
+		if te.IssueID == "" {
+			return errors.New("run_skill: agent_id is empty and the trigger event has no issue to fall back to")
+		}
+		issueID, err := parseUUID(te.IssueID)
+		if err != nil {
+			return fmt.Errorf("run_skill: %w", err)
+		}
+		issue, err := s.issues.GetIssue(ctx, issueID)
+		if err != nil {
+			return fmt.Errorf("run_skill: load issue for agent fallback: %w", err)
+		}
+		if issue.AssigneeType.String != AssigneeTypeAgent || !issue.AssigneeID.Valid {
+			return errors.New("run_skill: agent_id is empty and the issue has no agent assignee to fall back to")
+		}
+		agentIDStr = uuidString(issue.AssigneeID)
 	}
-	agentID, err := parseUUID(cfg.AgentID)
+	agentID, err := parseUUID(agentIDStr)
 	if err != nil {
 		return fmt.Errorf("run_skill: %w", err)
 	}

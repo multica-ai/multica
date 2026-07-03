@@ -90,9 +90,15 @@ type Caps struct {
 
 // Spec is a parsed loop.yaml.
 type Spec struct {
-	Version          int            `yaml:"version" json:"version"`
-	Goal             string         `yaml:"goal" json:"goal"`
-	DefinitionOfDone string         `yaml:"definition_of_done" json:"definition_of_done"`
+	Version int `yaml:"version" json:"version"`
+	// Goal and DefinitionOfDone are free-text notes for a human reader — the
+	// engine never reads either one. FIR-2283 v2: an Issue workflow recipe
+	// describes HOW an issue is worked (a chain of steps gated by
+	// Verification), not WHAT to build (that lives on the issue itself), so
+	// neither field is required. Both still round-trip through the spec for
+	// specs that do want a human-readable description.
+	Goal             string         `yaml:"goal,omitempty" json:"goal,omitempty"`
+	DefinitionOfDone string         `yaml:"definition_of_done,omitempty" json:"definition_of_done,omitempty"`
 	Verification     []Verification `yaml:"verification" json:"verification"`
 	Caps             Caps           `yaml:"caps" json:"caps"`
 	// Planning gates the loop behind an explicit design phase. When true,
@@ -102,6 +108,18 @@ type Spec struct {
 	// begins. The agent advances to the build status (default "in_progress")
 	// when it is satisfied with the plan. The delivery gate is unchanged.
 	Planning bool `yaml:"planning,omitempty" json:"planning,omitempty"`
+	// PlanGate is an optional set of criteria that must pass before the build
+	// phase is allowed to start (FIR-2283 v2 point 6 — "gates on the Plan
+	// step", e.g. an adversarial AI review that tries to tear the plan down
+	// before any code is written). Only meaningful when Planning is true —
+	// Validate rejects a non-empty PlanGate on a spec with Planning false.
+	// Unlike the delivery gate (Verification), PlanGate does NOT require a
+	// programmatic entry: there is no code yet to run a command against
+	// during planning, so a judge or human criterion alone is valid here.
+	// Compile attaches it as a second, independently-keyed check_passes
+	// condition on loop:dispatch-build, so a failing plan gate re-dispatches
+	// the plan skill instead of starting the build.
+	PlanGate []Verification `yaml:"plan_gate,omitempty" json:"plan_gate,omitempty"`
 }
 
 // SpecVersion is the only supported loop.yaml schema version.
@@ -128,26 +146,53 @@ func (s *Spec) Validate() error {
 	if s.Version != SpecVersion {
 		errs = append(errs, fmt.Errorf("version must be %d (got %d)", SpecVersion, s.Version))
 	}
-	if s.Goal == "" {
-		errs = append(errs, errors.New("goal is required"))
-	}
-	if s.DefinitionOfDone == "" {
-		errs = append(errs, errors.New("definition_of_done is required"))
-	}
 
 	if len(s.Verification) == 0 {
 		errs = append(errs, errors.New("at least one verification criterion is required"))
 	}
 
-	seen := make(map[string]bool, len(s.Verification))
+	// The defining rule for the delivery gate: a loop must have at least one
+	// gate the engine itself can decide, so progress never depends solely on
+	// a model grading its own or another agent's work. requireProgrammatic is
+	// false for PlanGate below — there is no code yet during planning, so a
+	// judge/human-only plan gate (Jesper's example: an adversarial AI review
+	// of the plan) is valid.
+	errs = append(errs, validateChecks("verification", s.Verification, true)...)
+
+	if len(s.PlanGate) > 0 && !s.Planning {
+		errs = append(errs, errors.New("plan_gate requires planning to be true (a plan gate only makes sense with a planning phase)"))
+	}
+	errs = append(errs, validateChecks("plan_gate", s.PlanGate, false)...)
+
+	if s.Caps.MaxIterations <= 0 {
+		errs = append(errs, errors.New("caps.max_iterations must be > 0"))
+	}
+	if s.Caps.MaxRevisions <= 0 {
+		errs = append(errs, errors.New("caps.max_revisions must be > 0"))
+	}
+	if s.Caps.NoProgressStalls <= 0 {
+		errs = append(errs, errors.New("caps.no_progress_stalls must be > 0"))
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateChecks validates one typed-criteria list (Spec.Verification or
+// Spec.PlanGate): every entry needs a unique id and its type-specific
+// required fields. When requireProgrammatic is true, at least one entry must
+// be CheckProgrammatic — the delivery gate's defining rule. list may be
+// empty; an empty PlanGate is valid (planning with no extra gate).
+func validateChecks(field string, list []Verification, requireProgrammatic bool) []error {
+	var errs []error
+	seen := make(map[string]bool, len(list))
 	programmatic := 0
-	for i, v := range s.Verification {
+	for i, v := range list {
 		label := v.ID
 		if label == "" {
-			label = fmt.Sprintf("verification[%d]", i)
+			label = fmt.Sprintf("%s[%d]", field, i)
 			errs = append(errs, fmt.Errorf("%s: id is required", label))
 		} else if seen[v.ID] {
-			errs = append(errs, fmt.Errorf("verification id %q is duplicated", v.ID))
+			errs = append(errs, fmt.Errorf("%s id %q is duplicated", field, v.ID))
 		}
 		seen[v.ID] = true
 
@@ -175,35 +220,15 @@ func (s *Spec) Validate() error {
 		}
 	}
 
-	// The defining rule: a loop must have at least one gate the engine itself
-	// can decide, so progress never depends solely on a model grading its own
-	// or another agent's work.
-	if len(s.Verification) > 0 && programmatic == 0 {
-		errs = append(errs, errors.New("at least one programmatic verification is required (a loop needs a check the engine can run, not only judge/human criteria)"))
+	if requireProgrammatic && len(list) > 0 && programmatic == 0 {
+		errs = append(errs, fmt.Errorf("at least one programmatic %s is required (a loop needs a check the engine can run, not only judge/human criteria)", field))
 	}
-
-	if s.Caps.MaxIterations <= 0 {
-		errs = append(errs, errors.New("caps.max_iterations must be > 0"))
-	}
-	if s.Caps.MaxRevisions <= 0 {
-		errs = append(errs, errors.New("caps.max_revisions must be > 0"))
-	}
-	if s.Caps.NoProgressStalls <= 0 {
-		errs = append(errs, errors.New("caps.no_progress_stalls must be > 0"))
-	}
-
-	return errors.Join(errs...)
+	return errs
 }
 
 // ProgrammaticChecks returns the criteria the engine can decide on its own.
 func (s *Spec) ProgrammaticChecks() []Verification {
-	out := make([]Verification, 0, len(s.Verification))
-	for _, v := range s.Verification {
-		if v.Type == CheckProgrammatic {
-			out = append(out, v)
-		}
-	}
-	return out
+	return filterByType(s.Verification, CheckProgrammatic)
 }
 
 // JudgeChecks returns the criteria a model must score against a rubric. Unlike
@@ -211,13 +236,7 @@ func (s *Spec) ProgrammaticChecks() []Verification {
 // dispatches each one to a judge agent and trusts the structured verdict that
 // comes back (see CheckDispatcher.DispatchJudge).
 func (s *Spec) JudgeChecks() []Verification {
-	out := make([]Verification, 0, len(s.Verification))
-	for _, v := range s.Verification {
-		if v.Type == CheckJudge {
-			out = append(out, v)
-		}
-	}
-	return out
+	return filterByType(s.Verification, CheckJudge)
 }
 
 // HumanChecks returns the criteria a person (or an agent standing in for
@@ -225,9 +244,23 @@ func (s *Spec) JudgeChecks() []Verification {
 // these on its own — it dispatches each one to the configured assignee and
 // waits for a reported approve/reject decision (see CheckDispatcher.DispatchHuman).
 func (s *Spec) HumanChecks() []Verification {
-	out := make([]Verification, 0, len(s.Verification))
-	for _, v := range s.Verification {
-		if v.Type == CheckHuman {
+	return filterByType(s.Verification, CheckHuman)
+}
+
+// PlanGateProgrammaticChecks/PlanGateJudgeChecks/PlanGateHumanChecks mirror
+// the Verification accessors above, filtered from Spec.PlanGate instead —
+// used by Compile to build the plan gate's CheckGateConfig.
+func (s *Spec) PlanGateProgrammaticChecks() []Verification {
+	return filterByType(s.PlanGate, CheckProgrammatic)
+}
+func (s *Spec) PlanGateJudgeChecks() []Verification { return filterByType(s.PlanGate, CheckJudge) }
+func (s *Spec) PlanGateHumanChecks() []Verification { return filterByType(s.PlanGate, CheckHuman) }
+
+// filterByType returns the entries of list matching t, preserving order.
+func filterByType(list []Verification, t CheckType) []Verification {
+	out := make([]Verification, 0, len(list))
+	for _, v := range list {
+		if v.Type == t {
 			out = append(out, v)
 		}
 	}

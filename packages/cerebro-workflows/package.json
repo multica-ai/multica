@@ -17,7 +17,8 @@
     "./views/workflow-form": "./views/workflow-form.tsx",
     "./views/workflow-canvas": "./views/workflow-canvas.tsx",
     "./views/workflow-runs-page": "./views/workflow-runs-page.tsx",
-    "./views/workflows-nav-item": "./views/workflows-nav-item.tsx"
+    "./views/workflows-nav-item": "./views/workflows-nav-item.tsx",
+    "./views/workflow-picker": "./views/workflow-picker.tsx"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
@@ -26,6 +27,7 @@
     "@multica/views": "workspace:*",
     "@xyflow/react": "catalog:",
     "cron-parser": "catalog:",
+    "sonner": "^2.0.7",
     "zod": "catalog:"
   },
   "peerDependencies": {

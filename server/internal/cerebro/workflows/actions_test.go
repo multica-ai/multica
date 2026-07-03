@@ -289,6 +289,51 @@ func TestActionRunSkill_RejectsMissingSkill(t *testing.T) {
 	}
 }
 
+// TestActionRunSkill_FallsBackToIssueAssignee locks in FIR-2283 v2's optional
+// build agent: when the step's action config carries no agent_id, the
+// dispatch resolves to whoever the triggering issue is currently assigned to.
+func TestActionRunSkill_FallsBackToIssueAssignee(t *testing.T) {
+	skillName := "firtal-data-evaluate"
+	assigneeID := mustUUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	fake := &fakeIssueActions{
+		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
+		AgentSkills: []db.Skill{{Name: skillName}},
+		Agent: db.Agent{
+			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+		},
+		ParentIssue: db.Issue{
+			ID:           mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			AssigneeType: pgtype.Text{String: AssigneeTypeAgent, Valid: true},
+			AssigneeID:   assigneeID,
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{SkillName: skillName})
+
+	if err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionRunSkill returned %v", err)
+	}
+	if fake.TaskQueued.AgentID != assigneeID {
+		t.Fatalf("expected task queued for the issue's assignee %v, got %v", assigneeID, fake.TaskQueued.AgentID)
+	}
+}
+
+// TestActionRunSkill_RejectsEmptyAgentWithNoIssueAssignee proves the fallback
+// fails loudly instead of silently picking an arbitrary agent when the issue
+// has no agent assignee either.
+func TestActionRunSkill_RejectsEmptyAgentWithNoIssueAssignee(t *testing.T) {
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{ID: mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{SkillName: "any-skill"})
+
+	err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "no agent assignee") {
+		t.Fatalf("expected 'no agent assignee' error, got %v", err)
+	}
+}
+
 func TestActionRunSkill_RejectsAgentMissingSkill(t *testing.T) {
 	skillName := "firtal-data-evaluate"
 	fake := &fakeIssueActions{

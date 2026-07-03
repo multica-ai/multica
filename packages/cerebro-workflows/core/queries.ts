@@ -1,6 +1,8 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  activateWorkflow,
   approveHumanCheck,
+  fetchActiveWorkflowForIssue,
   fetchLoopState,
   fetchWorkflow,
   fetchWorkflowRuns,
@@ -18,6 +20,8 @@ export const cerebroWorkflowsKeys = {
     [...cerebroWorkflowsKeys.all(wsId), "runs", workflowId ?? "all", limit, offset] as const,
   loopState: (wsId: string, workflowId: string, issueId: string) =>
     [...cerebroWorkflowsKeys.all(wsId), "loop-state", workflowId, issueId] as const,
+  activeForIssue: (wsId: string, issueId: string) =>
+    [...cerebroWorkflowsKeys.all(wsId), "active-for-issue", issueId] as const,
 };
 
 export function cerebroWorkflowsListOptions(wsId: string) {
@@ -111,6 +115,28 @@ export function cerebroLoopStateOptions(wsId: string, workflowId: string, issueI
     enabled: !!wsId && !!workflowId && !!issueId,
     staleTime: 3 * 1000,
     refetchInterval: 5 * 1000,
+  });
+}
+
+// FIR-2283 v2 point 8 — which recipe (if any) issueId is currently running.
+// Used by the "Workflow" picker on the issue itself.
+export function cerebroActiveWorkflowForIssueOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: cerebroWorkflowsKeys.activeForIssue(wsId, issueId),
+    queryFn: () => fetchActiveWorkflowForIssue(issueId),
+    enabled: !!wsId && !!issueId,
+  });
+}
+
+export function useActivateWorkflowMutation(wsId: string, issueId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => activateWorkflow(workflowId, issueId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: cerebroWorkflowsKeys.activeForIssue(wsId, issueId),
+      });
+    },
   });
 }
 

@@ -157,6 +157,12 @@ export interface LoopSpec {
   verification: LoopVerification[];
   caps: LoopCaps;
   planning?: boolean;
+  // Gates on the Plan step (FIR-2283 v2 point 6) — only meaningful when
+  // planning is true. Unlike verification, a plan gate does NOT require a
+  // programmatic entry: there is no code yet to run a command against
+  // during planning, so a judge-only criterion (e.g. an adversarial AI
+  // review of the plan) is valid on its own.
+  plan_gate?: LoopVerification[];
 
   // Build bindings.
   build_agent_id: string;
@@ -199,6 +205,21 @@ export interface PendingHumanCheck {
   prompt: string;
   assignee_type: LoopAssigneeType;
   assignee_id: string;
+}
+
+// FIR-2283 v2 point 8 — "per-issue workflow activation".
+// POST /{id}/activate response.
+export interface ActivateWorkflowResponse {
+  activated: boolean;
+  workflow_id: string;
+  issue_id: string;
+}
+
+// GET /for-issue/{issueId} response — which recipe (if any) an issue is
+// currently running. workflow_id is only present when active is true.
+export interface ActiveWorkflowForIssueResponse {
+  active: boolean;
+  workflow_id?: string;
 }
 
 export interface CerebroWorkflowRun {

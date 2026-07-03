@@ -208,3 +208,90 @@ func TestGateEvaluator_AdvancesFromJSONValue(t *testing.T) {
 		t.Fatal("gate did not advance from a JSON-shaped config")
 	}
 }
+
+// fakeStatusSetter records every SetStatus call for assertion, standing in
+// for IssueStatusSetter (which needs a real DB) in tests that only need to
+// prove the gate CALLS the setter with the right arguments.
+type fakeStatusSetter struct {
+	calls []fakeStatusSetterCall
+}
+
+type fakeStatusSetterCall struct {
+	issueID pgtype.UUID
+	status  string
+}
+
+func (f *fakeStatusSetter) SetStatus(_ context.Context, issueID pgtype.UUID, status string) error {
+	f.calls = append(f.calls, fakeStatusSetterCall{issueID: issueID, status: status})
+	return nil
+}
+
+// TestGateEvaluator_RevisesRevertsStatus covers FIR-2283 v2 slice 2d
+// (Jesper's proposal): a revising gate's action includes moving the issue's
+// status back to CheckGateConfig.RevertStatus, on top of (not instead of)
+// the existing direct DispatchRevision re-run.
+func TestGateEvaluator_RevisesRevertsStatus(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	setter := &fakeStatusSetter{}
+	eval := NewGateEvaluator(loopTestPool).WithStatusSetter(setter)
+
+	gate := "revert-gate"
+	check := []string{"go", "test", "./..."}
+	value := CheckGateConfig{Checks: [][]string{check}, RevertStatus: "in_progress"}
+
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval enqueue: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, gate, gateRound, check, 1); err != nil {
+		t.Fatalf("report failure: %v", err)
+	}
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval revise: %v", err)
+	}
+
+	if len(setter.calls) != 1 {
+		t.Fatalf("expected exactly 1 SetStatus call, got %d: %+v", len(setter.calls), setter.calls)
+	}
+	if setter.calls[0].status != "in_progress" {
+		t.Fatalf("expected revert to in_progress, got %q", setter.calls[0].status)
+	}
+	if setter.calls[0].issueID != issueID {
+		t.Fatalf("SetStatus called with the wrong issue id: %+v", setter.calls[0])
+	}
+}
+
+// TestGateEvaluator_NoRevertStatus_NoStatusSetterCall proves the default (no
+// RevertStatus configured, e.g. an older spec) never calls the setter — the
+// revert is opt-in per gate config, not automatic just because a setter is
+// wired.
+func TestGateEvaluator_NoRevertStatus_NoStatusSetterCall(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	setter := &fakeStatusSetter{}
+	eval := NewGateEvaluator(loopTestPool).WithStatusSetter(setter)
+
+	gate := "no-revert-gate"
+	check := []string{"go", "test", "./..."}
+	value := CheckGateConfig{Checks: [][]string{check}} // no RevertStatus
+
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval enqueue: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, gate, gateRound, check, 1); err != nil {
+		t.Fatalf("report failure: %v", err)
+	}
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval revise: %v", err)
+	}
+
+	if len(setter.calls) != 0 {
+		t.Fatalf("expected no SetStatus calls without RevertStatus, got %+v", setter.calls)
+	}
+}

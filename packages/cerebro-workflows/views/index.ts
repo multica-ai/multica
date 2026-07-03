@@ -5,3 +5,4 @@ export { WorkflowCanvas } from "./workflow-canvas";
 export { WorkflowIssueLoopForm } from "./workflow-issue-loop-form";
 export { WorkflowRunsPage } from "./workflow-runs-page";
 export { WorkflowsNavItem } from "./workflows-nav-item";
+export { WorkflowPicker } from "./workflow-picker";

@@ -32,6 +32,7 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // IssueLoopBridge implements workflows.IssueLoopCompiler over the generated
@@ -81,16 +82,37 @@ type issueLoopSpecWire struct {
 	JudgeSkill   string `json:"judge_skill,omitempty"`
 }
 
-// SyncIssueLoop parses workflowID's loop_spec, compiles it, and replaces its
-// previously-generated child rules with the fresh set.
+// SyncIssueLoop parses workflowID's loop_spec, compiles it PROJECT-WIDE, and
+// replaces its previously-generated project-wide child rules with the fresh
+// set. Called after every create/update of the recipe itself.
 func (b *IssueLoopBridge) SyncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte) error {
+	return b.syncIssueLoop(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, loopSpecJSON, pgtype.UUID{})
+}
+
+// ActivateOnIssue compiles workflowID's saved recipe scoped to issueID alone
+// (FIR-2283 v2 point 8), independent from the project-wide compile and from
+// any other issue's activation of the same recipe.
+func (b *IssueLoopBridge) ActivateOnIssue(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string, loopSpecJSON []byte) error {
+	if !issueID.Valid {
+		return fmt.Errorf("activate on issue: issueID is required")
+	}
+	return b.syncIssueLoop(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, loopSpecJSON, issueID)
+}
+
+// syncIssueLoop is the shared compile-and-materialize path for both
+// SyncIssueLoop (issueID zero value — project-wide) and ActivateOnIssue
+// (issueID set). Delete-then-recreate always replaces the previous
+// generated set for the SAME scope rather than diffing, so a re-sync never
+// leaves a stale rule behind; DeleteGeneratedChildren[ForIssue] is scoped so
+// this never touches a different scope's rows.
+func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte, issueID pgtype.UUID) error {
 	var wire issueLoopSpecWire
 	if err := json.Unmarshal(loopSpecJSON, &wire); err != nil {
 		return fmt.Errorf("loop_spec: invalid JSON: %w", err)
 	}
-	if wire.BuildAgentID == "" {
-		return fmt.Errorf("loop_spec: build_agent_id is required")
-	}
+	// build_agent_id is intentionally optional (FIR-2283 v2): a recipe with no
+	// pinned build agent falls back to the triggering issue's own assignee at
+	// dispatch time — see CompileParams.AgentID.
 	if wire.BuildSkill == "" {
 		return fmt.Errorf("loop_spec: build_skill is required")
 	}
@@ -106,26 +128,33 @@ func (b *IssueLoopBridge) SyncIssueLoop(ctx context.Context, workspaceID, workfl
 		JudgeAgentID:   wire.JudgeAgentID,
 		JudgeSkill:     wire.JudgeSkill,
 	}
+	if issueID.Valid {
+		params.IssueID = util.UUIDToString(issueID)
+	}
 
 	rules, err := Compile(&wire.Spec, params)
 	if err != nil {
 		return fmt.Errorf("compile loop spec: %w", err)
 	}
 
-	// Delete-then-recreate: always replace the previous generated set rather
-	// than diffing, so a re-sync never leaves a stale rule behind.
-	if err := b.columns.DeleteGeneratedChildren(ctx, workflowID); err != nil {
-		return err
+	if issueID.Valid {
+		if err := b.columns.DeleteAllGeneratedChildrenForIssue(ctx, issueID); err != nil {
+			return err
+		}
+	} else {
+		if err := b.columns.DeleteGeneratedChildren(ctx, workflowID); err != nil {
+			return err
+		}
 	}
 	for _, rule := range rules {
-		if err := b.materializeRule(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, rule); err != nil {
+		if err := b.materializeRule(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, rule, issueID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (b *IssueLoopBridge) materializeRule(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, rule Rule) error {
+func (b *IssueLoopBridge) materializeRule(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, rule Rule, issueID pgtype.UUID) error {
 	triggerConfigJSON, err := json.Marshal(rule.TriggerConfig)
 	if err != nil {
 		return fmt.Errorf("marshal %s trigger config: %w", rule.Name, err)
@@ -159,6 +188,9 @@ func (b *IssueLoopBridge) materializeRule(ctx context.Context, workspaceID, work
 	})
 	if err != nil {
 		return fmt.Errorf("create %s workflow: %w", rule.Name, err)
+	}
+	if issueID.Valid {
+		return b.columns.SetGeneratedFromForIssue(ctx, row.ID, workflowID, issueID)
 	}
 	return b.columns.SetGeneratedFrom(ctx, row.ID, workflowID)
 }

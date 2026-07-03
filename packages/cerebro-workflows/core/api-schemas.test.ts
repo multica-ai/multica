@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { parseWithFallback } from "@multica/core/api";
 import {
+  EMPTY_ACTIVATE_WORKFLOW,
+  EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
+  activateWorkflowSchema,
+  activeWorkflowForIssueSchema,
   regenerateInboundTokenSchema,
   workflowRunsListSchema,
   workflowSchema,
@@ -154,6 +158,47 @@ describe("regenerateInboundTokenSchema (parseWithFallback wiring)", () => {
     );
     expect(out.inbound_webhook_token).toBe("tok-xyz");
     expect(out.inbound_webhook_url).toContain("/webhook/tok-xyz");
+  });
+});
+
+describe("activateWorkflowSchema (FIR-2283 v2 point 8, parseWithFallback wiring)", () => {
+  it("returns the empty fallback on a null body", () => {
+    const out = parseWithFallback(null, activateWorkflowSchema, EMPTY_ACTIVATE_WORKFLOW, {
+      endpoint: "activateWorkflow",
+    });
+    expect(out).toEqual({ activated: false, workflow_id: "", issue_id: "" });
+  });
+
+  it("returns the activated response on a happy body", () => {
+    const out = parseWithFallback(
+      { activated: true, workflow_id: "wf-1", issue_id: "issue-1" },
+      activateWorkflowSchema,
+      EMPTY_ACTIVATE_WORKFLOW,
+      { endpoint: "activateWorkflow" },
+    );
+    expect(out).toEqual({ activated: true, workflow_id: "wf-1", issue_id: "issue-1" });
+  });
+});
+
+describe("activeWorkflowForIssueSchema (parseWithFallback wiring)", () => {
+  it("returns the empty fallback (active: false) on a null body", () => {
+    const out = parseWithFallback(
+      null,
+      activeWorkflowForIssueSchema,
+      EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+      { endpoint: "activeWorkflowForIssue" },
+    );
+    expect(out).toEqual({ active: false });
+  });
+
+  it("carries workflow_id through when a recipe is active", () => {
+    const out = parseWithFallback(
+      { active: true, workflow_id: "wf-1" },
+      activeWorkflowForIssueSchema,
+      EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+      { endpoint: "activeWorkflowForIssue" },
+    );
+    expect(out).toEqual({ active: true, workflow_id: "wf-1" });
   });
 });
 

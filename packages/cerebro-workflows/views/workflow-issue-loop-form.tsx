@@ -21,19 +21,20 @@ import { NativeSelect } from "@multica/ui/components/ui/native-select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
-import { AssigneePicker } from "@multica/views/issues/components";
+import { AssigneePicker, IssuePickerModal } from "@multica/views/issues/components";
+import type { Issue } from "@multica/core/types";
 import { Plus, Trash2 } from "lucide-react";
 
 import { SkillNamePicker } from "./loop-pickers";
 
 import {
-  CONFIRMED_BY_OPTIONS,
   DEFAULT_LOOP_CAPS,
   cerebroLoopStateOptions,
   cerebroWorkflowDetailOptions,
   cerebroWorkflowsKeys,
   createWorkflow,
   updateWorkflow,
+  useActivateWorkflowMutation,
   useApproveHumanCheckMutation,
 } from "../core";
 import type {
@@ -45,15 +46,30 @@ import type {
   WorkflowWriteInput,
 } from "../core/types";
 
+// FIR-2283 v2 point 6 — the editor no longer exposes the wire's three-way
+// "Confirmed by" (command / AI review / person). A condition is now either
+// "A command" or "A review", and WHO is assigned to the review decides the
+// rest: an agent assignee compiles to a wire "judge" check, a person to a
+// "human" check. So the UI kind is 2-way; the wire type is still 3-way and
+// derived at serialization time (wireTypeForRow).
+type RowKind = "programmatic" | "review";
+
+const ROW_KIND_OPTIONS: ReadonlyArray<{ value: RowKind; label: string }> = [
+  { value: "programmatic", label: "A command" },
+  { value: "review", label: "A review" },
+];
+
 interface VerificationRow {
   key: string; // React key + the verification id sent to the server
   label: string;
-  type: LoopCheckType;
+  kind: RowKind;
   command: string; // space-separated argv, edited under "Advanced"
-  runsAs: "skill" | "prompt";
-  skill: string;
-  rubric: string;
+  // The review instruction — what the reviewer should check. Maps to the
+  // wire's `rubric` for an agent review and `prompt` for a person.
   prompt: string;
+  // Optional skill an AGENT review runs instead of judging from the prompt.
+  // Ignored for a person review (people don't run skills).
+  skill: string;
   assigneeType: LoopAssigneeType;
   assigneeId: string;
 }
@@ -62,15 +78,19 @@ function newRow(): VerificationRow {
   return {
     key: `check-${Math.random().toString(36).slice(2, 10)}`,
     label: "",
-    type: "programmatic",
+    kind: "programmatic",
     command: "",
-    runsAs: "skill",
-    skill: "",
-    rubric: "",
     prompt: "",
+    skill: "",
     assigneeType: "agent",
     assigneeId: "",
   };
+}
+
+// The wire's LoopCheckType, derived from the UI kind + who is assigned.
+function wireTypeForRow(row: VerificationRow): LoopCheckType {
+  if (row.kind === "programmatic") return "programmatic";
+  return row.assigneeType === "member" ? "human" : "judge";
 }
 
 interface LoopFormState {
@@ -85,6 +105,10 @@ interface LoopFormState {
   maxAttempts: string;
   noProgressStalls: string;
   verification: VerificationRow[];
+  // Gates on the Plan step (FIR-2283 v2 point 6) — only shown/sent when
+  // planning is true. Empty means no plan gate: the agent advances Plan ->
+  // Build on its own judgment, same as before this feature existed.
+  planGate: VerificationRow[];
 }
 
 const EMPTY_LOOP_FORM: LoopFormState = {
@@ -99,7 +123,56 @@ const EMPTY_LOOP_FORM: LoopFormState = {
   maxAttempts: String(DEFAULT_LOOP_CAPS.max_iterations),
   noProgressStalls: String(DEFAULT_LOOP_CAPS.no_progress_stalls),
   verification: [newRow()],
+  planGate: [],
 };
+
+// rowsFromVerification/verificationFromRows convert between the wire shape
+// (LoopVerification[]) and the editable form rows — shared by the Delivery
+// gate (verification) and the Plan gate (plan_gate), which use the exact
+// same per-condition shape.
+function rowsFromVerification(list: LoopVerification[]): VerificationRow[] {
+  return list.map((v) => ({
+    key: v.id,
+    label: v.label ?? "",
+    kind: v.type === "programmatic" ? "programmatic" : "review",
+    command: (v.check ?? []).join(" "),
+    // Both wire review types collapse into one editable instruction: a
+    // judge stores it as `rubric`, a person as `prompt`.
+    prompt: v.rubric ?? v.prompt ?? "",
+    skill: v.skill ?? "",
+    // Default an old judge check (no explicit assignee_type) to an agent,
+    // an old human check to a person.
+    assigneeType: v.assignee_type ?? (v.type === "human" ? "member" : "agent"),
+    assigneeId: v.assignee_id ?? "",
+  }));
+}
+
+function verificationFromRows(rows: VerificationRow[]): LoopVerification[] {
+  return rows.map((row, i) => {
+    const wireType = wireTypeForRow(row);
+    const base: LoopVerification = {
+      id: row.key || `check-${i}`,
+      type: wireType,
+      label: row.label || undefined,
+    };
+    if (wireType === "programmatic") {
+      base.check = row.command.trim().split(/\s+/).filter(Boolean);
+      base.expect = "exit_zero";
+    } else if (wireType === "human") {
+      base.assignee_type = "member";
+      base.assignee_id = row.assigneeId;
+      base.prompt = row.prompt;
+    } else {
+      // judge — an agent review. Runs a skill if one is chosen, otherwise
+      // judges from the free-text instruction.
+      base.assignee_type = "agent";
+      base.assignee_id = row.assigneeId;
+      if (row.skill) base.skill = row.skill;
+      base.rubric = row.prompt || row.label || row.skill;
+    }
+    return base;
+  });
+}
 
 function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
   const spec = wf.loop_spec;
@@ -118,20 +191,8 @@ function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
       spec.caps?.no_progress_stalls ?? DEFAULT_LOOP_CAPS.no_progress_stalls,
     ),
     verification:
-      spec.verification.length > 0
-        ? spec.verification.map((v) => ({
-            key: v.id,
-            label: v.label ?? "",
-            type: v.type,
-            command: (v.check ?? []).join(" "),
-            runsAs: v.skill ? "skill" : "prompt",
-            skill: v.skill ?? "",
-            rubric: v.rubric ?? "",
-            prompt: v.prompt ?? "",
-            assigneeType: v.assignee_type ?? "agent",
-            assigneeId: v.assignee_id ?? "",
-          }))
-        : [newRow()],
+      spec.verification.length > 0 ? rowsFromVerification(spec.verification) : [newRow()],
+    planGate: spec.plan_gate && spec.plan_gate.length > 0 ? rowsFromVerification(spec.plan_gate) : [],
   };
 }
 
@@ -141,37 +202,12 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
     1,
     Number.parseInt(form.noProgressStalls, 10) || DEFAULT_LOOP_CAPS.no_progress_stalls,
   );
-  const verification: LoopVerification[] = form.verification.map((row, i) => {
-    const base: LoopVerification = {
-      id: row.key || `check-${i}`,
-      type: row.type,
-      label: row.label || undefined,
-    };
-    if (row.type === "programmatic") {
-      base.check = row.command.trim().split(/\s+/).filter(Boolean);
-      base.expect = "exit_zero";
-    } else if (row.type === "judge") {
-      base.assignee_type = row.assigneeType;
-      base.assignee_id = row.assigneeId;
-      if (row.runsAs === "skill") {
-        base.skill = row.skill;
-        base.rubric = row.label || row.skill;
-      } else {
-        base.rubric = row.rubric;
-      }
-    } else {
-      base.assignee_type = row.assigneeType;
-      base.assignee_id = row.assigneeId;
-      base.prompt = row.prompt;
-    }
-    return base;
-  });
 
   return {
     version: 1,
     goal: form.goal,
     definition_of_done: form.definitionOfDone,
-    verification,
+    verification: verificationFromRows(form.verification),
     caps: {
       max_iterations: attempts,
       max_revisions: attempts,
@@ -179,6 +215,8 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
     },
     planning: form.planning,
     plan_skill: form.planning ? form.planSkill || form.buildSkill : undefined,
+    plan_gate:
+      form.planning && form.planGate.length > 0 ? verificationFromRows(form.planGate) : undefined,
     build_agent_id: form.buildAgentId,
     build_skill: form.buildSkill,
   };
@@ -255,12 +293,21 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
     );
   }
 
-  const setRow = (key: string, patch: Partial<VerificationRow>) => {
-    setForm((f) => ({
-      ...f,
-      verification: f.verification.map((r) => (r.key === key ? { ...r, ...patch } : r)),
-    }));
-  };
+  // Shared row editing for both gate lists (Delivery gate = "verification",
+  // Plan gate = "planGate") — same VerificationRow shape, same operations.
+  const rowOps = (field: "verification" | "planGate") => ({
+    set: (key: string, patch: Partial<VerificationRow>) =>
+      setForm((f) => ({
+        ...f,
+        [field]: f[field].map((r) => (r.key === key ? { ...r, ...patch } : r)),
+      })),
+    add: () => setForm((f) => ({ ...f, [field]: [...f[field], newRow()] })),
+    remove: (key: string) =>
+      setForm((f) => ({ ...f, [field]: f[field].filter((r) => r.key !== key) })),
+  });
+  const verificationOps = rowOps("verification");
+  const planGateOps = rowOps("planGate");
+  const setRow = verificationOps.set;
 
   const body = (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -309,13 +356,46 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
             When enabled, the agent must produce and post a plan before Build starts.
           </p>
           {form.planning && (
-            <Field label="Plan skill (defaults to the build skill below)">
-              <SkillNamePicker
-                value={form.planSkill}
-                onChange={(name) => setForm({ ...form, planSkill: name })}
-                placeholder="Same as the build skill"
-              />
-            </Field>
+            <>
+              <Field label="Plan skill (defaults to the build skill below)">
+                <SkillNamePicker
+                  value={form.planSkill}
+                  onChange={(name) => setForm({ ...form, planSkill: name })}
+                  placeholder="Same as the build skill"
+                />
+              </Field>
+
+              <div className="flex flex-col gap-2 border-t pt-3">
+                <p className="text-[11px] text-muted-foreground">
+                  Optional — Build only starts when… (e.g. an adversarial AI review of the
+                  plan). Leave empty to let the agent move to Build on its own judgment.
+                </p>
+                {form.planGate.length > 0 && (
+                  <div className="flex flex-col gap-4">
+                    {form.planGate.map((row, i) => (
+                      <VerificationRowEditor
+                        key={row.key}
+                        row={row}
+                        index={i}
+                        canRemove
+                        onChange={(patch) => planGateOps.set(row.key, patch)}
+                        onRemove={() => planGateOps.remove(row.key)}
+                      />
+                    ))}
+                  </div>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={planGateOps.add}
+                >
+                  <Plus className="size-4" />
+                  Add plan gate
+                </Button>
+              </div>
+            </>
           )}
         </Section>
 
@@ -497,10 +577,10 @@ function VerificationRowEditor({
 
       <Field label="Confirmed by">
         <NativeSelect
-          value={row.type}
-          onChange={(e) => onChange({ type: e.target.value as LoopCheckType })}
+          value={row.kind}
+          onChange={(e) => onChange({ kind: e.target.value as RowKind })}
         >
-          {CONFIRMED_BY_OPTIONS.map((opt) => (
+          {ROW_KIND_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -508,10 +588,20 @@ function VerificationRowEditor({
         </NativeSelect>
       </Field>
 
-      {row.type === "programmatic" && (
+      {row.kind === "programmatic" && (
         <details className="rounded-md border bg-muted/30 p-2 text-xs">
           <summary className="cursor-pointer select-none text-muted-foreground">Advanced</summary>
           <div className="mt-2 flex flex-col gap-2">
+            {/* FIR-2283 v2 point 5 — explain, in the editor, what a command
+                is and how to add a new one, instead of leaving it unexplained. */}
+            <p className="text-muted-foreground">
+              A command is anything this issue&apos;s repo can already run — e.g.{" "}
+              <code>make test</code>, <code>pnpm typecheck</code>,{" "}
+              <code>go test ./...</code>. The engine runs it in the repo and reads the
+              exit code: <strong>0 = passed</strong>, anything else = failed. To add a
+              new check, make the command exist in the repo (a Makefile target, an npm
+              script, a shell script) — then type it here. No special registration.
+            </p>
             <NativeSelect
               defaultValue=""
               onChange={(e) => {
@@ -536,50 +626,33 @@ function VerificationRowEditor({
         </details>
       )}
 
-      {row.type === "judge" && (
+      {/* FIR-2283 v2 point 6 — one "A review" branch. The assignee picker
+          (agents + people, shared component) decides everything: an agent is
+          an AI review that can run a skill; a person is a human sign-off. */}
+      {row.kind === "review" && (
         <>
-          <Field label="Runs">
-            <NativeSelect
-              value={row.runsAs}
-              onChange={(e) => onChange({ runsAs: e.target.value as "skill" | "prompt" })}
-            >
-              <option value="skill">A skill</option>
-              <option value="prompt">A prompt</option>
-            </NativeSelect>
-          </Field>
-          {row.runsAs === "skill" ? (
-            <Field label="Skill">
+          <AssigneeFields row={row} onChange={onChange} />
+          {row.assigneeType === "agent" && (
+            <Field label="Run a skill (optional)">
               <SkillNamePicker
                 value={row.skill}
                 onChange={(name) => onChange({ skill: name })}
-                placeholder="Select the review skill"
-              />
-            </Field>
-          ) : (
-            <Field label="Prompt">
-              <Textarea
-                value={row.rubric}
-                onChange={(e) => onChange({ rubric: e.target.value })}
-                rows={2}
-                placeholder="What should the review judge?"
+                placeholder="Leave empty to review from the instruction below"
               />
             </Field>
           )}
-          <AssigneeFields row={row} onChange={onChange} />
-        </>
-      )}
-
-      {row.type === "human" && (
-        <>
-          <Field label="Prompt">
+          <Field label={row.assigneeType === "member" ? "What should they sign off on?" : "What should the review check?"}>
             <Textarea
               value={row.prompt}
               onChange={(e) => onChange({ prompt: e.target.value })}
               rows={2}
-              placeholder="What should the person sign off on?"
+              placeholder={
+                row.assigneeType === "member"
+                  ? "What should the person confirm before this is done?"
+                  : "What should the AI review judge? (ignored if a skill is chosen above)"
+              }
             />
           </Field>
-          <AssigneeFields row={row} onChange={onChange} />
         </>
       )}
     </div>
@@ -595,18 +668,21 @@ function AssigneeFields({
 }) {
   return (
     <Field label="Assign to">
-      <AssigneePicker
-        assigneeType={row.assigneeId ? row.assigneeType : null}
-        assigneeId={row.assigneeId || null}
-        onUpdate={(u) => {
-          const type = u.assignee_type;
-          if (type === "agent" || type === "member") {
-            onChange({ assigneeType: type, assigneeId: u.assignee_id ?? "" });
-          } else {
-            onChange({ assigneeId: "" });
-          }
-        }}
-      />
+      <div className="w-fit max-w-full">
+        <AssigneePicker
+          assigneeType={row.assigneeId ? row.assigneeType : null}
+          assigneeId={row.assigneeId || null}
+          onUpdate={(u) => {
+            const type = u.assignee_type;
+            if (type === "agent" || type === "member") {
+              onChange({ assigneeType: type, assigneeId: u.assignee_id ?? "" });
+            } else {
+              onChange({ assigneeId: "" });
+            }
+          }}
+          align="start"
+        />
+      </div>
     </Field>
   );
 }
@@ -632,21 +708,63 @@ function ControlStrip({
     ...cerebroLoopStateOptions(wsId, workflowId, watchIssueId),
   });
   const approve = useApproveHumanCheckMutation(wsId, workflowId, watchIssueId);
+  // FIR-2283 v2 point 8 — "per-issue workflow activation". Reuses the same
+  // watch-issue selection: pick an issue, then either just watch it (above)
+  // or activate this recipe on it (this recipe stays a reusable template —
+  // activating compiles an independent set of rules for THIS issue alone).
+  const activate = useActivateWorkflowMutation(wsId, watchIssueId);
+  // FIR-2283 v2 point 7 — "ALDRIG at man skal indsætte id'er". The raw
+  // paste-a-UUID input is gone; you search an issue by title and pick it,
+  // and we show its identifier/title, never the UUID.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [watchIssue, setWatchIssue] = useState<Issue | null>(null);
 
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <Field label="Loop">
           <Switch checked={enabled} onCheckedChange={(v) => onToggle(v === true)} />
         </Field>
-        <Field label="Watch issue (paste an issue id to follow it here)">
-          <Input
-            value={watchIssueId}
-            onChange={(e) => onChangeWatchIssueId(e.target.value)}
-            placeholder="<issue uuid>"
-            className="w-56"
-          />
+        <Field label="Watch an issue">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-56 justify-start font-normal"
+            onClick={() => setPickerOpen(true)}
+          >
+            <span className="truncate">
+              {watchIssue ? (
+                <>
+                  <span className="text-muted-foreground">{watchIssue.identifier}</span>{" "}
+                  {watchIssue.title}
+                </>
+              ) : (
+                <span className="text-muted-foreground">Search for an issue…</span>
+              )}
+            </span>
+          </Button>
         </Field>
+        <IssuePickerModal
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          title="Watch an issue"
+          description="Search by title and pick the issue to watch or activate this workflow on."
+          excludeIds={[]}
+          onSelect={(issue) => {
+            setWatchIssue(issue);
+            onChangeWatchIssueId(issue.id);
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!watchIssueId || activate.isPending}
+          onClick={() => activate.mutate(workflowId)}
+        >
+          {activate.isPending ? "Activating…" : "Activate on this issue"}
+        </Button>
         {workspace && (
           <Button
             type="button"
@@ -658,6 +776,17 @@ function ControlStrip({
           </Button>
         )}
       </div>
+      {activate.isSuccess && (
+        <p className="text-xs text-green-600 dark:text-green-400">
+          Activated on this issue — it now runs this recipe independently of the project-wide
+          compile.
+        </p>
+      )}
+      {activate.isError && (
+        <p className="text-xs text-destructive">
+          {activate.error instanceof Error ? activate.error.message : "Could not activate"}
+        </p>
+      )}
 
       {watchIssueId && loopState.data && (
         <div className="flex flex-col gap-2 text-xs">

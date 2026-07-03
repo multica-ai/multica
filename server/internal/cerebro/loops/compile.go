@@ -17,6 +17,59 @@ import (
 // build can target a stable shape.
 const CheckGateOp = "check_passes"
 
+// issueScopeField/issueScopeOp select the engine's generic "eq" condition
+// against the trigger event's own issue id (workflows.evaluate walks
+// te.Raw["issue"]["id"] for the dotted path "issue.id" — see
+// workflows/conditions.go and workflows/listener.go's onIssueUpdated, which
+// always populates payload["issue"]["id"]). Compile appends this condition to
+// every rule when CompileParams.IssueID is set, so a per-issue Issue workflow
+// activation reuses the existing pure evaluator instead of adding a new op.
+const (
+	issueScopeField = "issue.id"
+	issueScopeOp    = "eq"
+)
+
+// issueScopeCondition returns the single-issue scoping condition for
+// issueID, or nil when issueID is empty (project-wide — the default).
+func issueScopeCondition(issueID string) []workflows.Condition {
+	if issueID == "" {
+		return nil
+	}
+	return []workflows.Condition{{Field: issueScopeField, Op: issueScopeOp, Value: issueID}}
+}
+
+// splitChecks converts one CheckType-filtered triple of Verification slices
+// (as returned by Spec's ProgrammaticChecks/JudgeChecks/HumanChecks or their
+// PlanGate* equivalents) into the argv/JudgeCheck/HumanCheck shapes a
+// CheckGateConfig carries. Shared by the delivery gate and the plan gate so
+// both build their gate config the same way.
+func splitChecks(programmatic, judge, human []Verification) ([][]string, []JudgeCheck, []HumanCheck) {
+	checks := make([][]string, 0, len(programmatic))
+	for _, v := range programmatic {
+		checks = append(checks, v.Check)
+	}
+	judgeChecks := make([]JudgeCheck, 0, len(judge))
+	for _, v := range judge {
+		judgeChecks = append(judgeChecks, JudgeCheck{
+			ID:           v.ID,
+			Rubric:       v.Rubric,
+			AssigneeID:   v.AssigneeID,
+			AssigneeType: v.AssigneeType,
+			Skill:        v.Skill,
+		})
+	}
+	humanChecks := make([]HumanCheck, 0, len(human))
+	for _, v := range human {
+		humanChecks = append(humanChecks, HumanCheck{
+			ID:           v.ID,
+			Prompt:       v.Prompt,
+			AssigneeType: v.AssigneeType,
+			AssigneeID:   v.AssigneeID,
+		})
+	}
+	return checks, judgeChecks, humanChecks
+}
+
 // CheckGateConfig is stored under workflows.Condition.Value when Op is
 // CheckGateOp. Checks is the set of argv arrays (one per programmatic
 // verification); the gate passes only if all exit zero.
@@ -64,6 +117,15 @@ type CheckGateConfig struct {
 	// for advance/revise/wait purposes — every one must report Approved
 	// before the gate can advance.
 	HumanChecks []HumanCheck `json:"human_checks,omitempty"`
+	// RevertStatus is the status the engine moves the issue back to when this
+	// gate revises (see gate_evaluator.go's StatusSetter). Answers "how does
+	// it gate towards done" for the board, not just the DB: a failing gate
+	// visibly sends the issue back to Build/Plan instead of leaving it
+	// sitting on a status the loop has already moved past. Empty means no
+	// revert (the pre-FIR-2283-v2-slice2d behavior) — Compile always fills
+	// this in for both the delivery gate (BuildStatus) and the plan gate
+	// (PlanningStatus).
+	RevertStatus string `json:"revert_status,omitempty"`
 }
 
 // JudgeCheck is one judge-type verification criterion carried into the gate
@@ -94,7 +156,28 @@ type HumanCheck struct {
 // carry: which agent worker builds, which skill it runs, and the status names
 // that mark the loop's phases.
 type CompileParams struct {
-	AgentID      string // worker dispatched to build (run_skill)
+	// IssueID scopes every compiled rule to a single issue instead of the
+	// whole project (FIR-2283 v2 point 8 — "per-issue workflow activation").
+	// A recipe compiled without IssueID fires for every issue in the project
+	// that passes through the bound statuses, exactly as a standard workflow
+	// does — that stays the default. When a caller compiles the SAME recipe
+	// for one specific issue (the "run this workflow on this issue" picker),
+	// IssueID makes Compile append an `issue.id eq IssueID` condition to
+	// every rule, so the materialized workflow rows only ever fire for that
+	// issue. Reuses the engine's existing pure condition evaluator — no new
+	// condition op, no DB schema change.
+	IssueID string
+
+	// AgentID is the worker dispatched to build (run_skill). Optional (FIR-2283
+	// v2): an Issue workflow recipe may leave its agent picker empty so the
+	// same recipe is reusable across issues with different owners. When
+	// empty, workflows.actionRunSkill resolves the dispatch/plan step to
+	// whoever the triggering issue is currently assigned to. The delivery
+	// gate's own check dispatch (CheckGateConfig.AgentID) still degrades to
+	// "hold without dispatching" when empty — see gate_evaluator.go — so a
+	// recipe with no pinned agent and an issue with no agent assignee simply
+	// waits at the gate instead of silently picking an arbitrary worker.
+	AgentID      string
 	BuildSkill   string // skill the worker runs each build round
 	BuildStatus  string // status whose entry dispatches a build round
 	ReviewStatus string // status the worker sets when it claims a round done
@@ -174,10 +257,10 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid loop spec: %w", err)
 	}
+	// AgentID is intentionally not required here (FIR-2283 v2) — see the
+	// CompileParams.AgentID doc comment for how an empty build agent
+	// resolves at runtime instead of at compile time.
 	var errs []error
-	if params.AgentID == "" {
-		errs = append(errs, errors.New("params.agent_id is required"))
-	}
 	if params.BuildSkill == "" {
 		errs = append(errs, errors.New("params.build_skill is required"))
 	}
@@ -186,29 +269,32 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	}
 	p := params.withDefaults()
 
-	checks := make([][]string, 0, len(spec.Verification))
-	for _, v := range spec.ProgrammaticChecks() {
-		checks = append(checks, v.Check)
-	}
+	checks, judgeChecks, humanChecks := splitChecks(spec.ProgrammaticChecks(), spec.JudgeChecks(), spec.HumanChecks())
 
-	judgeChecks := make([]JudgeCheck, 0, len(spec.Verification))
-	for _, v := range spec.JudgeChecks() {
-		judgeChecks = append(judgeChecks, JudgeCheck{
-			ID:           v.ID,
-			Rubric:       v.Rubric,
-			AssigneeID:   v.AssigneeID,
-			AssigneeType: v.AssigneeType,
-			Skill:        v.Skill,
-		})
-	}
+	issueScope := issueScopeCondition(params.IssueID)
 
-	humanChecks := make([]HumanCheck, 0, len(spec.Verification))
-	for _, v := range spec.HumanChecks() {
-		humanChecks = append(humanChecks, HumanCheck{
-			ID:           v.ID,
-			Prompt:       v.Prompt,
-			AssigneeType: v.AssigneeType,
-			AssigneeID:   v.AssigneeID,
+	// Plan gate (FIR-2283 v2 point 6): when set, a check_passes condition on
+	// loop:dispatch-build itself — a second, independently-keyed gate from
+	// the delivery gate below (its gate key is loop:dispatch-build's own
+	// materialized row id, see gate_evaluator.go's EvaluateCheckGate). A
+	// failing plan gate re-dispatches the plan skill (RevisionSkill) instead
+	// of starting the build; the run_skill action only fires once it passes.
+	dispatchBuildConditions := append([]workflows.Condition{}, issueScope...)
+	if spec.Planning && len(spec.PlanGate) > 0 {
+		planChecks, planJudgeChecks, planHumanChecks := splitChecks(
+			spec.PlanGateProgrammaticChecks(), spec.PlanGateJudgeChecks(), spec.PlanGateHumanChecks())
+		dispatchBuildConditions = append(dispatchBuildConditions, workflows.Condition{
+			Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
+				Checks:        planChecks,
+				AgentID:       params.AgentID,
+				Caps:          spec.Caps,
+				RevisionSkill: p.PlanSkill,
+				JudgeChecks:   planJudgeChecks,
+				JudgeAgentID:  p.JudgeAgentID,
+				JudgeSkill:    p.JudgeSkill,
+				HumanChecks:   planHumanChecks,
+				RevertStatus:  p.PlanningStatus,
+			},
 		})
 	}
 
@@ -217,6 +303,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			Name:          "loop:dispatch-build",
 			TriggerType:   workflows.TriggerStatusChanged,
 			TriggerConfig: workflows.TriggerConfigStatusChanged{ToStatus: p.BuildStatus},
+			Conditions:    dispatchBuildConditions,
 			ActionType:    workflows.ActionRunSkill,
 			ActionConfig: workflows.ActionConfigRunSkill{
 				SkillName: p.BuildSkill,
@@ -227,8 +314,8 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			Name:          "loop:delivery-gate",
 			TriggerType:   workflows.TriggerStatusChanged,
 			TriggerConfig: workflows.TriggerConfigStatusChanged{ToStatus: p.ReviewStatus},
-			Conditions: []workflows.Condition{
-				{Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
+			Conditions: append(append([]workflows.Condition{}, issueScope...),
+				workflows.Condition{Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
 					Checks:        checks,
 					AgentID:       params.AgentID,
 					Caps:          spec.Caps,
@@ -237,8 +324,9 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 					JudgeAgentID:  p.JudgeAgentID,
 					JudgeSkill:    p.JudgeSkill,
 					HumanChecks:   humanChecks,
+					RevertStatus:  p.BuildStatus,
 				}},
-			},
+			),
 			ActionType:   workflows.ActionSetStatus,
 			ActionConfig: workflows.ActionConfigSetStatus{Status: p.DoneStatus},
 		},
@@ -246,6 +334,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			Name:          "loop:escalate-stalled",
 			TriggerType:   workflows.TriggerStatusChanged,
 			TriggerConfig: workflows.TriggerConfigStatusChanged{ToStatus: p.ReviewStatus},
+			Conditions:    issueScope,
 			ActionType:    workflows.ActionEscalateToOwner,
 			ActionConfig:  workflows.ActionConfigEscalateToOwner{},
 		},
@@ -259,6 +348,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	// separate gate.
 	if spec.Planning {
 		planRule := PlanningDispatchRule(params.AgentID, p.PlanSkill, p.PlanningStatus)
+		planRule.Conditions = issueScope
 		rules = append([]Rule{planRule}, rules...)
 	}
 

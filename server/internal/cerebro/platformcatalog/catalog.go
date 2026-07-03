@@ -962,6 +962,7 @@ var catalog = []Capability{
 			"PUT /api/cerebro/workflows/{id}",
 			"DELETE /api/cerebro/workflows/{id}",
 			"POST /api/cerebro/workflows/{id}/toggle",
+			"POST /api/cerebro/workflows/{id}/activate",
 			"POST /api/cerebro/workflows/{id}/human-checks/{checkId}/approve",
 			"POST /api/cerebro/workflows/{id}/regenerate-outbound-secret",
 			"POST /api/cerebro/workflows/{id}/regenerate-signing-secret",

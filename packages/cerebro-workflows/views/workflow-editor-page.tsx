@@ -53,7 +53,7 @@ export function WorkflowEditorPage({ workflowId }: Props) {
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -73,7 +73,7 @@ export function WorkflowEditorPage({ workflowId }: Props) {
   if (workflowId && (!detail.data || (workflowType === "standard" && !modeHydrated))) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Indlæser workflow…
+        Loading workflow…
       </div>
     );
   }
@@ -82,7 +82,7 @@ export function WorkflowEditorPage({ workflowId }: Props) {
     return <WorkflowIssueLoopForm workflowId={workflowId} />;
   }
 
-  const heading = workflowId ? "Rediger workflow" : "Nyt workflow";
+  const heading = workflowId ? "Edit workflow" : "New workflow";
   const toggle = (
     <div
       className="inline-flex items-center gap-1 rounded-md border bg-muted p-1 text-xs"
@@ -113,8 +113,8 @@ export function WorkflowEditorPage({ workflowId }: Props) {
           <h1 className="text-sm font-semibold">{heading}</h1>
           <p className="truncate text-[11px] text-muted-foreground">
             {mode === "form"
-              ? "Form-mode: alle felter i én visning."
-              : "Canvas-mode: trigger og action som node-graf med inspector."}
+              ? "Form mode: all fields in one view."
+              : "Canvas mode: trigger and action as a node graph with an inspector."}
           </p>
         </div>
         {toggle}
@@ -160,14 +160,14 @@ function ModeButton({
 function CanvasLoading() {
   return (
     <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-      Indlæser canvas…
+      Loading canvas…
     </div>
   );
 }
 
-// FIR-2283 — type-vælger for et NYT workflow. Samme Section/fieldset-idiom
-// som resten af pakken (workflow-form.tsx's Section) — ingen mockup-kort, kun
-// to knapper i den eksisterende opsætning.
+// FIR-2283 — type picker for a NEW workflow. Same Section/fieldset idiom as
+// the rest of the package (workflow-form.tsx's Section) — no mockup cards,
+// just two buttons in the existing layout.
 function TypePicker({
   onChoose,
 }: {
@@ -177,21 +177,21 @@ function TypePicker({
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-3">
         <div className="flex min-w-0 flex-col">
-          <h1 className="text-sm font-semibold">Nyt workflow</h1>
-          <p className="truncate text-[11px] text-muted-foreground">Vælg type</p>
+          <h1 className="text-sm font-semibold">New workflow</h1>
+          <p className="truncate text-[11px] text-muted-foreground">Choose a type</p>
         </div>
       </PageHeader>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-3 p-6">
           <TypeOption
             title="Standard workflow"
-            description="Trigger → conditions → action. Kør en enkelt regel når noget sker."
+            description="Trigger → conditions → action. Runs a single rule when something happens."
             onClick={() => onChoose("standard")}
             testId="workflow-type-standard"
           />
           <TypeOption
             title="Issue workflow"
-            description="Plan → Build → Delivery gate → Done. Et selvkørende loop der kun bliver færdigt når et rigtigt tjek er grønt."
+            description="Plan → Build → Delivery gate → Done. A self-running loop that only finishes once a real check passes."
             onClick={() => onChoose("issue_loop")}
             testId="workflow-type-issue-loop"
           />

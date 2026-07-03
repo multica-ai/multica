@@ -26,11 +26,24 @@ import (
 // Tests that never trigger a revision can still assume round 1 throughout.
 const gateRound int32 = 1
 
+// StatusSetter reverts an issue's status when a gate revises, so the board
+// visibly shows where the loop actually is (e.g. back in Build) instead of
+// sitting on "in_review" while a revision quietly re-runs behind it. Optional
+// and nil-safe on GateEvaluator, mirroring CheckDispatcher: without one wired
+// (or without CheckGateConfig.RevertStatus set), revise() behaves exactly as
+// before. This is best-effort visibility, NOT the mechanism that re-runs the
+// build — DispatchRevision (via CheckDispatcher) still does that directly, so
+// a status-update failure here never blocks the actual revision work.
+type StatusSetter interface {
+	SetStatus(ctx context.Context, issueID pgtype.UUID, status string) error
+}
+
 // GateEvaluator decides loop delivery gates for the workflow engine. It is the
 // concrete implementation of workflows.GateEvaluator.
 type GateEvaluator struct {
-	store      *Store
-	dispatcher CheckDispatcher
+	store        *Store
+	dispatcher   CheckDispatcher
+	statusSetter StatusSetter
 }
 
 // NewGateEvaluator builds a GateEvaluator backed by a check-outcome store on
@@ -45,6 +58,13 @@ func NewGateEvaluator(pool *pgxpool.Pool) *GateEvaluator {
 // Returns the receiver for fluent construction at the call site.
 func (g *GateEvaluator) WithDispatcher(d CheckDispatcher) *GateEvaluator {
 	g.dispatcher = d
+	return g
+}
+
+// WithStatusSetter plugs in the status-revert egress (see StatusSetter).
+// Optional and nil-safe. Returns the receiver for fluent construction.
+func (g *GateEvaluator) WithStatusSetter(s StatusSetter) *GateEvaluator {
+	g.statusSetter = s
 	return g
 }
 
@@ -133,6 +153,15 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 // can fix the failing checks in the fresh round the caps tracker just opened.
 // A cap trip freezes the gate instead: EvaluateCheckGate's Stopped check on
 // the next call is what actually stops the loop from consuming more rounds.
+//
+// When cfg.RevertStatus is set (Compile fills it in — BuildStatus for the
+// delivery gate, PlanningStatus for the plan gate), revise also moves the
+// issue's status back there so the board shows reality (kicked back to
+// Build/Plan) instead of sitting on a status the loop has already moved past.
+// This is deliberately best-effort and additive: a status-update failure is
+// logged-and-swallowed by the caller's error return being non-fatal to the
+// dispatch below in the sense that dispatch always still runs — the actual
+// re-run of the worker never depends on this succeeding.
 func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome, humanOutcomes []HumanOutcome) error {
 	signature := OutcomeSignature(outcomes, judgeOutcomes, humanOutcomes)
 	next, err := g.store.RecordRevision(ctx, issueID, gate, signature, cfg.Caps)
@@ -142,10 +171,14 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 	if next.Stopped {
 		return nil
 	}
-	if g.dispatcher == nil || cfg.AgentID == "" || cfg.RevisionSkill == "" {
-		return nil
+	var revertErr error
+	if g.statusSetter != nil && cfg.RevertStatus != "" {
+		revertErr = g.statusSetter.SetStatus(ctx, issueID, cfg.RevertStatus)
 	}
-	return g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
+	if g.dispatcher == nil || cfg.AgentID == "" || cfg.RevisionSkill == "" {
+		return revertErr
+	}
+	dispatchErr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
 		AgentID:   cfg.AgentID,
 		IssueID:   util.UUIDToString(issueID),
 		Gate:      gate,
@@ -153,6 +186,13 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 		SkillName: cfg.RevisionSkill,
 		Failures:  outcomes,
 	})
+	// The actual re-run must never be silently lost behind a status-revert
+	// failure — surface whichever step failed (dispatch takes priority since
+	// it's the mechanism that matters; the revert is cosmetic).
+	if dispatchErr != nil {
+		return dispatchErr
+	}
+	return revertErr
 }
 
 // dispatchPending sends every enqueued-but-undispatched check for this gate

@@ -46,6 +46,22 @@ type Handler struct {
 	issueLoopColumns *IssueLoopColumnStore
 	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
 	loopCheckStore LoopCheckStore
+	// issueLookup is optional and nil-safe: without it, the per-issue
+	// activation endpoints (FIR-2283 v2 point 8) are unavailable. Wired via
+	// WithIssueLookup from router.go — reuses the IssueLookup interface
+	// webhook_inbound.go already declares (same narrow need: confirm an
+	// issue id is real and belongs to the caller's workspace before acting
+	// on it; tenant isolation — SetGeneratedFromForIssue's FK alone would
+	// catch "no such issue" but not "issue belongs to a different
+	// workspace").
+	issueLookup IssueLookup
+}
+
+// WithIssueLookup plugs in the upstream issue lookup for the per-issue
+// activation endpoints. Returns the receiver for chainable init.
+func (h *Handler) WithIssueLookup(l IssueLookup) *Handler {
+	h.issueLookup = l
+	return h
 }
 
 // WithIssueLoopColumns plugs in the raw-SQL store for the workflow_type /
@@ -1068,6 +1084,123 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"recorded": true})
+}
+
+// ActivateWorkflow handles POST /api/cerebro/workflows/{id}/activate.
+// Body: { issue_id }. {id} must be an issue_loop recipe. Compiles it scoped
+// to issue_id alone (FIR-2283 v2 point 8 — "per-issue workflow activation")
+// — the recipe stays a reusable template; this creates/replaces just that
+// one issue's independent set of compiled rules, leaving the project-wide
+// compile and every other issue's activation untouched.
+func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	if h.issueLoopColumns == nil || h.issueLoopCompiler == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow activation is not wired on this server")
+		return
+	}
+	if h.issueLookup == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue lookup is not wired on this server")
+		return
+	}
+
+	var req struct {
+		IssueID string `json:"issue_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	issueID, err := util.ParseUUID(req.IssueID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "issue_id is required and must be a valid id")
+		return
+	}
+
+	fields, err := h.issueLoopColumns.Get(r.Context(), row.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load recipe")
+		return
+	}
+	if fields.WorkflowType != WorkflowTypeIssueLoop {
+		writeError(w, http.StatusBadRequest, "only an Issue workflow recipe can be activated on an issue")
+		return
+	}
+	if len(fields.LoopSpec) == 0 {
+		writeError(w, http.StatusBadRequest, "this recipe has no loop_spec to compile")
+		return
+	}
+
+	issue, err := h.issueLookup.GetIssue(r.Context(), issueID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if !inWorkspace(r, issue.WorkspaceID) {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+
+	wsUUID, ok := workspaceUUIDOr400(w, r)
+	if !ok {
+		return
+	}
+	creatorID, err := util.ParseUUID(actorID(r, userID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor id")
+		return
+	}
+	if err := h.issueLoopCompiler.ActivateOnIssue(r.Context(), wsUUID, row.ID, row.ProjectID, creatorID, issueID, actorType(r), fields.LoopSpec); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activated": true, "workflow_id": util.UUIDToString(row.ID), "issue_id": req.IssueID})
+}
+
+// ActiveWorkflowForIssue handles GET /api/cerebro/workflows/for-issue/{issueId}.
+// Returns which Issue workflow recipe (if any) issueId is currently running
+// — the binding is derived from the compiled rows themselves (see
+// IssueLoopColumnStore.ActiveWorkflowForIssue), not a separate table.
+func (h *Handler) ActiveWorkflowForIssue(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	if h.issueLoopColumns == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow activation is not wired on this server")
+		return
+	}
+	issueID, ok := pathUUIDOr400(w, r, "issueId")
+	if !ok {
+		return
+	}
+	if h.issueLookup != nil {
+		issue, err := h.issueLookup.GetIssue(r.Context(), issueID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		if !inWorkspace(r, issue.WorkspaceID) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+	}
+
+	workflowID, active, err := h.issueLoopColumns.ActiveWorkflowForIssue(r.Context(), issueID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load active workflow")
+		return
+	}
+	if !active {
+		writeJSON(w, http.StatusOK, map[string]any{"active": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"active": true, "workflow_id": util.UUIDToString(workflowID)})
 }
 
 // --- helpers ---

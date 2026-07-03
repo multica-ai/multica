@@ -347,7 +347,8 @@ func main() {
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 / JEH-1108 — engine is constructed here (before the router) so the public webhook ingress route can be wired into the router with the same Service instance the bus listener and sweepers use.
 	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries, bus)
 	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
-	workflowSvc.WithGateEvaluator(cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries)))
+	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
+	workflowSvc.WithGateEvaluator(cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)))
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,

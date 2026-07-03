@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type {
+  ActivateWorkflowResponse,
+  ActiveWorkflowForIssueResponse,
   CerebroWorkflow,
   LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
@@ -139,6 +141,22 @@ export const loopStateSchema = z
   })
   .passthrough();
 
+// FIR-2283 v2 point 8 — "per-issue workflow activation".
+export const activateWorkflowSchema = z
+  .object({
+    activated: z.boolean().default(false),
+    workflow_id: z.string().default(""),
+    issue_id: z.string().default(""),
+  })
+  .passthrough();
+
+export const activeWorkflowForIssueSchema = z
+  .object({
+    active: z.boolean().default(false),
+    workflow_id: z.string().optional(),
+  })
+  .passthrough();
+
 // Empty / fallback values used by parseWithFallback at call sites. Defined
 // once here so the values stay consistent across api.ts and queries.ts.
 export const EMPTY_WORKFLOWS_LIST: WorkflowsListResponse = { workflows: [] };
@@ -190,4 +208,14 @@ export const EMPTY_LOOP_STATE: LoopStateResponse = {
   round: 0,
   stopped: false,
   pending_human_checks: [],
+};
+
+export const EMPTY_ACTIVATE_WORKFLOW: ActivateWorkflowResponse = {
+  activated: false,
+  workflow_id: "",
+  issue_id: "",
+};
+
+export const EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE: ActiveWorkflowForIssueResponse = {
+  active: false,
 };
