@@ -145,6 +145,28 @@ function tryRouteToPinnedNewTab(path: string): boolean {
 }
 
 /**
+ * Before navigating the active tab to a path, check whether another tab
+ * in the active workspace already has that path open. If so, activate it
+ * instead — this is the sidebar dedupe behaviour that prevents duplicate
+ * tabs (e.g. clicking Inbox twice shouldn't create two Inbox tabs).
+ *
+ * Returns `true` if an existing tab was activated (caller should NOT
+ * proceed with navigation). Returns `false` if no tab matches the path
+ * (caller should navigate the active tab as usual).
+ */
+function tryActivateExistingTab(path: string): boolean {
+  const store = useTabStore.getState();
+  const { activeWorkspaceSlug, byWorkspace } = store;
+  if (!activeWorkspaceSlug) return false;
+  const group = byWorkspace[activeWorkspaceSlug];
+  if (!group) return false;
+  const existing = group.tabs.find((t) => t.path === path);
+  if (!existing || existing.id === group.activeTabId) return false;
+  store.setActiveTab(existing.id);
+  return true;
+}
+
+/**
  * Root-level navigation provider for components outside the per-tab
  * RouterProviders (sidebar, search dialog, modals, WindowOverlay contents).
  *
@@ -203,6 +225,7 @@ export function DesktopNavigationProvider({
         if (active && routerLocationPath(active.router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
+        if (tryActivateExistingTab(path)) return;
         active?.router.navigate(path);
       },
       replace: (path: string) => {
@@ -280,6 +303,7 @@ export function TabNavigationProvider({
         if (routerLocationPath(router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
+        if (tryActivateExistingTab(path)) return;
         router.navigate(path);
       },
       replace: (path: string) => {
