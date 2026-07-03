@@ -14,6 +14,17 @@ const renderMarkdown = BaseMentionExtension.config.renderMarkdown as (
   node: { attrs: Record<string, string> },
 ) => string;
 
+const JAVA_STACK_TRACE = [
+  "Caused by: java.lang.OutOfMemoryError: Java heap space",
+  "        at org.apache.commons.fileupload.disk.DiskFileItem.get(DiskFileItem.java:308) ~[commons-fileupload-1.5.jar!/:1.5]",
+  "        at org.springframework.web.multipart.commons.CommonsMultipartFile.getBytes(CommonsMultipartFile.java:143) ~[spring-web-5.3.39.jar!/:5.3.39]",
+  "        at java.util.ArrayList.forEach(ArrayList.java:1259) ~[?:1.8.0_342]",
+  "        at org.springframework.web.servlet.HandlerExecutionChain.applyPreHandle(HandlerExecutionChain.java:148) ~[spring-webmvc-5.3.39.jar!/:5.3.39]",
+  "        at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1067) ~[spring-webmvc-5.3.39.jar!/:5.3.39]",
+  "        at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:965) ~[spring-webmvc-5.3.39.jar!/:5.3.39]",
+  "        at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1006) ~[spring-webmvc-5.3.39.jar!/:5.3.39]",
+].join("\n");
+
 function tokenize(src: string) {
   const start = startFn(src);
   if (start === -1) return undefined;
@@ -88,5 +99,26 @@ describe("mention tokenizer", () => {
     expect(token!.attributes.label).toBe("MUL-123");
     expect(token!.attributes.type).toBe("issue");
     expect(token!.attributes.id).toBe("aaa-bbb");
+  });
+
+  it("does not treat Java jar source markers as mention candidates", () => {
+    const stackTrace = `${JAVA_STACK_TRACE}\n`.repeat(250);
+
+    expect(startFn(stackTrace)).toBe(-1);
+    expect(tokenize(stackTrace)).toBeUndefined();
+  });
+
+  it("still finds a mention after Java jar source markers", () => {
+    const src = [
+      JAVA_STACK_TRACE,
+      "Assigned to [@Worker](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+    ].join("\n\n");
+
+    const token = tokenize(src);
+
+    expect(token).toBeDefined();
+    expect(token!.attributes.label).toBe("Worker");
+    expect(token!.attributes.type).toBe("agent");
+    expect(token!.attributes.id).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   });
 });

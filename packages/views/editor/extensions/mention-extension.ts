@@ -3,6 +3,74 @@ import { mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { MentionView } from "./mention-view";
 
+const MENTION_URL_PREFIX = "](mention://";
+const MAX_MENTION_LABEL_SOURCE_LENGTH = 512;
+
+function isEscaped(src: string, index: number): boolean {
+  let slashCount = 0;
+  for (let i = index - 1; i >= 0 && src[i] === "\\"; i--) slashCount++;
+  return slashCount % 2 === 1;
+}
+
+function parseMentionMarkdown(src: string) {
+  if (src[0] !== "[") return undefined;
+
+  const labelLimit = Math.min(src.length, 1 + MAX_MENTION_LABEL_SOURCE_LENGTH);
+  let labelEnd = -1;
+  for (let i = 1; i < labelLimit; i++) {
+    if (src[i] === "]" && !isEscaped(src, i) && src.startsWith(MENTION_URL_PREFIX, i)) {
+      labelEnd = i;
+      break;
+    }
+  }
+  if (labelEnd === -1) return undefined;
+
+  const rawLabel = src.slice(1, labelEnd);
+  if (!rawLabel) return undefined;
+
+  const typeStart = labelEnd + MENTION_URL_PREFIX.length;
+  let slashIndex = typeStart;
+  while (slashIndex < src.length && /\w/.test(src[slashIndex] ?? "")) slashIndex++;
+  if (slashIndex === typeStart || src[slashIndex] !== "/") return undefined;
+
+  const idStart = slashIndex + 1;
+  const idEnd = src.indexOf(")", idStart);
+  if (idEnd === -1 || idEnd === idStart) return undefined;
+
+  const labelWithoutPrefix = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
+  const label = labelWithoutPrefix.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+
+  return {
+    raw: src.slice(0, idEnd + 1),
+    label,
+    type: src.slice(typeStart, slashIndex),
+    id: src.slice(idStart, idEnd),
+  };
+}
+
+function findMentionMarkdownStart(src: string): number {
+  let searchFrom = 0;
+
+  while (searchFrom < src.length) {
+    const labelEnd = src.indexOf(MENTION_URL_PREFIX, searchFrom);
+    if (labelEnd === -1) return -1;
+    if (isEscaped(src, labelEnd)) {
+      searchFrom = labelEnd + 1;
+      continue;
+    }
+
+    const minOpen = Math.max(0, labelEnd - MAX_MENTION_LABEL_SOURCE_LENGTH);
+    for (let i = labelEnd - 1; i >= minOpen; i--) {
+      if (src[i] !== "[" || isEscaped(src, i)) continue;
+      if (parseMentionMarkdown(src.slice(i))) return i;
+    }
+
+    searchFrom = labelEnd + MENTION_URL_PREFIX.length;
+  }
+
+  return -1;
+}
+
 export const BaseMentionExtension = Mention.extend({
   addNodeView() {
     return ReactNodeViewRenderer(MentionView);
@@ -39,25 +107,15 @@ export const BaseMentionExtension = Mention.extend({
     name: "mention",
     level: "inline" as const,
     start(src: string) {
-      // Accept escaped brackets (\\[ \\]) and non-] chars in the label.
-      // This prevents matching ordinary Markdown links like [docs](url)
-      // that appear before a mention on the same line.
-      return src.search(/\[@?(?:\\.|[^\]])+\]\(mention:\/\//);
+      return findMentionMarkdownStart(src);
     },
     tokenize(src: string) {
-      // Label accepts escaped chars (\\[ \\]) or any non-] character.
-      // This prevents the label from crossing a ]( Markdown link boundary
-      // while still supporting bracket-containing names like "David\[TF\]".
-      const match = src.match(
-        /^\[@?((?:\\.|[^\]])+)\]\(mention:\/\/(\w+)\/([^)]+)\)/,
-      );
-      if (!match) return undefined;
-      // Unescape backslash-escaped brackets that renderMarkdown may produce.
-      const rawLabel = match[1]?.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+      const mention = parseMentionMarkdown(src);
+      if (!mention) return undefined;
       return {
         type: "mention",
-        raw: match[0],
-        attributes: { label: rawLabel, type: match[2] ?? "member", id: match[3] },
+        raw: mention.raw,
+        attributes: { label: mention.label, type: mention.type, id: mention.id },
       };
     },
   },
