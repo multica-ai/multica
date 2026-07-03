@@ -221,9 +221,9 @@ export function AgentCreatePanel({
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
   // Every issue belongs to exactly one team, so the header picker always
-  // resolves to a value: explicit pick → remembered pick → workspace default
-  // team. Sub-issues are pinned to the parent's team (the server enforces
-  // inheritance), so the picker locks.
+  // resolves to a value. Associations are creation-time defaults, never
+  // constraints: explicit pick (incl. remembered) → parent's team →
+  // single-team project → workspace default.
   const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
   const defaultTeamId = useMemo(
     () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
@@ -234,26 +234,13 @@ export function AgentCreatePanel({
     enabled: !!parentIssueId,
   });
   const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
-  const effectiveTeamId = parentTeamId ?? teamId ?? defaultTeamId ?? null;
-
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
-  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
-  useEffect(() => {
-    if (!projectId || parentTeamId) return;
-    const allowed = selectedProject?.team_ids ?? [];
-    if (allowed.length === 0) return;
-    // Converge instead of clearing: the issue must keep a team, so a pick the
-    // newly-chosen project doesn't include snaps to that project's own team.
-    if (allowed.length === 1) {
-      if (teamId !== allowed[0]) setTeamId(allowed[0]);
-      return;
-    }
-    const current = teamId ?? defaultTeamId;
-    if (current && !allowed.includes(current)) setTeamId(allowed[0]);
-  }, [projectId, selectedProject, teamId, defaultTeamId, parentTeamId]);
+  const projectTeamId =
+    selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;
+  const effectiveTeamId = teamId ?? parentTeamId ?? projectTeamId ?? defaultTeamId ?? null;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -460,8 +447,6 @@ export function AgentCreatePanel({
             <TeamPicker
               teamId={effectiveTeamId}
               onChange={setTeamId}
-              allowedTeamIds={projectTeamIds}
-              disabled={!!parentTeamId}
               triggerRender={<PillButton />}
               align="start"
             />

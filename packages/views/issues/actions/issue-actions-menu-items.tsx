@@ -21,6 +21,8 @@ import {
 import type { AgentTask, Issue } from "@multica/core/types";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { activeTeamListOptions } from "@multica/core/teams/queries";
 import {
   ALL_STATUSES,
   PRIORITY_ORDER,
@@ -29,6 +31,7 @@ import {
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
+import { TeamIcon } from "../../teams/components/team-icon";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -110,6 +113,12 @@ export function IssueActionsMenuItems({
     openDeleteConfirm,
   } = actions;
 
+  // Teams for the move-to-team submenu. Cached workspace-wide; the list is
+  // small and shared with every picker, so this is effectively free.
+  const wsId = useWorkspaceId();
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const currentTeam = teams.find((team) => team.id === issue.team_id);
+
   // Subscribe to the issue's task list so the cache is warm by the time the
   // user clicks "Copy local workdir path". The query only fires while the
   // menu is open (Base UI portals the menu content lazily) — list views
@@ -143,6 +152,33 @@ export function IssueActionsMenuItems({
 
   return (
     <>
+      {/* Team — leads the menu: it owns the issue's identifier namespace.
+          Moving renumbers the issue server-side; associations (project,
+          parent) are left untouched — they only bind at creation time. */}
+      <P.Sub>
+        <P.SubTrigger>
+          <TeamIcon team={currentTeam ?? { icon: null }} className="size-3.5" />
+          {t(($) => $.actions.team)}
+        </P.SubTrigger>
+        <P.SubContent>
+          {teams.map((team) => (
+            <P.Item
+              key={team.id}
+              onClick={() => {
+                if (team.id !== issue.team_id) updateField({ team_id: team.id });
+              }}
+            >
+              <TeamIcon team={team} />
+              <span className="shrink-0 text-[10px] font-medium text-muted-foreground">{team.key}</span>
+              <span className="truncate">{team.name}</span>
+              {issue.team_id === team.id && (
+                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+              )}
+            </P.Item>
+          ))}
+        </P.SubContent>
+      </P.Sub>
+
       {/* Status */}
       <P.Sub>
         <P.SubTrigger>

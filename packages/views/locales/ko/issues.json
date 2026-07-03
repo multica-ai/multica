@@ -199,6 +199,7 @@
     "pull_request_card_files_count_other": "파일 {{count}}개",
     "pull_request_card_show_more": "{{count}}개 더 보기",
     "pull_request_card_show_less": "간단히 보기",
+    "prop_team": "팀",
     "prop_status": "상태",
     "prop_priority": "우선순위",
     "prop_stage": "단계",
@@ -429,6 +430,7 @@
     "updated_ago": "{{time}} 수정됨"
   },
   "actions": {
+    "team": "팀",
     "status": "상태",
     "priority": "우선순위",
     "assignee": "담당자",

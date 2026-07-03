@@ -56,6 +56,7 @@ import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { TeamPicker } from "../../teams/components/team-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -1552,7 +1553,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered. */}
+          {/* Core props — always rendered. Team leads: it owns the issue's
+              identifier namespace; moving renumbers the issue server-side. */}
+          <PropRow label={t(($) => $.detail.prop_team)}>
+            <TeamPicker
+              teamId={issue.team_id ?? null}
+              onChange={(team_id) => handleUpdateField({ team_id })}
+              align="start"
+            />
+          </PropRow>
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>

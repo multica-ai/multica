@@ -202,6 +202,7 @@
     "pull_request_card_files_count_other": "{{count}} files",
     "pull_request_card_show_more": "Show {{count}} more",
     "pull_request_card_show_less": "Show less",
+    "prop_team": "Team",
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_stage": "Stage",
@@ -451,6 +452,7 @@
     "updated_ago": "Updated {{time}}"
   },
   "actions": {
+    "team": "Team",
     "status": "Status",
     "priority": "Priority",
     "assignee": "Assignee",

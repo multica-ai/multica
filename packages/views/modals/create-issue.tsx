@@ -275,35 +275,18 @@ export function ManualCreatePanel({
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
-  // A project belongs to one or more teams; an issue's team must be one of
-  // them. When a project is selected, constrain the team picker to its teams;
-  // no project selected leaves the picker unconstrained.
-  const projectTeamIds = projectId ? selectedProject?.team_ids : undefined;
-
   // Every issue belongs to exactly one team, so the picker always resolves to
-  // a value: explicit pick → workspace default team. Sub-issues are pinned to
-  // the parent's team (the server enforces inheritance), so the picker locks.
+  // a value. Associations are creation-time defaults, never constraints:
+  // explicit pick → parent's team → single-team project → workspace default.
   const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
   const defaultTeamId = useMemo(
     () => (teams.find((team) => team.is_default) ?? teams[0])?.id,
     [teams],
   );
   const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
-  const effectiveTeamId = parentTeamId ?? teamId ?? defaultTeamId;
-
-  useEffect(() => {
-    if (!projectId || parentTeamId) return;
-    const allowed = selectedProject?.team_ids ?? [];
-    if (allowed.length === 0) return;
-    // Converge instead of clearing: the issue must keep a team, so a pick the
-    // newly-chosen project doesn't include snaps to that project's own team.
-    if (allowed.length === 1) {
-      if (teamId !== allowed[0]) setTeamId(allowed[0]);
-      return;
-    }
-    const current = teamId ?? defaultTeamId;
-    if (current && !allowed.includes(current)) setTeamId(allowed[0]);
-  }, [projectId, selectedProject, teamId, defaultTeamId, parentTeamId]);
+  const projectTeamId =
+    selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;
+  const effectiveTeamId = teamId ?? parentTeamId ?? projectTeamId ?? defaultTeamId;
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -611,8 +594,6 @@ export function ManualCreatePanel({
                 <TeamPicker
                   teamId={effectiveTeamId ?? null}
                   onChange={setTeamId}
-                  allowedTeamIds={projectTeamIds}
-                  disabled={!!parentTeamId}
                   triggerRender={<PillButton />}
                   align="start"
                 />

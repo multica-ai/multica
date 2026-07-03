@@ -32,6 +32,10 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  /** Move the issue to another team. Numbers are per-team, so the move
+   *  renumbers the issue server-side (the old identifier keeps resolving
+   *  via an alias); never null — every issue belongs to exactly one team. */
+  team_id?: string;
   /** Ordered stage (>= 1); null clears it (unstaged). */
   stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.

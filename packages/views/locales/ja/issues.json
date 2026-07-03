@@ -199,6 +199,7 @@
     "pull_request_card_files_count_other": "{{count}} ファイル",
     "pull_request_card_show_more": "他 {{count}} 件を表示",
     "pull_request_card_show_less": "折りたたむ",
+    "prop_team": "チーム",
     "prop_status": "ステータス",
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
@@ -429,6 +430,7 @@
     "updated_ago": "{{time}} に更新"
   },
   "actions": {
+    "team": "チーム",
     "status": "ステータス",
     "priority": "優先度",
     "assignee": "担当者",
