@@ -97,12 +97,6 @@ INSERT INTO project_team (workspace_id, project_id, team_id)
 SELECT sqlc.arg('workspace_id'), sqlc.arg('project_id'), unnest(sqlc.arg('team_ids')::uuid[])
 ON CONFLICT (project_id, team_id) DO NOTHING;
 
--- name: CountProjectIssuesByTeam :one
-SELECT count(*) FROM issue
-WHERE workspace_id = $1
-  AND project_id = $2
-  AND team_id = $3;
-
 -- name: CountActiveProjectAutopilotsByTeam :one
 SELECT count(*) FROM autopilot
 WHERE workspace_id = $1

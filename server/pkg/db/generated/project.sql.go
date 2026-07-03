@@ -61,26 +61,6 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 	return count, err
 }
 
-const countProjectIssuesByTeam = `-- name: CountProjectIssuesByTeam :one
-SELECT count(*) FROM issue
-WHERE workspace_id = $1
-  AND project_id = $2
-  AND team_id = $3
-`
-
-type CountProjectIssuesByTeamParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ProjectID   pgtype.UUID `json:"project_id"`
-	TeamID      pgtype.UUID `json:"team_id"`
-}
-
-func (q *Queries) CountProjectIssuesByTeam(ctx context.Context, arg CountProjectIssuesByTeamParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countProjectIssuesByTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,

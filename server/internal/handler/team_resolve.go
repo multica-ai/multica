@@ -14,7 +14,6 @@ import (
 const (
 	teamNotFoundMessage         = "team not found in this workspace"
 	teamArchivedMessage         = "team is archived"
-	projectTeamMismatchMessage  = "project is not associated with this team"
 	projectTeamAmbiguousMessage = "project has multiple teams; specify team_id"
 )
 
@@ -33,8 +32,6 @@ func teamResolveMessage(err error) string {
 		return teamNotFoundMessage
 	case errors.Is(err, service.ErrTeamArchived):
 		return teamArchivedMessage
-	case errors.Is(err, service.ErrProjectTeamMismatch):
-		return projectTeamMismatchMessage
 	default:
 		return ""
 	}

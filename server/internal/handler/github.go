@@ -1409,7 +1409,16 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 		Number:      int32(n),
 	})
 	if err != nil {
-		return db.Issue{}, false
+		// Branch names / PR titles keep referencing the pre-move identifier
+		// after an issue moves teams; the alias keeps auto-linking working.
+		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
+			WorkspaceID:  workspaceID,
+			TeamKeyLower: gotPrefix,
+			Number:       int32(n),
+		})
+		if err != nil {
+			return db.Issue{}, false
+		}
 	}
 	return issue, true
 }

@@ -16,7 +16,7 @@ func TestProjectTeamAmbiguousError(t *testing.T) {
 	}
 	// The other typed team errors must not match, so handlers can branch on them
 	// independently.
-	if errors.Is(err, ErrTeamNotFound) || errors.Is(err, ErrProjectTeamMismatch) {
+	if errors.Is(err, ErrTeamNotFound) || errors.Is(err, ErrTeamArchived) {
 		t.Fatalf("ambiguous error must not match unrelated team sentinels")
 	}
 

@@ -19,7 +19,6 @@ func TestTeamResolveMessage(t *testing.T) {
 	}{
 		{"not found", service.ErrTeamNotFound, "team not found in this workspace"},
 		{"archived", service.ErrTeamArchived, "team is archived"},
-		{"mismatch", service.ErrProjectTeamMismatch, "project is not associated with this team"},
 		{
 			"ambiguous names keys",
 			&service.ProjectTeamAmbiguousError{TeamKeys: []string{"ENG", "GROWTH"}},
@@ -50,7 +49,7 @@ func TestWriteTeamResolveError(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	if writeTeamResolveError(rec, service.ErrCrossTeamChild) {
+	if writeTeamResolveError(rec, errors.New("boom")) {
 		t.Fatal("expected writeTeamResolveError to ignore a non-team-resolution error")
 	}
 	if rec.Code != 200 {

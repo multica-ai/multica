@@ -1148,6 +1148,65 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 	return i, err
 }
 
+const moveIssueToTeam = `-- name: MoveIssueToTeam :one
+UPDATE issue
+SET team_id = $2,
+    number = $3,
+    position = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, team_id
+`
+
+type MoveIssueToTeamParams struct {
+	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
+	Number   int32       `json:"number"`
+	Position float64     `json:"position"`
+}
+
+// Moving an issue between teams renumbers it: numbers are allocated
+// per-team (uq_issue_team_number), so the caller passes a fresh number from
+// IncrementTeamIssueCounter and a fresh position in the destination column.
+func (q *Queries) MoveIssueToTeam(ctx context.Context, arg MoveIssueToTeamParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, moveIssueToTeam,
+		arg.ID,
+		arg.TeamID,
+		arg.Number,
+		arg.Position,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.TeamID,
+	)
+	return i, err
+}
+
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET

@@ -625,22 +625,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to load project teams")
 			return
 		}
+		// Issues under a removed team keep their project untouched — the
+		// project↔team association is a creation-time default, not an
+		// invariant. Only active autopilots still block removal: they keep
+		// producing new issues from the (project, team) pairing.
 		for _, team := range prevTeams {
 			if _, keep := next[uuidToString(team.ID)]; keep {
 				continue
-			}
-			issueCount, err := qtx.CountProjectIssuesByTeam(r.Context(), db.CountProjectIssuesByTeamParams{
-				WorkspaceID: wsUUID,
-				ProjectID:   prevProject.ID,
-				TeamID:      team.ID,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to validate project teams")
-				return
-			}
-			if issueCount > 0 {
-				writeError(w, http.StatusConflict, "cannot remove a team that still has project issues")
-				return
 			}
 			autopilotCount, err := qtx.CountActiveProjectAutopilotsByTeam(r.Context(), db.CountActiveProjectAutopilotsByTeamParams{
 				WorkspaceID: wsUUID,
