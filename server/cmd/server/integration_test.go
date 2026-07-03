@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -172,6 +173,22 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 		return err
 	}
 	return nil
+}
+
+// defaultTeamUUID returns the seeded default workspace_team for the given
+// workspace. Direct issue/autopilot inserts that bypass the team-aware service
+// layer must carry this so the NOT NULL team_id (migration 132) is satisfied
+// the same way a real create would resolve it via ResolveTeam.
+func defaultTeamUUID(t *testing.T, ctx context.Context, workspaceID string) pgtype.UUID {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1`,
+		workspaceID,
+	).Scan(&id); err != nil {
+		t.Fatalf("load default team: %v", err)
+	}
+	return parseUUID(id)
 }
 
 // Helper to make authenticated requests
@@ -871,8 +888,8 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
-		VALUES ($1, 'Dedup fixture', 'member', $2)
+		INSERT INTO issue (workspace_id, team_id, title, creator_type, creator_id)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'Dedup fixture', 'member', $2)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("failed to seed issue: %v", err)

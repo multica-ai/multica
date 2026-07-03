@@ -56,8 +56,8 @@ func createTestSubIssue(t *testing.T, workspaceID, creatorID, parentIssueID stri
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, parent_issue_id, number)
-		VALUES ($1, 'sub-issue test', 'todo', 'medium', 'member', $2, 0, $3,
+		INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_type, creator_id, position, parent_issue_id, number)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'sub-issue test', 'todo', 'medium', 'member', $2, 0, $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, workspaceID, creatorID, parentIssueID).Scan(&issueID)

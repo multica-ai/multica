@@ -104,11 +104,13 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 
 	var workspaceID string
+	var workspaceCounter int32
+	var workspacePrefix string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN").Scan(&workspaceID); err != nil {
+		RETURNING id, issue_counter, issue_prefix
+	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN").Scan(&workspaceID, &workspaceCounter, &workspacePrefix); err != nil {
 		return "", "", err
 	}
 
@@ -116,6 +118,18 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
+		return "", "", err
+	}
+
+	// Seed the default Team so team-aware issue/autopilot creates resolve a Team
+	// the same way migration 131 backfills production workspaces, and so direct
+	// inserts can carry the NOT NULL team_id from migration 132. The team's
+	// issue_counter mirrors the workspace counter so the two never hand out
+	// overlapping numbers.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, 'Default', $2, $3, true, $4)
+	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
 
@@ -498,6 +512,14 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 }
 
 func TestResolveIssueByIdentifierFallsBackToDefaultTeamForNullTeamIssue(t *testing.T) {
+	// Migration 132 makes issue.team_id NOT NULL, so a null-team issue can no
+	// longer be inserted to exercise the identifier fallback. The production
+	// fallback itself is retained for the rolling-deploy window (issue.go
+	// "TODO(migration-b): remove null-team fallback after migration 132 has run
+	// in production"); this DB test cannot construct its precondition against a
+	// 132-migrated schema and stays skipped until that fallback is removed.
+	t.Skip("null-team issues are impossible after migration 132 (team_id NOT NULL); see issue.go TODO(migration-b)")
+
 	ctx := context.Background()
 	suffix := time.Now().UnixNano() % 1_000_000
 	defaultKey := fmt.Sprintf("D%06d", suffix)
@@ -636,10 +658,17 @@ func TestCreateIssueRejectsCrossWorkspaceParent(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
 	})
 
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, is_default)
+		VALUES ($1, 'Default', 'XWP', true)
+	`, otherWorkspaceID); err != nil {
+		t.Fatalf("insert foreign default team: %v", err)
+	}
+
 	var foreignParentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
-		VALUES ($1, $2, 'todo', 'none', 'member', $3, 1)
+		INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'todo', 'none', 'member', $3, 1)
 		RETURNING id
 	`, otherWorkspaceID, "Foreign parent", testUserID).Scan(&foreignParentID); err != nil {
 		t.Fatalf("insert foreign parent: %v", err)
@@ -1787,8 +1816,8 @@ func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
-		VALUES ($1, 'member', $2, $3, 3310)
+		INSERT INTO issue (workspace_id, team_id, creator_type, creator_id, title, number)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 3310)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "preserve bare issue identifiers").Scan(&issueID); err != nil {
 		t.Fatalf("create issue fixture: %v", err)
@@ -2851,8 +2880,8 @@ func TestResolveActor(t *testing.T) {
 	// Create a task for the agent so we can test X-Task-ID validation.
 	var issueID string
 	err = testPool.QueryRow(ctx,
-		`INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
-		 VALUES ($1, 'resolveActor test', 'todo', 'none', 'member', $2, 9999, 0)
+		`INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_type, creator_id, number, position)
+		 VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'resolveActor test', 'todo', 'none', 'member', $2, 9999, 0)
 		 RETURNING id`, testWorkspaceID, testUserID,
 	).Scan(&issueID)
 	if err != nil {
@@ -3636,17 +3665,17 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 
 	var number int
 	if err := testPool.QueryRow(ctx, `
-		UPDATE workspace
-		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
-		WHERE id = $1 RETURNING issue_counter
+		UPDATE workspace_team
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE team_id = workspace_team.id)) + 1
+		WHERE workspace_id = $1 AND is_default RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
+		INSERT INTO issue (workspace_id, team_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "nested mention inheritance regression", assigneeAgent, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -3731,17 +3760,17 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 
 	var number int
 	if err := testPool.QueryRow(ctx, `
-		UPDATE workspace
-		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
-		WHERE id = $1 RETURNING issue_counter
+		UPDATE workspace_team
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE team_id = workspace_team.id)) + 1
+		WHERE workspace_id = $1 AND is_default RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
+		INSERT INTO issue (workspace_id, team_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "nested participation regression", assigneeAgent, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
