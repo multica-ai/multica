@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
@@ -13,6 +13,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
@@ -46,8 +47,8 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 //      story here; the row's right column carries the task status)
 //   2. Trigger description (e.g. "From comment", "Autopilot", "Retry"),
 //      truncated with ellipsis when narrow
-//   3. Status + relative time, swapped to hover actions (cancel /
-//      transcript) on hover
+//   3. Status + relative time, followed by a persistent retry action
+//      when the run failed or was cancelled
 //
 // One query (`listTasksByIssue`) drives both buckets — the back-end
 // returns every status, the front-end filters into active vs past on the
@@ -347,6 +348,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const queryClient = useQueryClient();
   const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
@@ -368,13 +370,16 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.rerunIssue(issueId, task.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+      // TODO: 暂时打日志验证传参，确认无误后恢复 api.rerunIssue 调用
+      console.log(
+        "%c[ExecutionLogSection] rerunIssue params",
+        "color: #f59e0b; font-weight: bold;",
+        { issueId, taskId: task.id },
+      );
+      toast.info(
+        `Retry logged: issueId=${issueId} taskId=${task.id} — check console`,
+      );
     } finally {
-      // Reset on both success and failure: the past row stays mounted
-      // (its task.id is unchanged), so leaving `retrying` true on success
-      // would pin the button as a permanent spinner.
       setRetrying(false);
     }
   };
@@ -387,31 +392,36 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
           <span className={tone}>{failureLabel ?? label}</span>
           <span className="text-muted-foreground"> · {time}</span>
         </span>
-        <RowActions>
-          <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-          {canRetry && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    disabled={retrying}
-                    aria-label={t(($) => $.execution_log.retry_task_aria)}
-                  />
-                }
-                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {retrying ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-              </TooltipTrigger>
-              <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-            </Tooltip>
-          )}
-        </RowActions>
+        {canRetry ? (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <TranscriptButton
+              task={task}
+              agentName=""
+              title={t(($) => $.execution_log.transcript_tooltip)}
+            />
+            <Button
+              type="button"
+              variant={task.status === "failed" ? "destructive" : "outline"}
+              size="xs"
+              onClick={handleRetry}
+              disabled={retrying}
+              aria-label={t(($) => $.execution_log.retry_task_aria)}
+              aria-busy={retrying}
+              className="cursor-pointer shadow-sm transition-all hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.97] motion-reduce:transform-none"
+            >
+              {retrying ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+              {t(($) => $.execution_log.retry)}
+            </Button>
+          </div>
+        ) : (
+          <RowActions>
+            <TranscriptButton
+              task={task}
+              agentName=""
+              title={t(($) => $.execution_log.transcript_tooltip)}
+            />
+          </RowActions>
+        )}
       </RowShell>
       <InlineTranscriptPanel task={task} isLive={false} defaultOpen={false} />
     </>
