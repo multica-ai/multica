@@ -259,6 +259,7 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 	}
 	agentID, _ := payload["agent_id"].(string)
 	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
 	if issueID == "" {
 		return
 	}
@@ -271,13 +272,23 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 		return
 	}
 
+	details := []byte("{}")
+	if taskID != "" {
+		details, err = json.Marshal(map[string]string{"task_id": taskID})
+		if err != nil {
+			slog.Error("activity: failed to encode task details",
+				"issue_id", issueID, "task_id", taskID, "error", err)
+			return
+		}
+	}
+
 	activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     parseUUID(issueID),
 		ActorType:   util.StrToText("agent"),
 		ActorID:     parseUUID(agentID),
 		Action:      action,
-		Details:     []byte("{}"),
+		Details:     details,
 	})
 	if err != nil {
 		slog.Error("activity: failed to record task activity",

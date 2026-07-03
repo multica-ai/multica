@@ -343,4 +343,11 @@ func TestActivityTaskFailed(t *testing.T) {
 	if activities[0].Action != "task_failed" {
 		t.Fatalf("expected action 'task_failed', got %q", activities[0].Action)
 	}
+	var details map[string]string
+	if err := json.Unmarshal(activities[0].Details, &details); err != nil {
+		t.Fatalf("unmarshal activity details: %v", err)
+	}
+	if details["task_id"] != "00000000-0000-0000-0000-000000000002" {
+		t.Fatalf("expected task_id in activity details, got %q", details["task_id"])
+	}
 }

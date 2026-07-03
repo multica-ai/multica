@@ -46,7 +46,15 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
+    queryFn: () => Promise.resolve([
+      {
+        id: "builtin-agent-1",
+        name: "Built-in Agent",
+        is_builtin: true,
+        archived_at: null,
+        visibility: "workspace",
+      },
+    ]),
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
@@ -55,6 +63,16 @@ vi.mock("@multica/core/workspace/queries", () => ({
   assigneeFrequencyOptions: () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
+  }),
+}));
+
+vi.mock("@multica/core/runtimes/queries", () => ({
+  runtimeListOptions: () => ({
+    queryKey: ["runtimes", "ws-1", "list"],
+    queryFn: () => Promise.resolve([
+      { id: "runtime-1", name: "Runtime One", status: "online", runtime_mode: "local" },
+      { id: "runtime-2", name: "Runtime Two", status: "online", runtime_mode: "local" },
+    ]),
   }),
 }));
 
@@ -195,6 +213,31 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Members")).toBeInTheDocument();
     expect(await screen.findByText("Test User")).toBeInTheDocument();
   });
+  it("keeps the runtime dialog mounted after choosing a runtime", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Assignee"));
+    fireEvent.click(await screen.findByText("Built-in Agent"));
+
+    expect(await screen.findByText("选择运行时")).toBeInTheDocument();
+    const runtimeOption = (await screen.findByText("Runtime One")).closest("label");
+    expect(runtimeOption).not.toBeNull();
+    fireEvent.pointerDown(runtimeOption!);
+    fireEvent.click(runtimeOption!);
+
+    expect(
+      screen.getByRole("button", { name: "确认执行" }),
+    ).toBeInTheDocument();
+  });
+
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {
     render(

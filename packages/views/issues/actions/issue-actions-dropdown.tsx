@@ -31,6 +31,7 @@ export function IssueActionsDropdown({
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [assigneeMounted, setAssigneeMounted] = useState(false);
 
   // The outer `relative inline-flex` is the picker's anchor box: the
   // absolute, pointer-events-none span inside `triggerRender` fills it, so
@@ -45,15 +46,20 @@ export function IssueActionsDropdown({
             issue={issue}
             actions={actions}
             primitives={dropdownPrimitives}
-            onOpenAssignee={() => setAssigneeOpen(true)}
+            onOpenAssignee={() => {
+              setAssigneeMounted(true);
+              setAssigneeOpen(true);
+            }}
             onDeletedNavigateTo={onDeletedNavigateTo}
           />
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* Mount the picker only once the user actually opens it. Otherwise
-          every row in a list/board would subscribe to members/agents/squads
-          /frequency queries on mount, multiplying memory + render cost. */}
-      {assigneeOpen && (
+      {/* Lazily mount the picker on first use so untouched list/board rows do
+          not subscribe to its queries. Keep it mounted after the popover
+          closes: RuntimeSelectDialog is portalled outside the popover, so a
+          click on a runtime closes the popover as an outside interaction.
+          Unmounting here would also destroy the dialog before confirmation. */}
+      {assigneeMounted && (
         <AssigneePicker
           assigneeType={issue.assignee_type}
           assigneeId={issue.assignee_id}
