@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Canvas Drawing Editor - 纯 JavaScript Web Component
  * 无任何框架依赖

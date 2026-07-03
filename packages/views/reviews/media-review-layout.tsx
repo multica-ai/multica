@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ReviewAsset } from "@multica/core/types";
 import { MediaReviewPlayer, type MediaReviewPlayerRef } from "./media-review-player";
 import { ReviewCommentSidebar } from "./review-comment-sidebar";

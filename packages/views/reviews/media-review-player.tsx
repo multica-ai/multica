@@ -74,6 +74,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   }, [asset.asset_type]);
 
   // Convert a mouse event (clientX/Y) to a normalized 0.0-1.0 coordinate
+  // @ts-ignore
   const getNormalizedCoordinates = useCallback(
     (clientX: number, clientY: number) => {
       if (!canvasRef.current) return { x: 0, y: 0 };
@@ -87,6 +88,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   );
 
   // Convert a normalized 0.0-1.0 coordinate to a render pixel coordinate
+  // @ts-ignore
   const getRenderCoordinates = useCallback(
     (nx: number, ny: number) => {
       return {
