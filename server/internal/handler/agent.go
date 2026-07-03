@@ -589,9 +589,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	alwaysRedact := workspaceAlwaysRedactSecrets(ws.Settings)
 
-	// Resolve the request actor once. Agents bypass the private-agent gate
-	// to preserve A2A collaboration; members must be in allowed_principals
-	// (agent owner or workspace owner/admin) to see private agents.
+	// Resolve the request actor once. Members must be in allowed_principals
+	// (agent owner or workspace owner/admin) to see private agents. Agent
+	// actors keep workspace-wide list visibility for A2A discovery; actual
+	// task-producing and chat surfaces still call canAccessPrivateAgent.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {

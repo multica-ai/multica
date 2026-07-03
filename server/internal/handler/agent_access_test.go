@@ -50,6 +50,24 @@ func TestMemberAllowedForPrivateAgent_Pure(t *testing.T) {
 	}
 }
 
+func TestCanAccessPrivateAgent_AgentActorFailsClosedWithoutOwnershipEvidence(t *testing.T) {
+	target := db.Agent{
+		Visibility: "private",
+		OwnerID:    util.MustParseUUID("11111111-1111-1111-1111-111111111111"),
+	}
+
+	got := (&Handler{}).canAccessPrivateAgent(
+		context.Background(),
+		target,
+		"agent",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if got {
+		t.Fatal("private agent access by an unverifiable agent actor must fail closed")
+	}
+}
+
 // privateAgentTestFixture sets up a private agent owned by a freshly created
 // user, plus a second non-admin member in the workspace. Returns the agent
 // id, the owner's user id, and the unrelated member's user id. The caller's
@@ -267,6 +285,115 @@ func TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(t *testing.T) {
 	testHandler.CreateIssue(w, newRequestAs(memberID, "POST", "/api/issues?workspace_id="+testWorkspaceID, body(memberID)))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("CreateIssue as plain member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateIssue_AgentActorCannotAssignOtherUsersPrivateAgent verifies that a
+// legitimate running agent cannot use the issue-assignment surface to route
+// work into another user's private agent. Private agent visibility protects the
+// target agent's dispatch boundary, regardless of whether the caller is human
+// or agent-authored.
+func TestCreateIssue_AgentActorCannotAssignOtherUsersPrivateAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	targetAgentID, _, memberID := privateAgentTestFixture(t)
+
+	var sourceAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'private-access-source-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t), memberID).Scan(&sourceAgentID); err != nil {
+		t.Fatalf("create source agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, sourceAgentID)
+	})
+	sourceTaskID := createHandlerTestTaskForAgent(t, sourceAgentID)
+
+	title := "agent actor cannot assign other private agent " + memberID
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM agent_task_queue
+			WHERE issue_id IN (SELECT id FROM issue WHERE title = $1)
+		`, title)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE title = $1`, title)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(memberID, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         title,
+		"status":        "todo",
+		"priority":      "medium",
+		"assignee_type": "agent",
+		"assignee_id":   targetAgentID,
+	})
+	req.Header.Set("X-Agent-ID", sourceAgentID)
+	req.Header.Set("X-Task-ID", sourceTaskID)
+
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateIssue from other user's agent: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateIssue_AgentActorCanAssignOwnPrivateAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	targetAgentID, ownerID, _ := privateAgentTestFixture(t)
+
+	var sourceAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'private-access-owned-source-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t), ownerID).Scan(&sourceAgentID); err != nil {
+		t.Fatalf("create source agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, sourceAgentID)
+	})
+	sourceTaskID := createHandlerTestTaskForAgent(t, sourceAgentID)
+
+	title := "agent actor can assign own private agent " + ownerID
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM agent_task_queue
+			WHERE issue_id IN (SELECT id FROM issue WHERE title = $1)
+		`, title)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE title = $1`, title)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(ownerID, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         title,
+		"status":        "todo",
+		"priority":      "medium",
+		"assignee_type": "agent",
+		"assignee_id":   targetAgentID,
+	})
+	req.Header.Set("X-Agent-ID", sourceAgentID)
+	req.Header.Set("X-Task-ID", sourceTaskID)
+
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue from same owner's agent: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -513,7 +640,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 //   - reject plain workspace members (not owner, not admin, not agent owner)
 //   - allow the agent owner
 //   - allow workspace owners/admins
-//   - allow agent-to-agent traffic regardless of agent visibility
+//   - allow agent-to-agent traffic when the calling agent owner is allowed
 func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -574,17 +701,17 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 			reason:    "workspace owners/admins are in the allowed_principals set",
 		},
 		{
-			name:      "agent-to-agent — allowed",
+			name:      "same-owner agent-to-agent — allowed",
 			actorType: "agent",
 			actorID:   agentID,
 			want:      true,
-			reason:    "A2A traffic bypasses the visibility gate by design",
+			reason:    "A2A traffic is checked through the calling agent's owner",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+			got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)
