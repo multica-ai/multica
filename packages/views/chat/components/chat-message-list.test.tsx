@@ -62,7 +62,9 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     const qc = new QueryClient();
     renderList(qc);
 
-    const foldTrigger = await screen.findByText("2 steps");
+    // The Bash tool_use+tool_result pair folds into one merged card (MUL-27),
+    // so the two seed messages count as a single step.
+    const foldTrigger = await screen.findByText("1 step");
     const footerBefore = foldTrigger.closest("div");
 
     pushTaskMessage(
@@ -70,8 +72,9 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
       taskMsg(3, "tool_use", { tool: "Read", input: { file_path: "/tmp/x" } }),
     );
 
-    // The fold re-renders in place: same DOM node, updated count.
-    const updatedTrigger = await screen.findByText("3 steps");
+    // The fold re-renders in place: same DOM node, updated count. The new
+    // (unpaired, running) Read card adds a second step.
+    const updatedTrigger = await screen.findByText("2 steps");
     expect(updatedTrigger.closest("div")).toBe(footerBefore);
     expect(document.contains(foldTrigger)).toBe(true);
   });
@@ -80,8 +83,9 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     const qc = new QueryClient();
     renderList(qc);
 
-    // Streaming defaults the fold open; the user closes it.
-    const foldTrigger = await screen.findByText("2 steps");
+    // Streaming defaults the fold open; the user closes it. The Bash pair
+    // renders as one merged card (MUL-27) → a single step.
+    const foldTrigger = await screen.findByText("1 step");
     expect(screen.getByText("Bash")).toBeInTheDocument();
     act(() => {
       foldTrigger.click();
@@ -95,7 +99,7 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
 
     // Before the fix the footer remounted, useState re-seeded defaultOpen and
     // the fold sprang back open on every streamed message.
-    await screen.findByText("3 steps");
+    await screen.findByText("2 steps");
     expect(screen.queryByText("Bash")).not.toBeInTheDocument();
   });
 });

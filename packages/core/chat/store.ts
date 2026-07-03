@@ -121,6 +121,16 @@ export interface ChatTimelineItem {
   input?: Record<string, unknown>;
   output?: string;
   created_at?: string;
+  /** Tool call id, pairs tool_use ↔ tool_result. Null on legacy rows. (MUL-27) */
+  call_id?: string;
+  /** True when a paired tool_result reported failure; copied onto the tool_use. (MUL-27) */
+  is_error?: boolean;
+  /** On a tool_use: live status derived by the timeline builder. (MUL-27) */
+  status?: "running" | "done" | "error";
+  /** On a paired tool_use: the seq of the tool_result it absorbed. (MUL-27) */
+  resultSeq?: number;
+  /** On a paired tool_use: call→result wall-clock, when both timestamps exist. (MUL-27) */
+  duration_ms?: number;
 }
 
 export interface ChatState {

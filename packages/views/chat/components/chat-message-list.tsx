@@ -33,6 +33,7 @@ import type {
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
+import { ToolCard } from "./tool-renderers";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -641,8 +642,13 @@ function MiddleTextRow({
 function ItemRow({ item }: { item: ChatTimelineItem }) {
   switch (item.type) {
     case "tool_use":
-      return <ToolCallRow item={item} />;
+      // A tool_use carries its paired result (output/status/duration) after
+      // build-timeline's pairing pass, so one merged card replaces the old
+      // call row + result row.
+      return <ToolCard item={item} />;
     case "tool_result":
+      // Only orphan results (no matching tool_use) still reach here; paired
+      // results were folded into their tool_use and dropped from the array.
       return <ToolResultRow item={item} />;
     case "thinking":
       return <ThinkingRow item={item} />;
@@ -651,64 +657,6 @@ function ItemRow({ item }: { item: ChatTimelineItem }) {
     default:
       return null;
   }
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
-}
-
-function getToolSummary(item: ChatTimelineItem): string {
-  if (!item.input) return "";
-  const inp = item.input as Record<string, string>;
-  if (inp.query) return inp.query;
-  if (inp.file_path) return shortenPath(inp.file_path);
-  if (inp.path) return shortenPath(inp.path);
-  if (inp.pattern) return inp.pattern;
-  if (inp.description) return String(inp.description);
-  if (inp.command) {
-    const cmd = String(inp.command);
-    return cmd.length > 100 ? cmd.slice(0, 100) + "..." : cmd;
-  }
-  if (inp.prompt) {
-    const p = String(inp.prompt);
-    return p.length > 100 ? p.slice(0, 100) + "..." : p;
-  }
-  if (inp.skill) return String(inp.skill);
-  for (const v of Object.values(inp)) {
-    if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-  }
-  return "";
-}
-
-function ToolCallRow({ item }: { item: ChatTimelineItem }) {
-  const [open, setOpen] = useState(false);
-  const summary = getToolSummary(item);
-  const hasInput = item.input && Object.keys(item.input).length > 0;
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded px-1 -mx-1 py-0.5 text-xs hover:bg-accent/30 transition-colors">
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-            !hasInput && "invisible",
-          )}
-        />
-        <span className="font-medium text-foreground shrink-0">{item.tool}</span>
-        {summary && <span className="truncate text-muted-foreground">{summary}</span>}
-      </CollapsibleTrigger>
-      {hasInput && (
-        <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-all">
-            {JSON.stringify(item.input, null, 2)}
-          </pre>
-        </CollapsibleContent>
-      )}
-    </Collapsible>
-  );
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
