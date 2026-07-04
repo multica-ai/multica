@@ -385,7 +385,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 4.1 Project-Level RBAC
 
-- [ ] **DB Migration:** Create `project_members` table
+- [x] **DB Migration:** Create `project_members` table
   ```sql
   CREATE TABLE project_members (
     project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -396,14 +396,14 @@ Multica is a powerful AI-native task management platform where AI agents are fir
     PRIMARY KEY (project_id, member_id)
   );
   ```
-- [ ] **Backend:** Add `project_members` sqlc queries (List, Add, Remove, UpdateRole)
-- [ ] **Backend:** Add middleware/guard that checks project membership before issue CRUD
-- [ ] **Backend:** Project creator auto-gets `admin` role
-- [ ] **API:** Add project member management endpoints
-- [ ] **Core:** Add `packages/core/projects/members.ts` — React Query hooks + Zustand store
-- [ ] **Views:** Add "Members" tab in project settings with invite/remove/role-change UI
-- [ ] **Views:** Filter project list by membership (show only accessible projects)
-- [ ] **Permissions Matrix:**
+- [x] **Backend:** Add `project_members` sqlc queries (List, Add, Remove, UpdateRole)
+- [x] **Backend:** Add middleware/guard that checks project membership before issue CRUD
+- [x] **Backend:** Project creator auto-gets `admin` role
+- [x] **API:** Add project member management endpoints
+- [x] **Core:** Add `packages/core/projects/members.ts` — React Query hooks + Zustand store
+- [x] **Views:** Add "Members" tab in project settings with invite/remove/role-change UI
+- [x] **Views:** Filter project list by membership (show only accessible projects)
+- [x] **Permissions Matrix:**
       | Action | Admin | Editor | Viewer |
       |---|---|---|---|
       | View issues | ✅ | ✅ | ✅ |
@@ -414,7 +414,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 4.2 Milestones
 
-- [ ] **DB Migration:** Create `milestones` table
+- [x] **DB Migration:** Create `milestones` table
   ```sql
   CREATE TABLE milestones (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -430,17 +430,17 @@ Multica is a powerful AI-native task management platform where AI agents are fir
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   ```
-- [ ] **DB Migration:** Add `milestone_id` column to `issues` table
-- [ ] **Backend:** CRUD handlers for milestones
-- [ ] **Core:** `packages/core/milestones/` — queries, mutations, store
-- [ ] **Views:** Milestone list in project sidebar
-- [ ] **Views:** Milestone detail page showing issues grouped by status
-- [ ] **Views:** Progress bar (% of issues completed in milestone)
-- [ ] **Gantt Integration:** Show milestones as markers on existing Gantt view
+- [x] **DB Migration:** Add `milestone_id` column to `issues` table
+- [x] **Backend:** CRUD handlers for milestones
+- [x] **Core:** `packages/core/milestones/` — queries, mutations, store
+- [x] **Views:** Milestone list in project sidebar
+- [x] **Views:** Milestone detail page showing issues grouped by status
+- [x] **Views:** Progress bar (% of issues completed in milestone)
+- [x] **Gantt Integration:** Show milestones as markers on existing Gantt view
 
 ### 4.3 Project Wiki / Documentation Hub
 
-- [ ] **DB Migration:** Create `project_documents` table
+- [x] **DB Migration:** Create `project_documents` table
   ```sql
   CREATE TABLE project_documents (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -454,12 +454,12 @@ Multica is a powerful AI-native task management platform where AI agents are fir
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   ```
-- [ ] **Backend:** CRUD handlers for project documents with tree structure support
-- [ ] **Core:** `packages/core/documents/` — queries, mutations, store
-- [ ] **Views:** Document tree sidebar (nested, drag-to-reorder)
-- [ ] **Views:** Full-page document editor using TipTap (from Phase 3)
-- [ ] **Views:** "Docs" tab in project navigation alongside Issues
-- [ ] **Reference:** Huly's `controlled-documents` plugin for versioning patterns
+- [x] **Backend:** CRUD handlers for project documents with tree structure support
+- [x] **Core:** `packages/core/documents/` — queries, mutations, store
+- [x] **Views:** Document tree sidebar (nested, drag-to-reorder)
+- [x] **Views:** Full-page document editor using TipTap (from Phase 3)
+- [x] **Views:** "Docs" tab in project navigation alongside Issues
+- [x] **Reference:** Huly's `controlled-documents` plugin for versioning patterns
 
 ---
 
