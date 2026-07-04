@@ -88,6 +88,15 @@ const (
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
+	EventProjectMemberAdded     = "project_member:added"
+	EventProjectMemberUpdated   = "project_member:updated"
+	EventProjectMemberRemoved   = "project_member:removed"
+	EventMilestoneCreated       = "milestone:created"
+	EventMilestoneUpdated       = "milestone:updated"
+	EventMilestoneDeleted       = "milestone:deleted"
+	EventProjectDocumentCreated = "project_document:created"
+	EventProjectDocumentUpdated = "project_document:updated"
+	EventProjectDocumentDeleted = "project_document:deleted"
 
 	// Label events
 	EventLabelCreated       = "label:created"

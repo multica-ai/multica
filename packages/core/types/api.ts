@@ -25,6 +25,7 @@ export interface CreateIssueRequest {
   attachment_ids?: string[];
   assignees?: IssueAssigneeInput[];
   issue_type_id?: string;
+  milestone_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -55,6 +56,7 @@ export interface UpdateIssueRequest {
    *  field — strip from optimistic cache patches. */
   handoff_note?: string;
   issue_type_id?: string | null;
+  milestone_id?: string | null;
 }
 
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means

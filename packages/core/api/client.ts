@@ -142,6 +142,9 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  ProjectMember,
+  Milestone,
+  ProjectDocument,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
@@ -2556,6 +2559,92 @@ export class ApiClient {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(data),
+    });
+  }
+
+  // --- Project Members ---
+
+  async listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+    return this.fetch(`/api/projects/${projectId}/members`);
+  }
+
+  async addProjectMember(projectId: string, memberId: string, role: string): Promise<ProjectMember> {
+    return this.fetch(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ member_id: memberId, role }),
+    });
+  }
+
+  async updateProjectMember(projectId: string, memberId: string, role: string): Promise<ProjectMember> {
+    return this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async removeProjectMember(projectId: string, memberId: string): Promise<void> {
+    return this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // --- Milestones ---
+
+  async listMilestones(projectId: string): Promise<Milestone[]> {
+    return this.fetch(`/api/projects/${projectId}/milestones`);
+  }
+
+  async getMilestone(milestoneId: string): Promise<Milestone> {
+    return this.fetch(`/api/milestones/${milestoneId}`);
+  }
+
+  async createMilestone(projectId: string, data: Partial<Milestone>): Promise<Milestone> {
+    return this.fetch(`/api/projects/${projectId}/milestones`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMilestone(milestoneId: string, data: Partial<Milestone>): Promise<Milestone> {
+    return this.fetch(`/api/milestones/${milestoneId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMilestone(milestoneId: string): Promise<void> {
+    return this.fetch(`/api/milestones/${milestoneId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // --- Project Documents ---
+
+  async listProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
+    return this.fetch(`/api/projects/${projectId}/documents`);
+  }
+
+  async getProjectDocument(documentId: string): Promise<ProjectDocument> {
+    return this.fetch(`/api/project-documents/${documentId}`);
+  }
+
+  async createProjectDocument(projectId: string, data: Partial<ProjectDocument>): Promise<ProjectDocument> {
+    return this.fetch(`/api/projects/${projectId}/documents`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProjectDocument(documentId: string, data: Partial<ProjectDocument>): Promise<ProjectDocument> {
+    return this.fetch(`/api/project-documents/${documentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectDocument(documentId: string): Promise<void> {
+    return this.fetch(`/api/project-documents/${documentId}`, {
+      method: "DELETE",
     });
   }
 }

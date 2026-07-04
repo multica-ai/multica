@@ -104,6 +104,11 @@ export type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ProjectMember,
+  ProjectMemberRole,
+  Milestone,
+  MilestoneStatus,
+  ProjectDocument,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {

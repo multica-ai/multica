@@ -523,6 +523,7 @@ type Issue struct {
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
 	IssueTypeID        pgtype.UUID        `json:"issue_type_id"`
+	MilestoneID        pgtype.UUID        `json:"milestone_id"`
 }
 
 type IssueAssignee struct {
@@ -683,6 +684,20 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Milestone struct {
+	ID          pgtype.UUID        `json:"id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	StartDate   pgtype.Date        `json:"start_date"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	Status      string             `json:"status"`
+	SortOrder   int32              `json:"sort_order"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -725,6 +740,26 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
+}
+
+type ProjectDocument struct {
+	ID        pgtype.UUID        `json:"id"`
+	ProjectID pgtype.UUID        `json:"project_id"`
+	ParentID  pgtype.UUID        `json:"parent_id"`
+	Title     string             `json:"title"`
+	Content   string             `json:"content"`
+	SortOrder int32              `json:"sort_order"`
+	CreatedBy pgtype.UUID        `json:"created_by"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectMember struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	MemberID  pgtype.UUID        `json:"member_id"`
+	Role      string             `json:"role"`
+	InvitedAt pgtype.Timestamptz `json:"invited_at"`
+	InvitedBy pgtype.UUID        `json:"invited_by"`
 }
 
 type ProjectResource struct {

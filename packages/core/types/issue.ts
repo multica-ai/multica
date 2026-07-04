@@ -66,6 +66,7 @@ export interface Issue {
   due_date: string | null;
   metadata: IssueMetadata;
   issue_type_id: string | null;
+  milestone_id: string | null;
   assignees?: IssueAssignee[];
   reactions?: IssueReaction[];
   labels?: Label[];

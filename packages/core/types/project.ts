@@ -106,3 +106,41 @@ export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
   total: number;
 }
+
+export type ProjectMemberRole = "admin" | "editor" | "viewer";
+
+export interface ProjectMember {
+  project_id: string;
+  member_id: string;
+  role: ProjectMemberRole;
+  invited_at: string;
+  invited_by: string | null;
+}
+
+export type MilestoneStatus = "active" | "completed" | "cancelled";
+
+export interface Milestone {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  status: MilestoneStatus;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  title: string;
+  content: string;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}

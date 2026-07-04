@@ -1076,6 +1076,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/members", h.ListProjectMembers)
+					r.Post("/members", h.AddProjectMember)
+					r.Patch("/members/{memberId}", h.UpdateProjectMember)
+					r.Delete("/members/{memberId}", h.RemoveProjectMember)
+					r.Get("/milestones", h.ListMilestones)
+					r.Post("/milestones", h.CreateMilestone)
+					r.Get("/documents", h.ListProjectDocuments)
+					r.Post("/documents", h.CreateProjectDocument)
+				})
+			})
+
+			// Milestones
+			r.Route("/api/milestones", func(r chi.Router) {
+				r.Route("/{milestoneId}", func(r chi.Router) {
+					r.Get("/", h.GetMilestone)
+					r.Patch("/", h.UpdateMilestone)
+					r.Delete("/", h.DeleteMilestone)
+				})
+			})
+
+			// Project Documents
+			r.Route("/api/project-documents", func(r chi.Router) {
+				r.Route("/{documentId}", func(r chi.Router) {
+					r.Get("/", h.GetProjectDocument)
+					r.Patch("/", h.UpdateProjectDocument)
+					r.Delete("/", h.DeleteProjectDocument)
 				})
 			})
 

@@ -284,6 +284,8 @@ export const IssueSchema = z.object({
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
   metadata: IssueMetadataSchema,
+  issue_type_id: z.string().nullable().optional(),
+  milestone_id: z.string().nullable().optional(),
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
