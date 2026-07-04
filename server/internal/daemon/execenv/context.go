@@ -254,6 +254,13 @@ func skillsDirPath(workDir, provider string) string {
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
 		return filepath.Join(workDir, ".opencode", "skills")
+	case "deveco":
+		// DevEco Code (Huawei's OpenCode fork) natively discovers project
+		// skills from .deveco/skills/ in the workdir, mirroring OpenCode's
+		// .opencode/skills layout under its DEVECO_-prefixed brand. Discovery
+		// is anchored at the task workdir via `deveco run --dir <workDir>` +
+		// the PWD override in devecoBackend, same anchor OpenCode uses.
+		return filepath.Join(workDir, ".deveco", "skills")
 	case "openclaw":
 		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
 		// daemon pairs this with a per-task synthesized openclaw-config.json
