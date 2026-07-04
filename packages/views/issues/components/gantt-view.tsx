@@ -7,7 +7,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import { useMilestones } from "@multica/core/milestones";
+import type { Issue, IssueStatus, Milestone } from "@multica/core/types";
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -232,6 +233,46 @@ function GanttAxis({
 }
 
 // ---------------------------------------------------------------------------
+// Milestones Layer — vertical markers for milestones
+// ---------------------------------------------------------------------------
+
+function MilestonesLayer({
+  milestones,
+  range,
+  dayPx,
+  height,
+}: {
+  milestones: Milestone[];
+  range: Range;
+  dayPx: number;
+  height: number;
+}) {
+  return (
+    <>
+      {milestones
+        .filter((m) => m.due_date)
+        .map((m) => {
+          const d = parseDay(m.due_date);
+          if (!d) return null;
+          const offsetDays = daysBetween(range.start, d);
+          return (
+            <div
+              key={m.id}
+              className="absolute top-0 bottom-0 z-10 flex flex-col pointer-events-none"
+              style={{ left: offsetDays * dayPx, height }}
+            >
+              <div className="w-px h-full border-l border-dashed border-indigo-500/50" />
+              <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-sm bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-medium text-indigo-600 whitespace-nowrap shadow-sm backdrop-blur-sm">
+                {m.title}
+              </div>
+            </div>
+          );
+        })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Background layer — weekend shading, week/month gridlines, today line.
 // Rendered once across the full timeline track height behind all bars.
 // ---------------------------------------------------------------------------
@@ -440,7 +481,13 @@ function ScheduledRow({
 // GanttView — public component
 // ---------------------------------------------------------------------------
 
-export function GanttView({ issues }: { issues: Issue[] }) {
+export function GanttView({
+  issues,
+  projectId,
+}: {
+  issues: Issue[];
+  projectId?: string | null;
+}) {
   const { t } = useT("issues");
   const zoom = useViewStore((s) => s.ganttZoom);
   const showCompleted = useViewStore((s) => s.ganttShowCompleted);
@@ -450,6 +497,8 @@ export function GanttView({ issues }: { issues: Issue[] }) {
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];
+  
+  const { data: milestones = [] } = useMilestones(projectId || null);
 
   // The data source only delivers scheduled issues (server-side
   // `scheduled=true`), but a row can still arrive here without a date — for
@@ -564,6 +613,12 @@ export function GanttView({ issues }: { issues: Issue[] }) {
                 dayPx={dayPx}
                 height={scheduled.length * ROW_HEIGHT}
                 todayOffsetDays={todayOffsetDays}
+              />
+              <MilestonesLayer
+                milestones={milestones}
+                range={range}
+                dayPx={dayPx}
+                height={scheduled.length * ROW_HEIGHT}
               />
             </div>
             {scheduled.map((issue) => (

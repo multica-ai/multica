@@ -24,7 +24,7 @@ function mk(id: string, status: Issue["status"], position: number): Issue {
     stage: null,
     start_date: null,
     due_date: null,
-    metadata: {}, issue_type_id: null,
+    metadata: {}, issue_type_id: null, milestone_id: null,
     labels: [],
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",

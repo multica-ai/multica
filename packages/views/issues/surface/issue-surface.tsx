@@ -216,7 +216,7 @@ function IssueSurfaceContent({
               />
             )}
             {controller.viewMode === "gantt" && (
-              <GanttView issues={controller.filteredGanttIssues} />
+              <GanttView issues={controller.filteredGanttIssues} projectId={controller.projectId} />
             )}
             {controller.viewMode === "swimlane" && (
               <SwimLaneView

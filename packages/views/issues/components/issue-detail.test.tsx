@@ -408,7 +408,7 @@ const mockIssue: Issue = {
   stage: null,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
-  metadata: {}, issue_type_id: null,
+  metadata: {}, issue_type_id: null, milestone_id: null,
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -686,7 +686,7 @@ describe("IssueDetail (shared)", () => {
     // the raw JSON on demand. Keys are NOT rendered inline anywhere.
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
-      issue_type_id: null,
+      issue_type_id: null, milestone_id: null,
       metadata: {
         pr_url: "https://example.com/pr/1",
         pipeline_status: "running",
@@ -709,7 +709,7 @@ describe("IssueDetail (shared)", () => {
   it("opens a dialog with formatted JSON when the Metadata button is clicked", async () => {
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
-      issue_type_id: null,
+      issue_type_id: null, milestone_id: null,
       metadata: {
         pr_url: "https://example.com/pr/1",
         pipeline_status: "running",
@@ -736,7 +736,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("hides the Metadata button entirely when the bag is empty", async () => {
-    // Default fixture already has metadata: {}, issue_type_id: null, asserted explicitly here.
+    // Default fixture already has metadata: {}, issue_type_id: null, milestone_id: null, asserted explicitly here.
     renderIssueDetail();
 
     await waitFor(() => {
