@@ -19,15 +19,23 @@ images:
     pullPolicy: IfNotPresent
 
 # -----------------------------------------------------------------------------
-# Pre-created Secret with sensitive values. Create it before `helm install`:
+# Pre-created Secret with sensitive values. Create it before `helm install`.
+# The backend imports the whole Secret via envFrom, so you can add any optional
+# secret env var without changing this chart. Keep real values out of git.
 #
 # Built-in postgres (default):
 #   kubectl -n <namespace> create secret generic multica-secrets \
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
 #     --from-literal=RESEND_API_KEY="" \
+#     --from-literal=SMTP_PASSWORD="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=AWS_ACCESS_KEY_ID="" \
+#     --from-literal=AWS_SECRET_ACCESS_KEY="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=GITHUB_WEBHOOK_SECRET="" \
+#     --from-literal=MULTICA_LARK_SECRET_KEY="" \
+#     --from-literal=MULTICA_SLACK_SECRET_KEY="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # External postgres (postgres.external.enabled=true):
@@ -36,12 +44,15 @@ images:
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=DATABASE_URL="postgres://user:pass@host:5432/multica?sslmode=require" \
 #     --from-literal=RESEND_API_KEY="" \
+#     --from-literal=SMTP_PASSWORD="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=AWS_ACCESS_KEY_ID="" \
+#     --from-literal=AWS_SECRET_ACCESS_KEY="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=GITHUB_WEBHOOK_SECRET="" \
+#     --from-literal=MULTICA_LARK_SECRET_KEY="" \
+#     --from-literal=MULTICA_SLACK_SECRET_KEY="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
-#
-# The chart references this Secret by name; it does not template it, so real
-# values never need to land in git.
 # -----------------------------------------------------------------------------
 existingSecret: multica-secrets
 
@@ -110,10 +121,22 @@ backend:
   config:
     appEnv: production
     appUrl: http://multica.dev.lan
+    publicUrl: http://api.multica.dev.lan
     frontendOrigin: http://multica.dev.lan
     corsAllowedOrigins: ""
+    allowedOrigins: ""
     cookieDomain: ""
+    logLevel: info
+    metricsAddr: ""
+    databaseMaxConns: ""
+    databaseMinConns: ""
     resendFromEmail: noreply@multica.ai
+    smtpHost: ""
+    smtpPort: "25"
+    smtpUsername: ""
+    smtpTls: ""
+    smtpTlsInsecure: false
+    smtpEhloName: ""
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
@@ -123,11 +146,31 @@ backend:
     disableWorkspaceCreation: false
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
+    githubAppSlug: ""
     s3Bucket: ""
     s3Region: us-west-2
+    awsEndpointUrl: ""
+    s3UsePathStyle: ""
+    attachmentDownloadMode: auto
+    attachmentDownloadUrlTtl: 30m
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    rateLimitTrustedProxies: ""
+    trustedProxies: ""
+    larkHttpBaseUrl: ""
+    larkCallbackBaseUrl: ""
+  # Additional backend env entries rendered into the Deployment's `env` list.
+  # Use this for less common knobs or valueFrom references, for example:
+  # extraEnv:
+  #   - name: CLOUDFRONT_PRIVATE_KEY_SECRET
+  #     value: my/aws/secret
+  #   - name: REDIS_URL
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: multica-redis
+  #         key: url
+  extraEnv: []
   resources:
     requests:
       cpu: 100m
@@ -145,6 +188,8 @@ backend:
 # -----------------------------------------------------------------------------
 frontend:
   replicas: 1
+  # Additional frontend env entries rendered into the Deployment's `env` list.
+  extraEnv: []
   # Compatibility shim for the prebuilt multica-web image.
   compatibility:
     # When true (default) the chart creates an ExternalName Service literally
