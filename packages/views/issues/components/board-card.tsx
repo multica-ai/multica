@@ -14,6 +14,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
+import { IssueTypeBadge } from "./issue-type-badge";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
@@ -175,6 +176,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
+          <IssueTypeBadge issueTypeId={issue.issue_type_id} />
           <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
           {hasPendingReview && (
             <span className="flex items-center gap-1 bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-medium ml-1">

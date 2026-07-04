@@ -12,6 +12,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
+import { IssueTypeBadge } from "./issue-type-badge";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
@@ -91,6 +92,7 @@ function ListRowContent({
           href={p.issueDetail(issue.id)}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
+          <IssueTypeBadge issueTypeId={issue.issue_type_id} />
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
           </span>

@@ -31,6 +31,7 @@
       "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",
+      "issue_types": "Issue Types",
       "repositories": "Repositories",
       "github": "GitHub",
       "integrations": "Integrations",
