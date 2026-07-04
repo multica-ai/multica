@@ -8,6 +8,7 @@ export const STATUS_ORDER: IssueStatus[] = [
   "done",
   "blocked",
   "cancelled",
+  "archived",
 ];
 
 export const ALL_STATUSES: IssueStatus[] = [
@@ -18,9 +19,10 @@ export const ALL_STATUSES: IssueStatus[] = [
   "done",
   "blocked",
   "cancelled",
+  "archived",
 ];
 
-/** Statuses shown as board columns (excludes cancelled). */
+/** Statuses shown as board columns (excludes cancelled and archived). */
 export const BOARD_STATUSES: IssueStatus[] = [
   "backlog",
   "todo",
@@ -47,4 +49,5 @@ export const STATUS_CONFIG: Record<
   done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
   blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10", dividerColor: "bg-destructive", columnBg: "bg-destructive/5" },
   cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
+  archived: { label: "Archived", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };

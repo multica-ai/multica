@@ -13,7 +13,8 @@
     "in_review": "レビュー中",
     "done": "完了",
     "blocked": "ブロック中",
-    "cancelled": "キャンセル済み"
+    "cancelled": "キャンセル済み",
+    "archived": "アーカイブ済み"
   },
   "priority": {
     "urgent": "緊急",

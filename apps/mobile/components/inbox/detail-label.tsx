@@ -33,6 +33,7 @@ const STATUS_LABEL: Record<IssueStatus, string> = {
   done: "Done",
   blocked: "Blocked",
   cancelled: "Cancelled",
+  archived: "Archived",
 };
 
 // Mirrors PRIORITY_CONFIG.label in packages/core/issues/config/priority.ts

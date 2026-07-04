@@ -387,9 +387,12 @@ function MentionRow({
 }) {
   const { t } = useT("editor");
   if (item.type === "issue") {
-    // Visually dim closed issues (done/cancelled) so they're distinguishable
-    // from active ones in the suggestion list — they're still selectable.
-    const isClosed = item.status === "done" || item.status === "cancelled";
+    // Visually dim closed issues (done/cancelled/archived) so they're
+    // distinguishable from active ones in the suggestion list — still selectable.
+    const isClosed =
+      item.status === "done" ||
+      item.status === "cancelled" ||
+      item.status === "archived";
     return (
       <button
         type="button"

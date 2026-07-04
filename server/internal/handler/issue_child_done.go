@@ -202,10 +202,11 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
-// "finished" for stage-barrier purposes. Cancelled counts as terminal: a
-// cancelled sibling will never complete, so it must not hold a stage open.
+// "finished" for stage-barrier purposes. Cancelled and archived count as
+// terminal: such a sibling will never complete, so it must not hold a stage
+// open.
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return status == "done" || status == "cancelled" || status == "archived"
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit

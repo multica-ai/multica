@@ -139,6 +139,22 @@ function CancelledIcon() {
   );
 }
 
+/** Filled ring with an archive-box glyph (lid + tray + handle slot) */
+function ArchivedIcon() {
+  return (
+    <ProgressCircle progress={0}>
+      <path
+        d="M4 5 H10 M4.5 5 V9 A0.5 0.5 0 0 0 5 9.5 H9 A0.5 0.5 0 0 0 9.5 9 V5 M6 6.75 H8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </ProgressCircle>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Renderer map
 // ---------------------------------------------------------------------------
@@ -151,6 +167,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,
+  archived: ArchivedIcon,
 };
 
 // ---------------------------------------------------------------------------

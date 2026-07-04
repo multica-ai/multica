@@ -30,6 +30,7 @@ const STATUS_COLOR: Record<IssueStatus, string> = {
   done: "#3b82f6", // info
   blocked: "#dc2626", // destructive
   cancelled: "#71717a",
+  archived: "#71717a",
 };
 
 function piePath(progress: number): string {
