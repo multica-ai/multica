@@ -283,6 +283,8 @@
     "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",
     "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime.",
     "col_cli": "CLI",
+    "_comment_fir2669": "CEREBRO-PATCH(runtime-list-columns-i18n): FIR-2669 column picker label",
+    "columns_label": "Columns",
     "cli_managed_badge": "Desktop",
     "cli_update_available_aria": "Update available",
     "cli_update_available_tooltip": "Update available: {{version}}"

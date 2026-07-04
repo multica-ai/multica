@@ -63,6 +63,9 @@
     "runs": "実行",
     "last_active": "最終アクティブ",
     "model": "モデル",
+    "_comment_fir2669": "CEREBRO-PATCH(agent-columns-account-thinking-i18n): FIR-2669 Account + Thinking columns",
+    "account": "アカウント",
+    "thinking": "思考レベル",
     "created": "作成日時",
     "owner": "オーナー"
   },
@@ -509,6 +512,7 @@
     "none": "30 日間アクティビティなし"
   },
   "toolbar": {
+    "search_placeholder": "エージェントを検索…",
     "result_count_title": "該当エージェント / スコープ内全体",
     "filter_label": "フィルター",
     "filter_active_count_one": "{{count}} 件のフィルター",

@@ -90,6 +90,9 @@
     "runs": "실행",
     "last_active": "최근 활동",
     "model": "모델",
+    "_comment_fir2669": "CEREBRO-PATCH(agent-columns-account-thinking-i18n): FIR-2669 Account + Thinking columns",
+    "account": "계정",
+    "thinking": "사고 수준",
     "created": "생성일",
     "owner": "소유자"
   },
@@ -539,6 +542,7 @@
     "none": "30일간 활동 없음"
   },
   "toolbar": {
+    "search_placeholder": "에이전트 검색…",
     "result_count_title": "일치하는 에이전트 / 범위 내 전체",
     "filter_label": "필터",
     "filter_active_count_one": "필터 {{count}}개",

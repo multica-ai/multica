@@ -21,6 +21,16 @@ import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeList } from "./runtime-list";
+// CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — full-field search + column picker.
+import "@multica/cerebro-types";
+import {
+  matchesRuntimeSearch,
+  useCerebroAccountsList,
+  RuntimeColumnPicker,
+} from "@multica/cerebro-runtime/views";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
+import { memberListOptions } from "@multica/core/workspace/queries";
+import { useHealthLabel } from "./shared";
 import { useT } from "../../i18n";
 
 type RuntimeFilter = "mine" | "all";
@@ -98,6 +108,24 @@ export function RuntimesPage({
     runtimeListOptions(wsId),
   );
 
+  // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — full-field search resolves
+  // per-row account identity, owner name, and health label so the search box
+  // matches every column. Gated by the flag; off = original name/provider search.
+  const columnsEnabled = useFlagValue("cerebro_interface_columns");
+  const labelOf = useHealthLabel();
+  const { data: accounts = [] } = useCerebroAccountsList();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const accountLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.id, `${a.login_identity} ${a.provider}`);
+    return m;
+  }, [accounts]);
+  const memberNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const mem of members) m.set(mem.user_id, mem.name);
+    return m;
+  }, [members]);
+
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
   }, [qc, wsId]);
@@ -133,16 +161,41 @@ export function RuntimesPage({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scopedRuntimes.filter((r) => {
+      const health = deriveRuntimeHealth(r, now);
       if (healthFilter !== "all") {
-        if (deriveRuntimeHealth(r, now) !== healthFilter) return false;
+        if (health !== healthFilter) return false;
       }
       if (q) {
-        const haystack = `${r.name} ${r.provider} ${r.device_info ?? ""}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
+        // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — search all fields.
+        if (columnsEnabled) {
+          const ok = matchesRuntimeSearch(r, q, {
+            accountLabel: r.current_account_id
+              ? accountLabelById.get(r.current_account_id) ?? null
+              : null,
+            ownerName: r.owner_id
+              ? memberNameById.get(r.owner_id) ?? null
+              : null,
+            healthLabel: labelOf(health),
+          });
+          if (!ok) return false;
+        } else {
+          const haystack =
+            `${r.name} ${r.provider} ${r.device_info ?? ""}`.toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
       }
       return true;
     });
-  }, [scopedRuntimes, healthFilter, search, now]);
+  }, [
+    scopedRuntimes,
+    healthFilter,
+    search,
+    now,
+    columnsEnabled,
+    accountLabelById,
+    memberNameById,
+    labelOf,
+  ]);
 
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
@@ -173,6 +226,7 @@ export function RuntimesPage({
               setSearch={setSearch}
               scope={scope}
               setScope={setScope}
+              showColumnPicker={columnsEnabled}
             />
             <FilterChipsRow
               healthFilter={healthFilter}
@@ -281,11 +335,14 @@ function CardToolbar({
   setSearch,
   scope,
   setScope,
+  // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — column picker toggle.
+  showColumnPicker,
 }: {
   search: string;
   setSearch: (v: string) => void;
   scope: RuntimeFilter;
   setScope: (v: RuntimeFilter) => void;
+  showColumnPicker: boolean;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -300,10 +357,13 @@ function CardToolbar({
         />
       </div>
       <ScopeSegment value={scope} onChange={setScope} />
+      {/* CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — column picker + Live grouped right. */}
+      <div className="ml-auto flex items-center gap-2">
+        {showColumnPicker && <RuntimeColumnPicker />}
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="ml-auto inline-flex cursor-default select-none items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="inline-flex cursor-default select-none items-center gap-1.5 text-xs text-muted-foreground">
               <span className="relative inline-flex h-2 w-2 items-center justify-center">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/60" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
@@ -316,6 +376,7 @@ function CardToolbar({
           {t(($) => $.page.live_tooltip)}
         </TooltipContent>
       </Tooltip>
+      </div>
     </div>
   );
 }

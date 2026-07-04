@@ -338,7 +338,12 @@ export type CerebroFlagKey =
   | "cerebro_browser"
   // FIR-2042: mobile-web "Install Multica" top banner with per-platform
   // guidance (Android native install prompt; iOS Share → Add to Home Screen).
-  | "cerebro_pwa_install_banner";
+  | "cerebro_pwa_install_banner"
+  // FIR-2669: configurable columns + full-field search on the Runtime and Agent
+  // list pages. Adds a column picker (persisted per workspace/device) and an
+  // Account column to the runtimes table, and a search box + Account/Thinking
+  // level columns to the agents table. Default ON.
+  | "cerebro_interface_columns";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -689,6 +694,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2042: default ON — the install banner only appears on mobile web when
   // the app is not already installed, and is dismissible.
   cerebro_pwa_install_banner: true,
+  cerebro_interface_columns: true,
 };
 
 /**
@@ -1028,6 +1034,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
+  },
+  {
+    key: "cerebro_interface_columns",
+    label: "Configurable list columns",
+    group: "agents",
+    description:
+      "Choose which columns show on the Runtimes and Agents pages via a column picker (remembered per workspace on this device). Adds an Account column to Runtimes and Account + Thinking level columns to Agents, plus a search box on Agents and full-field search on Runtimes.",
   },
   {
     key: "cerebro_tasks",

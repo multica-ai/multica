@@ -90,6 +90,9 @@
     "runs": "Runs",
     "last_active": "Last active",
     "model": "Model",
+    "_comment_fir2669": "CEREBRO-PATCH(agent-columns-account-thinking-i18n): FIR-2669 Account + Thinking columns",
+    "account": "Account",
+    "thinking": "Thinking level",
     "created": "Created",
     "owner": "Owner"
   },
@@ -539,6 +542,7 @@
     "none": "No activity (30d)"
   },
   "toolbar": {
+    "search_placeholder": "Search agents…",
     "result_count_title": "Matching agents / agents in scope",
     "filter_label": "Filter",
     "filter_active_count_one": "{{count}} filter",

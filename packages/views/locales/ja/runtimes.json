@@ -269,6 +269,8 @@
     "col_agents": "エージェント",
     "col_cost": "コスト · 7 日",
     "col_cli": "CLI",
+    "_comment_fir2669": "CEREBRO-PATCH(runtime-list-columns-i18n): FIR-2669 column picker label",
+    "columns_label": "列",
     "cost_delta_flat": "変化なし",
     "cli_managed_badge": "デスクトップ",
     "cli_update_available_aria": "更新あり",
