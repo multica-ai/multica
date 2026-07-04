@@ -189,6 +189,15 @@ Contracts:
   only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,
   mirrors the agent path from MUL-2808). Re-triggering is bounded only by
   `HasPendingTaskForIssueAndAgent` (idempotent per parent issue + agent).
+- no leader-invocation gate: child-done does NOT re-check whether the child's
+  completer can invoke the leader. The parent was already permission-checked at
+  squad-assign time (`validateAssigneePair`), so waking its own leader is a
+  coordination handoff, not a fresh invocation. Re-checking it here failed
+  closed for the DEFAULT private leader (the child's completer is an
+  agent/system actor with no resolvable human originator), stranding every
+  process-squad pipeline after stage 1 while direct-to-leader-agent parents
+  advanced fine (MUL-4063 / GH #4928). Agent and squad child-done now share one
+  ungated path; any future invocation gate must be added to BOTH together.
 
 ## Private Leader Access
 

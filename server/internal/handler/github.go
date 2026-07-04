@@ -1431,7 +1431,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// it here would leave the parent silent for the dominant completion path.
 	// notifyParentOfChildDone re-checks every guard (prev != done, parent
 	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated, "system", "")
+	h.notifyParentOfChildDone(ctx, issue, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

@@ -124,8 +124,8 @@ These are all silent no-ops — no error, no run:
   (`RuntimeID` invalid or `ArchivedAt` set).
 - **A private agent you cannot access:** skipped — the mention path gates on
   `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
-  `canEnqueueSquadLeader` wrapper is the assignment/child-done path, not this
-  one).
+  `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
+  one; the child-done wake is ungated — see the multica-squads skill).
 
 ## Incorrect → Correct
 
