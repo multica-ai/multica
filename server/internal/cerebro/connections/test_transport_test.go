@@ -330,3 +330,61 @@ func TestAPI_ProbeAuthRejectionIsReported(t *testing.T) {
 		t.Fatalf("expected credential-rejection error, got %q", result.Error)
 	}
 }
+
+// TestAPI_ProbeAuthRejectionFallsBackToPublicDocs verifies that a rejected
+// credential falls back to the API's anonymous documentation with an explicit
+// warning, instead of leaving the endpoint list empty (FIR-2640).
+func TestAPI_ProbeAuthRejectionFallsBackToPublicDocs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(openAPIv3JSON))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	result := doTestConnection(context.Background(), testConnectionRequest{
+		URL: srv.URL, Type: TypeAPI, AuthConfig: AuthConfig{BearerToken: "bad-key"},
+	})
+	if len(result.Endpoints) != 2 {
+		t.Fatalf("expected fallback to the 2 public endpoints, got %+v", result.Endpoints)
+	}
+	if !strings.Contains(result.Error, "credential was rejected (HTTP 401") ||
+		!strings.Contains(result.Error, "public endpoints") {
+		t.Fatalf("expected rejected-credential warning with fallback note, got %q", result.Error)
+	}
+}
+
+// TestAPI_SpecURLAuthRejectionFallsBackToPublicDoc mirrors the fallback for an
+// explicitly provided spec URL.
+func TestAPI_SpecURLAuthRejectionFallsBackToPublicDoc(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/spec.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(openAPIv3JSON))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	result := doTestConnection(context.Background(), testConnectionRequest{
+		URL: srv.URL, Type: TypeAPI, SpecURL: srv.URL + "/spec.json",
+		AuthConfig: AuthConfig{BearerToken: "bad-key"},
+	})
+	if len(result.Endpoints) != 2 {
+		t.Fatalf("expected fallback to the 2 public endpoints, got %+v", result.Endpoints)
+	}
+	if !strings.Contains(result.Error, "rejected the connection's credential (HTTP 401") ||
+		!strings.Contains(result.Error, "public document") {
+		t.Fatalf("expected rejected-credential warning with fallback note, got %q", result.Error)
+	}
+}

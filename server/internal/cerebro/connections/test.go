@@ -495,6 +495,19 @@ func testAPIConnection(ctx context.Context, client *http.Client, url string, aut
 	if len(eps) > 0 {
 		result.Endpoints = eps
 	} else if rejection != nil {
+		// Fall back to the API's anonymous documentation (mirrors the registry
+		// docs page): the admin still gets the public endpoint list, and the
+		// warning names the rejected credential as the thing to fix.
+		if hasCredential(auth) {
+			if anonEps, _ := discoverAPIEndpoints(ctx, client, url, stripCredentials(auth)); len(anonEps) > 0 {
+				result.Endpoints = anonEps
+				result.Error = fmt.Sprintf(
+					"the connection's credential was rejected (HTTP %d at %s) — showing the API's public endpoints instead; fix the Bearer token / API key to discover the key's full surface",
+					rejection.StatusCode, rejection.URL,
+				)
+				return result
+			}
+		}
 		result.Error = fmt.Sprintf(
 			"found an API spec at %s but it rejected the connection's credential (HTTP %d) — check the Bearer token / API key, then test again",
 			rejection.URL, rejection.StatusCode,
