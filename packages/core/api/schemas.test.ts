@@ -539,6 +539,11 @@ describe("AppConfigSchema cdn_signed drift", () => {
     const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
     expect(parsed.feature_flags).toEqual({});
   });
+
+  it("parses server_version and leaves it undefined when the server omits it", () => {
+    expect(AppConfigSchema.parse({ server_version: "1.2.3" }).server_version).toBe("1.2.3");
+    expect(AppConfigSchema.parse({}).server_version).toBeUndefined();
+  });
 });
 
 describe("InboxUnreadSummarySchema", () => {

@@ -49,6 +49,11 @@ type AppConfig struct {
 	// FeatureFlags exposes only frontend-safe boolean decisions. Do not dump
 	// raw rules here: /api/config is public and may be called anonymously.
 	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
+
+	// ServerVersion is the running API build version, so self-hosted
+	// operators can confirm what's deployed and include it in bug reports.
+	// Empty (and omitted) for dev builds that aren't stamped via -X main.version.
+	ServerVersion string `json:"server_version,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -67,6 +72,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
+	config.ServerVersion = h.cfg.ServerVersion
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.

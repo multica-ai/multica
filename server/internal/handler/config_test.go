@@ -287,6 +287,39 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	}
 }
 
+// TestGetConfigExposesServerVersion verifies /api/config reports the build
+// version main.go stamps into handler.Config via -X main.version, so
+// self-hosted operators can confirm what's deployed from the Help popover.
+func TestGetConfigExposesServerVersion(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+
+	testHandler.cfg.ServerVersion = ""
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want empty for dev build, got %q", cfg.ServerVersion)
+	}
+
+	testHandler.cfg.ServerVersion = "1.2.3"
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3, got %q", cfg.ServerVersion)
+	}
+}
+
 func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)

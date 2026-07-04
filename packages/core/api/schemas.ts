@@ -93,6 +93,7 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
+  server_version?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,7 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
+  server_version: OptionalStringSchema,
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
