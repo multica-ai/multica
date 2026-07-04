@@ -1576,23 +1576,19 @@ func TestExecuteAndDrain_ZeroOutputWatchdog_DoesNotFireWhenUserVisibleOutputExis
 	agentCtx, agentCancel := context.WithCancel(context.Background())
 	defer agentCancel()
 
-	cancelled := make(chan struct{})
+	// Run the watchdog with a 200ms zero-output window (tick at ~50ms).
+	// Since lastUserVisibleActivityAt was just stamped, the watchdog should
+	// NOT fire for 200ms. We cancel the context after 150ms — after
+	// multiple ticks but before the threshold — to confirm the watchdog
+	// stays quiet when user-visible activity is recent.
 	go func() {
-		agentCancel()
-		close(cancelled)
-	}()
-
-	// Run the watchdog with a 100ms zero-output window. Since
-	// lastUserVisibleActivityAt was just stamped, the watchdog should NOT
-	// fire for 100ms. We cancel the context after 50ms.
-	go func() {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		agentCancel()
 	}()
 
 	messages := make(chan agent.Message) // empty, unbuffered
 	d := newTestDaemon(t)
-	d.runIdleWatchdog(agentCtx, 0, 0, 100*time.Millisecond, &lastActivityAt, &lastUserVisibleActivityAt, &inFlightTools, &fired, &firedThreshold, agentCancel, messages, slog.Default(), "t-zero-no-fire")
+	d.runIdleWatchdog(agentCtx, 0, 0, 200*time.Millisecond, &lastActivityAt, &lastUserVisibleActivityAt, &inFlightTools, &fired, &firedThreshold, agentCancel, messages, slog.Default(), "t-zero-no-fire")
 
 	if fired.Load() {
 		t.Fatalf("zero-output watchdog should not fire when lastUserVisibleActivityAt was recently stamped, but it did (threshold=%s)", time.Duration(firedThreshold.Load()))

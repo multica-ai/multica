@@ -4248,11 +4248,16 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
-				// Stamp user-visible activity for all types except
-				// MessageStatus (session init, pin). The zero-output
-				// watchdog uses this to detect runs that emit internal
-				// frames but no content the user can see (#4407).
-				if msg.Type != agent.MessageStatus {
+				// Stamp user-visible activity only for message types
+				// that produce timeline items the user can see. The
+				// zero-output watchdog uses this to detect stuck
+				// --resume sessions that emit internal frames
+				// (MessageStatus for session init, MessageLog for
+				// debug output) but no real content (#4407).
+				switch msg.Type {
+				case agent.MessageText, agent.MessageThinking,
+					agent.MessageToolUse, agent.MessageToolResult,
+					agent.MessageError:
 					lastUserVisibleActivityAt.Store(time.Now().UnixNano())
 				}
 				switch msg.Type {
@@ -4368,7 +4373,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			// generic "agent_error" bucket the aborted path falls into.
 			result.Status = "idle_watchdog"
 			if result.Error == "" {
-				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+				tripped := time.Duration(idleWatchdogThreshold.Load())
+				if d.cfg.AgentZeroOutputWatchdog > 0 && tripped == d.cfg.AgentZeroOutputWatchdog {
+					result.Error = zeroOutputWatchdogReason(tripped)
+				} else {
+					result.Error = idleWatchdogReason(tripped)
+				}
 			}
 		}
 		return result, toolCount.Load(), nil
@@ -4378,9 +4388,14 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
 		if idleWatchdogFired.Load() {
+			tripped := time.Duration(idleWatchdogThreshold.Load())
+			reason := idleWatchdogReason(tripped)
+			if d.cfg.AgentZeroOutputWatchdog > 0 && tripped == d.cfg.AgentZeroOutputWatchdog {
+				reason = zeroOutputWatchdogReason(tripped)
+			}
 			return agent.Result{
 				Status: "idle_watchdog",
-				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
+				Error:  reason,
 			}, toolCount.Load(), nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
@@ -4406,6 +4421,14 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 // drain-timeout branch in executeAndDrain emit identical wording.
 func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+// zeroOutputWatchdogReason formats the explanation for zero-output watchdog
+// dispositions. Unlike the idle watchdog (which fires on total backend
+// silence), the zero-output watchdog fires when the backend is emitting
+// internal frames but no user-visible timeline items.
+func zeroOutputWatchdogReason(window time.Duration) string {
+	return fmt.Sprintf("agent produced no user-visible output for %s despite emitting internal frames; force-stopped by zero-output watchdog", window)
 }
 
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
@@ -4467,12 +4490,17 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow, z
 				continue
 			}
 
+			toolInFlight := inFlightTools.Load() > 0
+
 			// Check 1: Zero-output watchdog. If no user-visible timeline
 			// items have been produced for zeroOutputWindow, fire. This
-			// is independent of the idle watchdog — a backend emitting
-			// internal frames keeps lastActivityAt fresh but does NOT
-			// reset lastUserVisibleActivityAt.
-			if zeroOutputWindow > 0 {
+			// catches stuck --resume sessions that emit internal frames
+			// (keeps lastActivityAt fresh) but no user-visible content.
+			// Skipped when a tool is in flight: a legitimate long-running
+			// tool (npm install, docker build) may run silently for hours
+			// after tool_use, and the tool watchdog (2h) is the correct
+			// budget for that case.
+			if zeroOutputWindow > 0 && !toolInFlight {
 				lastVisible := time.Unix(0, lastUserVisibleActivityAt.Load())
 				silentFor := time.Since(lastVisible)
 				if silentFor >= zeroOutputWindow {
@@ -4494,7 +4522,6 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow, z
 				continue
 			}
 			threshold := window
-			toolInFlight := inFlightTools.Load() > 0
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
