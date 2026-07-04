@@ -40,6 +40,8 @@ function workspaceScoped(slug: string) {
     documentEdit: (id: string) => `${ws}/documents/${encode(id)}/edit`,
     attachmentView: (id: string) => `${ws}/attachments/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
+    autopilotsFolder: (folderId: string) =>
+      `${ws}/autopilots?folder=${encode(folderId)}`, // CEREBRO-PATCH(cerebro-autopilots-folder-path): FIR-2688 shareable per-folder URL
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     autopilotNew: () => `${ws}/autopilots/new`, // CEREBRO-PATCH(autopilot-new-path): full-page create route (JEH-1766)
     autopilotEdit: (id: string) => `${ws}/autopilots/${encode(id)}/edit`, // CEREBRO-PATCH(autopilot-edit-path): full-page edit route (JEH-1766)
@@ -50,6 +52,8 @@ function workspaceScoped(slug: string) {
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     notes: () => `${ws}/notes`, // CEREBRO-PATCH(cerebro-notes-path): TECH-3421 Notes page path
+    notesFolder: (folderId: string) =>
+      `${ws}/notes?folder=${encode(folderId)}`, // CEREBRO-PATCH(cerebro-notes-folder-path): FIR-2688 shareable per-folder URL
     noteDetail: (id: string) => `${ws}/notes/${encode(id)}`, // CEREBRO-PATCH(cerebro-note-detail-path): FIR-2595 shareable per-note URL
     search: () => `${ws}/search`, // CEREBRO-PATCH(search-page-1326): JEH-1326 dedicated search page path
     notifications: () => `${ws}/notifications`,
@@ -57,6 +61,8 @@ function workspaceScoped(slug: string) {
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     skills: () => `${ws}/skills`,
+    skillsFolder: (folderId: string) =>
+      `${ws}/skills?folder=${encode(folderId)}`, // CEREBRO-PATCH(cerebro-skills-folder-path): FIR-2688 shareable per-folder URL
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
     // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 full-page connection create/edit routes.

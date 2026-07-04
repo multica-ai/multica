@@ -155,7 +155,14 @@ export function NotesPage({
   // null = the root, where loose (unfiled) notes and top-level folders live.
   // Drilling into a folder scopes the list to that folder + shows its
   // subfolders, with a breadcrumb back to the root.
-  const [folderId, setFolderId] = React.useState<string | null>(null);
+  const navigation = useNavigation();
+  const wsPaths = useWorkspacePaths();
+  // FIR-2688: seed the open folder from `?folder=<id>` so a folder URL copied
+  // from the address bar reopens that folder. A stale id resolves to an empty
+  // list until refetch, which is harmless.
+  const [folderId, setFolderId] = React.useState<string | null>(
+    () => navigation.searchParams.get("folder"),
+  );
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
   );
@@ -177,26 +184,34 @@ export function NotesPage({
     [notes, selectedId],
   );
 
-  // FIR-2595: keep the browser address bar in sync with the open note, so the
-  // URL is shareable ("kopier den fra browseren"). `replaceSilent` updates the
-  // URL via the History API with no route reload — the same trick the inbox
-  // uses (FIR-2684). Deliberately NOT falling back to `replace`: web-only, it
-  // is gated on `replaceSilent` being present. On desktop there is no URL bar
-  // and a real `replace` from /notes to /notes/:noteId would swap the route
-  // element and remount the page, so desktop shares via the Copy link button.
-  // Guarding on `pathname === desired` keeps it loop-free and, on a deep link
-  // like /notes/:id?comment=x, leaves the ?comment param untouched on load.
-  const navigation = useNavigation();
-  const wsPaths = useWorkspacePaths();
+  // FIR-2595 + FIR-2688: keep the browser address bar in sync with the open
+  // note OR the open folder, so both URLs are shareable ("kopier den fra
+  // browseren"). `replaceSilent` updates the URL via the History API with no
+  // route reload — the same trick the inbox uses (FIR-2684). Deliberately NOT
+  // falling back to `replace`: web-only, it is gated on `replaceSilent` being
+  // present. On desktop there is no URL bar and a real `replace` would swap the
+  // route element and remount the page, so desktop shares via the Copy link
+  // button. An open note wins the URL (`/notes/:id`); with no note open the URL
+  // reflects the folder (`/notes?folder=<id>`), else the bare list. Comparing
+  // the full pathname+search keeps it loop-free.
   React.useEffect(() => {
     if (!navigation.replaceSilent) return;
     if (!navigation.pathname.includes("/notes")) return;
-    const desired = selectedId
-      ? wsPaths.noteDetail(selectedId)
-      : wsPaths.notes();
-    if (navigation.pathname === desired) return;
-    navigation.replaceSilent(desired);
-  }, [selectedId, wsPaths, navigation]);
+    if (selectedId) {
+      // Note open: `/notes/:id`. Guard on pathname so a deep link like
+      // /notes/:id?comment=x keeps its ?comment param untouched on load.
+      const desired = wsPaths.noteDetail(selectedId);
+      if (navigation.pathname === desired) return;
+      navigation.replaceSilent(desired);
+      return;
+    }
+    // No note open: the folder owns the URL. Write unconditionally so leaving a
+    // folder clears a stale `?folder`; History-API writes don't re-render, so
+    // the effect only fires on a real selection change (loop-free).
+    navigation.replaceSilent(
+      folderId ? wsPaths.notesFolder(folderId) : wsPaths.notes(),
+    );
+  }, [selectedId, folderId, wsPaths, navigation]);
 
   const noteFolderIds = React.useMemo(
     () => new Set(folders.map((f) => f.id)),

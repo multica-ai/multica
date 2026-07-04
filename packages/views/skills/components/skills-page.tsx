@@ -232,6 +232,7 @@ export default function SkillsPage() {
     kind: "skill",
     items: folderItems,
     itemNoun: "skills",
+    navigation, // CEREBRO-PATCH(skill-folder-deeplink): FIR-2688 — inject nav for ?folder deep-link.
   });
   const folderIncludes = folderView.includes; // CEREBRO-PATCH(skill-folder-loop): FIR-1486 — keep the filter dependency stable.
   // CEREBRO-PATCH(skill-list-columns): FIR-1530 — pending change-request data + filter state.

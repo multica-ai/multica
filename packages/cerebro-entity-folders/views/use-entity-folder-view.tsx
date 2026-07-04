@@ -4,10 +4,11 @@
 // with a minimal footprint. Returns whether the feature is on, a predicate to
 // filter the list by the selected folder, and the ready-to-render sidebar node.
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layers } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
@@ -26,6 +27,21 @@ import {
 export interface EntityFolderViewItem {
   id: string;
   label: string;
+}
+
+/**
+ * FIR-2688: minimal structural slice of the app's navigation adapter that this
+ * hook needs for `?folder` deep-linking. Injected by the caller rather than
+ * imported from `@multica/views/navigation`, so this cerebro package does not
+ * take a hard dependency on `@multica/views` (which itself depends on this
+ * package — that would form a build cycle). Any real `NavigationAdapter`
+ * satisfies this shape structurally.
+ */
+export interface EntityFolderNavigation {
+  pathname: string;
+  searchParams: Pick<URLSearchParams, "get">;
+  /** Web-only: update the URL without an RSC route nav. Absent on desktop. */
+  replaceSilent?: (path: string) => void;
 }
 
 export interface EntityFolderView {
@@ -65,11 +81,18 @@ export function useEntityFolderView(opts: {
   items: EntityFolderViewItem[];
   /** Plain-language plural for UI copy, e.g. "skills". Defaults to "items". */
   itemNoun?: string;
+  /**
+   * FIR-2688: the caller's navigation adapter, injected so this package stays
+   * decoupled from `@multica/views`. When omitted, `?folder` deep-linking is
+   * simply inactive (selection starts at "all" and is not mirrored to the URL).
+   */
+  navigation?: EntityFolderNavigation;
 }): EntityFolderView {
-  const { kind, items } = opts;
+  const { kind, items, navigation } = opts;
   const itemNoun = opts.itemNoun ?? "items";
   const enabled = useFeatureFlag(FLAG_BY_KIND[kind]);
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
 
   const { data: folders = [] } = useQuery({
     ...entityFoldersOptions(wsId, kind),
@@ -86,7 +109,50 @@ export function useEntityFolderView(opts: {
     return map;
   }, [itemRows]);
 
-  const [selected, setSelected] = useState<string>(SELECT_ALL);
+  // FIR-2688: the selected folder is deep-linkable via `?folder=<id>` so the
+  // URL can be copied from the address bar. Seed the selection from the query
+  // string on first render; a stale id is dropped below by `selectedValid`.
+  const [selected, setSelected] = useState<string>(
+    () => navigation?.searchParams.get("folder") ?? SELECT_ALL,
+  );
+
+  // FIR-2688: mirror the selection into the address bar. Web-only via
+  // `replaceSilent` (History API, no route reload) — matching the Notes surface
+  // (FIR-2595); on desktop there is no URL bar and a real `replace` would remount
+  // the page, so we skip it there. SELECT_ALL clears the param; a real folder id
+  // or the "unfiled" sentinel is written as `?folder=`.
+  //
+  // `useNavigation()` and `useWorkspacePaths()` both return a fresh object every
+  // render (paths.workspace(slug) is not memoized), so we read them through refs
+  // to keep `selectFolder` referentially stable — otherwise the sidebar node
+  // returned by this hook would change identity on every render.
+  const navRef = useRef(navigation);
+  navRef.current = navigation;
+  const wsPathsRef = useRef(wsPaths);
+  wsPathsRef.current = wsPaths;
+
+  const selectFolder = useCallback(
+    (sel: string) => {
+      setSelected(sel);
+      // Called only from a user action (folder click), so writing
+      // unconditionally cannot loop and clears a stale `?folder` on SELECT_ALL.
+      const nav = navRef.current;
+      if (!nav?.replaceSilent) return;
+      const surfacePath = kind === "skill" ? "/skills" : "/autopilots";
+      if (!nav.pathname.includes(surfacePath)) return;
+      const p = wsPathsRef.current;
+      const desired =
+        sel === SELECT_ALL
+          ? kind === "skill"
+            ? p.skills()
+            : p.autopilots()
+          : kind === "skill"
+            ? p.skillsFolder(sel)
+            : p.autopilotsFolder(sel);
+      nav.replaceSilent(desired);
+    },
+    [kind],
+  );
 
   // Drop a selection that points at a folder that no longer exists.
   const selectedValid =
@@ -124,11 +190,20 @@ export function useEntityFolderView(opts: {
           items={items}
           membership={membership}
           selected={effectiveSelected}
-          onSelect={setSelected}
+          onSelect={selectFolder}
           itemNoun={itemNoun}
         />
       ) : null,
-    [enabled, effectiveSelected, folders, itemNoun, items, kind, membership],
+    [
+      enabled,
+      effectiveSelected,
+      folders,
+      itemNoun,
+      items,
+      kind,
+      membership,
+      selectFolder,
+    ],
   );
 
   // FIR-1772: mobile drawer state + label for the current selection.
@@ -166,7 +241,7 @@ export function useEntityFolderView(opts: {
                 membership={membership}
                 selected={effectiveSelected}
                 onSelect={(sel) => {
-                  setSelected(sel);
+                  selectFolder(sel);
                   setMobileOpen(false);
                 }}
                 itemNoun={itemNoun}
@@ -186,6 +261,7 @@ export function useEntityFolderView(opts: {
       items,
       kind,
       membership,
+      selectFolder,
     ],
   );
 

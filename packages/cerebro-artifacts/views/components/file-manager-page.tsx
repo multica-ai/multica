@@ -603,6 +603,25 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     setSelectedArtifacts(new Set());
   }, [folderId]);
 
+  // FIR-2688: keep the address bar in sync with the open folder so its URL is
+  // copyable ("kopier den fra browseren"). Web-only via replaceSilent (History
+  // API, no route reload) — matching the Notes surface (FIR-2595); on desktop
+  // there is no URL bar and a real replace would remount the page. null clears
+  // the `?folder=` param (All documents); a folder id writes `?folder=<id>`.
+  const selectFolder = React.useCallback(
+    (id: string | null) => {
+      setFolderId(id);
+      // Called only from a user action (click), so writing unconditionally
+      // cannot loop and correctly clears a stale `?folder` when going to root.
+      if (!router.replaceSilent) return;
+      if (!router.pathname.includes("/documents")) return;
+      router.replaceSilent(
+        id ? wsPaths.documentsFolder(id) : wsPaths.documents(),
+      );
+    },
+    [router, wsPaths],
+  );
+
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "document" }),
   );
@@ -690,7 +709,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   const handleDeleteFolder = async () => {
     if (!deleteFolderTarget) return;
     await deleteFolder.mutateAsync({ id: deleteFolderTarget.id });
-    if (folderId === deleteFolderTarget.id) setFolderId(null);
+    if (folderId === deleteFolderTarget.id) selectFolder(null);
     setDeleteFolderTarget(null);
   };
 
@@ -802,7 +821,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
         <button
           type="button"
           onClick={() => {
-            setFolderId(null);
+            selectFolder(null);
             onPick?.();
           }}
           onDragOver={(e) => e.preventDefault()}
@@ -834,7 +853,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
             expanded={expanded}
             onToggle={toggleFolder}
             onSelect={(id) => {
-              setFolderId(id);
+              selectFolder(id);
               onPick?.();
             }}
             onMoveArtifact={handleMoveArtifact}
@@ -896,7 +915,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     <BreadcrumbLink
                       onClick={(e) => {
                         e.preventDefault();
-                        setFolderId(null);
+                        selectFolder(null);
                       }}
                       className="cursor-pointer truncate"
                     >
@@ -914,7 +933,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         <BreadcrumbLink
                           onClick={(e) => {
                             e.preventDefault();
-                            setFolderId(f.id);
+                            selectFolder(f.id);
                           }}
                           className="cursor-pointer truncate"
                         >
@@ -1110,7 +1129,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       e.dataTransfer.effectAllowed = "move";
                       setCompactDragImage(e, f.name, "folder");
                     }}
-                    onClick={() => setFolderId(f.id)}
+                    onClick={() => selectFolder(f.id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                       e.preventDefault();

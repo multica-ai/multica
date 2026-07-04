@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { collectionFolderKeys } from "@multica/cerebro-collections";
 import { artifactKeys } from "./queries";
 import type {
   Artifact,
@@ -23,6 +24,17 @@ function invalidateArtifactScopes(
   _artifact?: Pick<Artifact, "id" | "issue_id" | "project_id">,
 ) {
   qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+}
+
+// FIR-2688: the Settings → Collections tab reads document + note folders through
+// its own cache key (`collection-folders`), disjoint from `artifactKeys.folders`.
+// A folder create/rename/move/delete here must also invalidate that key so the
+// Collections tree stays aligned with the surface without a hard refresh.
+function invalidateArtifactCollections(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+) {
+  qc.invalidateQueries({ queryKey: collectionFolderKeys.artifact(wsId) });
 }
 
 export function useCreateArtifact() {
@@ -156,6 +168,7 @@ export function useCreateArtifactFolder() {
       qc.invalidateQueries({
         queryKey: artifactKeys.folders(wsId, folder?.kind),
       });
+      invalidateArtifactCollections(qc, wsId);
     },
   });
 }
@@ -185,6 +198,7 @@ export function useUpdateArtifactFolder() {
       qc.invalidateQueries({
         queryKey: artifactKeys.folders(wsId, folder?.kind),
       });
+      invalidateArtifactCollections(qc, wsId);
     },
   });
 }
@@ -210,6 +224,7 @@ export function useDeleteArtifactFolder() {
       qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
       // Artifacts inside the folder reset to root via SET NULL; refresh lists.
       qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+      invalidateArtifactCollections(qc, wsId);
     },
   });
 }
