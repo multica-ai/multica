@@ -127,6 +127,22 @@ type AuthConfig struct {
 	SessionExchange *SessionExchangeConfig `json:"session_exchange,omitempty"`
 }
 
+// TrimCredentials strips leading/trailing whitespace from every credential
+// field. A key pasted from a password manager or terminal often carries an
+// invisible trailing newline; the raw value then validates when tested from
+// the form but the stored copy is rejected by the remote API — an admin-facing
+// dead end that reads as "my key is valid but the connection says 401"
+// (FIR-2640). Applied on create, update, and at dispatch (for values stored
+// before this existed).
+func TrimCredentials(a AuthConfig) AuthConfig {
+	a.BearerToken = strings.TrimSpace(a.BearerToken)
+	a.APIKey = strings.TrimSpace(a.APIKey)
+	a.APIKeyHeader = strings.TrimSpace(a.APIKeyHeader)
+	a.CFAccessID = strings.TrimSpace(a.CFAccessID)
+	a.CFAccessSecret = strings.TrimSpace(a.CFAccessSecret)
+	return a
+}
+
 // SessionExchangeConfig configures per-person session-key exchange for an
 // API-type connection.
 type SessionExchangeConfig struct {

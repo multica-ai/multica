@@ -133,3 +133,17 @@ func TestOptionsSourceFor(t *testing.T) {
 		t.Fatal("an undeclared tool must be rejected")
 	}
 }
+
+func TestTrimCredentials(t *testing.T) {
+	got := TrimCredentials(AuthConfig{
+		BearerToken:    " rk_abc\n",
+		APIKey:         "\tkey ",
+		APIKeyHeader:   " X-API-Key ",
+		CFAccessID:     " id ",
+		CFAccessSecret: " secret\r\n",
+	})
+	if got.BearerToken != "rk_abc" || got.APIKey != "key" || got.APIKeyHeader != "X-API-Key" ||
+		got.CFAccessID != "id" || got.CFAccessSecret != "secret" {
+		t.Fatalf("credentials not trimmed: %+v", got)
+	}
+}
