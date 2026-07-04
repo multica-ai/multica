@@ -68,10 +68,15 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Values.existingSecret }}
-          {{- if not .Values.postgres.external.enabled }}
+          {{- if or (not .Values.postgres.external.enabled) .Values.backend.extraEnv }}
           env:
+            {{- if not .Values.postgres.external.enabled }}
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+            {{- end }}
+            {{- with .Values.backend.extraEnv }}
+            {{- include "multica.extraEnv" (dict "root" $ "env" .) | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- if .Values.backend.uploads.persistence.enabled }}
           volumeMounts:

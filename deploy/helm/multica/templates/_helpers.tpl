@@ -33,3 +33,23 @@ on the same container (see envFrom on the backend Deployment).
 {{- define "multica.databaseUrl" -}}
 postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "multica.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
 {{- end -}}
+
+{{/*
+Render additional container env entries.
+Each item supports Kubernetes EnvVar fields. String `value` fields are passed
+through tpl so operators can reference chart values in custom environment.
+*/}}
+{{- define "multica.extraEnv" -}}
+{{- $root := .root -}}
+{{- range .env }}
+- name: {{ required "extraEnv entries require a name" .name | quote }}
+  {{- if hasKey . "valueFrom" }}
+  valueFrom:
+    {{- tpl (toYaml .valueFrom) $root | nindent 4 }}
+  {{- else if hasKey . "value" }}
+  value: {{ tpl (toString .value) $root | quote }}
+  {{- else }}
+  value: ""
+  {{- end }}
+{{- end }}
+{{- end -}}
