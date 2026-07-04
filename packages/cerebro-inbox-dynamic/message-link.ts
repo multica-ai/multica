@@ -62,6 +62,39 @@ export function findEntryByMessageKey(
 }
 
 /**
+ * Decide the URL the "keep the address bar in sync with the open message"
+ * effect should navigate to, or `null` to leave the URL untouched.
+ *
+ * FIR-2677 — the guard is load-bearing. That effect re-runs whenever the
+ * navigation adapter hands the inbox a fresh `replace`/`replaceSilent`
+ * reference (it does on every navigation), which means it can fire with a
+ * STALE `selected` while a sidebar "New message" intent (`?chat`/`?agent`) or a
+ * created-conversation intent (`?issue`) is still in the URL. Writing the stale
+ * selection's `?message=<key>` there overwrites the incoming intent; the intent
+ * reader then re-selects the previously open message and discards the new chat,
+ * so the pane never moves. While an intent is present the consume effect owns
+ * the URL, so this returns `null` and leaves it alone.
+ */
+export function nextInboxMessageUrl(params: {
+  urlChat: string;
+  urlIssue: string;
+  /** `messageKeyForEntry(selected)` for the open row, or `null` when nothing is open. */
+  selectedKey: string | null;
+  /** Current value of the `?message=` param, or `null` when absent. */
+  currentMessageParam: string | null;
+  /** Workspace inbox path, e.g. `/acme/inbox`. */
+  inboxPath: string;
+}): string | null {
+  const { urlChat, urlIssue, selectedKey, currentMessageParam, inboxPath } = params;
+  // An unconsumed intent owns the URL — don't clobber it with a stale selection.
+  if (urlChat || urlIssue) return null;
+  if (selectedKey === currentMessageParam) return null;
+  return selectedKey
+    ? `${inboxPath}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(selectedKey)}`
+    : inboxPath;
+}
+
+/**
  * Resolve the legacy `?issue=<id>` inbox URL param used by the global
  * "New message" flow. Channels/DMs also use issue ids, so prefer the channel
  * row when it exists. While channel data is still loading, callers can defer

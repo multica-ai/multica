@@ -81,7 +81,7 @@ import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxScrollAnchor } from "../use-inbox-scroll-anchor";
-import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam } from "../message-link";
+import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam, nextInboxMessageUrl } from "../message-link";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
@@ -571,14 +571,21 @@ export function DynamicInbox() {
   // pane. A `newChat` (unsent agent chat) has no stable key, so selection being
   // null there correctly leaves the URL message-free.
   useEffect(() => {
-    const want = selected ? messageKeyForEntry(selected) : null;
-    if (want === (searchParams.get(INBOX_MESSAGE_PARAM) ?? null)) return;
-    const next = want
-      ? `${paths.inbox()}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(want)}`
-      : paths.inbox();
+    // FIR-2677 — nextInboxMessageUrl returns null (skip) while a sidebar
+    // "New message" (?chat/?agent) or created-conversation (?issue) intent is
+    // still in the URL, so this effect can't clobber that intent with a stale
+    // selection when it re-runs on a fresh `replace` reference.
+    const next = nextInboxMessageUrl({
+      urlChat,
+      urlIssue,
+      selectedKey: selected ? messageKeyForEntry(selected) : null,
+      currentMessageParam: searchParams.get(INBOX_MESSAGE_PARAM) ?? null,
+      inboxPath: paths.inbox(),
+    });
+    if (next === null) return;
     (replaceSilent ?? replace)(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, paths, replace, replaceSilent]);
+  }, [selected, paths, replace, replaceSilent, urlChat, urlIssue]);
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
