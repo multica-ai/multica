@@ -61,6 +61,7 @@ type AgentResponse struct {
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string              `json:"thinking_level"`
+	Mode          string              `json:"mode"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -136,6 +137,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
+		Mode:               a.Mode,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -362,6 +364,7 @@ type TaskAgentData struct {
 	// (issue #3260). Other providers ignore the payload entirely. Sent
 	// raw so the daemon can evolve its schema without a server roundtrip.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
+	Mode          string          `json:"mode,omitempty"`
 }
 
 // taskToResponse maps a queue row to its wire shape. workspaceID is threaded
@@ -686,6 +689,7 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
+	Mode     string `json:"mode"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -741,6 +745,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MaxConcurrentTasks == 0 {
 		req.MaxConcurrentTasks = 6
+	}
+	if req.Mode == "" {
+		req.Mode = "coding"
+	}
+	if req.Mode != "coding" && req.Mode != "operational" && req.Mode != "hybrid" {
+		writeError(w, http.StatusBadRequest, "mode must be one of: coding, operational, hybrid")
+		return
 	}
 
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
@@ -830,6 +841,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		Mode:               req.Mode,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -897,6 +909,7 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	Mode          *string `json:"mode"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1180,6 +1193,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			))
 			return
 		}
+	}
+
+	if req.Mode != nil {
+		m := *req.Mode
+		if m != "coding" && m != "operational" && m != "hybrid" {
+			writeError(w, http.StatusBadRequest, "mode must be one of: coding, operational, hybrid")
+			return
+		}
+		params.Mode = pgtype.Text{String: m, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)

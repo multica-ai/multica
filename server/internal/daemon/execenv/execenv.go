@@ -111,6 +111,12 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+	// AgentMode controls whether the agent operates as a coding agent
+	// ("coding"), an operational/business agent ("operational"), or both
+	// ("hybrid"). The runtime brief uses this to skip coding-specific
+	// sections (repo context, code output instructions) for operational
+	// agents and to inject operational workflow guidance instead.
+	AgentMode string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

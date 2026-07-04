@@ -296,6 +296,13 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * Agent operating mode: "coding" (default), "operational", or "hybrid".
+   * Controls prompt template selection and runtime brief generation.
+   * Operational agents skip repo context and receive business-task prompts.
+   * Older backends omit this field; treat undefined as "coding".
+   */
+  mode?: 'coding' | 'operational' | 'hybrid';
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -334,6 +341,8 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Agent operating mode. "coding" (default) | "operational" | "hybrid". */
+  mode?: 'coding' | 'operational' | 'hybrid';
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
@@ -445,6 +454,8 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /** Agent operating mode. See `Agent.mode`. */
+  mode?: 'coding' | 'operational' | 'hybrid';
 }
 
 /**

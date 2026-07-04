@@ -145,6 +145,7 @@ type AgentData struct {
 	// daemon decodes provider-specific fields (e.g. openclaw mode +
 	// gateway endpoint, see issue #3260); other backends ignore it.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
+	Mode          string          `json:"mode,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

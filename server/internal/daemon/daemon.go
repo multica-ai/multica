@@ -3498,11 +3498,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	agentName := "agent"
 	var agentID string
+	var agentMode string
 	var skills []SkillData
 	var instructions string
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
+		agentMode = task.Agent.Mode
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
 	}
@@ -3543,6 +3545,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorName:                    task.InitiatorName,
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
+		AgentMode:                        agentMode,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop

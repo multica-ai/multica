@@ -1323,6 +1323,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: runtimeConfig,
+			Mode:          agent.Mode,
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)

@@ -392,7 +392,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	switch ctx.AgentMode {
+	case "operational":
+		b.WriteString("You are an operational agent in the Multica platform. Your role is to complete business tasks using MCP tools and the `multica` CLI. You do NOT write code or check out repositories unless explicitly asked.\n\n")
+	case "hybrid":
+		b.WriteString("You are a hybrid agent in the Multica platform. You can both write code and perform operational/business tasks. Use the `multica` CLI and MCP tools to interact with the platform and external services.\n\n")
+	default:
+		b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	}
 	writeBackgroundTaskSafetyInstructions(&b)
 
 	// Always emit agent identity so the agent knows who it is, even when

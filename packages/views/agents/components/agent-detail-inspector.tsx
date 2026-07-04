@@ -45,6 +45,7 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
+import { ModePicker } from "./inspector/mode-picker";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../settings/components/slack-tab";
@@ -155,6 +156,13 @@ export function AgentDetailInspector({
             value={agent.visibility}
             canEdit={canEdit}
             onChange={(v) => update({ visibility: v })}
+          />
+        </PropRow>
+        <PropRow label="Mode" interactive={false}>
+          <ModePicker
+            value={agent.mode ?? "coding"}
+            canEdit={canEdit}
+            onChange={(v) => update({ mode: v })}
           />
         </PropRow>
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>

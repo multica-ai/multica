@@ -35,9 +35,16 @@ import (
 // `writeBackgroundTaskSafetySlim` below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
-func writeHeader(b *strings.Builder) {
+func writeHeader(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	switch ctx.AgentMode {
+	case "operational":
+		b.WriteString("You are an operational agent in the Multica platform. Your role is to complete business tasks using MCP tools and the `multica` CLI. You do NOT write code or check out repositories unless explicitly asked.\n\n")
+	case "hybrid":
+		b.WriteString("You are a hybrid agent in the Multica platform. You can both write code and perform operational/business tasks. Use the `multica` CLI and MCP tools to interact with the platform and external services.\n\n")
+	default:
+		b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	}
 }
 
 // writeBackgroundTaskSafetySlim is the slim analogue of
@@ -191,10 +198,10 @@ func writeCommentFormatting(b *strings.Builder) {
 }
 
 // writeRepositories emits the Repositories section when at least one repo
-// is configured. The closing paragraph from the legacy version is dropped
-// (it re-stated the opening); intro is tightened into one line.
+// is configured AND the agent is not in operational mode (operational
+// agents skip repository context entirely).
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	if ctx.AgentMode == "operational" || len(ctx.Repos) == 0 {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
@@ -472,7 +479,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
 
-	writeHeader(&b)
+	writeHeader(&b, ctx)
 	writeBackgroundTaskSafetySlim(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)

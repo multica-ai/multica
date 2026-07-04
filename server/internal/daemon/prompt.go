@@ -28,7 +28,18 @@ func BuildPrompt(task Task, provider string) string {
 		return buildQuickCreatePrompt(task)
 	}
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	agentMode := ""
+	if task.Agent != nil {
+		agentMode = task.Agent.Mode
+	}
+	switch agentMode {
+	case "operational":
+		b.WriteString("You are running as an operational agent for a Multica workspace. Your role is to complete business tasks using the tools available to you (MCP servers, Multica CLI). You do NOT write code or check out repositories unless explicitly asked.\n\n")
+	case "hybrid":
+		b.WriteString("You are running as a hybrid agent for a Multica workspace. You can both write code and perform operational/business tasks. Use the tools available to you (MCP servers, Multica CLI, code repositories) as needed.\n\n")
+	default:
+		b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	}
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a

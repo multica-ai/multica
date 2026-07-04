@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock, Code, Briefcase, Layers } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
@@ -92,6 +92,9 @@ export function CreateAgentDialog({
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
     () => new Set(template?.skills.map((s) => s.id) ?? []),
   );
+  const [mode, setMode] = useState<'coding' | 'operational' | 'hybrid'>(
+    template?.mode ?? 'coding',
+  );
   const [creating, setCreating] = useState(false);
 
   // Duplicate-mode pre-fill: clone lands on the source agent's runtime so
@@ -162,6 +165,7 @@ export function CreateAgentDialog({
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
+        mode,
       };
       if (template) {
         // Duplicate path: forward the hidden config fields the source
@@ -319,6 +323,63 @@ export function CreateAgentDialog({
                     <div className="font-medium">{VISIBILITY_LABEL.private}</div>
                     <div className="text-xs text-muted-foreground">
                       {VISIBILITY_DESCRIPTION.private}
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground">Mode</Label>
+              <div className="mt-1.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMode("coding")}
+                  className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    mode === "coding"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  <Code className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="text-left">
+                    <div className="font-medium">Coding</div>
+                    <div className="text-xs text-muted-foreground">
+                      Writes code, checks out repos
+                    </div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("operational")}
+                  className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    mode === "operational"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  <Briefcase className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="text-left">
+                    <div className="font-medium">Operational</div>
+                    <div className="text-xs text-muted-foreground">
+                      Business tasks via MCP tools
+                    </div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("hybrid")}
+                  className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    mode === "hybrid"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="text-left">
+                    <div className="font-medium">Hybrid</div>
+                    <div className="text-xs text-muted-foreground">
+                      Code + operational tasks
                     </div>
                   </div>
                 </button>
