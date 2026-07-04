@@ -52,6 +52,7 @@ func doTestConnection(ctx context.Context, req testConnectionRequest) testConnec
 }
 
 func addAuthHeaders(httpReq *http.Request, auth AuthConfig) {
+	auth = TrimCredentials(auth)
 	if auth.BearerToken != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+auth.BearerToken)
 	} else if auth.APIKey != "" {

@@ -474,6 +474,7 @@ func buildQueryValues(args map[string]any) url.Values {
 // bearer token, a custom API-key header (default X-API-Key), and a Cloudflare
 // Access service-token pair. All are optional.
 func applyConnectionAuth(req *http.Request, auth connections.AuthConfig) {
+	auth = connections.TrimCredentials(auth)
 	if auth.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+auth.BearerToken)
 	}
