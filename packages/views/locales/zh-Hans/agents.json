@@ -40,7 +40,7 @@
   },
   "empty": {
     "title": "还没有智能体",
-    "description": "创建一个智能体，像分配给同事那样把 issue 交给它。本地智能体在你的机器上运行，云智能体在 Multica 运行时上运行。"
+    "description": "创建一个智能体，像分配给同事那样把 issue 交给它。本地智能体在你的机器上运行，云智能体在 Multica 智能体环境上运行。"
   },
   "no_matches": {
     "title": "无匹配项",
@@ -53,7 +53,7 @@
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
   },
   "runtime_filter": {
-    "all": "全部运行时",
+    "all": "全部智能体环境",
     "section_local": "本机",
     "section_remote": "远程",
     "section_cloud": "云端",
@@ -64,7 +64,7 @@
     "agent": "智能体",
     "status": "状态",
     "workload": "工作负载",
-    "runtime": "运行时",
+    "runtime": "智能体环境",
     "activity_7d": "活动（7 天）",
     "runs": "运行次数",
     "last_active": "最近活跃",
@@ -142,7 +142,7 @@
     "section_details": "详情",
     "section_skills": "Skills",
     "section_integrations": "外部集成",
-    "prop_runtime": "运行时",
+    "prop_runtime": "智能体环境",
     "prop_model": "模型",
     "prop_thinking": "思考",
     "prop_visibility": "可见性",
@@ -169,16 +169,16 @@
   "pickers": {
     "concurrency_tooltip": "并发 · 最多 {{value}} 个并行 task",
     "concurrency_range": "最大并行 task 数（{{min}}–{{max}}）",
-    "runtime_none": "无运行时",
-    "runtime_tooltip": "运行时 · {{name}} · {{status}}",
-    "runtime_tooltip_none": "运行时 · 未选择",
+    "runtime_none": "无智能体环境",
+    "runtime_tooltip": "智能体环境 · {{name}} · {{status}}",
+    "runtime_tooltip_none": "智能体环境 · 未选择",
     "runtime_online": "在线",
     "runtime_offline": "离线",
     "runtime_owned_by": "{{name}} 的",
-    "runtime_empty": "暂无运行时",
+    "runtime_empty": "暂无智能体环境",
     "model_default": "默认",
     "model_tooltip": "模型 · {{value}}",
-    "model_managed_by_runtime": "由运行时管理",
+    "model_managed_by_runtime": "由智能体环境管理",
     "model_search_placeholder": "搜索或输入模型 ID",
     "model_discovering": "正在发现模型...",
     "model_empty": "暂无可用模型",
@@ -186,7 +186,7 @@
     "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
     "model_custom_use": "使用\"{{value}}\"",
     "model_clear": "清除（使用提供方默认）",
-    "model_clear_title": "清除并回退到运行时的提供方默认",
+    "model_clear_title": "清除并回退到智能体环境的提供方默认",
     "thinking_default": "跟随 CLI 配置",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "跟随 CLI 配置",
@@ -194,11 +194,11 @@
   },
   "model_dropdown": {
     "label": "模型",
-    "select_runtime_first": "请先选择运行时",
+    "select_runtime_first": "请先选择智能体环境",
     "default_provider": "默认（提供方）",
-    "runtime_offline_manual": "运行时离线 —— 请手动输入",
-    "managed_by_runtime_title": "模型选择由该运行时管理。",
-    "managed_by_runtime_hint": "请在运行时主机上配置模型（例如 Hermes 会从自身配置文件读取）。",
+    "runtime_offline_manual": "智能体环境离线 —— 请手动输入",
+    "managed_by_runtime_title": "模型选择由该智能体环境管理。",
+    "managed_by_runtime_hint": "请在智能体环境主机上配置模型（例如 Hermes 会从自身配置文件读取）。",
     "discovery_failed": "发现失败",
     "clear_full": "清除选择（使用提供方默认）"
   },
@@ -239,14 +239,14 @@
       "public_members_empty": "没有可选择的工作区成员",
       "public_targets_empty_hint": "至少勾选下方一项 —— 否则该智能体仍为私有。"
     },
-    "runtime_label": "运行时",
+    "runtime_label": "智能体环境",
     "runtime_filter_mine": "我的",
     "runtime_filter_all": "全部",
-    "runtime_loading": "加载运行时...",
-    "runtime_none": "暂无可用运行时",
+    "runtime_loading": "加载智能体环境...",
+    "runtime_none": "暂无可用智能体环境",
     "runtime_cloud_badge": "云端",
     "runtime_private_badge": "私有",
-    "runtime_private_locked_tooltip": "私有运行时——只有 agent environment 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
+    "runtime_private_locked_tooltip": "私有智能体环境——只有 agent environment 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
     "duplicate_copy_suffix": "（副本）",
     "create": "创建",
     "creating": "创建中...",
@@ -322,7 +322,7 @@
       "save_failed_toast": "保存自定义参数失败"
     },
     "mcp_config": {
-      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "intro": "转发给智能体环境 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP 配置 JSON 编辑器",
       "clear_action": "清空",
@@ -350,7 +350,7 @@
       "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
     },
     "runtime_config": {
-      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
+      "intro": "选择 OpenClaw 智能体环境执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
       "mode_label": "路由模式",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
@@ -370,7 +370,7 @@
       "save_failed_toast": "保存路由配置失败"
     },
     "skills": {
-      "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
+      "intro": "分配给该智能体的工作区 skill。本地智能体环境 skill 会自动可用。",
       "add_action": "添加 skill",
       "empty_title": "尚未分配 skill",
       "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
@@ -472,10 +472,10 @@
   "profile_card": {
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
-    "runtime_label": "运行时",
+    "runtime_label": "智能体环境",
     "skills_label": "Skills",
     "owner_label": "所有者",
-    "unknown_runtime": "未知运行时"
+    "unknown_runtime": "未知智能体环境"
   },
   "live_peek": {
     "current_issue_label": "正在处理",
@@ -525,7 +525,7 @@
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_availability": "可用性",
-    "section_runtime": "运行时",
+    "section_runtime": "智能体环境",
     "display": "显示",
     "sort_by": "排序",
     "direction_asc": "升序",

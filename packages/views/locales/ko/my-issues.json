@@ -14,7 +14,9 @@
       "created_label": "내가 만든 이슈",
       "created_description": "내가 생성한 이슈",
       "agents_label": "내 에이전트와 스쿼드",
-      "agents_description": "내 에이전트에게 할당된 이슈"
+      "agents_description": "내 에이전트에게 할당된 이슈",
+      "approvals_label": "승인 대기 중",
+      "approvals_description": "내 승인이 필요한 이슈"
     },
     "filter_button": "필터",
     "filter_status": "상태",

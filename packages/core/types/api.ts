@@ -110,6 +110,7 @@ export interface ListIssuesParams {
    * disjoint result sets by construction.
    */
   involves_user_id?: string;
+  pending_approver_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   open_only?: boolean;

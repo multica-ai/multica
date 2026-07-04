@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ReviewAsset } from "@multica/core/types";
-import { useUpdateReviewAssetStatus } from "@multica/core/reviews/mutations";
+import { useUpdateReviewAssetStatus, useReviewAssetUpload } from "@multica/core/reviews/mutations";
 import { listReviewAssetsOptions, listReviewCommentsOptions } from "@multica/core/reviews/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@multica/ui/components/ui/select";
 import { MediaReviewPlayer, type MediaReviewPlayerRef } from "./media-review-player";
@@ -20,6 +20,34 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange }: MediaRe
   const { data: allAssets } = useQuery(listReviewAssetsOptions(workspaceId, asset.issue_id));
   const { data: comments, isLoading: commentsLoading } = useQuery(listReviewCommentsOptions(workspaceId, asset.issue_id, asset.id));
   const updateStatus = useUpdateReviewAssetStatus();
+  const uploadAsset = useReviewAssetUpload();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadProgress(0);
+      uploadAsset.mutate(
+        { 
+          workspaceId, 
+          issueId: asset.issue_id, 
+          file, 
+          assetGroupId: asset.asset_group_id,
+          onProgress: (p) => setUploadProgress(p),
+        },
+        {
+          onSuccess: (newAsset) => {
+            if (onAssetChange) onAssetChange(newAsset);
+          },
+          onSettled: () => setUploadProgress(null)
+        }
+      );
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const assetVersions = (allAssets as ReviewAsset[] | undefined)
     ?.filter((a: ReviewAsset) => a.asset_group_id === asset.asset_group_id)
@@ -64,18 +92,37 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange }: MediaRe
         <div className="flex items-center gap-4">
           <div className="font-medium text-sm">{asset.name}</div>
           
-          <Select value={asset.id} onValueChange={handleVersionChange}>
-            <SelectTrigger className="h-7 border-gray-700 bg-gray-800 text-xs w-28">
-              <SelectValue placeholder="Version" />
-            </SelectTrigger>
-            <SelectContent>
-              {assetVersions.map((v) => (
-                <SelectItem key={v.id} value={v.id}>
-                  Version {v.version}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={asset.id} onValueChange={handleVersionChange}>
+              <SelectTrigger className="h-7 border-gray-700 bg-gray-800 text-xs w-28">
+                <SelectValue placeholder="Version" />
+              </SelectTrigger>
+              <SelectContent>
+                {assetVersions.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    Version {v.version}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadAsset.isPending}
+              className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700 text-gray-300"
+            >
+              {uploadAsset.isPending ? (
+                uploadProgress !== null ? `Uploading ${Math.round(uploadProgress)}%` : "Uploading..."
+              ) : "Upload New Version"}
+            </button>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="video/*,image/*" 
+              onChange={handleFileChange} 
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

@@ -248,7 +248,7 @@
     "close": "关闭",
     "title_placeholder": "自动化名称",
     "runbook_label": "Runbook",
-    "runbook_hint": "智能体每次运行时读取",
+    "runbook_hint": "智能体每次智能体环境读取",
     "description_placeholder": "# 目标\n你希望智能体完成什么？\n\n# 上下文\n这是给谁的？有什么约束？\n\n# 步骤\n1. ...\n2. ...",
     "auto_run_hint": "保存后会自动运行，直到暂停。",
     "cancel": "取消",

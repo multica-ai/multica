@@ -14,7 +14,9 @@
       "created_label": "我创建的",
       "created_description": "我创建的 issue",
       "agents_label": "我的智能体和小队",
-      "agents_description": "分配给我的智能体的 issue"
+      "agents_description": "分配给我的智能体的 issue",
+      "approvals_label": "待我审批",
+      "approvals_description": "需要我审批的问题"
     },
     "filter_button": "筛选",
     "filter_status": "状态",

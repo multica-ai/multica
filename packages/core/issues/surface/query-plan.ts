@@ -64,6 +64,13 @@ function myRelationPlan(
         userId: undefined,
         createDefaults: {},
       };
+    case "approvals":
+      return {
+        queryScope: "approvals",
+        queryFilter: { pending_approver_id: scope.userId },
+        userId: undefined,
+        createDefaults: {},
+      };
     case "all":
       return {
         queryScope: "all",

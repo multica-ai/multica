@@ -8,7 +8,7 @@
     "headline_line2": "在",
     "headline_emphasis": "同一个工作区。",
     "lede": "像分配给同事一样把 task 交给它们——它们会接手、推进状态、完成后留下评论。",
-    "lede_web": "桌面端自带运行时，无需安装。在 web 端继续可以连接你自己的 CLI。",
+    "lede_web": "桌面端自带智能体环境，无需安装。在 web 端继续可以连接你自己的 CLI。",
     "lede_desktop": "完成本流程后，真实的智能体会回复你创建的第一个 issue。",
     "download_desktop": "下载桌面端",
     "continue_on_web": "在 web 端继续",
@@ -104,26 +104,26 @@
     "hint_continue": "可以了。准备好就点继续。"
   },
   "runtime_aside": {
-    "what_eyebrow": "什么是 agent 运行时？",
+    "what_eyebrow": "什么是 agent 智能体环境？",
     "what_prefix": "你连接的「电脑」就是我们内部所说的 ",
-    "what_term": "agent 运行时",
-    "what_suffix": "：电脑上的一个小型后台进程，配上一款 AI 编程工具（Claude Code、Codex 等）。一款工具对应一个 agent 运行时。它代替你的智能体执行接到的 task。",
+    "what_term": "agent 智能体环境",
+    "what_suffix": "：电脑上的一个小型后台进程，配上一款 AI 编程工具（Claude Code、Codex 等）。一款工具对应一个 agent 智能体环境。它代替你的智能体执行接到的 task。",
     "good_eyebrow": "需要知道",
     "swap_title": "随时切换",
-    "swap_body": "每个智能体的运行时只是一个设置。想换就换。",
+    "swap_body": "每个智能体的智能体环境只是一个设置。想换就换。",
     "add_more_title": "之后再加",
     "add_more_body": "可以为团队再连接一台电脑，或给每个智能体一台专属电脑。",
-    "learn_more": "了解 agent 运行时 →"
+    "learn_more": "了解 agent 智能体环境 →"
   },
   "cli_install": {
     "copy_aria": "复制",
-    "intro": "这台电脑上需要装一个 agent 运行时（Claude Code、Codex、Cursor 等）才能运行你的智能体。也支持服务器和远程开发机。",
+    "intro": "这台电脑上需要装一个 agent 智能体环境（Claude Code、Codex、Cursor 等）才能运行你的智能体。也支持服务器和远程开发机。",
     "step1_label": "安装 Multica CLI",
     "step2_label": "启动守护进程"
   },
   "cloud_waitlist": {
-    "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
-    "intro_warning": "提示：没有运行时，智能体无法执行 task —— 如果现在跳过，工作区会是只读状态，直到你回来安装一个。",
+    "intro_main": "云智能体环境尚未上线。留下邮箱，上线时通过邮件通知你。",
+    "intro_warning": "提示：没有智能体环境，智能体无法执行 task —— 如果现在跳过，工作区会是只读状态，直到你回来安装一个。",
     "email_label": "邮箱",
     "email_placeholder": "you@work.com",
     "reason_label": "为什么选择云？",
@@ -131,7 +131,7 @@
     "reason_placeholder": "例如：希望智能体 24/7 运行，或团队在不同设备协作。",
     "join": "加入候补",
     "on_list": "已在候补名单",
-    "success_toast": "已加入候补名单。云运行时上线时会通过邮件通知你。",
+    "success_toast": "已加入候补名单。云智能体环境上线时会通过邮件通知你。",
     "failed_toast": "加入候补名单失败"
   },
   "first_issue": {
@@ -174,7 +174,7 @@
     },
     "about_eyebrow": "什么是智能体",
     "about_headline": "住在你工作区里的 AI 队友。",
-    "about_body": "智能体会出现在每个负责人选择器里，就像任何同事一样 —— 区别是它们可以 24/7 在你指定的运行时上工作。",
+    "about_body": "智能体会出现在每个负责人选择器里，就像任何同事一样 —— 区别是它们可以 24/7 在你指定的智能体环境上工作。",
     "ways_eyebrow": "和智能体协作的方式",
     "way_assign_title": "分配 issue",
     "way_assign_body": "它会接下任务，并在评论里反馈进展。",
@@ -233,12 +233,12 @@
       "status_todo": "待办",
       "cards": {
         "install_runtime": {
-          "title": "连接一个运行时",
+          "title": "连接一个智能体环境",
           "subtitle": "安装 Codex 或 Kimi 让 agent 上线。"
         },
         "create_agent": {
           "title": "创建你的第一个 agent",
-          "subtitle": "运行时上线后，把第一个 agent 建出来。"
+          "subtitle": "智能体环境上线后，把第一个 agent 建出来。"
         }
       }
     }
@@ -285,7 +285,7 @@
     "perk_invite": "邀请同事 —— 他们只会看到这个工作区",
     "perk_switch": "随时从左上角切换到其他工作区",
     "next_runtime": "连接一台电脑，给智能体一个跑的地方",
-    "next_agent": "用你连接的运行时创建 Multica Helper",
+    "next_agent": "用你连接的智能体环境创建 Multica Helper",
     "next_starter": "打开一个上手引导 issue，继续下一步",
     "preview": {
       "inbox_label": "收件箱",
@@ -298,7 +298,7 @@
       "projects_meta": "把相关 issue 分组",
       "autopilot_label": "自动化",
       "autopilot_meta": "定时自动化",
-      "runtimes_label": "运行时",
+      "runtimes_label": "智能体环境",
       "runtimes_meta": "智能体跑的地方",
       "skills_label": "Skills",
       "skills_meta": "可复用的剧本",
@@ -317,19 +317,19 @@
     "scanning_headline": "正在连接这台电脑…",
     "scanning_lede_prefix": "你的智能体借助本机已安装的 AI 编程工具运行，例如 ",
     "scanning_lede_suffix": " 等。我们正在检测这台电脑上装了哪些。",
-    "found_headline": "这台电脑已连接。选一个 agent 运行时。",
-    "found_lede": "以下是在这台电脑上找到的 agent 运行时。挑一个支撑你的第一个智能体 —— 之后可以随时切换或再加。",
-    "runtime_count_other": "{{count}} 个 agent 运行时",
+    "found_headline": "这台电脑已连接。选一个 agent 智能体环境。",
+    "found_lede": "以下是在这台电脑上找到的 agent 智能体环境。挑一个支撑你的第一个智能体 —— 之后可以随时切换或再加。",
+    "runtime_count_other": "{{count}} 个 agent 智能体环境",
     "status_all_online": "全部在线",
     "status_none_online": "全部离线",
     "status_n_online": "{{count}} 个在线",
     "online_label": "在线",
     "offline_label": "离线",
-    "empty_headline": "这台电脑上还没有可用的 agent 运行时。",
-    "empty_lede_prefix": "agent 运行时是我们接管的 AI 编程工具，比如 ",
+    "empty_headline": "这台电脑上还没有可用的 agent 智能体环境。",
+    "empty_lede_prefix": "agent 智能体环境是我们接管的 AI 编程工具，比如 ",
     "empty_lede_suffix": "。装好其中之一后点刷新，或在下面挑一条路。",
     "empty_skip_title": "暂时跳过",
-    "empty_skip_subtitle": "进入工作区（只读模式）。在这台电脑上连接 agent 运行时之前，智能体无法执行 task —— 但你仍可以浏览、规划、邀请同事。",
+    "empty_skip_subtitle": "进入工作区（只读模式）。在这台电脑上连接 agent 智能体环境之前，智能体无法执行 task —— 但你仍可以浏览、规划、邀请同事。",
     "empty_skip_action": "跳过",
     "empty_waitlist_title": "改用云电脑",
     "empty_waitlist_subtitle": "我们会在云上为你运行一台电脑。尚未上线。",
@@ -338,7 +338,7 @@
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "hint_selected": "已选择：{{name}}",
-    "hint_pick": "在上方选一个 agent 运行时继续。",
+    "hint_pick": "在上方选一个 agent 智能体环境继续。",
     "hint_waiting": "等待第一个结果...",
     "hint_skip_or_refresh": "装好后点刷新，或跳过进入工作区。",
     "start_exploring": "开始探索"

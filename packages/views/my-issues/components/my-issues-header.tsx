@@ -39,6 +39,7 @@ export function MyIssuesHeader({
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
     { value: "created", label: t(($) => $.header.scope.created_label), description: t(($) => $.header.scope.created_description) },
     { value: "agents", label: t(($) => $.header.scope.agents_label), description: t(($) => $.header.scope.agents_description) },
+    { value: "approvals", label: t(($) => $.header.scope.approvals_label), description: t(($) => $.header.scope.approvals_description) },
   ];
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore(

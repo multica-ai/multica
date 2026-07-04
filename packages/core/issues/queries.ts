@@ -121,6 +121,7 @@ export type MyIssuesFilter = Pick<
   | "creator_id"
   | "project_id"
   | "involves_user_id"
+  | "pending_approver_id"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<

@@ -14,7 +14,9 @@
       "created_label": "作成済み",
       "created_description": "自分が作成したイシュー",
       "agents_label": "自分のエージェントとスクワッド",
-      "agents_description": "自分のエージェントに割り当てられたイシュー"
+      "agents_description": "自分のエージェントに割り当てられたイシュー",
+      "approvals_label": "承認待ち",
+      "approvals_description": "あなたの承認が必要な課題"
     },
     "filter_button": "フィルター",
     "filter_status": "ステータス",

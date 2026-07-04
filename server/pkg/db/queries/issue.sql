@@ -19,6 +19,15 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
+    sqlc.narg('pending_approver_id')::uuid IS NULL
+    OR EXISTS (
+      SELECT 1 FROM approvals a
+      WHERE a.issue_id = i.id
+        AND a.approver_id = sqlc.narg('pending_approver_id')::uuid
+        AND a.status = 'pending'
+    )
+  )
+  AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -177,6 +186,15 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
+    sqlc.narg('pending_approver_id')::uuid IS NULL
+    OR EXISTS (
+      SELECT 1 FROM approvals a
+      WHERE a.issue_id = i.id
+        AND a.approver_id = sqlc.narg('pending_approver_id')::uuid
+        AND a.status = 'pending'
+    )
+  )
+  AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
@@ -222,6 +240,15 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  AND (
+    sqlc.narg('pending_approver_id')::uuid IS NULL
+    OR EXISTS (
+      SELECT 1 FROM approvals a
+      WHERE a.issue_id = i.id
+        AND a.approver_id = sqlc.narg('pending_approver_id')::uuid
+        AND a.status = 'pending'
+    )
+  )
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (

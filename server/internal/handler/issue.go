@@ -849,6 +849,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		involvesUserFilter = id
 	}
+	var pendingApproverFilter pgtype.UUID
+	if u := r.URL.Query().Get("pending_approver_id"); u != "" {
+		id, ok := parseUUIDOrBadRequest(w, u, "pending_approver_id")
+		if !ok {
+			return
+		}
+		pendingApproverFilter = id
+	}
 
 	metadataFilter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata"))
 	if !ok {
@@ -869,6 +877,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			CreatorID:      creatorFilter,
 			ProjectID:      projectFilter,
 			InvolvesUserID: involvesUserFilter,
+			PendingApproverID: pendingApproverFilter,
 			MetadataFilter: metadataFilter,
 		})
 		if err != nil {
@@ -1013,6 +1022,17 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
+	if pendingApproverFilter.Valid {
+		ref := addArg(pendingApproverFilter)
+		where = append(where, fmt.Sprintf(`(
+      EXISTS (
+        SELECT 1 FROM approvals a
+        WHERE a.issue_id = i.id
+          AND a.approver_id = %s::uuid
+          AND a.status = 'pending'
+      )
+    )`, ref))
+	}
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
 		where = append(where, fmt.Sprintf(`(
@@ -1385,6 +1405,23 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
 	}
+	// Filter issues pending approval by the given approver ID.
+	if raw := r.URL.Query().Get("pending_approver_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "pending_approver_id")
+		if !ok {
+			return
+		}
+		ref := addArg(id)
+		where = append(where, fmt.Sprintf(`(
+      EXISTS (
+        SELECT 1 FROM approvals a
+        WHERE a.issue_id = i.id
+          AND a.approver_id = %s::uuid
+          AND a.status = 'pending'
+      )
+    )`, ref))
+	}
+
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is

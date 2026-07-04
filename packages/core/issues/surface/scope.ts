@@ -6,7 +6,7 @@ export type IssueScope =
   | { type: "workspace"; actorKind?: WorkspaceIssueActorKind }
   | {
       type: "my";
-      relation: "all" | "assigned" | "created" | "involved";
+      relation: "all" | "assigned" | "created" | "involved" | "approvals";
       userId: string;
     }
   | { type: "project"; projectId: string }

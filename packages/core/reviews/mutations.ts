@@ -97,8 +97,8 @@ export function useReviewAssetUpload() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (params: { workspaceId: string; issueId: string; file: File; assetGroupId?: string }) => {
-      const { workspaceId, issueId, file, assetGroupId } = params;
+    mutationFn: async (params: { workspaceId: string; issueId: string; file: File; assetGroupId?: string; onProgress?: (progress: number) => void }) => {
+      const { workspaceId, issueId, file, assetGroupId, onProgress } = params;
       
       // 1. Presign
       const { upload_url, asset_id, upload_method } = await api.presignReviewAssetUpload(workspaceId, issueId, {
@@ -108,18 +108,30 @@ export function useReviewAssetUpload() {
         asset_group_id: assetGroupId,
       });
 
-      // 2. Upload directly to S3 or local storage
-      const res = await fetch(upload_url, {
-        method: upload_method,
-        headers: {
-          "Content-Type": file.type,
-        },
-        body: file,
-      });
+      // 2. Upload with XHR to track progress
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(upload_method, upload_url, true);
+        xhr.setRequestHeader("Content-Type", file.type);
+        
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && onProgress) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            onProgress(percentComplete);
+          }
+        };
 
-      if (!res.ok) {
-        throw new Error("Failed to upload file to storage");
-      }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error("Failed to upload file to storage"));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("Network error during upload"));
+        xhr.send(file);
+      });
 
       // 3. Complete
       const asset = await api.completeReviewAssetUpload(workspaceId, issueId, asset_id);

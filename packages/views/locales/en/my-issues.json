@@ -14,7 +14,9 @@
       "created_label": "Created",
       "created_description": "Issues I created",
       "agents_label": "My Agents and Squads",
-      "agents_description": "Issues assigned to my agents"
+      "agents_description": "Issues assigned to my agents",
+      "approvals_label": "Pending Approval",
+      "approvals_description": "Issues requiring your approval"
     },
     "filter_button": "Filter",
     "filter_status": "Status",

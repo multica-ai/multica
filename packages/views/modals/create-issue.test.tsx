@@ -240,6 +240,7 @@ vi.mock("../issues/components", () => ({
   PriorityPicker: () => <div data-testid="priority-picker" />,
   StagePicker: () => <div data-testid="stage-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
+  IssueTypePicker: () => <div data-testid="issue-type-picker" />,
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
   StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
