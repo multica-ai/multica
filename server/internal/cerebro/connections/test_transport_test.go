@@ -304,3 +304,29 @@ func TestAPI_SpecContentTakesPrecedenceOverSpecURL(t *testing.T) {
 		t.Fatalf("expected no error (content wins), got %q", result.Error)
 	}
 }
+
+// TestAPI_ProbeAuthRejectionIsReported verifies that when well-known spec
+// probing hits a 401, the result says the credential was rejected instead of
+// pretending no spec exists (FIR-2640).
+func TestAPI_ProbeAuthRejectionIsReported(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	result := doTestConnection(context.Background(), testConnectionRequest{
+		URL: srv.URL, Type: TypeAPI, AuthConfig: AuthConfig{BearerToken: "bad-key"},
+	})
+	if !result.Reachable {
+		t.Fatalf("base URL should be reachable, got %+v", result)
+	}
+	if len(result.Endpoints) != 0 {
+		t.Fatalf("expected no endpoints, got %+v", result.Endpoints)
+	}
+	if !strings.Contains(result.Error, "rejected the connection's credential (HTTP 401)") {
+		t.Fatalf("expected credential-rejection error, got %q", result.Error)
+	}
+}

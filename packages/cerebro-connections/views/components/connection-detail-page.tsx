@@ -478,6 +478,7 @@ function ConnectionFormBody({
               )}
 
               {testResult.reachable &&
+                !testResult.error &&
                 (!testResult.tools || testResult.tools.length === 0) &&
                 (!testResult.endpoints || testResult.endpoints.length === 0) && (
                   <p className="text-xs text-muted-foreground">
