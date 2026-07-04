@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useCreateReviewComment, useResolveReviewComment, useUnresolveReviewComment } from "@multica/core/reviews";
 import type { ReviewAsset } from "@multica/core/types";
+import { ContentEditor } from "../editor";
 
 interface ReviewCommentSidebarProps {
   workspaceId: string;
@@ -176,13 +177,14 @@ export function ReviewCommentSidebar({
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-          <textarea
-            className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[80px]"
-            placeholder="Add a review comment..."
-            value={draftContent}
-            onChange={(e) => setDraftContent(e.target.value)}
-            onFocus={onDrawStart}
-          />
+          <div className="min-h-[80px] rounded border border-gray-300 bg-white" onFocus={onDrawStart}>
+            <ContentEditor
+              defaultValue={draftContent}
+              placeholder="Add a review comment..."
+              onUpdate={(md) => setDraftContent(md)}
+              enableSlashCommands
+            />
+          </div>
           <div className="flex justify-between items-center">
             {asset.asset_type === "video" && (
               <span className="text-xs text-gray-500">
