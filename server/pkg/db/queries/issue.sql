@@ -250,6 +250,26 @@ SELECT * FROM multica_issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: ListIssueDescendants :many
+-- Recursively finds all descendants of an issue. Ordered deepest-first so
+-- the caller can delete leaves before their parents, avoiding FK violations.
+-- The workspace_id filter on both the anchor and recursive legs serves as a
+-- tenant guard: descendants that cross workspace boundaries are impossible by
+-- construction (parent_issue_id always points within the same workspace), but
+-- the filter makes the invariant a SQL-layer guarantee.
+WITH RECURSIVE descendants AS (
+    SELECT id, workspace_id, parent_issue_id::uuid, 0::int AS depth
+    FROM multica_issue
+    WHERE parent_issue_id = $1 AND workspace_id = $2
+    UNION ALL
+    SELECT i.id, i.workspace_id, i.parent_issue_id, d.depth + 1
+    FROM multica_issue i
+    JOIN descendants d ON i.parent_issue_id = d.id
+    WHERE i.workspace_id = $2
+)
+SELECT id, workspace_id, parent_issue_id, depth FROM descendants
+ORDER BY depth DESC;
+
 -- name: GetIssueByOrigin :one
 -- Finds the multica_issue stamped with a specific (origin_type, origin_id) pair.
 -- Used by quick-create completion to deterministically locate the multica_issue
