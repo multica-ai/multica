@@ -59,6 +59,11 @@ export interface MessageComposerProps {
   size?: "sm" | "default";
   /** Blur after send (chat). */
   blurOnSubmit?: boolean;
+
+  /** Gate the send behind a confirm (resolves false to abort, keeping draft). */
+  confirmBeforeSend?: (content: string) => Promise<boolean>;
+  /** Dialog node rendered by the composer; pair with confirmBeforeSend. */
+  confirmDialog?: ReactNode;
 }
 
 export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(function MessageComposer({
@@ -86,6 +91,8 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
   avatar = null,
   size = "default",
   blurOnSubmit = false,
+  confirmBeforeSend,
+  confirmDialog,
 }: MessageComposerProps, ref) {
   // Always call the hook (rules of hooks); prefer the injected handle when the
   // caller owns the draft store (chat).
@@ -123,6 +130,8 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
       dictationRow={dictationRow}
       transcribingSlot={transcribingSlot}
       blurOnSubmit={blurOnSubmit}
+      confirmBeforeSend={confirmBeforeSend}
+      confirmDialog={confirmDialog}
     />
   );
 });

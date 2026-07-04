@@ -92,6 +92,10 @@ export type CerebroFlagKey =
   // note is shared with (and their agents), instead of the full workspace
   // directory. Prevents even offering a colleague who cannot open the note.
   | "cerebro_note_scoped_mentions"
+  // FIR-2680: an @mention of a non-participant in a channel/group no longer
+  // silently notifies them. The author is prompted to add them first, mirroring
+  // the note give-access model. DMs are unchanged.
+  | "cerebro_channel_mention_members_only"
   // FIR-1800: reference an artifact (document/note) inside a comment / chat /
   // DM / channel body via a `mention://artifact/<id>` token, rendered as a
   // compact white card that opens the full-page note editor.
@@ -418,6 +422,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_agent_collab: true,
   // FIR-2595 point 3: OFF until the scoped note @mention picker is QA'd on staging.
   cerebro_note_scoped_mentions: false,
+  // FIR-2680: ON — a channels setting (under the Channels feature) that makes
+  // channel/group @mentions respect membership. Only takes effect where
+  // cerebro_channels is on; a workspace can switch it off via the setting.
+  cerebro_channel_mention_members_only: true,
   // FIR-2022: OFF until the Notes search scope is QA'd on staging. Gates only
   // the in-app global-search "Notes" scope; the CLI/MCP search tools always work.
   cerebro_note_search: false,
@@ -1358,6 +1366,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Inside a note, the @mention picker only offers people the note is shared with (and their agents), instead of the whole workspace. Prevents tagging a colleague who cannot open the note. FIR-2595.",
   },
   {
+    key: "cerebro_channel_mention_members_only",
+    label: "Mentions respect membership",
+    group: "dm_channel",
+    description:
+      "A Channels setting: in a channel or group, @mentioning someone who is not a participant no longer silently notifies them. The author is prompted to add them to the channel first (Cancel / Send without / Add & send), mirroring the note give-access prompt. Only takes effect where Channels is on; direct messages are unchanged. FIR-2680.",
+  },
+  {
     key: "cerebro_note_types",
     label: "Note types",
     group: "workspace",
@@ -1655,6 +1670,14 @@ export interface CerebroFlagSubgroup {
 export const CEREBRO_FLAG_SUBGROUPS: Partial<
   Record<CerebroFlagGroupKey, CerebroFlagSubgroup[]>
 > = {
+  dm_channel: [
+    {
+      key: "channels",
+      label: "Channels",
+      description:
+        "Channel-style conversations and the settings that govern how they behave.",
+    },
+  ],
   permissions: [
     {
       key: "tool_permissions",
@@ -1696,6 +1719,10 @@ export const CEREBRO_FLAG_SUBGROUPS: Partial<
  * sub-groups defined in {@link CEREBRO_FLAG_SUBGROUPS}.
  */
 export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> = {
+  // Channels — the channels feature and its settings (e.g. membership-aware
+  // mentions), so the setting reads as living under Channels. FIR-2680.
+  cerebro_channels: "channels",
+  cerebro_channel_mention_members_only: "channels",
   // Tool permissions — the tool-policy chain and everything that feeds it.
   cerebro_tool_policy: "tool_permissions",
   cerebro_simple_tool_policy: "tool_permissions",

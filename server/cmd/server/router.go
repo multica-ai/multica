@@ -543,6 +543,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dispatch always-listening agents in channels.
 	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
 	h.ChannelListen = channelListenSvc
+	// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — bind the mention-membership guard now that cerebro queries exist (no-op when pool is nil, e.g. DB-less test routers).
+	setChannelMentionGuard(pool, cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-agent-memory-wire): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle service.
 	h.AgentMemory = cerebroagentmemory.New(cerebroQueries, bus)
 	h.ChannelPerms = channelListenSvc // CEREBRO-PATCH(router-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).

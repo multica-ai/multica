@@ -38,3 +38,8 @@ export type {
   ChannelMessageSearchButtonProps,
   ChannelMessageSearchBarProps,
 } from "./channel-message-search";
+// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate a channel send
+// with an "add them to this channel?" prompt when a non-participant is
+// @mentioned, mirroring the notes give-access prompt.
+export { useChannelMentionGate } from "./channel-mention-gate";
+export type { ChannelMentionGate } from "./channel-mention-gate";

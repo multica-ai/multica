@@ -31,6 +31,9 @@ type mobilePushNotifier interface {
 // per device, and not every deployment has VAPID keys configured.
 var pushNotifier mobilePushNotifier
 
+// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — hook to drop @mentioned non-participants in channels/groups. Identity by default; the cerebro wiring binds it to the real guard (see cerebro_channel_mention_guard.go).
+var filterChannelMentionRecipients = func(_ context.Context, _ events.Event, _ string, ids map[string]bool) map[string]bool { return ids }
+
 // Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
 // After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
 // and full comment bodies routinely exceeded that, which made Apple reject
@@ -747,6 +750,8 @@ func notifyMentionedMembers(
 	recipientIDs := collectMentionedMemberIDs(context.Background(), queries, e.WorkspaceID, mentions)
 
 	ctx := context.Background()
+	// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — drop @mentioned non-participants in channels/groups.
+	recipientIDs = filterChannelMentionRecipients(ctx, e, issueID, recipientIDs)
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
 			continue

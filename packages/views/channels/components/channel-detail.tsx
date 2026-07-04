@@ -62,6 +62,8 @@ import { useChannelTyping } from "@multica/core/presence";
 import { ChannelCostChip } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channel-message-search): FIR-407 — in-conversation message search (icon + bar + highlight/scroll).
 import { useChannelMessageSearch, ChannelMessageSearchButton, ChannelMessageSearchBar } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — channel send gate for non-participant @mentions.
+import { useChannelMentionGate } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
@@ -107,6 +109,9 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
     initialData: initialChannel ?? undefined,
   });
   const channel = channelDetail ?? initialChannel ?? null;
+
+  // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate a channel send when a non-participant is @mentioned; one gate drives both the main composer and thread replies.
+  const mentionGate = useChannelMentionGate(channelId, channel?.participants ?? []);
 
   // useChannelDisplay reads the auth/actor stores via hooks, so it must be
   // called unconditionally. The fallback channel keeps it shape-stable.
@@ -439,7 +444,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
                 chat-like; entering one should land the caret in the input. */}
             {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}
             {/* CEREBRO-PATCH(channel-composer-unify): FIR-1748 — shared message field (Channels/DMs/Chat), draft scoped per channel. */}
-            <MessageComposer conversationId={channelId} uploadIssueId={channelId} editorKey={channelId} draftKey={`new:${channelId}`} onSubmit={submitComment} autoFocus onTyping={notifyTyping} />
+            {/* CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate send + render the shared "add to channel?" dialog once here (it portals). */}
+            <MessageComposer conversationId={channelId} uploadIssueId={channelId} editorKey={channelId} draftKey={`new:${channelId}`} onSubmit={submitComment} autoFocus onTyping={notifyTyping} confirmBeforeSend={mentionGate.confirmBeforeSend} confirmDialog={mentionGate.confirmDialog} />
           </div>
         </div>
 
@@ -452,6 +458,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           backLabel={threadBackLabel}
           onClose={() => setActiveThreadId(null)}
           onSubmit={submitReply}
+          confirmBeforeSend={mentionGate.confirmBeforeSend} // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate thread replies too (dialog rendered by the main composer).
           onEdit={editComment}
           onDelete={deleteComment}
           onToggleReaction={toggleReaction}
