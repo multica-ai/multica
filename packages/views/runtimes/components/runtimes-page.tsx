@@ -25,11 +25,14 @@ import { RuntimeList } from "./runtime-list";
 import "@multica/cerebro-types";
 import {
   matchesRuntimeSearch,
+  // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — bound-agent-name index.
+  buildAgentNamesByRuntime,
   useCerebroAccountsList,
   RuntimeColumnPicker,
 } from "@multica/cerebro-runtime/views";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
-import { memberListOptions } from "@multica/core/workspace/queries";
+// CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — agents for the name index.
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { useHealthLabel } from "./shared";
 import { useT } from "../../i18n";
 
@@ -125,6 +128,9 @@ export function RuntimesPage({
     for (const mem of members) m.set(mem.user_id, mem.name);
     return m;
   }, [members]);
+  // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — runtime_id → bound agent names.
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentNamesByRuntime = useMemo(() => buildAgentNamesByRuntime(agents), [agents]);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -176,6 +182,8 @@ export function RuntimesPage({
               ? memberNameById.get(r.owner_id) ?? null
               : null,
             healthLabel: labelOf(health),
+            // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — match bound agent names.
+            agentNames: agentNamesByRuntime.get(r.id) ?? null,
           });
           if (!ok) return false;
         } else {
@@ -194,6 +202,8 @@ export function RuntimesPage({
     columnsEnabled,
     accountLabelById,
     memberNameById,
+    // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — re-filter when agent index changes.
+    agentNamesByRuntime,
     labelOf,
   ]);
 
@@ -357,14 +367,15 @@ function CardToolbar({
 }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-      <div className="relative">
+    // CEREBRO-PATCH(runtime-toolbar-mobile-fit): FIR-2669 — flexible search + horizontal scroll so the scope toggle, column picker and Live indicator stay reachable on a phone (were clipped by the card's overflow-hidden).
+    <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-4">
+      <div className="relative min-w-0 flex-1 md:flex-none">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-64 pl-8 text-sm"
+          className="h-8 w-full pl-8 text-sm md:w-64"
         />
       </div>
       <ScopeSegment value={scope} onChange={setScope} />

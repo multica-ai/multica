@@ -82,7 +82,8 @@ import { AgentListToolbar } from "./agent-list-toolbar";
 // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account column reuses
 // the runtimes' Account cell; the search box + extra columns are flag-gated.
 // CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — mobile stacked-card list.
-import { RuntimeAccountCell, AgentMobileList } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(agent-search-by-account): FIR-2669 — accounts list + search matcher.
+import { RuntimeAccountCell, AgentMobileList, useCerebroAccountsList, matchesAgentSearch } from "@multica/cerebro-runtime/views";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 
@@ -845,6 +846,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   // Account/Thinking columns are gated by the interface-columns flag.
   const extrasEnabled = useFlagValue("cerebro_interface_columns");
   const [search, setSearch] = useState("");
+  // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — runtime account_id → "login provider"
+  // so the search box matches the Account email shown on each agent row.
+  const { data: cerebroAccounts = [] } = useCerebroAccountsList();
+  const accountLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of cerebroAccounts) m.set(a.id, `${a.login_identity} ${a.provider}`);
+    return m;
+  }, [cerebroAccounts]);
 
   const [showCreate, setShowCreate] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
@@ -968,20 +977,26 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const rows = useMemo<AgentListRow[]>(() => {
     const q = extrasEnabled ? search.trim().toLowerCase() : "";
     const filtered = scopeRows.filter((row) => {
-      // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — free-text
-      // search across name, description, model, thinking level, runtime, owner.
+      // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — free-text search now
+      // also matches the Account email/provider shown on the row (via runtime).
       if (q) {
-        const hay = [
-          row.agent.name,
-          row.agent.description ?? "",
-          row.agent.model ?? "",
-          row.agent.thinking_level ?? "",
-          row.runtime?.name ?? "",
-          row.owner?.name ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
+        const accountId = row.runtime?.current_account_id;
+        if (
+          !matchesAgentSearch(
+            {
+              name: row.agent.name,
+              description: row.agent.description,
+              model: row.agent.model,
+              thinkingLevel: row.agent.thinking_level,
+              runtimeName: row.runtime?.name,
+              ownerName: row.owner?.name,
+              accountLabel: accountId ? accountLabelById.get(accountId) : null,
+            },
+            q,
+          )
+        ) {
+          return false;
+        }
       }
       if (
         filters.availability.length > 0 &&
@@ -1039,7 +1054,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     });
     return filtered;
     // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search deps.
-  }, [scopeRows, filters, sortField, sortDirection, extrasEnabled, search]);
+    // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — re-filter when account labels resolve.
+  }, [scopeRows, filters, sortField, sortDirection, extrasEnabled, search, accountLabelById]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer

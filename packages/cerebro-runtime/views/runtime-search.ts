@@ -1,4 +1,4 @@
-import type { AgentRuntime } from "@multica/core/types/agent";
+import type { Agent, AgentRuntime } from "@multica/core/types/agent";
 
 // FIR-2669: full-field search for the Runtimes list. Jesper asked search to
 // match every field the table can show, except the ones a text search can't
@@ -14,6 +14,28 @@ export interface RuntimeSearchExtras {
   ownerName?: string | null;
   /** Derived health label in the current locale (e.g. "Online", "Offline"). */
   healthLabel?: string | null;
+  /** FIR-2669 follow-up: space-joined names of the agents bound to this runtime,
+   *  so a user can find a runtime by typing an agent that runs on it. */
+  agentNames?: string | null;
+}
+
+/**
+ * FIR-2669 follow-up: map runtime_id → a single space-joined string of the
+ * names of the non-archived agents bound to that runtime. Built once off the
+ * workspace-wide agent list and passed to matchesRuntimeSearch as an extra, so
+ * "search a runtime by an agent name" needs no extra request and stays testable.
+ */
+export function buildAgentNamesByRuntime(agents: Agent[]): Map<string, string> {
+  const byRuntime = new Map<string, string[]>();
+  for (const a of agents) {
+    if (!a.runtime_id || a.archived_at) continue;
+    const names = byRuntime.get(a.runtime_id) ?? [];
+    names.push(a.name);
+    byRuntime.set(a.runtime_id, names);
+  }
+  const joined = new Map<string, string>();
+  for (const [id, names] of byRuntime) joined.set(id, names.join(" "));
+  return joined;
 }
 
 /** Read the agent-native CLI/tool version off a runtime's loose metadata bag. */
@@ -48,6 +70,7 @@ export function matchesRuntimeSearch(
     extras.accountLabel ?? "",
     extras.ownerName ?? "",
     extras.healthLabel ?? "",
+    extras.agentNames ?? "",
   ]
     .join(" ")
     .toLowerCase();

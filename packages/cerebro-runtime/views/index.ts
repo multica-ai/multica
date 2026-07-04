@@ -20,8 +20,13 @@ export {
 } from "./runtime-view-store";
 export {
   matchesRuntimeSearch,
+  buildAgentNamesByRuntime,
   type RuntimeSearchExtras,
 } from "./runtime-search";
+export {
+  matchesAgentSearch,
+  type AgentSearchFields,
+} from "./agent-search";
 export {
   useCerebroAccountsList,
   cerebroAccountsListOptions,
