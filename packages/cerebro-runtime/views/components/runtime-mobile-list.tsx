@@ -3,7 +3,11 @@
 import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
-import { deriveRuntimeHealth, runtimeUsageOptions } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  runtimeUsageOptions,
+  readRuntimeCliVersion,
+} from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink } from "@multica/views/navigation";
 import { useT } from "@multica/views/i18n";
@@ -85,6 +89,21 @@ function CliValue({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
+// The multica daemon CLI version (metadata.cli_version) — shared per machine,
+// distinct from CliValue's per-agent tool version (metadata.version).
+function DaemonValue({ runtime }: { runtime: AgentRuntime }) {
+  if (runtime.runtime_mode === "cloud") {
+    return <span className="text-muted-foreground/50">—</span>;
+  }
+  const version = readRuntimeCliVersion(
+    runtime.metadata as Record<string, unknown> | undefined,
+  );
+  if (!version) return <span className="text-muted-foreground/50">—</span>;
+  return (
+    <span className="truncate font-mono text-muted-foreground">{version}</span>
+  );
+}
+
 function RuntimeMobileCard({
   row,
   now,
@@ -157,6 +176,11 @@ function RuntimeMobileCard({
       {isVisible("cli") && (
         <CardField label={t(($) => $.list.col_cli)}>
           <CliValue runtime={runtime} />
+        </CardField>
+      )}
+      {isVisible("daemon") && (
+        <CardField label={t(($) => $.list.col_daemon)}>
+          <DaemonValue runtime={runtime} />
         </CardField>
       )}
     </AppLink>

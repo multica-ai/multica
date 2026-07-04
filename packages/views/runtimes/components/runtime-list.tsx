@@ -28,6 +28,8 @@ import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
+  // CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — daemon CLI version reader.
+  readRuntimeCliVersion,
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
@@ -84,9 +86,10 @@ import { useT } from "../../i18n";
 // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (see agents-page).
 // CEREBRO-PATCH(runtime-list-columns): FIR-2669 — Account track added before CLI.
 // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine (computer) track before Account.
+// CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon (cli_version) track after CLI.
 const GRID_COLS =
   "grid-cols-[minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)] " +
-  "@2xl:grid-cols-[minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-machine)_var(--rtc-account)_var(--rtc-cli)_var(--rtc-kebab)]";
+  "@2xl:grid-cols-[minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-machine)_var(--rtc-account)_var(--rtc-cli)_var(--rtc-daemon)_var(--rtc-kebab)]";
 
 const COLUMN_WIDTHS = {
   // Health folds the workload in as a suffix ("Healthy · 2 running") —
@@ -100,11 +103,13 @@ const COLUMN_WIDTHS = {
   account: 180,
   // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine column width.
   machine: 160,
+  // CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon column width.
+  daemon: 112,
 } as const;
 
 // Fixed tracks (name min 140) plus gap-x-3 between the wide template's tracks.
-// CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — 8 gaps after adding Machine.
-const FIXED_TRACKS_WIDTH = 140 + 8 * 12;
+// CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — 9 gaps after adding Daemon.
+const FIXED_TRACKS_WIDTH = 140 + 9 * 12;
 
 // The kebab track is conditional like the owner column: on a healthy
 // local machine EVERY row's only action (delete) is hidden by the
@@ -132,6 +137,8 @@ function columnTrackVars(
     w("machine") +
     w("account") +
     w("cli") +
+    // CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon in min-width sum.
+    w("daemon") +
     (showActions ? 28 : 0);
   return {
     "--rtc-health": `${COLUMN_WIDTHS.health}px`,
@@ -142,6 +149,8 @@ function columnTrackVars(
     "--rtc-machine": px("machine"),
     "--rtc-account": px("account"),
     "--rtc-cli": px("cli"),
+    // CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon track var.
+    "--rtc-daemon": px("daemon"),
     "--rtc-kebab": showActions ? "1.75rem" : "0px",
     "--rtc-minw": `${minWidth}px`,
   } as React.CSSProperties;
@@ -370,6 +379,28 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
+// CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — the multica daemon CLI
+// version (metadata.cli_version). Shared per machine, distinct from CliCell's
+// per-agent tool version (metadata.version). Cloud runtimes have no daemon.
+export function DaemonCell({ runtime }: { runtime: AgentRuntime }) {
+  if (runtime.runtime_mode === "cloud") {
+    return <span className="text-xs text-muted-foreground/50">—</span>;
+  }
+  const version = readRuntimeCliVersion(
+    runtime.metadata as Record<string, unknown> | undefined,
+  );
+  if (!version) {
+    return <span className="text-xs text-muted-foreground/50">—</span>;
+  }
+  return (
+    <div className="flex min-w-0 items-center text-xs">
+      <span className="truncate font-mono text-muted-foreground">
+        {version}
+      </span>
+    </div>
+  );
+}
+
 // Stacks up to 3 agent avatars, then a "+N" pill if more bind to this
 // runtime. Each avatar uses the wrapping ActorAvatar so hover automatically
 // surfaces AgentProfileCard.
@@ -497,9 +528,9 @@ export function RuntimeList({
   // Account only exists when the flag is on. Flag off = original layout.
   const columnsEnabled = useFlagValue("cerebro_interface_columns");
   const hiddenColumns = useRuntimesViewStore((s) => s.hiddenColumns);
-  // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine is opt-in like Account.
+  // CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon is a cerebro column, gated like Account/Machine.
   const isVisible = (key: RuntimeColumnKey) =>
-    key === "account" || key === "machine"
+    key === "account" || key === "machine" || key === "daemon"
       ? columnsEnabled && !hiddenColumns.includes(key)
       : columnsEnabled
         ? !hiddenColumns.includes(key)
@@ -624,6 +655,14 @@ export function RuntimeList({
           ) : (
             <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
           )}
+          {/* CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon (cli_version) header. */}
+          {isVisible("daemon") ? (
+            <ListGridHeaderCell className="hidden @2xl:flex">
+              {t(($) => $.list.col_daemon)}
+            </ListGridHeaderCell>
+          ) : (
+            <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+          )}
           <ListGridHeaderCell className="px-0" />
         </ListGridHeader>
         {rows.map((row) => (
@@ -690,6 +729,14 @@ export function RuntimeList({
             {isVisible("cli") ? (
               <ListGridCell className="hidden @2xl:flex">
                 <CliCell runtime={row.runtime} />
+              </ListGridCell>
+            ) : (
+              <ListGridCell className="hidden px-0 @2xl:flex" />
+            )}
+            {/* CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 — Daemon (cli_version) cell. */}
+            {isVisible("daemon") ? (
+              <ListGridCell className="hidden @2xl:flex">
+                <DaemonCell runtime={row.runtime} />
               </ListGridCell>
             ) : (
               <ListGridCell className="hidden px-0 @2xl:flex" />

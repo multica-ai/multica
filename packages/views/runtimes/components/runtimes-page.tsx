@@ -212,7 +212,8 @@ export function RuntimesPage({
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+      {/* CEREBRO-PATCH(runtime-list-mobile-unbox): FIR-2669 — edge-to-edge on mobile (no p-6 inset) like the agents page; keep the padded frame at md+. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-0 md:p-6">
         {topSlot}
 
         {showEmpty ? (
@@ -220,7 +221,8 @@ export function RuntimesPage({
             <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+          // CEREBRO-PATCH(runtime-list-mobile-unbox): FIR-2669 — no visible box on mobile (no border/rounding); the card frame returns at md+.
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-background md:rounded-lg md:border">
             <CardToolbar
               search={search}
               setSearch={setSearch}
@@ -308,9 +310,18 @@ function PageHeaderBar({
             {t(($) => $.cloud_runtime.action)}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
+        {/* CEREBRO-PATCH(runtimes-add-computer-icon-only): FIR-2669 — icon-only "+" below md (mirrors the agents "New agent" button). */}
+        <Button
+          type="button"
+          size="sm"
+          onClick={onConnectRemote}
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.connect_remote)}
+        >
           <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
+          <span className="hidden md:inline">
+            {t(($) => $.page.connect_remote)}
+          </span>
         </Button>
       </div>
     </PageHeader>

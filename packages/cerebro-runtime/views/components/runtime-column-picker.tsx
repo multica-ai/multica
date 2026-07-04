@@ -34,6 +34,7 @@ export function RuntimeColumnPicker() {
     cost: t(($) => $.list.col_cost),
     account: t(($) => $.list.col_account),
     cli: t(($) => $.list.col_cli),
+    daemon: t(($) => $.list.col_daemon),
   };
 
   return (

@@ -53,6 +53,8 @@ vi.mock("@multica/views/runtimes/components/shared", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
   runtimeUsageOptions: () => ({ queryKey: ["usage"], queryFn: () => [] }),
+  readRuntimeCliVersion: (meta?: Record<string, unknown>) =>
+    typeof meta?.cli_version === "string" ? meta.cli_version : "",
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -82,7 +84,7 @@ const runtime: AgentRuntime = {
   launch_header: "",
   status: "online",
   device_info: "host.local",
-  metadata: { version: "2.1.5" },
+  metadata: { version: "2.1.5", cli_version: "0.42.0" },
   owner_id: null,
   sandbox_enabled: null,
   persona_sandbox: "",
@@ -132,5 +134,23 @@ describe("RuntimeMobileList", () => {
     expect(screen.queryByText("2.1.5")).not.toBeInTheDocument();
     // A still-enabled column (Account) remains visible.
     expect(screen.getByText("user@example.com")).toBeInTheDocument();
+  });
+
+  it("shows the Daemon column (metadata.cli_version) when enabled, distinct from CLI", () => {
+    // Daemon is default-visible; CLI shows metadata.version, Daemon shows cli_version.
+    setHidden([...RUNTIME_DEFAULT_HIDDEN_COLUMNS]);
+    render(<RuntimeMobileList rows={[{ runtime, agentCount: 1 }]} now={0} />);
+
+    expect(screen.getByText("0.42.0")).toBeInTheDocument(); // daemon
+    expect(screen.getByText("2.1.5")).toBeInTheDocument(); // cli
+  });
+
+  it("hides the Daemon column when toggled off", () => {
+    setHidden(["daemon"]);
+    render(<RuntimeMobileList rows={[{ runtime, agentCount: 1 }]} now={0} />);
+
+    expect(screen.queryByText("0.42.0")).not.toBeInTheDocument();
+    // CLI (metadata.version) is unaffected.
+    expect(screen.getByText("2.1.5")).toBeInTheDocument();
   });
 });

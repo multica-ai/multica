@@ -21,7 +21,16 @@ import {
 // FIR-2669 follow-up: "machine" is the computer/hostname the runtime runs on.
 // A runtime name reads as "base (hostname)"; the name column shows only the
 // base, so the machine name is otherwise invisible. Opt-in via the picker.
-export type RuntimeColumnKey = "agents" | "cost" | "cli" | "account" | "machine";
+// FIR-2669 review follow-up: "daemon" is the multica daemon CLI version
+// (metadata.cli_version) — shared per machine, distinct from "cli" which is
+// the agent's own underlying tool version (metadata.version).
+export type RuntimeColumnKey =
+  | "agents"
+  | "cost"
+  | "cli"
+  | "account"
+  | "machine"
+  | "daemon";
 
 // Every existing column visible by default — the picker only ever hides. Jesper
 // asked to ADD the Account column, not to trim the existing set, so nothing
@@ -31,13 +40,15 @@ export const RUNTIME_DEFAULT_HIDDEN_COLUMNS: RuntimeColumnKey[] = ["machine"];
 
 // Order shown in the column picker. Machine sits first (it is the computer
 // name), then the workload/cost columns, then the identity columns (account +
-// CLI) which read together.
+// CLI + daemon) which read together. Daemon sits next to CLI — both are
+// version numbers.
 export const RUNTIME_COLUMN_KEYS: RuntimeColumnKey[] = [
   "machine",
   "agents",
   "cost",
   "account",
   "cli",
+  "daemon",
 ];
 
 export interface RuntimesViewState {
