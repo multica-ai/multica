@@ -1509,6 +1509,121 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	}
 }
 
+// statusOnlyBackend simulates a stuck --resume session that emits internal
+// MessageStatus frames (session init, pin) but never produces user-visible
+// output. The idle watchdog stays quiet because lastActivityAt keeps resetting,
+// but the zero-output watchdog should fire (#4407).
+type statusOnlyBackend struct {
+	interval time.Duration // how often to emit a status frame
+}
+
+func (b statusOnlyBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 8)
+	resCh := make(chan agent.Result)
+	go func() {
+		// Emit a burst of status frames, then go silent. Each frame resets
+		// lastActivityAt but NOT lastUserVisibleActivityAt.
+		for i := 0; i < 5; i++ {
+			msgCh <- agent.Message{Type: agent.MessageStatus, Status: "init", SessionID: "sess-123"}
+			if b.interval > 0 {
+				time.Sleep(b.interval)
+			}
+		}
+		// Never close msgCh, never send to resCh — hung backend.
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_ZeroOutputWatchdog_FiresWhenOnlyStatusFrames(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// Disable the idle watchdog so only the zero-output watchdog is active.
+	d.cfg.AgentIdleWatchdog = 0
+	d.cfg.AgentZeroOutputWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, statusOnlyBackend{interval: 5 * time.Millisecond}, "p", agent.ExecOptions{}, slog.Default(), "t-zero-out")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog (zero-output trip), got %q (err=%q)", result.Status, result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 10*d.cfg.AgentZeroOutputWatchdog {
+		t.Fatalf("zero-output watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentZeroOutputWatchdog)
+	}
+}
+
+func TestExecuteAndDrain_ZeroOutputWatchdog_DoesNotFireWhenUserVisibleOutputExists(t *testing.T) {
+	t.Parallel()
+
+	// Test runIdleWatchdog directly to avoid scheduling races with the drain
+	// goroutine. Pre-stamp lastUserVisibleActivityAt to a recent time (as the
+	// drain loop would after processing a MessageText). The zero-output
+	// watchdog should NOT fire because user-visible output was "produced".
+	var lastActivityAt atomic.Int64
+	lastActivityAt.Store(time.Now().UnixNano())
+	var lastUserVisibleActivityAt atomic.Int64
+	lastUserVisibleActivityAt.Store(time.Now().UnixNano()) // stamped by drain after processing MessageText
+	var inFlightTools atomic.Int32
+	var fired atomic.Bool
+	var firedThreshold atomic.Int64
+
+	agentCtx, agentCancel := context.WithCancel(context.Background())
+	defer agentCancel()
+
+	cancelled := make(chan struct{})
+	go func() {
+		agentCancel()
+		close(cancelled)
+	}()
+
+	// Run the watchdog with a 100ms zero-output window. Since
+	// lastUserVisibleActivityAt was just stamped, the watchdog should NOT
+	// fire for 100ms. We cancel the context after 50ms.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		agentCancel()
+	}()
+
+	messages := make(chan agent.Message) // empty, unbuffered
+	d := newTestDaemon(t)
+	d.runIdleWatchdog(agentCtx, 0, 0, 100*time.Millisecond, &lastActivityAt, &lastUserVisibleActivityAt, &inFlightTools, &fired, &firedThreshold, agentCancel, messages, slog.Default(), "t-zero-no-fire")
+
+	if fired.Load() {
+		t.Fatalf("zero-output watchdog should not fire when lastUserVisibleActivityAt was recently stamped, but it did (threshold=%s)", time.Duration(firedThreshold.Load()))
+	}
+}
+
+func TestExecuteAndDrain_ZeroOutputWatchdog_DisabledWhenZero(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 0
+	d.cfg.AgentZeroOutputWatchdog = 0 // disabled
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Cancel after 100ms — neither watchdog should fire.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	result, _, err := d.executeAndDrain(ctx, statusOnlyBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-zero-disabled")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status == "idle_watchdog" {
+		t.Fatalf("watchdog should not fire when both AgentIdleWatchdog=0 and AgentZeroOutputWatchdog=0, got status=%q", result.Status)
+	}
+}
+
 // ensureRepoReady must refresh `workspaceState.settings` on every checkout —
 // even when the repo cache already holds the URL. The /repo/checkout handler
 // reads `workspaceCoAuthoredByEnabled` right after, and the 30s workspace
