@@ -30,6 +30,41 @@ describe("computeDiff", () => {
   });
 });
 
+describe("word-level highlighting on modified lines", () => {
+  it("highlights only the changed words when a sentence is lightly edited", () => {
+    const diff = computeDiff(
+      "The quick brown fox jumps over the lazy dog",
+      "The quick brown fox leaps over the lazy dog",
+    );
+    expect(diff).toHaveLength(2);
+    const [removed, added] = diff;
+    expect(removed).toMatchObject({ type: "removed" });
+    expect(added).toMatchObject({ type: "added" });
+
+    if (removed?.type !== "removed" || added?.type !== "added") throw new Error("unreachable");
+    expect(removed.words).toBeDefined();
+    expect(added.words).toBeDefined();
+
+    const changedOld = removed.words!.filter((w) => w.changed).map((w) => w.text);
+    const changedNew = added.words!.filter((w) => w.changed).map((w) => w.text);
+    expect(changedOld).toEqual(["jumps"]);
+    expect(changedNew).toEqual(["leaps"]);
+
+    // Most of the sentence is untouched.
+    const unchangedCount = removed.words!.filter((w) => !w.changed).length;
+    expect(unchangedCount).toBeGreaterThan(0);
+  });
+
+  it("does not word-diff two unrelated replaced lines", () => {
+    const diff = computeDiff("Alpha bravo charlie delta", "Echo foxtrot golf hotel");
+    const [removed, added] = diff;
+    if (removed?.type !== "removed" || added?.type !== "added") throw new Error("unreachable");
+    // Zero shared words — well below the similarity gate.
+    expect(removed.words).toBeUndefined();
+    expect(added.words).toBeUndefined();
+  });
+});
+
 describe("groupForDisplay", () => {
   it("does not collapse anything when every unchanged line is within context distance", () => {
     const base = ["a", "b", "changed", "d", "e"].join("\n");

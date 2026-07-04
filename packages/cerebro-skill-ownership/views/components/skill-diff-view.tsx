@@ -1,18 +1,37 @@
 "use client";
 
-// Unified-diff-style view for SKILL.md content, collapsing long unchanged
-// runs into expandable dividers so a reviewer sees only what changed (plus a
-// little context) instead of scrolling through the whole file.
+// Unified diff view for SKILL.md content (prose, not code). Modified lines
+// get word-level highlighting instead of whole-line red/green blocks — the
+// thing that makes a diff readable for edited sentences rather than just
+// inserted/deleted ones (see FIR-2684). Long unchanged runs collapse into
+// expandable dividers so a reviewer isn't scrolling past the whole file.
 
 import { useState } from "react";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
-import { computeDiff, groupForDisplay, type DiffLine } from "./skill-diff";
+import { computeDiff, groupForDisplay, type DiffLine, type WordSegment } from "./skill-diff";
 
 interface Props {
   base: string;
   proposed: string;
   baseLabel?: string;
   proposedLabel?: string;
+}
+
+function renderWords(words: WordSegment[], type: "added" | "removed") {
+  return words.map((seg, i) => (
+    <span
+      key={i}
+      className={
+        seg.changed
+          ? type === "added"
+            ? "rounded-[2px] bg-emerald-500/25 text-emerald-800 underline decoration-emerald-600 decoration-2 dark:text-emerald-300"
+            : "rounded-[2px] bg-destructive/20 text-destructive line-through decoration-destructive/70"
+          : undefined
+      }
+    >
+      {seg.text}
+    </span>
+  ));
 }
 
 export function SkillDiffView({ base, proposed, baseLabel = "base", proposedLabel = "proposed" }: Props) {
@@ -51,28 +70,34 @@ export function SkillDiffView({ base, proposed, baseLabel = "base", proposedLabe
     <div
       className={
         line.type === "added"
-          ? "flex bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          ? "flex bg-emerald-500/10"
           : line.type === "removed"
-            ? "flex bg-destructive/10 text-destructive/80"
+            ? "flex bg-destructive/10"
             : "flex text-muted-foreground"
       }
     >
-      <span className="w-9 shrink-0 select-none pr-2 text-right text-muted-foreground/50 tabular-nums">
+      <span className="w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums">
         {line.oldLine ?? ""}
       </span>
-      <span className="w-9 shrink-0 select-none pr-2 text-right text-muted-foreground/50 tabular-nums">
+      <span className="w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums">
         {line.newLine ?? ""}
       </span>
-      <span className="mr-2 shrink-0 select-none">
+      <span className="mr-2 shrink-0 select-none font-mono">
         {line.type === "added" ? "+" : line.type === "removed" ? "−" : " "}
       </span>
-      <span className="whitespace-pre-wrap break-all pr-2">{line.text || " "}</span>
+      <span
+        className={`whitespace-pre-wrap break-words pr-2 ${
+          line.type === "added" ? "text-emerald-800 dark:text-emerald-300" : line.type === "removed" ? "text-destructive" : ""
+        }`}
+      >
+        {line.type !== "unchanged" && line.words ? renderWords(line.words, line.type) : line.text || " "}
+      </span>
     </div>
   );
 
   return (
-    <div className="overflow-hidden rounded-md border bg-muted/20 font-mono text-xs leading-5">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs">
+    <div className="overflow-hidden rounded-md border bg-muted/20 text-sm leading-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-3 py-1.5 font-mono text-xs">
         <div className="flex items-center gap-3 text-muted-foreground">
           <span className="text-destructive/70">− {baseLabel}</span>
           <span className="text-emerald-600">+ {proposedLabel}</span>
@@ -116,7 +141,7 @@ export function SkillDiffView({ base, proposed, baseLabel = "base", proposedLabe
               key={group.key}
               type="button"
               onClick={() => toggleGroup(group.key)}
-              className="flex w-full items-center gap-1.5 border-y border-dashed bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="flex w-full items-center gap-1.5 border-y border-dashed bg-muted/40 px-3 py-1 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <ChevronsUpDown className="h-3 w-3 shrink-0" />
               {group.lines.length} unchanged line{group.lines.length === 1 ? "" : "s"}
