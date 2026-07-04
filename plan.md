@@ -338,9 +338,9 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 3.1 Integrate TipTap Editor
 
-- [ ] Install TipTap packages: `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-*`
-- [ ] Create `packages/views/editor/tiptap-editor.tsx` — core editor component
-- [ ] Configure extensions:
+- [x] Install TipTap packages: `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-*`
+- [x] Create `packages/views/editor/tiptap-editor.tsx` — core editor component
+- [x] Configure extensions:
   - `StarterKit` (bold, italic, headings, lists, code blocks, blockquotes)
   - `Placeholder` (empty state hints)
   - `Link` (auto-detect URLs)
@@ -349,30 +349,30 @@ Multica is a powerful AI-native task management platform where AI agents are fir
   - `Table` (basic tables)
   - `CodeBlockLowlight` (syntax-highlighted code)
   - `Mention` (@ mentions for team members and agents)
-- [ ] Output: Raw Markdown (for DB storage compatibility) via `@tiptap/extension-markdown` or custom serializer
+- [x] Output: Raw Markdown (for DB storage compatibility) via `@tiptap/extension-markdown` or custom serializer
 
 ### 3.2 Slash Command Palette
 
-- [ ] Create `packages/views/editor/slash-command.tsx`
-- [ ] Implement floating command menu triggered by `/` keystroke
-- [ ] Commands: Heading 1-3, Bullet List, Numbered List, To-Do, Code Block, Quote, Divider, Image, Table, Mention
-- [ ] Keyboard navigation (↑/↓/Enter/Escape)
-- [ ] Filter commands by typed text after `/`
+- [x] Create `packages/views/editor/slash-command.tsx`
+- [x] Implement floating command menu triggered by `/` keystroke
+- [x] Commands: Heading 1-3, Bullet List, Numbered List, To-Do, Code Block, Quote, Divider, Image, Table, Mention
+- [x] Keyboard navigation (↑/↓/Enter/Escape)
+- [x] Filter commands by typed text after `/`
 
 ### 3.3 Floating Format Toolbar
 
-- [ ] Create `packages/views/editor/bubble-menu.tsx`
-- [ ] Show floating toolbar on text selection with: Bold, Italic, Strikethrough, Code, Link, Heading toggle
-- [ ] Position dynamically above selection using TipTap's `BubbleMenu` component
-- [ ] Animate in/out with CSS transitions
+- [x] Create `packages/views/editor/bubble-menu.tsx`
+- [x] Show floating toolbar on text selection with: Bold, Italic, Strikethrough, Code, Link, Heading toggle
+- [x] Position dynamically above selection using TipTap's `BubbleMenu` component
+- [x] Animate in/out with CSS transitions
 
 ### 3.4 Integration Points
 
-- [ ] Replace existing editor in **Issue Description** (create + edit)
-- [ ] Replace existing editor in **Comments** (new comment + edit)
-- [ ] Replace existing editor in **Project Description**
-- [ ] Ensure Markdown roundtrip: TipTap → Markdown → stored in DB → Markdown → TipTap (no data loss)
-- [ ] Preserve existing Markdown rendering for read-only views (KaTeX, Mermaid, etc.)
+- [x] Replace existing editor in **Issue Description** (create + edit)
+- [x] Replace existing editor in **Comments** (new comment + edit)
+- [x] Replace existing editor in **Project Description**
+- [x] Ensure Markdown roundtrip: TipTap → Markdown → stored in DB → Markdown → TipTap (no data loss)
+- [x] Preserve existing Markdown rendering for read-only views (KaTeX, Mermaid, etc.)
 
 ---
 
