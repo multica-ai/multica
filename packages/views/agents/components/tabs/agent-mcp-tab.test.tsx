@@ -234,4 +234,25 @@ describe("AgentMcpTab", () => {
       screen.queryByText(/any workspace member may use these Composio apps/i),
     ).toBeNull();
   });
+
+  // Regression: GH #4915. Legacy self-host backends / stale caches may
+  // return an agent without `invocation_targets` even though the modern
+  // type declares a required array. The tab must degrade to the "not
+  // workspace-public" copy instead of crashing the whole detail route
+  // with "Cannot read properties of undefined (reading 'some')".
+  it("does not crash when invocation_targets is undefined", () => {
+    expect(() =>
+      renderTab({
+        permission_mode: "public_to",
+        invocation_targets:
+          undefined as unknown as Agent["invocation_targets"],
+        composio_toolkit_allowlist: ["notion"],
+      }),
+    ).not.toThrow();
+    // Falls back to the generic shared warning (no workspace target
+    // resolves to `false`), not the workspace-wide one.
+    expect(
+      screen.queryByText(/any workspace member may use these Composio apps/i),
+    ).toBeNull();
+  });
 });

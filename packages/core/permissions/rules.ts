@@ -75,8 +75,10 @@ export function canAssignAgentToIssue(
   }
 
   // permission_mode === "public_to": resolve the invocation grants. A
-  // workspace grant opens invocation to any workspace member.
-  const targets = agent.invocation_targets;
+  // workspace grant opens invocation to any workspace member. The `?? []`
+  // guards against legacy self-host backends / stale caches that omit the
+  // field even though the type says required-array (GH #4915).
+  const targets = agent.invocation_targets ?? [];
   if (targets.some((t) => t.target_type === "workspace")) {
     if (ctx.role === null) {
       return deny("not_member", "Join this workspace to assign agents.");

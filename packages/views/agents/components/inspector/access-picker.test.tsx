@@ -116,4 +116,34 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
       ],
     });
   });
+
+  // Regression: GH #4915. Older self-host backends / stale caches may return
+  // an agent without `invocation_targets` even though the modern type says
+  // required-array. The picker must degrade gracefully to the "Private" /
+  // empty-allowlist summary instead of crashing the whole agent detail
+  // route with "Cannot read properties of undefined (reading 'some')".
+  it("renders without crashing when invocationTargets is undefined", () => {
+    expect(() =>
+      renderPicker({
+        // Force the runtime shape produced by a legacy backend response.
+        invocationTargets: undefined as unknown as AgentInvocationTarget[],
+      }),
+    ).not.toThrow();
+    // Private is the fallback summary when there are no grants.
+    expect(screen.getAllByText("Only me").length).toBeGreaterThan(0);
+  });
+
+  it("read-only mode: undefined invocationTargets does not crash for non-owners", () => {
+    expect(() =>
+      renderPicker({
+        canEdit: false,
+        permissionMode: "public_to",
+        invocationTargets: undefined as unknown as AgentInvocationTarget[],
+        visibility: "workspace",
+      }),
+    ).not.toThrow();
+    // No workspace target in the (empty) list ⇒ shows the "no members" state
+    // rather than the workspace one, which is the safe degradation.
+    expect(screen.getByTestId("access-readonly")).toBeInTheDocument();
+  });
 });
