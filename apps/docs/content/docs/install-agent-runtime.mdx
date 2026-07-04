@@ -157,6 +157,15 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 | Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
 
+### ForgeCode (Open source)
+
+Open-source CLI coding harness ([forgecode.dev](https://forgecode.dev/)). The daemon launches it in one-shot mode as `forge -C <workdir> --cid <conversation-id> -p <prompt>`. Session resumption works by reusing the pinned conversation id. ForgeCode has no `--model` flag — the model is selected via the `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` environment variables (set `MULTICA_FORGE_MODEL=provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). Because ForgeCode's one-shot mode renders Markdown rather than a structured event stream, the daemon replays the structured message list from a post-run `forge conversation dump <id>`. Skills are copied into `.forge/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `forge` |
+| Install | See the official docs at [forgecode.dev](https://forgecode.dev/). |
+| Authentication | Per the vendor's docs (API keys for the configured provider). |
 ### Trae CLI (ByteDance)
 
 ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** the open-source `bytedance/trae-agent`). It is ACP-native, so Multica drives it over stdio via `traecli acp serve --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, and Qoder. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (switched per task via `session/set_model`), and skills are copied into `.traecli/skills/`.

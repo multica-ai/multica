@@ -26,6 +26,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | Dynamic discovery |
+| **ForgeCode** | Open source | ✅ (`--cid <id>`) | ❌ | `.forge/skills/` | Static (env vars) |
 | **Trae** | ByteDance | ✅ (ACP `session/load`) | ✅ | `.traecli/skills/` | Dynamic discovery |
 
 ## What each tool is for
@@ -90,6 +91,10 @@ From Inflection AI, minimalist. **Session resumption is unusual** — the sessio
 
 From Alibaba. An agentic coding CLI. Uses the ACP protocol over stdio (shares a transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/` for native discovery.
 
+### ForgeCode
+
+Open-source CLI coding harness ([forgecode.dev](https://forgecode.dev/)). Unlike the other supported tools, ForgeCode's one-shot mode (`forge -p`) does **not** emit a structured event stream — it renders styled Markdown to stdout with tool calls, reasoning, and prose interleaved. Multica works around this with a two-phase approach: it buffers the live stdout (forwarding only a liveness heartbeat) and, after the run, replays the structured message list from `forge conversation dump <id>` (tool calls, tool results, reasoning, token usage). **Session resumption works** via the pinned `--cid <id>`; the conversation id is reused to continue a prior conversation. **Model selection is unusual**: there is no `--model` flag — the model is set via the `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` environment variables, which Multica derives from a `provider/model` value (e.g. `anthropic/claude-sonnet-4-20250514`). MCP config is not consumed. Skills are copied into `.forge/skills/`.
+
 ### Trae
 
 From ByteDance — the official **TRAE CLI** (`traecli`, documented at [docs.trae.cn/cli](https://docs.trae.cn/cli); this is the product paired with the Trae IDE, **not** the open-source `bytedance/trae-agent`). traecli is ACP-native, so Multica drives it over the standard ACP JSON-RPC transport via `traecli acp serve --yolo`, exactly like Kiro and Qoder — `--yolo` puts it in bypass-permissions mode so headless runs don't block on tool-approval prompts.
@@ -109,7 +114,7 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: provider-specific support
 
-**Of the 14 tools, eleven consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Qoder, and Trae**. The other three (Antigravity, Copilot, Pi) accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**Of the 15 tools, eleven consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Qoder, and Trae**. The other four (Antigravity, Copilot, ForgeCode, Pi) accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
 The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, Qoder, and Trae receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
@@ -133,6 +138,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | Pi | `.pi/skills/` | ✅ Native |
 | Qoder | `.qoder/skills/` | ✅ Native |
+| ForgeCode | `.forge/skills/` | ✅ Native |
 | Antigravity | `.agents/skills/` | ✅ Native (inherits Gemini CLI's workspace layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)) |
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |

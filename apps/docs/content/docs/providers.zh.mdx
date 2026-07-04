@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: Multica 支持 13 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: Multica 支持 14 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 内置支持 **14 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -26,6 +26,7 @@ Multica 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接
 | **OpenClaw** | 开源项目 | ✅ | ✅ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 动态发现 |
+| **ForgeCode** | 开源项目 | ✅（`--cid <id>`）| ❌ | `.forge/skills/` | 静态（环境变量）|
 
 ## 每款工具的定位
 
@@ -89,13 +90,17 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 
 Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Kimi、Kiro CLI 共享传输层）。会话恢复通过 ACP `session/resume` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现，skill 复制到 `.qoder/skills/` 做原生发现。
 
+### ForgeCode
+
+开源 CLI 编程 harness（[forgecode.dev](https://forgecode.dev/))）。和其他支持的工具不同，ForgeCode 的 one-shot 模式（`forge -p`）**不**输出结构化事件流——它把工具调用、推理、正文交织在一起，渲染成 Markdown 发到 stdout。Multica 用两阶段方案绕过这个限制：运行时先缓冲 stdout（只转发存活心跳），运行结束后从 `forge conversation dump <id>` 重放结构化消息列表（工具调用、工具结果、推理、token 用量）。**会话恢复可用**，通过钉住的 `--cid <id>` 实现；会话 id 被复用来接续上一次会话。**模型选择特殊**：没有 `--model` flag——模型通过 `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` 环境变量设置，Multica 从 `provider/model` 值推导（如 `anthropic/claude-sonnet-4-20250514`）。MCP 配置不消费。skill 复制到 `.forge/skills/`。
+
 ## 会话恢复：谁真的支持
 
 会话恢复的机制在 [执行任务](/tasks#任务能接着上次的上下文继续吗) 里讲过。**所有支持的工具都能恢复会话**——传 resume id，任务就会从上次的上下文接着继续。唯一的特例是 Pi：它的 resume id 是磁盘上的会话文件路径，而不是字符串 ID（见上文 [Pi](#pi)）。
 
 ## MCP 配置：按工具不同
 
-**13 款工具里有 10 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder**。其他 3 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
+**14 款工具里有 10 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder**。其他 4 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
 
 各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
 
@@ -119,6 +124,7 @@ Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Ki
 | OpenCode | `.opencode/skills/` | ✅ 原生 |
 | Pi | `.pi/skills/` | ✅ 原生 |
 | Qoder | `.qoder/skills/` | ✅ 原生 |
+| ForgeCode | `.forge/skills/` | ✅ 原生 |
 | Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
 | Hermes | `.agent_context/skills/` | ⚠️ 通用 fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |
@@ -134,3 +140,4 @@ skill 的创建和使用详见 [技能](/skills)。
 - [创建和配置智能体](/agents-create) —— 给你的智能体挑一款工具
 - [执行任务](/tasks) —— 任务的生命周期和会话恢复机制
 - [守护进程与运行时](/daemon-runtimes) —— 工具跑在哪里、怎么连进 Multica
+- [安装 agent 运行时](/install-agent-runtime) —— 14 款支持工具的安装和认证
