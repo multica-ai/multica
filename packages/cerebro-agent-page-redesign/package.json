@@ -1,0 +1,34 @@
+{
+  "name": "@multica/cerebro-agent-page-redesign",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./views": "./views/index.ts"
+  },
+  "dependencies": {
+    "@multica/cerebro-agent-capabilities": "workspace:*",
+    "@multica/cerebro-agent-context": "workspace:*",
+    "@multica/cerebro-agent-tools": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:"
+  },
+  "peerDependencies": {
+    "lucide-react": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

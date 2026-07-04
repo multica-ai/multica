@@ -343,7 +343,11 @@ export type CerebroFlagKey =
   // list pages. Adds a column picker (persisted per workspace/device) and an
   // Account column to the runtimes table, and a search box + Account/Thinking
   // level columns to the agents table. Default ON.
-  | "cerebro_interface_columns";
+  | "cerebro_interface_columns"
+  // FIR-2670: opt-in preview of the redesigned agent detail page (new card
+  // chrome, identity rail, flat tab strip). Default OFF — the live agent page
+  // is untouched until this is flipped on per workspace/user.
+  | "cerebro_agent_page_redesign";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -695,6 +699,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the app is not already installed, and is dismissible.
   cerebro_pwa_install_banner: true,
   cerebro_interface_columns: true,
+  // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
+  cerebro_agent_page_redesign: false,
 };
 
 /**
@@ -779,6 +785,13 @@ export interface CerebroFlagDefinition {
  * the user within each group (see CEREBRO_FLAG_GROUPS for group order).
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
+  {
+    key: "cerebro_agent_page_redesign",
+    label: "Agent page redesign (preview)",
+    group: "agents",
+    description:
+      "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+  },
   {
     key: "cerebro_credentials_per_actor",
     label: "Credentials per actor",
