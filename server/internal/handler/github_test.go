@@ -2214,6 +2214,138 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	}
 }
 
+func TestRescanPullRequestForIssue_IdempotentLinkOnlyRepair(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	pemBytes, _ := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "424242")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "manual rescan repair",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	const installationID int64 = 40440444
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO github_installation (workspace_id, installation_id, account_login, account_type)
+		VALUES ($1, $2, $3, $4)
+	`, testWorkspaceID, installationID, "Wilson-G", "User"); err != nil {
+		t.Fatalf("insert github_installation: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	oldBase := githubAPIBase
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	var tokenPosts, pullGets int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == fmt.Sprintf("/app/installations/%d/access_tokens", installationID):
+			tokenPosts++
+			if auth := r.Header.Get("Authorization"); !strings.HasPrefix(auth, "Bearer ") {
+				t.Fatalf("installation token auth header = %q, want Bearer", auth)
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{"token": "installation-token"})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/Wilson-G/multi-loop/pulls/44":
+			pullGets++
+			if auth := r.Header.Get("Authorization"); auth != "Bearer installation-token" {
+				t.Fatalf("pull fetch auth header = %q, want installation token", auth)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"number":          44,
+				"html_url":        "https://github.com/Wilson-G/multi-loop/pull/44",
+				"title":           created.Identifier + ": tighten mention routing",
+				"body":            "Refs " + created.Identifier,
+				"state":           "closed",
+				"draft":           false,
+				"merged":          true,
+				"merged_at":       "2026-07-02T15:00:00Z",
+				"closed_at":       "2026-07-02T15:00:00Z",
+				"created_at":      "2026-07-02T14:00:00Z",
+				"updated_at":      "2026-07-02T15:00:00Z",
+				"mergeable_state": "clean",
+				"additions":       12,
+				"deletions":       3,
+				"changed_files":   2,
+				"head":            map[string]any{"ref": "agent/loop-builder/pur-133-fixture", "sha": "abc123"},
+				"user":            map[string]any{"login": "octocat", "avatar_url": ""},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	githubAPIBase = srv.URL
+
+	body := map[string]any{
+		"repo_owner": "Wilson-G",
+		"repo_name":  "multi-loop",
+		"number":     44,
+	}
+	for i := 0; i < 2; i++ {
+		w = httptest.NewRecorder()
+		req = withURLParam(newRequest("POST", "/api/issues/"+created.ID+"/pull-requests/rescan", body), "id", created.ID)
+		testHandler.RescanPullRequestForIssue(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("rescan attempt %d: expected 200, got %d (%s)", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	if tokenPosts != 2 || pullGets != 2 {
+		t.Fatalf("expected 2 token fetches and 2 pull fetches, got token=%d pull=%d", tokenPosts, pullGets)
+	}
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected exactly 1 linked PR after repeated rescan, got %d", len(linked))
+	}
+
+	var linkCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_pull_request WHERE issue_id = $1`, created.ID).Scan(&linkCount); err != nil {
+		t.Fatalf("count issue_pull_request rows: %v", err)
+	}
+	if linkCount != 1 {
+		t.Fatalf("issue_pull_request row count = %d, want 1", linkCount)
+	}
+
+	counts, err := testHandler.Queries.GetIssuePullRequestCloseAggregate(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssuePullRequestCloseAggregate: %v", err)
+	}
+	if counts.MergedWithCloseIntentCount != 0 {
+		t.Fatalf("merged_with_close_intent_count = %d, want 0", counts.MergedWithCloseIntentCount)
+	}
+
+	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if updated.Status != "in_progress" {
+		t.Fatalf("issue status = %q, want in_progress", updated.Status)
+	}
+}
+
 // generateTestRSAKeyPEM mints an RSA-2048 key, returns its PKCS#1 PEM
 // encoding (the format GitHub hands operators when they create the App)
 // and the parsed *rsa.PrivateKey for verification.

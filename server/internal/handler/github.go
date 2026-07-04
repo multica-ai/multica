@@ -93,6 +93,57 @@ type GitHubPullRequestResponse struct {
 	ChangedFiles int32 `json:"changed_files"`
 }
 
+type githubPullRequestRescanRequest struct {
+	RepoOwner      string `json:"repo_owner"`
+	RepoName       string `json:"repo_name"`
+	Number         int32  `json:"number"`
+	InstallationID *int64 `json:"installation_id,omitempty"`
+}
+
+type githubPullRequestSyncSnapshot struct {
+	Action         string
+	BaseRefChanged bool
+	RepoOwner      string
+	RepoName       string
+	Number         int32
+	HTMLURL        string
+	Title          string
+	Body           string
+	State          string
+	Draft          bool
+	Merged         bool
+	MergedAt       string
+	ClosedAt       string
+	CreatedAt      string
+	UpdatedAt      string
+	MergeableState string
+	Additions      int32
+	Deletions      int32
+	ChangedFiles   int32
+	HeadRef        string
+	HeadSHA        string
+	AuthorLogin    string
+	AuthorAvatar   string
+}
+
+type githubAPIHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *githubAPIHTTPError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("github api returned %d", e.StatusCode)
+	}
+	return fmt.Sprintf("github api returned %d: %s", e.StatusCode, e.Body)
+}
+
+var (
+	errGitHubAppAuthNotConfigured = errors.New("github app auth not configured")
+	errGitHubNoInstallation       = errors.New("github installation not found")
+	errGitHubPullRequestNotFound  = errors.New("github pull request not found")
+)
+
 type GitHubConnectResponse struct {
 	URL        string `json:"url"`
 	Configured bool   `json:"configured"`
@@ -177,6 +228,34 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
+func pullRequestSnapshotFromWebhookPayload(p ghPullRequestPayload) githubPullRequestSyncSnapshot {
+	return githubPullRequestSyncSnapshot{
+		Action:         p.Action,
+		BaseRefChanged: baseRefChanged(p.Changes),
+		RepoOwner:      p.Repository.Owner.Login,
+		RepoName:       p.Repository.Name,
+		Number:         p.PullRequest.Number,
+		HTMLURL:        p.PullRequest.HTMLURL,
+		Title:          p.PullRequest.Title,
+		Body:           p.PullRequest.Body,
+		State:          p.PullRequest.State,
+		Draft:          p.PullRequest.Draft,
+		Merged:         p.PullRequest.Merged,
+		MergedAt:       p.PullRequest.MergedAt,
+		ClosedAt:       p.PullRequest.ClosedAt,
+		CreatedAt:      p.PullRequest.CreatedAt,
+		UpdatedAt:      p.PullRequest.UpdatedAt,
+		MergeableState: p.PullRequest.MergeableState,
+		Additions:      p.PullRequest.Additions,
+		Deletions:      p.PullRequest.Deletions,
+		ChangedFiles:   p.PullRequest.ChangedFiles,
+		HeadRef:        p.PullRequest.Head.Ref,
+		HeadSHA:        p.PullRequest.Head.SHA,
+		AuthorLogin:    p.PullRequest.User.Login,
+		AuthorAvatar:   p.PullRequest.User.AvatarURL,
 	}
 }
 
@@ -574,6 +653,60 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
 }
 
+// RescanPullRequestForIssue fetches the current GitHub PR payload and reruns
+// the same PR mirror + issue-key scanner used by webhook delivery. It is the
+// manual repair path for "PR exists but issue ↔ PR link rows are missing".
+func (h *Handler) RescanPullRequestForIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+
+	var req githubPullRequestRescanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.RepoOwner = strings.TrimSpace(req.RepoOwner)
+	req.RepoName = strings.TrimSpace(req.RepoName)
+	if req.RepoOwner == "" || req.RepoName == "" || req.Number <= 0 {
+		writeError(w, http.StatusBadRequest, "repo_owner, repo_name, and number are required")
+		return
+	}
+
+	inst, pr, err := h.fetchPullRequestForRescan(r.Context(), issue.WorkspaceID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, errGitHubNoInstallation):
+			writeError(w, http.StatusConflict, "no github installation connected for this workspace")
+		case errors.Is(err, errGitHubAppAuthNotConfigured):
+			writeError(w, http.StatusServiceUnavailable, "github app auth not configured for manual rescan")
+		case errors.Is(err, errGitHubPullRequestNotFound):
+			writeError(w, http.StatusNotFound, "pull request not found")
+		default:
+			slog.Warn("github: manual rescan fetch failed", "err", err, "repo_owner", req.RepoOwner, "repo_name", req.RepoName, "pr_number", req.Number)
+			writeError(w, http.StatusBadGateway, "failed to fetch pull request from github")
+		}
+		return
+	}
+
+	resp, linkedIssueIDs, err := h.syncGitHubPullRequest(r.Context(), issue.WorkspaceID, inst, pr, false)
+	if err != nil {
+		slog.Warn("github: manual rescan sync failed", "err", err, "repo_owner", req.RepoOwner, "repo_name", req.RepoName, "pr_number", req.Number)
+		writeError(w, http.StatusInternalServerError, "failed to rescan pull request")
+		return
+	}
+
+	h.publish(protocol.EventPullRequestUpdated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"pull_request":     resp,
+		"linked_issue_ids": linkedIssueIDs,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pull_request":     resp,
+		"linked_issue_ids": linkedIssueIDs,
+	})
+}
+
 // ── Webhook ─────────────────────────────────────────────────────────────────
 
 // identifierRe extracts identifiers like "MUL-1510" from text. Case-insensitive
@@ -822,147 +955,21 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// per-repo, so the binding only supplies the delivering account and the
 	// fallback workspace. The oldest binding is a deterministic fallback.
 	inst := insts[0]
-
 	// Route to the workspace that owns this repo, not the installation's single
 	// workspace — one installation can serve repos across several workspaces.
 	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, inst.AccountLogin, p.Repository.Owner.Login, p.Repository.Name)
-
-	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
-	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
-	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:         wsID,
-		InstallationID:      inst.InstallationID,
-		RepoOwner:           p.Repository.Owner.Login,
-		RepoName:            p.Repository.Name,
-		PrNumber:            p.PullRequest.Number,
-		Title:               p.PullRequest.Title,
-		State:               state,
-		HtmlUrl:             p.PullRequest.HTMLURL,
-		Branch:              ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:         ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:            parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:            parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:         parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:         parseGHTimeRequired(p.PullRequest.UpdatedAt),
-		HeadSha:             p.PullRequest.Head.SHA,
-		MergeableState:      mergeable,
-		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
-		Additions:           p.PullRequest.Additions,
-		Deletions:           p.PullRequest.Deletions,
-		ChangedFiles:        p.PullRequest.ChangedFiles,
-	})
+	snapshot := pullRequestSnapshotFromWebhookPayload(p)
+	state := derivePRState(snapshot.State, snapshot.Draft, snapshot.Merged)
+	preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
+	resp, linkedIssueIDs, err := h.syncGitHubPullRequest(ctx, wsID, inst, snapshot, preserveCloseIntent)
 	if err != nil {
-		slog.Warn("github: upsert pr failed", "err", err)
+		slog.Warn("github: sync pr failed", "err", err)
 		return
-	}
-
-	// Drain any check_suite events that arrived before this PR row was
-	// mirrored (out-of-order webhook delivery). Each drained row is
-	// replayed through the same upsert path used by live check_suite
-	// events; the DrainPending… query removes them atomically so a
-	// concurrent PR upsert can't double-apply.
-	h.replayPendingCheckSuitesForPR(ctx, pr, wsID)
-
-	workspaceID := uuidToString(wsID)
-	resp := githubPullRequestToResponse(pr)
-
-	// Auto-link: scan title/body/branch for issue identifiers, look them
-	// up in this workspace, attach the link rows. Idempotent (ON CONFLICT
-	// upserts the close_intent flag — see LinkIssueToPullRequest) so
-	// re-firing the webhook doesn't duplicate.
-	//
-	// RFC MUL-2414 §4.8: the PR mirror upsert above always runs (so re-enabling
-	// GitHub features restores history without backfill), but the link rows
-	// are a "new side-effect" and must be gated by the workspace's auto-link
-	// flag (which itself short-circuits when the master `github_enabled`
-	// switch is off).
-	linkedIssueIDs := make([]string, 0)
-	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
-		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
-		// closingIdents is the subset of identifiers that this PR explicitly
-		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
-		// Linking still happens for every mention (idents above), but the
-		// link row's close_intent column — and therefore whether the
-		// auto-advance gate eventually fires — is only set for keyword-
-		// declared identifiers. Bare title prefixes and branch-name
-		// references are link-only.
-		closingIdents := map[string]struct{}{}
-		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
-			closingIdents[c] = struct{}{}
-		}
-		// close_intent should follow the PR title/body while the PR is still
-		// editable before its terminal close event. Once GitHub has delivered
-		// a terminal event, later edit/synchronize webhooks must not rewrite
-		// the merge-time close decision.
-		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
-		prefix := h.getIssuePrefix(ctx, wsID)
-		// reevalIssues collects each issue whose link row we just touched so
-		// we can re-run the auto-advance gate against the persisted aggregate
-		// after every link upsert in this event. Driving the gate off
-		// persisted state (instead of "did *this* webhook declare closing
-		// intent?") is what fixes the multi-PR sibling case: a PR with
-		// `Closes MUL-1` merges first while a link-only sibling is still
-		// open, then the sibling closes later — its webhook has no closing
-		// keyword, but the earlier link row carries close_intent=true, so
-		// MUL-1 still advances.
-		reevalIssues := make([]db.Issue, 0, len(idents))
-		for _, id := range idents {
-			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
-			if !ok {
-				continue
-			}
-			_, declared := closingIdents[id]
-			closeIntent := declared && !preserveCloseIntent
-			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-				IssueID:             issue.ID,
-				PullRequestID:       pr.ID,
-				CloseIntent:         closeIntent,
-				PreserveCloseIntent: preserveCloseIntent,
-				LinkedByType:        strToText("system"),
-				LinkedByID:          pgtype.UUID{},
-			}); err != nil {
-				slog.Warn("github: link failed", "err", err)
-				continue
-			}
-			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-			reevalIssues = append(reevalIssues, issue)
-		}
-
-		// A terminal PR event (`merged` or `closed`) may be the moment the
-		// last in-flight sibling resolves. We re-evaluate every issue we
-		// just linked once both the PR row and the link row are persisted,
-		// so the aggregate query sees the freshest state. We advance the
-		// issue to done when:
-		//   1. the issue isn't already terminal (`done` / `cancelled`);
-		//   2. no linked PR is still `open` / `draft`;
-		//   3. at least one merged linked PR declared close_intent (a
-		//      "Closes/Fixes/Resolves" keyword on its link row).
-		// Rule (3) is what prevents "Follow up in MUL-2" / "Unblocks MUL-3"
-		// references from being treated the same as "Closes MUL-1", and
-		// also prevents an "all closed-without-merge" sequence from
-		// silently auto-closing the issue — if nothing carrying closing
-		// intent was ever delivered, the user should decide manually.
-		if state == "merged" || state == "closed" {
-			for _, issue := range reevalIssues {
-				if issue.Status == "done" || issue.Status == "cancelled" {
-					continue
-				}
-				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
-				if err != nil {
-					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
-					continue
-				}
-				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
-				}
-			}
-		}
 	}
 
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.
-	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
+	h.publish(protocol.EventPullRequestUpdated, uuidToString(wsID), "system", "", map[string]any{
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
@@ -1212,6 +1219,276 @@ func derivePRState(state string, draft, merged bool) string {
 		return "draft"
 	}
 	return "open"
+}
+
+func (h *Handler) syncGitHubPullRequest(ctx context.Context, workspaceID pgtype.UUID, inst db.GithubInstallation, snapshot githubPullRequestSyncSnapshot, preserveCloseIntent bool) (GitHubPullRequestResponse, []string, error) {
+	state := derivePRState(snapshot.State, snapshot.Draft, snapshot.Merged)
+	mergeable, clearMergeable := derivePRMergeableState(snapshot.Action, snapshot.MergeableState, snapshot.BaseRefChanged)
+	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID:         workspaceID,
+		InstallationID:      inst.InstallationID,
+		RepoOwner:           snapshot.RepoOwner,
+		RepoName:            snapshot.RepoName,
+		PrNumber:            snapshot.Number,
+		Title:               snapshot.Title,
+		State:               state,
+		HtmlUrl:             snapshot.HTMLURL,
+		Branch:              ptrToText(strPtrOrNil(snapshot.HeadRef)),
+		AuthorLogin:         ptrToText(strPtrOrNil(snapshot.AuthorLogin)),
+		AuthorAvatarUrl:     ptrToText(strPtrOrNil(snapshot.AuthorAvatar)),
+		MergedAt:            parseGHTime(snapshot.MergedAt),
+		ClosedAt:            parseGHTime(snapshot.ClosedAt),
+		PrCreatedAt:         parseGHTimeRequired(snapshot.CreatedAt),
+		PrUpdatedAt:         parseGHTimeRequired(snapshot.UpdatedAt),
+		HeadSha:             snapshot.HeadSHA,
+		MergeableState:      mergeable,
+		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:           snapshot.Additions,
+		Deletions:           snapshot.Deletions,
+		ChangedFiles:        snapshot.ChangedFiles,
+	})
+	if err != nil {
+		return GitHubPullRequestResponse{}, nil, err
+	}
+
+	h.replayPendingCheckSuitesForPR(ctx, pr, workspaceID)
+
+	resp := githubPullRequestToResponse(pr)
+	linkedIssueIDs := make([]string, 0)
+	if h.workspaceAutoLinkPRsEnabled(ctx, workspaceID) {
+		idents := extractIdentifiers(snapshot.Title, snapshot.Body, snapshot.HeadRef)
+		closingIdents := map[string]struct{}{}
+		for _, c := range extractClosingIdentifiers(snapshot.Title, snapshot.Body) {
+			closingIdents[c] = struct{}{}
+		}
+		prefix := h.getIssuePrefix(ctx, workspaceID)
+		reevalIssues := make([]db.Issue, 0, len(idents))
+		for _, id := range idents {
+			issue, ok := h.lookupIssueByIdentifier(ctx, workspaceID, prefix, id)
+			if !ok {
+				continue
+			}
+			_, declared := closingIdents[id]
+			closeIntent := declared && !preserveCloseIntent
+			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+				IssueID:             issue.ID,
+				PullRequestID:       pr.ID,
+				CloseIntent:         closeIntent,
+				PreserveCloseIntent: preserveCloseIntent,
+				LinkedByType:        strToText("system"),
+				LinkedByID:          pgtype.UUID{},
+			}); err != nil {
+				slog.Warn("github: link failed", "err", err)
+				continue
+			}
+			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
+			reevalIssues = append(reevalIssues, issue)
+		}
+
+		if state == "merged" || state == "closed" {
+			workspaceIDStr := uuidToString(workspaceID)
+			for _, issue := range reevalIssues {
+				if issue.Status == "done" || issue.Status == "cancelled" {
+					continue
+				}
+				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
+				if err != nil {
+					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+					continue
+				}
+				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
+					h.advanceIssueToDone(ctx, issue, workspaceIDStr)
+				}
+			}
+		}
+	}
+	return resp, linkedIssueIDs, nil
+}
+
+func (h *Handler) fetchPullRequestForRescan(ctx context.Context, workspaceID pgtype.UUID, req githubPullRequestRescanRequest) (db.GithubInstallation, githubPullRequestSyncSnapshot, error) {
+	insts, err := h.Queries.ListGitHubInstallationsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, err
+	}
+	if len(insts) == 0 {
+		return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, errGitHubNoInstallation
+	}
+
+	candidates := make([]db.GithubInstallation, 0, len(insts))
+	if req.InstallationID != nil {
+		for _, inst := range insts {
+			if inst.InstallationID == *req.InstallationID {
+				candidates = append(candidates, inst)
+				break
+			}
+		}
+		if len(candidates) == 0 {
+			return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, errGitHubNoInstallation
+		}
+	} else {
+		for _, inst := range insts {
+			if strings.EqualFold(strings.TrimSpace(inst.AccountLogin), req.RepoOwner) {
+				candidates = append(candidates, inst)
+			}
+		}
+		for _, inst := range insts {
+			if strings.EqualFold(strings.TrimSpace(inst.AccountLogin), req.RepoOwner) {
+				continue
+			}
+			candidates = append(candidates, inst)
+		}
+	}
+
+	var lastErr error
+	for _, inst := range candidates {
+		pr, err := fetchGitHubPullRequest(ctx, inst.InstallationID, req.RepoOwner, req.RepoName, req.Number)
+		if err == nil {
+			return inst, pr, nil
+		}
+		if errors.Is(err, errGitHubAppAuthNotConfigured) {
+			return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, err
+		}
+		var httpErr *githubAPIHTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusForbidden) {
+			lastErr = err
+			continue
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errGitHubPullRequestNotFound
+	}
+	var httpErr *githubAPIHTTPError
+	if errors.As(lastErr, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusForbidden) {
+		return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, errGitHubPullRequestNotFound
+	}
+	return db.GithubInstallation{}, githubPullRequestSyncSnapshot{}, lastErr
+}
+
+func fetchGitHubInstallationToken(ctx context.Context, installationID int64) (string, error) {
+	appJWT, err := signGitHubAppJWT(time.Now())
+	if err != nil {
+		return "", err
+	}
+	if appJWT == "" {
+		return "", errGitHubAppAuthNotConfigured
+	}
+	endpoint := fmt.Sprintf("%s/app/installations/%d/access_tokens", strings.TrimRight(githubAPIBase, "/"), installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader("{}"))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+appJWT)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", &githubAPIHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(body.Token) == "" {
+		return "", errors.New("github installation token response was empty")
+	}
+	return body.Token, nil
+}
+
+func fetchGitHubPullRequest(ctx context.Context, installationID int64, repoOwner, repoName string, number int32) (githubPullRequestSyncSnapshot, error) {
+	token, err := fetchGitHubInstallationToken(ctx, installationID)
+	if err != nil {
+		return githubPullRequestSyncSnapshot{}, err
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d",
+		strings.TrimRight(githubAPIBase, "/"),
+		url.PathEscape(repoOwner),
+		url.PathEscape(repoName),
+		number,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return githubPullRequestSyncSnapshot{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return githubPullRequestSyncSnapshot{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return githubPullRequestSyncSnapshot{}, &githubAPIHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	var body struct {
+		Number         int32   `json:"number"`
+		HTMLURL        string  `json:"html_url"`
+		Title          string  `json:"title"`
+		Body           string  `json:"body"`
+		State          string  `json:"state"`
+		Draft          bool    `json:"draft"`
+		Merged         bool    `json:"merged"`
+		MergedAt       *string `json:"merged_at"`
+		ClosedAt       *string `json:"closed_at"`
+		CreatedAt      string  `json:"created_at"`
+		UpdatedAt      string  `json:"updated_at"`
+		MergeableState string  `json:"mergeable_state"`
+		Additions      int32   `json:"additions"`
+		Deletions      int32   `json:"deletions"`
+		ChangedFiles   int32   `json:"changed_files"`
+		Head           struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+		User struct {
+			Login     string `json:"login"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return githubPullRequestSyncSnapshot{}, err
+	}
+	mergedAt := ""
+	if body.MergedAt != nil {
+		mergedAt = *body.MergedAt
+	}
+	closedAt := ""
+	if body.ClosedAt != nil {
+		closedAt = *body.ClosedAt
+	}
+	merged := body.Merged || body.MergedAt != nil
+	return githubPullRequestSyncSnapshot{
+		Action:         "edited",
+		RepoOwner:      repoOwner,
+		RepoName:       repoName,
+		Number:         body.Number,
+		HTMLURL:        body.HTMLURL,
+		Title:          body.Title,
+		Body:           body.Body,
+		State:          body.State,
+		Draft:          body.Draft,
+		Merged:         merged,
+		MergedAt:       mergedAt,
+		ClosedAt:       closedAt,
+		CreatedAt:      body.CreatedAt,
+		UpdatedAt:      body.UpdatedAt,
+		MergeableState: body.MergeableState,
+		Additions:      body.Additions,
+		Deletions:      body.Deletions,
+		ChangedFiles:   body.ChangedFiles,
+		HeadRef:        body.Head.Ref,
+		HeadSHA:        body.Head.SHA,
+		AuthorLogin:    body.User.Login,
+		AuthorAvatar:   body.User.AvatarURL,
+	}, nil
 }
 
 func parseGHTime(s string) pgtype.Timestamptz {
