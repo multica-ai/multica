@@ -119,6 +119,16 @@ func resolveExplicitSpec(ctx context.Context, client *http.Client, specURL, spec
 		case 0:
 			return nil, "could not fetch the spec URL (unreachable)"
 		case http.StatusUnauthorized, http.StatusForbidden:
+			// A rejected credential should not leave the admin empty-handed:
+			// fall back to the document the API serves anonymously (mirrors the
+			// registry docs page), with a warning that names the real problem.
+			if hasCredential(auth) {
+				if anonBody, _, anonOK := fetchSpec(ctx, client, specURL, stripCredentials(auth)); anonOK {
+					if eps := parseSpec(anonBody); len(eps) > 0 {
+						return eps, fmt.Sprintf("the spec URL rejected the connection's credential (HTTP %d) — showing the API's public document instead; fix the Bearer token / API key to see key-specific endpoints", status)
+					}
+				}
+			}
 			return nil, fmt.Sprintf("the spec URL rejected the connection's credential (HTTP %d) — check the Bearer token / API key", status)
 		default:
 			return nil, fmt.Sprintf("could not fetch the spec URL (HTTP %d)", status)
@@ -131,6 +141,23 @@ func resolveExplicitSpec(ctx context.Context, client *http.Client, specURL, spec
 		return nil, "the spec URL returned an HTML page instead of an OpenAPI/Swagger document — likely a login wall (e.g. Cloudflare Access) in front of the API"
 	}
 	return nil, "the spec URL did not return a parsable OpenAPI/Swagger document"
+}
+
+// hasCredential reports whether the config carries an API credential (Bearer
+// token or API key). Cloudflare Access service tokens are transport-level and
+// do not count — they open the network path, they are not the API identity.
+func hasCredential(auth AuthConfig) bool {
+	return auth.BearerToken != "" || auth.APIKey != ""
+}
+
+// stripCredentials returns the auth config without the API credential, keeping
+// Cloudflare Access headers so an anonymous retry can still traverse a login
+// wall in front of the API.
+func stripCredentials(auth AuthConfig) AuthConfig {
+	return AuthConfig{
+		CFAccessID:     auth.CFAccessID,
+		CFAccessSecret: auth.CFAccessSecret,
+	}
 }
 
 // looksLikeHTML reports whether a fetched body is an HTML page rather than a
