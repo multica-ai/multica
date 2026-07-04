@@ -1,6 +1,6 @@
 "use client";
 
-import { Cpu, Monitor, Shield, User } from "lucide-react";
+import { Building2, Cpu, GitBranch, Monitor, Shield, User } from "lucide-react";
 import type { AgentAvailability, AgentPresenceDetail } from "@multica/core/agents";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import type { MemberWithUser } from "@multica/core/types";
@@ -59,11 +59,26 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Read the account/host and CLI version off a runtime's loose metadata bag.
+ * The daemon reports these under free-form keys, so we probe the common ones
+ * and fall back to "—" rather than inventing a value.
+ */
+function runtimeVersion(runtime: AgentRuntime | null): string | null {
+  const meta = runtime?.metadata;
+  if (!meta || typeof meta !== "object") return null;
+  const bag = meta as Record<string, unknown>;
+  const v = bag.version ?? bag.cli_version;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
 interface IdentityRailProps {
   agent: Agent;
   runtime: AgentRuntime | null;
   owner: MemberWithUser | undefined;
   presence: AgentPresenceDetail | null;
+  /** Workspace/organization the runtime bills and reports under. */
+  accountName: string | null;
 }
 
 export function IdentityRail({
@@ -71,6 +86,7 @@ export function IdentityRail({
   runtime,
   owner,
   presence,
+  accountName,
 }: IdentityRailProps) {
   const tone = availabilityTone(presence?.availability);
   const initial = (agent.name?.[0] ?? "?").toUpperCase();
@@ -121,6 +137,20 @@ export function IdentityRail({
             <span className="inline-flex items-center gap-1.5">
               <Monitor className="h-3.5 w-3.5 shrink-0" />
               {runtime?.name ?? "—"}
+            </span>
+          </PropRow>
+          <PropRow label="Account">
+            <span className="inline-flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 shrink-0" />
+              {accountName ?? "—"}
+            </span>
+          </PropRow>
+          <PropRow label="Runtime version">
+            <span className="inline-flex items-center gap-1.5">
+              <GitBranch className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-mono text-xs">
+                {runtimeVersion(runtime) ?? "—"}
+              </span>
             </span>
           </PropRow>
           <PropRow label="Model">
