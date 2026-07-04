@@ -41,6 +41,10 @@ const mockSquadsData = vi.hoisted(
 );
 
 vi.mock("@tanstack/react-query", () => ({
+  // queryOptions is an identity helper for type inference — mirror it so
+  // components that build options objects (e.g. WorkflowSelectField via
+  // cerebroWorkflowsListOptions) can render under this mock.
+  queryOptions: <T,>(options: T) => options,
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     // Workspace-scoped query keys carry the wsId as `queryKey[1]`; the
     // discriminator is at `queryKey[2]` (e.g. ["workspaces", wsId, "squads"]).

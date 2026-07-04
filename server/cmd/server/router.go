@@ -756,6 +756,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation): FIR-2283 v2 point 8 — plug the upstream issue lookup so the per-issue activation endpoints can confirm the target issue exists and belongs to the caller's workspace.
 	cerebroWorkflowsHandler.WithIssueLookup(queries)
+	// CEREBRO-PATCH(handler-issue-workflow-activator-wire): FIR-2283 followup — let CreateIssue (HTTP + CLI `--workflow`) start a new issue on an Issue workflow in the same call, reusing the workflows handler's ActivateForIssue.
+	h.IssueWorkflowActivator = cerebroWorkflowsHandler
+	// CEREBRO-PATCH(task-issue-workflow-activator-wire): FIR-2283 followup — same seam for the quick-create (Create-with-agent) completion path, which attaches the picked workflow once the async-created issue is resolved.
+	h.TaskService.IssueWorkflowActivator = cerebroWorkflowsHandler
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
 	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries).WithUpstream(queries).WithTx(pool)
 	// CEREBRO-PATCH(custom-status-resolver-wire): FIR-1550 v2b — UpdateIssue invokes the resolver.

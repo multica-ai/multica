@@ -469,6 +469,45 @@ func (s *Store) RecordRevision(ctx context.Context, issueID pgtype.UUID, gate st
 	return next, nil
 }
 
+// LoadPhase returns the current build-phase index for a multi-phase loop's
+// gate, creating a fresh row at phase 0 on first access (FIR-2283 followup
+// point 6). Idempotent: repeated calls never reset an existing pointer.
+// `gate` here is the base delivery-gate key; each phase runs under its own
+// derived per-phase gate key so its caps and check outcomes stay isolated.
+func (s *Store) LoadPhase(ctx context.Context, issueID pgtype.UUID, gate string) (int, error) {
+	if _, err := s.pool.Exec(ctx,
+		`INSERT INTO cerebro_loop_phase (issue_id, gate) VALUES ($1, $2)
+		 ON CONFLICT (issue_id, gate) DO NOTHING`,
+		issueID, gate); err != nil {
+		return 0, fmt.Errorf("init loop phase: %w", err)
+	}
+	var phase int32
+	if err := s.pool.QueryRow(ctx,
+		`SELECT phase FROM cerebro_loop_phase WHERE issue_id = $1 AND gate = $2`,
+		issueID, gate).Scan(&phase); err != nil {
+		return 0, fmt.Errorf("load loop phase: %w", err)
+	}
+	return int(phase), nil
+}
+
+// AdvancePhase moves a gate's phase pointer to the next build phase and returns
+// the new index. No caps reset is needed: the next phase evaluates under a
+// fresh per-phase gate key, so its round/revision/check state starts empty on
+// its own. Called by the gate evaluator when an intermediate phase's delivery
+// gate passes.
+func (s *Store) AdvancePhase(ctx context.Context, issueID pgtype.UUID, gate string) (int, error) {
+	var phase int32
+	if err := s.pool.QueryRow(ctx,
+		`INSERT INTO cerebro_loop_phase (issue_id, gate, phase) VALUES ($1, $2, 1)
+		 ON CONFLICT (issue_id, gate)
+		 DO UPDATE SET phase = cerebro_loop_phase.phase + 1, updated_at = now()
+		 RETURNING phase`,
+		issueID, gate).Scan(&phase); err != nil {
+		return 0, fmt.Errorf("advance loop phase: %w", err)
+	}
+	return int(phase), nil
+}
+
 // Outcomes returns every check (pending and reported) for a gate round, oldest
 // first, folded into the CheckOutcome shape Reconcile / EvaluateGate consume.
 func (s *Store) Outcomes(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]CheckOutcome, error) {

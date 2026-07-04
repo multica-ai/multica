@@ -61,10 +61,32 @@ type TaskService struct {
 	// CEREBRO-PATCH(agent-pass-gate): JEH-1327 pre-enqueue gate seam. Set
 	// from main.go; nil-safe (gate skipped when unwired).
 	AgentPass AgentPassGate
+	// CEREBRO-PATCH(task-issue-workflow-activator): FIR-2283 followup — when a
+	// quick-create (Create-with-agent) request carried workflow_id, the agent
+	// creates the issue asynchronously; this seam attaches the Issue workflow
+	// to that issue once the completion handler resolves it. Set from
+	// router.go; nil-safe (a quick-create with a workflow just skips the
+	// attach if unwired).
+	IssueWorkflowActivator IssueWorkflowActivator
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+}
+
+// IssueWorkflowActivator attaches a cerebro Issue workflow recipe to a single
+// issue. It is the same seam the HTTP CreateIssue path uses; the quick-create
+// completion handler calls it once the async-created issue is resolved, so
+// picking a workflow in the Create-with-agent modal reaches the loop engine
+// too. Implemented by the cerebro workflows handler (ActivateForIssue).
+//
+// CEREBRO-PATCH(task-issue-workflow-activator-iface): FIR-2283 followup seam.
+type IssueWorkflowActivator interface {
+	ActivateForIssue(
+		ctx context.Context,
+		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		createdByType string,
+	) error
 }
 
 type TaskWakeupNotifier interface {
@@ -873,6 +895,12 @@ type QuickCreateContext struct {
 	// pass `--parent <uuid>` so the sub-issue relationship is preserved
 	// across the manual→agent mode flip.
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — the optional
+	// Issue workflow recipe the user picked in the Create-with-agent modal.
+	// The agent creates the issue asynchronously, so the workflow can only be
+	// attached once the completion handler resolves that issue by origin; this
+	// carries the recipe id across that async gap.
+	WorkflowID string `json:"workflow_id,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -897,7 +925,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, workflowID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -923,6 +951,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if parentIssueID.Valid {
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	}
+	if workflowID.Valid {
+		payload.WorkflowID = util.UUIDToString(workflowID)
 	}
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -2864,6 +2895,28 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			"issue_id", util.UUIDToString(issue.ID),
 			"error", err,
 		)
+	}
+
+	// CEREBRO-PATCH(quick-create-workflow-activate): FIR-2283 followup — if the
+	// user picked an Issue workflow in the Create-with-agent modal, start the
+	// now-resolved issue on it. Best-effort: the issue exists either way, so a
+	// failure is logged, not surfaced as a create failure. The requester (the
+	// human who triggered the modal) is recorded as the activator.
+	if qc.WorkflowID != "" && s.IssueWorkflowActivator != nil {
+		if workflowID, perr := util.ParseUUID(qc.WorkflowID); perr != nil {
+			slog.Warn("quick-create completion: invalid workflow id",
+				"task_id", util.UUIDToString(task.ID), "workflow_id", qc.WorkflowID, "error", perr)
+		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, "member"); aerr != nil {
+			slog.Warn("quick-create completion: workflow activation failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"workflow_id", qc.WorkflowID,
+				"error", aerr,
+			)
+		} else {
+			slog.Info("quick-create completion: issue started on workflow",
+				"issue_id", util.UUIDToString(issue.ID), "workflow_id", qc.WorkflowID)
+		}
 	}
 
 	// Subscribe the requester so they receive notifications for follow-up

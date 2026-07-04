@@ -1012,11 +1012,11 @@ func (h *Handler) LoopRuns(w http.ResponseWriter, r *http.Request) {
 // bound it, read off the recipe's own loop_spec), whether the gate is
 // stopped, and any human checks currently awaiting a decision.
 type loopStateResponse struct {
-	Round               int32               `json:"round"`
-	MaxIterations       int                 `json:"max_iterations,omitempty"`
-	Stopped             bool                `json:"stopped"`
-	StopReason          string              `json:"stop_reason,omitempty"`
-	PendingHumanChecks  []PendingHumanCheck `json:"pending_human_checks"`
+	Round              int32               `json:"round"`
+	MaxIterations      int                 `json:"max_iterations,omitempty"`
+	Stopped            bool                `json:"stopped"`
+	StopReason         string              `json:"stop_reason,omitempty"`
+	PendingHumanChecks []PendingHumanCheck `json:"pending_human_checks"`
 }
 
 // LoopState handles GET /api/cerebro/workflows/{id}/loop-state?issue_id=<uuid>.
@@ -1142,6 +1142,42 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"recorded": true})
 }
 
+// ActivateForIssue compiles the given issue_loop recipe scoped to a single
+// issue. It is the reusable core of ActivateWorkflow (HTTP): other entry
+// points — issue-create carrying workflow_id, the quick-create completion
+// hook — call it so an issue and its workflow can be wired in one flow
+// without duplicating the recipe-load + validation. The caller must have
+// already confirmed workspaceID owns both the workflow and the issue
+// (CreateIssue does this because it just minted the issue in workspaceID and
+// resolved the workflow id from the same request; the HTTP handler confirms
+// the issue via issueLookup before calling in).
+//
+// CEREBRO-PATCH(cerebro-workflows-activate-for-issue): FIR-2283 followup —
+// shared activation used by the CLI/API create-with-workflow path.
+func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID, issueID, creatorID pgtype.UUID, createdByType string) error {
+	if h.issueLoopColumns == nil || h.issueLoopCompiler == nil {
+		return fmt.Errorf("issue workflow activation is not wired on this server")
+	}
+	row, err := h.Cerebro.GetCerebroWorkflow(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("workflow not found")
+	}
+	if row.WorkspaceID != workspaceID {
+		return fmt.Errorf("workflow not found in this workspace")
+	}
+	fields, err := h.issueLoopColumns.Get(ctx, row.ID)
+	if err != nil {
+		return fmt.Errorf("failed to load recipe")
+	}
+	if fields.WorkflowType != WorkflowTypeIssueLoop {
+		return fmt.Errorf("only an Issue workflow recipe can be activated on an issue")
+	}
+	if len(fields.LoopSpec) == 0 {
+		return fmt.Errorf("this recipe has no loop_spec to compile")
+	}
+	return h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec)
+}
+
 // ActivateWorkflow handles POST /api/cerebro/workflows/{id}/activate.
 // Body: { issue_id }. {id} must be an issue_loop recipe. Compiles it scoped
 // to issue_id alone (FIR-2283 v2 point 8 — "per-issue workflow activation")
@@ -1179,20 +1215,6 @@ func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fields, err := h.issueLoopColumns.Get(r.Context(), row.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load recipe")
-		return
-	}
-	if fields.WorkflowType != WorkflowTypeIssueLoop {
-		writeError(w, http.StatusBadRequest, "only an Issue workflow recipe can be activated on an issue")
-		return
-	}
-	if len(fields.LoopSpec) == 0 {
-		writeError(w, http.StatusBadRequest, "this recipe has no loop_spec to compile")
-		return
-	}
-
 	issue, err := h.issueLookup.GetIssue(r.Context(), issueID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
@@ -1212,7 +1234,9 @@ func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid actor id")
 		return
 	}
-	if err := h.issueLoopCompiler.ActivateOnIssue(r.Context(), wsUUID, row.ID, row.ProjectID, creatorID, issueID, actorType(r), fields.LoopSpec); err != nil {
+	// ActivateForIssue re-loads and validates the recipe (issue_loop + has a
+	// loop_spec); the earlier load here was redundant, so it is gone.
+	if err := h.ActivateForIssue(r.Context(), wsUUID, row.ID, issueID, creatorID, actorType(r)); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

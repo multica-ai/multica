@@ -4,9 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { MoreHorizontal } from "lucide-react";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { Button } from "@multica/ui/components/ui/button";
 import { NativeSelect } from "@multica/ui/components/ui/native-select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { WorkflowLoopControls } from "./workflow-loop-controls";
 import {
   Table,
   TableBody,
@@ -39,6 +47,11 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(workflowId ?? null);
   const [statusFilter, setStatusFilter] = useState<CerebroWorkflowRunStatus | "">("");
   const [offset, setOffset] = useState(0);
+  // FIR-2283 followup point 4 — the loop controls moved here from the editor
+  // form. They open from the three-dot menu (below) rather than sitting inline,
+  // and only apply to one workflow, so the menu item is disabled until a
+  // workflow is selected.
+  const [showLoopControls, setShowLoopControls] = useState(false);
 
   const workflows = useQuery(cerebroWorkflowsListOptions(wsId));
   const runs = useQuery(cerebroWorkflowRunsOptions(wsId, selectedWorkflowId, PAGE_SIZE, offset));
@@ -73,10 +86,32 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
             Executions across workflows
           </p>
         </div>
+        {/* FIR-2283 followup point 4 — the loop controls (Loop on/off, Watch an
+            issue, Activate on this issue, live loop state) live here now,
+            reached from this three-dot menu instead of cluttering the editor
+            form. They apply to one workflow, so pick a workflow first. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" aria-label="Workflow actions" />}
+          >
+            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={!selectedWorkflowId}
+              onClick={() => setShowLoopControls((v) => !v)}
+            >
+              {showLoopControls ? "Hide loop controls" : "Loop controls…"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-4 p-6">
+          {showLoopControls && selectedWorkflowId && (
+            <WorkflowLoopControls workflowId={selectedWorkflowId} wsId={wsId} />
+          )}
           <div className="flex flex-wrap items-end gap-3">
             {!workflowId && (
               <FilterField label="Workflow">

@@ -159,6 +159,10 @@ Re-derive any line above before depending on it:
 
 ```bash
 cd server
+# CEREBRO-PATCH(create-issue-workflow-source-map): FIR-2283 followup — issue create --workflow.
+grep -n '"workflow"'                          cmd/multica/cmd_workflow.go cmd/multica/cmd_issue.go
+grep -n 'WorkflowID \*string'                 internal/handler/issue.go
+grep -n 'ActivateForIssue'                    internal/cerebro/workflows/handler.go internal/handler/issue.go
 grep -n 'pull-requests <id>'                 cmd/multica/cmd_issue.go
 grep -n 'ListPullRequestsForIssue'           cmd/server/router.go internal/handler/github.go
 grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse struct\|func derivePRState\|func extractIdentifiers\|func extractClosingIdentifiers\|closingIdentifierRe' internal/handler/github.go

@@ -112,8 +112,10 @@ func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workfl
 	}
 	// build_agent_id is intentionally optional (FIR-2283 v2): a recipe with no
 	// pinned build agent falls back to the triggering issue's own assignee at
-	// dispatch time — see CompileParams.AgentID.
-	if wire.BuildSkill == "" {
+	// dispatch time — see CompileParams.AgentID. A multi-phase recipe (FIR-2283
+	// followup point 6) carries the build skill per phase, so the top-level
+	// build_skill is not required there — Compile drives the loop from phase 0.
+	if wire.BuildSkill == "" && len(wire.Spec.Phases) == 0 {
 		return fmt.Errorf("loop_spec: build_skill is required")
 	}
 

@@ -1564,6 +1564,10 @@ export class ApiClient {
     prompt: string;
     project_id?: string | null;
     parent_issue_id?: string | null;
+    // CEREBRO-PATCH(quick-create-workflow-id-client): FIR-2283 followup —
+    // optional Issue workflow the created issue is started on (server attaches
+    // it once the agent's async-created issue is resolved).
+    workflow_id?: string | null;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",

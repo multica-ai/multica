@@ -126,6 +126,27 @@ type CheckGateConfig struct {
 	// this in for both the delivery gate (BuildStatus) and the plan gate
 	// (PlanningStatus).
 	RevertStatus string `json:"revert_status,omitempty"`
+	// Phases carries a multi-phase build chain (FIR-2283 followup point 6).
+	// When non-empty, the gate evaluator reads the issue's current phase index
+	// and evaluates that phase's checks instead of the top-level Checks; on
+	// advance it dispatches the next phase's BuildSkill (a fresh "Build k"
+	// session) rather than marking the issue done — only the final phase's gate
+	// advances to done. Empty means a single-phase loop (unchanged behavior).
+	Phases []GatePhase `json:"phases,omitempty"`
+}
+
+// GatePhase is one phase's build binding + delivery gate, carried in
+// CheckGateConfig.Phases. The evaluator uses phase p's Checks/JudgeChecks/
+// HumanChecks to decide phase p's gate, and dispatches phase p's BuildSkill
+// (to BuildAgentID, falling back to the gate's AgentID) when it re-enters or
+// advances into that phase.
+type GatePhase struct {
+	Name         string       `json:"name,omitempty"`
+	BuildSkill   string       `json:"build_skill,omitempty"`
+	BuildAgentID string       `json:"build_agent_id,omitempty"`
+	Checks       [][]string   `json:"checks,omitempty"`
+	JudgeChecks  []JudgeCheck `json:"judge_checks,omitempty"`
+	HumanChecks  []HumanCheck `json:"human_checks,omitempty"`
 }
 
 // JudgeCheck is one judge-type verification criterion carried into the gate
@@ -260,8 +281,14 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	// AgentID is intentionally not required here (FIR-2283 v2) — see the
 	// CompileParams.AgentID doc comment for how an empty build agent
 	// resolves at runtime instead of at compile time.
+	//
+	// A multi-phase spec (FIR-2283 followup point 6) carries the build skill
+	// per phase, so params.BuildSkill is not required — phase 0's skill drives
+	// the loop:dispatch-build rule and the rest are dispatched by the gate
+	// evaluator on advance.
+	multiPhase := len(spec.Phases) > 0
 	var errs []error
-	if params.BuildSkill == "" {
+	if !multiPhase && params.BuildSkill == "" {
 		errs = append(errs, errors.New("params.build_skill is required"))
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -272,6 +299,54 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	checks, judgeChecks, humanChecks := splitChecks(spec.ProgrammaticChecks(), spec.JudgeChecks(), spec.HumanChecks())
 
 	issueScope := issueScopeCondition(params.IssueID)
+
+	// Build the delivery gate's config and the phase-0 build binding. For a
+	// single-phase loop these are the spec's top-level gate + params build
+	// skill (unchanged). For a multi-phase loop, phase 0 drives the dispatch
+	// rule and the gate carries every phase's checks so the evaluator can pick
+	// the current one and dispatch the next on advance.
+	buildSkill := p.BuildSkill
+	buildAgentID := params.AgentID
+	deliveryGateConfig := CheckGateConfig{
+		Checks:        checks,
+		AgentID:       params.AgentID,
+		Caps:          spec.Caps,
+		RevisionSkill: p.BuildSkill,
+		JudgeChecks:   judgeChecks,
+		JudgeAgentID:  p.JudgeAgentID,
+		JudgeSkill:    p.JudgeSkill,
+		HumanChecks:   humanChecks,
+		RevertStatus:  p.BuildStatus,
+	}
+	if multiPhase {
+		gatePhases := make([]GatePhase, len(spec.Phases))
+		for i, ph := range spec.Phases {
+			pc, pj, phm := splitChecks(
+				filterByType(ph.Verification, CheckProgrammatic),
+				filterByType(ph.Verification, CheckJudge),
+				filterByType(ph.Verification, CheckHuman),
+			)
+			gatePhases[i] = GatePhase{
+				Name:         ph.Name,
+				BuildSkill:   ph.BuildSkill,
+				BuildAgentID: ph.BuildAgentID,
+				Checks:       pc,
+				JudgeChecks:  pj,
+				HumanChecks:  phm,
+			}
+		}
+		buildSkill = spec.Phases[0].BuildSkill
+		if spec.Phases[0].BuildAgentID != "" {
+			buildAgentID = spec.Phases[0].BuildAgentID
+		}
+		// The top-level checks are unused in multi-phase; the evaluator reads
+		// the current phase's checks out of Phases instead.
+		deliveryGateConfig.Checks = nil
+		deliveryGateConfig.JudgeChecks = nil
+		deliveryGateConfig.HumanChecks = nil
+		deliveryGateConfig.RevisionSkill = spec.Phases[0].BuildSkill
+		deliveryGateConfig.Phases = gatePhases
+	}
 
 	// Plan gate (FIR-2283 v2 point 6): when set, a check_passes condition on
 	// loop:dispatch-build itself — a second, independently-keyed gate from
@@ -306,8 +381,8 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			Conditions:    dispatchBuildConditions,
 			ActionType:    workflows.ActionRunSkill,
 			ActionConfig: workflows.ActionConfigRunSkill{
-				SkillName: p.BuildSkill,
-				AgentID:   params.AgentID,
+				SkillName: buildSkill,
+				AgentID:   buildAgentID,
 			},
 		},
 		{
@@ -315,17 +390,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			TriggerType:   workflows.TriggerStatusChanged,
 			TriggerConfig: workflows.TriggerConfigStatusChanged{ToStatus: p.ReviewStatus},
 			Conditions: append(append([]workflows.Condition{}, issueScope...),
-				workflows.Condition{Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
-					Checks:        checks,
-					AgentID:       params.AgentID,
-					Caps:          spec.Caps,
-					RevisionSkill: p.BuildSkill,
-					JudgeChecks:   judgeChecks,
-					JudgeAgentID:  p.JudgeAgentID,
-					JudgeSkill:    p.JudgeSkill,
-					HumanChecks:   humanChecks,
-					RevertStatus:  p.BuildStatus,
-				}},
+				workflows.Condition{Field: "loop.checks", Op: CheckGateOp, Value: deliveryGateConfig},
 			),
 			ActionType:   workflows.ActionSetStatus,
 			ActionConfig: workflows.ActionConfigSetStatus{Status: p.DoneStatus},
@@ -377,6 +442,10 @@ func PlanningDispatchRule(agentID, skillName, planningStatus string) Rule {
 		ActionConfig: workflows.ActionConfigRunSkill{
 			SkillName: skillName,
 			AgentID:   agentID,
+			// FIR-2283 followup point 3 — this dispatch IS the plan phase, so
+			// the run must be told it is planning (only plan in Multica, no
+			// code) rather than inferring it from the issue status.
+			PlanMode: true,
 		},
 	}
 }

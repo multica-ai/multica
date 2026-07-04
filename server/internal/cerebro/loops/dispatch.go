@@ -99,6 +99,12 @@ type RevisionDispatch struct {
 	Round     int32          // the new round this revision starts
 	SkillName string         // the skill to re-dispatch (Compile sets the build skill)
 	Failures  []CheckOutcome // the outcomes that triggered this revision
+	// PhaseLabel names the build phase this dispatch belongs to (e.g. "Build 2")
+	// for a multi-phase loop (FIR-2283 followup point 6). When set, this is a
+	// fresh next-phase build (not a fix-what-failed revision) — it is stamped
+	// on the task as loop_phase so the run's session is named/badged for the
+	// phase, and Failures is empty. Empty for a single-phase revision.
+	PhaseLabel string
 }
 
 // DispatchQueries is the narrow slice of the upstream issue queries the task
@@ -208,7 +214,7 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		return fmt.Errorf("dispatch revision: agent has no runtime")
 	}
 
-	contextJSON, err := json.Marshal(map[string]any{
+	taskContext := map[string]any{
 		"type":         "quick_create",
 		"prompt":       buildRevisionPrompt(d),
 		"workspace_id": util.UUIDToString(agent.WorkspaceID),
@@ -219,7 +225,14 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 			"gate":     d.Gate,
 			"round":    d.Round,
 		},
-	})
+	}
+	// Multi-phase: stamp the phase label so the dispatched build runs in a
+	// session named/badged for its phase (FIR-2283 followup points 3 + 6).
+	if d.PhaseLabel != "" {
+		taskContext["loop_phase"] = d.PhaseLabel
+		taskContext["loop_session_name"] = d.PhaseLabel
+	}
+	contextJSON, err := json.Marshal(taskContext)
 	if err != nil {
 		return fmt.Errorf("dispatch revision: marshal context: %w", err)
 	}
@@ -374,6 +387,14 @@ func buildHumanPrompt(d HumanDispatch) string {
 // on a revision: which checks failed and with what exit code, so the agent
 // does not have to re-discover the failure before it can fix it.
 func buildRevisionPrompt(d RevisionDispatch) string {
+	// A fresh next-phase build (multi-phase): no failures to fix — the previous
+	// phase's gate passed, this is the start of the next build phase.
+	if d.PhaseLabel != "" && len(d.Failures) == 0 {
+		return fmt.Sprintf(
+			"The previous build phase passed its review. Start build phase %q for this issue: run the phase's build skill, then move the issue to review when done so the loop can verify this phase.",
+			d.PhaseLabel,
+		)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Loop gate %s failed and needs round %d: the previous round's verification checks did not all pass. Fix the issue, then let the loop re-verify.\n\nFailed checks:\n", d.Gate, d.Round)
 	for _, o := range d.Failures {

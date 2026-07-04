@@ -261,6 +261,30 @@ type Handler struct {
 	APIConnectionBrief CerebroAPIConnectionBriefResolver
 	// CEREBRO-PATCH(handler-agent-memory-settings): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle.
 	AgentMemory AgentMemorySettingsService
+	// CEREBRO-PATCH(handler-issue-workflow-activator): FIR-2283 followup —
+	// attaches an Issue workflow recipe to a freshly created issue when the
+	// create request (HTTP or CLI) carries workflow_id, so agents get the same
+	// "start an issue on a workflow" reach the manual create modal already has.
+	// Nil on a server without cerebro workflows wired.
+	IssueWorkflowActivator IssueWorkflowActivator
+}
+
+// IssueWorkflowActivator is the upstream-side seam for attaching a cerebro
+// Issue workflow recipe to a single issue. CreateIssue calls it after the
+// issue row is committed when the request carries workflow_id — giving the
+// CLI (`multica issue create --workflow`) and the REST API the same
+// one-call "create + start on a workflow" the manual create modal does via
+// its picker. The implementation lives in the cerebro workflows handler
+// (ActivateForIssue); it loads the recipe, validates it is an issue_loop,
+// and compiles it scoped to the one issue.
+//
+// CEREBRO-PATCH(handler-issue-workflow-activator-iface): FIR-2283 followup seam.
+type IssueWorkflowActivator interface {
+	ActivateForIssue(
+		ctx context.Context,
+		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		createdByType string,
+	) error
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model

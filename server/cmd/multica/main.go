@@ -73,6 +73,7 @@ func init() {
 	chatCmd.GroupID = groupCore        // CEREBRO-PATCH(chat-cli): TECH-3183
 	channelCmd.GroupID = groupCore     // CEREBRO-PATCH(fir-125-channel-cli)
 	noteCmd.GroupID = groupCore        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
+	workflowCmd.GroupID = groupCore    // CEREBRO-PATCH(cerebro-workflow-cli): FIR-2283 followup — discover Issue workflow recipe IDs
 
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
@@ -91,6 +92,7 @@ func init() {
 	rootCmd.AddCommand(chatCmd)        // CEREBRO-PATCH(chat-cli): TECH-3183
 	rootCmd.AddCommand(channelCmd)     // CEREBRO-PATCH(fir-125-channel-cli)
 	rootCmd.AddCommand(noteCmd)        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
+	rootCmd.AddCommand(workflowCmd)    // CEREBRO-PATCH(cerebro-workflow-cli): FIR-2283 followup — discover Issue workflow recipe IDs
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

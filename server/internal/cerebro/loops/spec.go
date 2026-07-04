@@ -120,6 +120,36 @@ type Spec struct {
 	// condition on loop:dispatch-build, so a failing plan gate re-dispatches
 	// the plan skill instead of starting the build.
 	PlanGate []Verification `yaml:"plan_gate,omitempty" json:"plan_gate,omitempty"`
+
+	// Phases splits the build into an ordered chain of build steps, each with
+	// its own build skill and its own delivery gate that must pass before the
+	// next phase's build is dispatched (FIR-2283 followup point 6). A spec with
+	// no Phases is a single-phase loop and behaves exactly as before — the
+	// top-level Verification is that single build's delivery gate. When Phases
+	// is set, the top-level Verification is ignored (each phase carries its own
+	// gate) and BuildSkill falls to the per-phase BuildSkill. Each phase runs
+	// as its own session ("Build k") followed by a review session ("Review k"),
+	// reusing the same gate engine as the single-phase delivery gate.
+	Phases []BuildPhase `yaml:"phases,omitempty" json:"phases,omitempty"`
+}
+
+// BuildPhase is one ordered build step in a multi-phase loop. It carries its
+// own build skill/agent and its own delivery gate (Verification) — the review
+// that must pass before the next phase's build begins.
+type BuildPhase struct {
+	// Name is a short human label for the phase (e.g. "Backend"), shown in the
+	// editor and used to name the phase's build/review sessions. Display-only.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+	// BuildSkill is the skill this phase's build agent runs. Required.
+	BuildSkill string `yaml:"build_skill" json:"build_skill"`
+	// BuildAgentID pins the phase's build agent; empty falls back to the
+	// recipe-wide build agent (CompileParams.AgentID).
+	BuildAgentID string `yaml:"build_agent_id,omitempty" json:"build_agent_id,omitempty"`
+	// Goal is an optional free-text instruction for this phase's build.
+	Goal string `yaml:"goal,omitempty" json:"goal,omitempty"`
+	// Verification is this phase's delivery gate. Same rules as the top-level
+	// gate: at least one programmatic check is required.
+	Verification []Verification `yaml:"verification" json:"verification"`
 }
 
 // SpecVersion is the only supported loop.yaml schema version.
@@ -147,17 +177,24 @@ func (s *Spec) Validate() error {
 		errs = append(errs, fmt.Errorf("version must be %d (got %d)", SpecVersion, s.Version))
 	}
 
-	if len(s.Verification) == 0 {
-		errs = append(errs, errors.New("at least one verification criterion is required"))
+	// Multi-phase (FIR-2283 followup point 6): when Phases is set, each phase
+	// carries its own delivery gate, so the top-level Verification is ignored
+	// and its "at least one criterion" requirement moves onto every phase. A
+	// single-phase spec (no Phases) keeps the original top-level gate rules.
+	if len(s.Phases) > 0 {
+		errs = append(errs, validatePhases(s.Phases)...)
+	} else {
+		if len(s.Verification) == 0 {
+			errs = append(errs, errors.New("at least one verification criterion is required"))
+		}
+		// The defining rule for the delivery gate: a loop must have at least
+		// one gate the engine itself can decide, so progress never depends
+		// solely on a model grading its own or another agent's work.
+		// requireProgrammatic is false for PlanGate below — there is no code
+		// yet during planning, so a judge/human-only plan gate (Jesper's
+		// example: an adversarial AI review of the plan) is valid.
+		errs = append(errs, validateChecks("verification", s.Verification, true)...)
 	}
-
-	// The defining rule for the delivery gate: a loop must have at least one
-	// gate the engine itself can decide, so progress never depends solely on
-	// a model grading its own or another agent's work. requireProgrammatic is
-	// false for PlanGate below — there is no code yet during planning, so a
-	// judge/human-only plan gate (Jesper's example: an adversarial AI review
-	// of the plan) is valid.
-	errs = append(errs, validateChecks("verification", s.Verification, true)...)
 
 	if len(s.PlanGate) > 0 && !s.Planning {
 		errs = append(errs, errors.New("plan_gate requires planning to be true (a plan gate only makes sense with a planning phase)"))
@@ -175,6 +212,23 @@ func (s *Spec) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// validatePhases validates a multi-phase build chain: at least one phase,
+// each phase needs a build skill and its own delivery gate (same rules as the
+// single-phase top-level gate — at least one programmatic check).
+func validatePhases(phases []BuildPhase) []error {
+	var errs []error
+	for i, p := range phases {
+		if p.BuildSkill == "" {
+			errs = append(errs, fmt.Errorf("phases[%d]: build_skill is required", i))
+		}
+		if len(p.Verification) == 0 {
+			errs = append(errs, fmt.Errorf("phases[%d]: at least one verification criterion is required", i))
+		}
+		errs = append(errs, validateChecks(fmt.Sprintf("phases[%d].verification", i), p.Verification, true)...)
+	}
+	return errs
 }
 
 // validateChecks validates one typed-criteria list (Spec.Verification or

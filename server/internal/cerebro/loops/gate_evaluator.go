@@ -89,7 +89,19 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	if err != nil {
 		return false, fmt.Errorf("check gate: parse issue id: %w", err)
 	}
+	// Multi-phase loop (FIR-2283 followup point 6): the gate carries every
+	// phase's checks; route to the phase-aware path, which reads the issue's
+	// current phase and evaluates just that phase's gate.
+	if len(cfg.Phases) > 0 {
+		return g.evaluateMultiPhase(ctx, iid, gate, cfg)
+	}
+	return g.evaluateGateAt(ctx, iid, gate, cfg)
+}
 
+// evaluateGateAt runs the delivery-gate decision for one gate key + config.
+// It is the single-phase gate body, reused per phase (under a derived
+// per-phase gate key) by evaluateMultiPhase.
+func (g *GateEvaluator) evaluateGateAt(ctx context.Context, iid pgtype.UUID, gate string, cfg CheckGateConfig) (bool, error) {
 	state, err := g.store.LoadGateState(ctx, iid, gate)
 	if err != nil {
 		return false, err
@@ -146,6 +158,103 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 		// GateWait: every required check is in flight; hold.
 		return false, nil
 	}
+}
+
+// phaseGateKey derives a per-phase gate key from the base delivery-gate key so
+// each phase's caps tracking and check outcomes stay isolated (the phase
+// pointer itself is keyed by the base gate). Distinct keys are what let phase 2
+// start clean instead of colliding with phase 1's round-1 outcomes.
+func phaseGateKey(baseGate string, phase int) string {
+	return fmt.Sprintf("%s#phase%d", baseGate, phase)
+}
+
+// phaseLabel names a phase's build session ("Build k", or the phase's own Name
+// when set) for display/badging on the dispatched run.
+func phaseLabel(p GatePhase, index int) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return fmt.Sprintf("Build %d", index+1)
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// evaluateMultiPhase decides a multi-phase loop's delivery gate (FIR-2283
+// followup point 6). It reads the issue's current phase, evaluates that phase's
+// gate under its own isolated key, and on a pass either advances to the next
+// phase — dispatching its build in a fresh "Build k" session and moving the
+// board back to Build — or, on the final phase, returns true so the caller's
+// set-status(done) action fires. Every intermediate phase thus becomes a real
+// build→review pair, chained through the same gate engine as the single-phase
+// delivery gate.
+func (g *GateEvaluator) evaluateMultiPhase(ctx context.Context, iid pgtype.UUID, baseGate string, cfg CheckGateConfig) (bool, error) {
+	p, err := g.store.LoadPhase(ctx, iid, baseGate)
+	if err != nil {
+		return false, err
+	}
+	if p >= len(cfg.Phases) {
+		// Defensive: pointer past the last phase — treat as done.
+		return true, nil
+	}
+	phase := cfg.Phases[p]
+	subCfg := CheckGateConfig{
+		Checks:        phase.Checks,
+		AgentID:       firstNonEmpty(phase.BuildAgentID, cfg.AgentID),
+		Caps:          cfg.Caps,
+		RevisionSkill: phase.BuildSkill,
+		JudgeChecks:   phase.JudgeChecks,
+		JudgeAgentID:  cfg.JudgeAgentID,
+		JudgeSkill:    cfg.JudgeSkill,
+		HumanChecks:   phase.HumanChecks,
+		RevertStatus:  cfg.RevertStatus,
+	}
+	passed, err := g.evaluateGateAt(ctx, iid, phaseGateKey(baseGate, p), subCfg)
+	if err != nil || !passed {
+		// Holding (enqueue / revise / wait) — evaluateGateAt already recorded
+		// and dispatched whatever this phase needed.
+		return false, err
+	}
+	if p == len(cfg.Phases)-1 {
+		// Final phase passed — let the delivery-gate rule set the issue Done.
+		return true, nil
+	}
+	// Intermediate phase passed — advance the pointer and kick off the next
+	// phase's build.
+	np, err := g.store.AdvancePhase(ctx, iid, baseGate)
+	if err != nil {
+		return false, err
+	}
+	// Move the board back to Build for the next phase. This is a quiet update
+	// (StatusSetter) that does NOT re-fire the dispatch-build rule, so the only
+	// build dispatched for the next phase is the one below.
+	if g.statusSetter != nil && cfg.RevertStatus != "" {
+		if serr := g.statusSetter.SetStatus(ctx, iid, cfg.RevertStatus); serr != nil {
+			return false, serr
+		}
+	}
+	if g.dispatcher != nil && np < len(cfg.Phases) {
+		next := cfg.Phases[np]
+		agent := firstNonEmpty(next.BuildAgentID, cfg.AgentID)
+		if agent != "" && next.BuildSkill != "" {
+			if derr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
+				AgentID:    agent,
+				IssueID:    util.UUIDToString(iid),
+				Gate:       phaseGateKey(baseGate, np),
+				Round:      gateRound,
+				SkillName:  next.BuildSkill,
+				PhaseLabel: phaseLabel(next, np),
+			}); derr != nil {
+				return false, derr
+			}
+		}
+	}
+	// The gate does not advance to done on an intermediate phase.
+	return false, nil
 }
 
 // revise records a failed round against the spec's caps (Store.RecordRevision)

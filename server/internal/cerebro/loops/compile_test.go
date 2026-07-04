@@ -73,6 +73,86 @@ func TestCompile_ProducesGateDispatchEscalate(t *testing.T) {
 	}
 }
 
+// TestCompile_MultiPhase covers FIR-2283 followup point 6: a spec with Phases
+// drives the dispatch-build rule from phase 0 and carries every phase's checks
+// on the delivery gate so the evaluator can chain build→review pairs.
+func TestCompile_MultiPhase(t *testing.T) {
+	spec := &Spec{
+		Version: SpecVersion,
+		Caps:    Caps{MaxIterations: 5, MaxRevisions: 3, NoProgressStalls: 2},
+		Phases: []BuildPhase{
+			{Name: "Backend", BuildSkill: "build-be", Verification: []Verification{
+				{ID: "be-tests", Type: CheckProgrammatic, Check: []string{"make", "test-be"}},
+			}},
+			{Name: "Frontend", BuildSkill: "build-fe", Verification: []Verification{
+				{ID: "fe-tests", Type: CheckProgrammatic, Check: []string{"pnpm", "test"}},
+			}},
+		},
+	}
+	if err := spec.Validate(); err != nil {
+		t.Fatalf("multi-phase spec should validate: %v", err)
+	}
+	rules, err := Compile(spec, CompileParams{AgentID: "agent-1"})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+	byName := map[string]Rule{}
+	for _, r := range rules {
+		byName[r.Name] = r
+	}
+
+	rs := byName["loop:dispatch-build"].ActionConfig.(workflows.ActionConfigRunSkill)
+	if rs.SkillName != "build-be" {
+		t.Fatalf("dispatch-build should run phase 0's skill, got %q", rs.SkillName)
+	}
+
+	gate := byName["loop:delivery-gate"]
+	var cfg CheckGateConfig
+	for _, c := range gate.Conditions {
+		if c.Op == CheckGateOp {
+			cfg = c.Value.(CheckGateConfig)
+		}
+	}
+	if len(cfg.Phases) != 2 {
+		t.Fatalf("gate should carry 2 phases, got %d", len(cfg.Phases))
+	}
+	if cfg.Phases[0].BuildSkill != "build-be" || cfg.Phases[1].BuildSkill != "build-fe" {
+		t.Fatalf("phase build skills wrong: %+v", cfg.Phases)
+	}
+	if len(cfg.Phases[0].Checks) != 1 || cfg.Phases[0].Checks[0][0] != "make" {
+		t.Fatalf("phase 0 checks wrong: %+v", cfg.Phases[0].Checks)
+	}
+	if len(cfg.Checks) != 0 {
+		t.Fatalf("top-level Checks should be empty in multi-phase, got %+v", cfg.Checks)
+	}
+	if cfg.RevertStatus != "in_progress" {
+		t.Fatalf("gate revert status wrong: %q", cfg.RevertStatus)
+	}
+}
+
+// TestValidate_MultiPhase_RequiresProgrammaticAndSkill locks the per-phase
+// validation: each phase needs a build skill and at least one programmatic
+// check (same trust rule as the single-phase delivery gate).
+func TestValidate_MultiPhase_RequiresProgrammaticAndSkill(t *testing.T) {
+	noSkill := &Spec{
+		Version: SpecVersion,
+		Caps:    Caps{MaxIterations: 5, MaxRevisions: 3, NoProgressStalls: 2},
+		Phases:  []BuildPhase{{Verification: []Verification{{ID: "t", Type: CheckProgrammatic, Check: []string{"make", "test"}}}}},
+	}
+	if err := noSkill.Validate(); err == nil {
+		t.Fatal("phase without build_skill should fail validation")
+	}
+
+	judgeOnly := &Spec{
+		Version: SpecVersion,
+		Caps:    Caps{MaxIterations: 5, MaxRevisions: 3, NoProgressStalls: 2},
+		Phases:  []BuildPhase{{BuildSkill: "b", Verification: []Verification{{ID: "j", Type: CheckJudge, Rubric: "looks good"}}}},
+	}
+	if err := judgeOnly.Validate(); err == nil {
+		t.Fatal("phase with only a judge check should fail validation (needs a programmatic gate)")
+	}
+}
+
 // TestCompile_PlanGate_RevertStatusIsPlanningStatus covers FIR-2283 v2 slice
 // 2d (Jesper's proposal: a revising gate's action is to move the status
 // back). The plan gate must revert to the PLANNING status, not the build
@@ -244,6 +324,11 @@ func TestPlanningDispatchRule_Standalone(t *testing.T) {
 	ac, ok := rule.ActionConfig.(workflows.ActionConfigRunSkill)
 	if !ok || ac.SkillName != "build" || ac.AgentID != "agent-1" {
 		t.Fatalf("action config wrong: %+v", rule.ActionConfig)
+	}
+	// FIR-2283 followup point 3 — the planning dispatch must mark the run as
+	// plan mode so the action runner injects the plan-mode instruction.
+	if !ac.PlanMode {
+		t.Fatal("planning-dispatch action config should have PlanMode=true")
 	}
 }
 

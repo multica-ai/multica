@@ -209,6 +209,79 @@ func TestGateEvaluator_AdvancesFromJSONValue(t *testing.T) {
 	}
 }
 
+// TestGateEvaluator_MultiPhase_ChainsBuildReviewPairs covers FIR-2283 followup
+// point 6: a multi-phase gate evaluates one phase at a time, and when an
+// intermediate phase passes it advances the phase pointer, dispatches the next
+// phase's build (a fresh "Build k" session), and moves the board back to Build
+// WITHOUT setting the issue Done. Only the final phase's pass advances to Done.
+func TestGateEvaluator_MultiPhase_ChainsBuildReviewPairs(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	disp := &fakeDispatcher{}
+	setter := &fakeStatusSetter{}
+	eval := NewGateEvaluator(loopTestPool).WithDispatcher(disp).WithStatusSetter(setter)
+
+	base := "mp-gate"
+	c0 := []string{"make", "test-be"}
+	c1 := []string{"pnpm", "test"}
+	cfg := CheckGateConfig{
+		AgentID:      "11111111-1111-1111-1111-111111111111",
+		Caps:         Caps{MaxIterations: 10, MaxRevisions: 5, NoProgressStalls: 5},
+		RevertStatus: "in_progress",
+		Phases: []GatePhase{
+			{Name: "Backend", BuildSkill: "build-be", Checks: [][]string{c0}},
+			{Name: "Frontend", BuildSkill: "build-fe", Checks: [][]string{c1}},
+		},
+	}
+
+	// Phase 0: enqueue, report green. An intermediate phase passing must NOT
+	// advance the gate (issue stays out of Done); it advances the phase pointer
+	// and dispatches phase 1's build.
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), base, cfg); err != nil {
+		t.Fatalf("phase 0 enqueue: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, phaseGateKey(base, 0), gateRound, c0, 0); err != nil {
+		t.Fatalf("report phase 0 green: %v", err)
+	}
+	advance, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), base, cfg)
+	if err != nil {
+		t.Fatalf("phase 0 advance: %v", err)
+	}
+	if advance {
+		t.Fatal("an intermediate phase must NOT advance the gate to Done")
+	}
+	if p, _ := eval.store.LoadPhase(ctx, issueID, base); p != 1 {
+		t.Fatalf("phase pointer should be 1 after phase 0 passes, got %d", p)
+	}
+	if len(disp.revisionCalls) != 1 || disp.revisionCalls[0].SkillName != "build-fe" {
+		t.Fatalf("phase 1 build should be dispatched with build-fe, got %+v", disp.revisionCalls)
+	}
+	if disp.revisionCalls[0].PhaseLabel != "Frontend" {
+		t.Fatalf("phase 1 dispatch should carry the phase label, got %q", disp.revisionCalls[0].PhaseLabel)
+	}
+	if len(setter.calls) == 0 || setter.calls[len(setter.calls)-1].status != "in_progress" {
+		t.Fatalf("advance should move the board back to in_progress, got %+v", setter.calls)
+	}
+
+	// Phase 1 (final): enqueue, report green -> the gate advances to Done.
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), base, cfg); err != nil {
+		t.Fatalf("phase 1 enqueue: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, phaseGateKey(base, 1), gateRound, c1, 0); err != nil {
+		t.Fatalf("report phase 1 green: %v", err)
+	}
+	advance, err = eval.EvaluateCheckGate(ctx, uuidToString(issueID), base, cfg)
+	if err != nil {
+		t.Fatalf("phase 1 advance: %v", err)
+	}
+	if !advance {
+		t.Fatal("the final phase passing should advance the gate to Done")
+	}
+}
+
 // fakeStatusSetter records every SetStatus call for assertion, standing in
 // for IssueStatusSetter (which needs a real DB) in tests that only need to
 // prove the gate CALLS the setter with the right arguments.

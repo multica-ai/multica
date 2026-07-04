@@ -488,12 +488,27 @@ func TestBuildRunSkillPrompt_DeterministicJSON(t *testing.T) {
 	}
 }
 
+func TestBuildPlanModePrompt(t *testing.T) {
+	inner := buildRunSkillPrompt("plan-skill", nil)
+	got := buildPlanModePrompt(inner)
+	// The plan skill instruction must survive (the plan skill still runs).
+	if !strings.Contains(got, inner) {
+		t.Fatalf("plan-mode prompt dropped the inner skill instruction: %q", got)
+	}
+	// And the run must be told it is planning and must not write code.
+	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plan-mode prompt missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
 func TestClassifyDomain(t *testing.T) {
 	cases := []struct {
-		name    string
-		title   string
-		desc    string
-		want    string
+		name  string
+		title string
+		desc  string
+		want  string
 	}{
 		{"empty falls back to default", "", "", DomainBusiness},
 		{"file extension wins", "Tweak handler", "fix in actions.go and types.ts", DomainCode},

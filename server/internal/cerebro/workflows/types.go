@@ -201,6 +201,15 @@ type ActionConfigRunSkill struct {
 	// opaque action_config JSON and has no effect on the base run_skill action
 	// runner — it is consumed only by the loop compiler.
 	LoopPlanning bool `json:"loop_planning,omitempty"`
+	// PlanMode marks THIS run_skill dispatch as the planning phase itself
+	// (FIR-2283 followup point 3). Unlike LoopPlanning (a compiler-only hint on
+	// the build step), PlanMode IS consumed by the action runner: it makes the
+	// dispatched run carry an explicit plan-mode instruction — "only produce a
+	// plan in Multica, do not write code" — and stamps loop_phase=plan on the
+	// task so the run genuinely knows it is planning, instead of being expected
+	// to infer it from the issue status. Set by the loop compiler on the
+	// planning-dispatch rule.
+	PlanMode bool `json:"plan_mode,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

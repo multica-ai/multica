@@ -22,19 +22,26 @@ import (
 // rather than on the service package.
 //
 // PR 1 (phase 1): UpdateIssueStatus / CreateIssue / IncrementIssueCounter /
-//                 GetIssue.
+//
+//	GetIssue.
+//
 // PR 2 (phase 1): + CreateInboxItem (send_reminder).
 // PR 1 (phase 2): + CreateComment, AttachLabelToIssue (comment_on_issue,
-//                   extended create_sub_issue),
-//                 + ListSkillSummariesByWorkspace, ListAgentSkills, GetAgent,
-//                   CreateQuickCreateTask (run_skill resolution + enqueue).
+//
+//	  extended create_sub_issue),
+//	+ ListSkillSummariesByWorkspace, ListAgentSkills, GetAgent,
+//	  CreateQuickCreateTask (run_skill resolution + enqueue).
+//
 // PR 1 (phase-2 ext, JEH-1114): + ListLabels (route_by_domain resolves the
-//                   `<prefix><domain>` label by name within the workspace).
+//
+//	`<prefix><domain>` label by name within the workspace).
+//
 // PR 2 (phase-2 ext, JEH-1114): + ListCommentsForIssue,
-//                   ListAttachmentsByIssue,
-//                   ListAttachmentURLsByIssueOrComments
-//                   (evidence_present condition op scans recent comments +
-//                   attachments for a PR URL, image, or matching URL regex).
+//
+//	ListAttachmentsByIssue,
+//	ListAttachmentURLsByIssueOrComments
+//	(evidence_present condition op scans recent comments +
+//	attachments for a PR URL, image, or matching URL regex).
 type IssueActions interface {
 	UpdateIssueStatus(ctx context.Context, arg db.UpdateIssueStatusParams) (db.Issue, error)
 	CreateIssue(ctx context.Context, arg db.CreateIssueParams) (db.Issue, error)
@@ -399,17 +406,27 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	}
 
 	prompt := buildRunSkillPrompt(skillName, cfg.SkillInput)
-	contextJSON := mustJSON(map[string]any{
+	taskContext := map[string]any{
 		"type":         "quick_create",
 		"prompt":       prompt,
 		"workspace_id": te.WorkspaceID,
 		"requester_id": uuidString(wf.createdByID),
 		// Bookkeeping fields the daemon ignores but the workflow log can use.
-		"workflow_id":          uuidString(wf.id),
-		"workflow_skill_name":  skillName,
-		"workflow_skill_input": cfg.SkillInput,
+		"workflow_id":              uuidString(wf.id),
+		"workflow_skill_name":      skillName,
+		"workflow_skill_input":     cfg.SkillInput,
 		"workflow_target_issue_id": te.IssueID,
-	})
+	}
+	// FIR-2283 followup point 3 — a plan-phase dispatch must make the run KNOW
+	// it is planning: prepend an explicit plan-mode instruction (only plan in
+	// Multica, do not write code) and stamp the phase on the task so it is
+	// visible downstream instead of the agent having to infer it from status.
+	if cfg.PlanMode {
+		taskContext["prompt"] = buildPlanModePrompt(prompt)
+		taskContext["loop_phase"] = "plan"
+		taskContext["plan_mode"] = true
+	}
+	contextJSON := mustJSON(taskContext)
 
 	if _, err := s.issues.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
@@ -438,6 +455,24 @@ func buildRunSkillPrompt(skillName string, input map[string]any) string {
 		return fmt.Sprintf("Run the skill %q.", skillName)
 	}
 	return fmt.Sprintf("Run the skill %q with the following input:\n%s", skillName, string(encoded))
+}
+
+// buildPlanModePrompt wraps a run_skill prompt with an explicit plan-mode
+// preamble so the planning-phase run understands it is planning and must not
+// write code (FIR-2283 followup point 3). "Plan mode" for an Issue workflow
+// means: produce the plan inside Multica (on the issue), touch no code, and
+// hand off to the build phase by advancing the issue's status — the engine
+// then dispatches the build step. The preamble is prepended, not replacing the
+// skill instruction, so the chosen plan skill still runs.
+func buildPlanModePrompt(inner string) string {
+	return "You are in PLAN MODE — this run is the planning phase of an Issue workflow.\n\n" +
+		"In plan mode you may ONLY produce a plan for this issue inside Multica " +
+		"(write it as a comment / plan on the issue). You must NOT write or edit " +
+		"code, must NOT run build, migration, or deploy commands, and must NOT open " +
+		"a pull request or otherwise change the repository. Planning only.\n\n" +
+		"When the plan is complete, move the issue forward to the build status so the " +
+		"build phase can start — do not start building yourself.\n\n" +
+		inner
 }
 
 func skillNameExists(skills []db.ListSkillSummariesByWorkspaceRow, name string) bool {
@@ -682,11 +717,11 @@ func renderTitle(tpl string, raw map[string]any) string {
 //   - Issue lookup fails              → action error (retried).
 //   - Workspace label catalog fails   → action error (retried).
 //   - Resolved label name not found   → action error (terminal-shaped, but
-//                                       still retried by the engine — operators
-//                                       fix the catalog and the next retry
-//                                       picks up). Message includes which
-//                                       label name we looked for so the fix
-//                                       is obvious.
+//     still retried by the engine — operators
+//     fix the catalog and the next retry
+//     picks up). Message includes which
+//     label name we looked for so the fix
+//     is obvious.
 func (s *Service) actionRouteByDomain(ctx context.Context, wf workflow, te TriggerEvent) error {
 	if te.IssueID == "" {
 		return errors.New("route_by_domain: trigger event has no issue_id")
@@ -859,10 +894,10 @@ func isKnownDomain(d string) bool {
 // minutes during a healthy sprint.
 //
 // Lookup fallback order (each step checked, first hit wins):
-//   1. Walk parent_issue_id up to maxParentHops, return first issue with
-//      a non-null assignee.
-//   2. If no ancestor has an assignee, fall back to the workflow creator
-//      (createdBy) so the escalation never silently disappears.
+//  1. Walk parent_issue_id up to maxParentHops, return first issue with
+//     a non-null assignee.
+//  2. If no ancestor has an assignee, fall back to the workflow creator
+//     (createdBy) so the escalation never silently disappears.
 //
 // If the workflow itself isn't bound to an issue (no te.IssueID), the
 // action errors — escalation has no anchor to walk from. Same goes for
@@ -870,8 +905,8 @@ func isKnownDomain(d string) bool {
 //
 // The default comment template auto-builds:
 //
-//   ⚠️ Stalled sub-issue: [#<number>: <title>](mention://issue/<uuid>)
-//   Reason: no status change for <hours>h (threshold: <max>h).
+//	⚠️ Stalled sub-issue: [#<number>: <title>](mention://issue/<uuid>)
+//	Reason: no status change for <hours>h (threshold: <max>h).
 //
 // A custom ContentTemplate is rendered through renderTemplate so {{title}}
 // / {{issue.<field>}} keep working. The trigger event raw map gets two

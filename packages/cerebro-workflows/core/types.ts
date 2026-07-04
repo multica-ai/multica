@@ -150,6 +150,18 @@ export interface LoopCaps {
   no_progress_stalls: number;
 }
 
+// One ordered build phase in a multi-phase loop (FIR-2283 followup point 6).
+// Each phase runs its own build skill and is gated by its own delivery review
+// (verification) that must pass before the next phase's build starts.
+export interface LoopBuildPhase {
+  /** Display name, e.g. "Backend". Names the phase's build/review sessions. */
+  name?: string;
+  build_skill: string;
+  build_agent_id?: string;
+  goal?: string;
+  verification: LoopVerification[];
+}
+
 export interface LoopSpec {
   version: 1;
   // FIR-2283 v2 point 4 — one free-text prompt (skill-taggable) replaces the
@@ -168,9 +180,16 @@ export interface LoopSpec {
   // review of the plan) is valid on its own.
   plan_gate?: LoopVerification[];
 
-  // Build bindings.
+  // Build bindings. Used for a single-phase loop. When `phases` is set (a
+  // multi-phase loop), these are ignored — each phase carries its own build
+  // skill/agent and its own delivery gate.
   build_agent_id: string;
   build_skill: string;
+
+  // Multi-phase build chain (FIR-2283 followup point 6). When non-empty, the
+  // build is split into ordered phases, each gated by its own review that must
+  // pass before the next phase's build begins. Empty/omitted = single-phase.
+  phases?: LoopBuildPhase[];
 
   // Planning bindings — only meaningful when planning is true.
   plan_agent_id?: string;

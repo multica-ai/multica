@@ -2830,11 +2830,11 @@
     },
     {
       "id": "tool-policy explain",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/tool-policy"
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/tool-policy"
     },
     {
       "id": "tool-policy list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/tool-policy"
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/tool-policy"
     },
     {
       "id": "tool-policy set",
@@ -2875,6 +2875,10 @@
     {
       "id": "wakeup list",
       "exempt": "read-only — wraps GET /api/cerebro/wakeups"
+    },
+    {
+      "id": "workflow list",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows"
     },
     {
       "id": "workspace get",

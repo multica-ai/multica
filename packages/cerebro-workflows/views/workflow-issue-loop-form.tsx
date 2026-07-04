@@ -21,21 +21,17 @@ import { NativeSelect } from "@multica/ui/components/ui/native-select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
-import { AssigneePicker, IssuePickerModal } from "@multica/views/issues/components";
-import type { Issue } from "@multica/core/types";
+import { AssigneePicker } from "@multica/views/issues/components";
 import { Plus, Trash2 } from "lucide-react";
 
 import { SkillNamePicker } from "./loop-pickers";
 
 import {
   DEFAULT_LOOP_CAPS,
-  cerebroLoopStateOptions,
   cerebroWorkflowDetailOptions,
   cerebroWorkflowsKeys,
   createWorkflow,
   updateWorkflow,
-  useActivateWorkflowMutation,
-  useApproveHumanCheckMutation,
 } from "../core";
 import type {
   CerebroWorkflow,
@@ -87,6 +83,29 @@ function newRow(): VerificationRow {
   };
 }
 
+// A build phase in the editor (FIR-2283 followup point 6): its own build
+// skill/agent, an optional prompt, and its own delivery gate (verification).
+interface PhaseRow {
+  key: string;
+  name: string;
+  buildSkill: string;
+  buildAgentId: string;
+  goal: string;
+  verification: VerificationRow[];
+}
+
+function newPhase(seed?: Partial<PhaseRow>): PhaseRow {
+  return {
+    key: `phase-${Math.random().toString(36).slice(2, 10)}`,
+    name: "",
+    buildSkill: "",
+    buildAgentId: "",
+    goal: "",
+    verification: [newRow()],
+    ...seed,
+  };
+}
+
 // The wire's LoopCheckType, derived from the UI kind + who is assigned.
 function wireTypeForRow(row: VerificationRow): LoopCheckType {
   if (row.kind === "programmatic") return "programmatic";
@@ -110,6 +129,10 @@ interface LoopFormState {
   // planning is true. Empty means no plan gate: the agent advances Plan ->
   // Build on its own judgment, same as before this feature existed.
   planGate: VerificationRow[];
+  // Build phases (FIR-2283 followup point 6). Empty = single-phase loop (the
+  // buildSkill/buildAgentId/verification fields above drive it). Non-empty =
+  // the build is split into these ordered phases, each with its own gate.
+  phases: PhaseRow[];
 }
 
 const EMPTY_LOOP_FORM: LoopFormState = {
@@ -124,6 +147,7 @@ const EMPTY_LOOP_FORM: LoopFormState = {
   noProgressStalls: String(DEFAULT_LOOP_CAPS.no_progress_stalls),
   verification: [newRow()],
   planGate: [],
+  phases: [],
 };
 
 // rowsFromVerification/verificationFromRows convert between the wire shape
@@ -194,6 +218,19 @@ function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
     verification:
       spec.verification.length > 0 ? rowsFromVerification(spec.verification) : [newRow()],
     planGate: spec.plan_gate && spec.plan_gate.length > 0 ? rowsFromVerification(spec.plan_gate) : [],
+    phases:
+      spec.phases && spec.phases.length > 0
+        ? spec.phases.map((p) =>
+            newPhase({
+              name: p.name ?? "",
+              buildSkill: p.build_skill ?? "",
+              buildAgentId: p.build_agent_id ?? "",
+              goal: p.goal ?? "",
+              verification:
+                p.verification.length > 0 ? rowsFromVerification(p.verification) : [newRow()],
+            }),
+          )
+        : [],
   };
 }
 
@@ -204,12 +241,15 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
     Number.parseInt(form.noProgressStalls, 10) || DEFAULT_LOOP_CAPS.no_progress_stalls,
   );
 
-  return {
+  const multiPhase = form.phases.length > 0;
+  const spec: LoopSpec = {
     version: 1,
     // Point 4 — the single prompt is stored as `goal`; definition_of_done is
     // no longer authored (left unset on the wire).
     goal: form.goal,
-    verification: verificationFromRows(form.verification),
+    // In multi-phase mode each phase carries its own gate; the top-level
+    // verification is unused (the backend ignores it when phases is set).
+    verification: multiPhase ? [] : verificationFromRows(form.verification),
     caps: {
       max_iterations: attempts,
       max_revisions: attempts,
@@ -219,9 +259,21 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
     plan_skill: form.planning ? form.planSkill || form.buildSkill : undefined,
     plan_gate:
       form.planning && form.planGate.length > 0 ? verificationFromRows(form.planGate) : undefined,
-    build_agent_id: form.buildAgentId,
-    build_skill: form.buildSkill,
+    // In multi-phase mode phase 0 drives the loop; keep build_skill pointing at
+    // it so a downgrade to single-phase still has a skill to fall back on.
+    build_agent_id: multiPhase ? (form.phases[0]?.buildAgentId ?? "") : form.buildAgentId,
+    build_skill: multiPhase ? (form.phases[0]?.buildSkill ?? "") : form.buildSkill,
   };
+  if (multiPhase) {
+    spec.phases = form.phases.map((p) => ({
+      name: p.name || undefined,
+      build_skill: p.buildSkill,
+      build_agent_id: p.buildAgentId || undefined,
+      goal: p.goal || undefined,
+      verification: verificationFromRows(p.verification),
+    }));
+  }
+  return spec;
 }
 
 interface Props {
@@ -243,7 +295,6 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
 
   const [form, setForm] = useState<LoopFormState>(EMPTY_LOOP_FORM);
   const [error, setError] = useState<string | null>(null);
-  const [watchIssueId, setWatchIssueId] = useState("");
 
   useEffect(() => {
     if (!detail.data) return;
@@ -267,22 +318,6 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
     },
     onError: (err: unknown) => {
       setError(err instanceof Error ? err.message : "Could not save the Issue workflow");
-    },
-  });
-
-  const toggleEnabled = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      if (!workflowId) return;
-      const payload: WorkflowWriteInput = {
-        name: form.name,
-        enabled,
-        workflow_type: "issue_loop",
-        loop_spec: buildLoopSpec(form),
-      };
-      await updateWorkflow(workflowId, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: cerebroWorkflowsKeys.all(wsId) });
     },
   });
 
@@ -311,6 +346,55 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   const planGateOps = rowOps("planGate");
   const setRow = verificationOps.set;
 
+  // Build phases (FIR-2283 followup point 6). usePhases is derived from the
+  // presence of phases; the toggle seeds the first phase from the single-build
+  // fields (so nothing is lost switching modes) and clearing them returns to a
+  // single-phase loop.
+  const usePhases = form.phases.length > 0;
+  const phaseOps = {
+    toggle: (on: boolean) =>
+      setForm((f) => {
+        if (on && f.phases.length === 0) {
+          return {
+            ...f,
+            phases: [
+              newPhase({
+                name: "Phase 1",
+                buildSkill: f.buildSkill,
+                buildAgentId: f.buildAgentId,
+                goal: f.goal,
+                verification: f.verification.length > 0 ? f.verification : [newRow()],
+              }),
+            ],
+          };
+        }
+        if (!on) return { ...f, phases: [] };
+        return f;
+      }),
+    add: () =>
+      setForm((f) => ({
+        ...f,
+        phases: [...f.phases, newPhase({ name: `Phase ${f.phases.length + 1}` })],
+      })),
+    remove: (key: string) =>
+      setForm((f) => ({ ...f, phases: f.phases.filter((p) => p.key !== key) })),
+    set: (key: string, patch: Partial<PhaseRow>) =>
+      setForm((f) => ({
+        ...f,
+        phases: f.phases.map((p) => (p.key === key ? { ...p, ...patch } : p)),
+      })),
+    setVerification: (
+      phaseKey: string,
+      updater: (rows: VerificationRow[]) => VerificationRow[],
+    ) =>
+      setForm((f) => ({
+        ...f,
+        phases: f.phases.map((p) =>
+          p.key === phaseKey ? { ...p, verification: updater(p.verification) } : p,
+        ),
+      })),
+  };
+
   const body = (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <form
@@ -332,19 +416,11 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           </Field>
         </Section>
 
-        {workflowId && (
-          <ControlStrip
-            workflowId={workflowId}
-            wsId={wsId}
-            enabled={form.enabled}
-            onToggle={(v) => {
-              setForm({ ...form, enabled: v });
-              toggleEnabled.mutate(v);
-            }}
-            watchIssueId={watchIssueId}
-            onChangeWatchIssueId={setWatchIssueId}
-          />
-        )}
+        {/* FIR-2283 followup point 4 — the loop controls (Loop on/off, Watch,
+            Activate on this issue, live loop state) moved OUT of this editor
+            form. They now live on the run-history page, reached from its
+            three-dot menu (WorkflowLoopControls). They made no sense inline
+            here next to the recipe fields. */}
 
         <Section title="Plan">
           <Field label="Planning mode">
@@ -402,48 +478,195 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
         </Section>
 
         <Section title="Build">
-          <Field label="Worker skill">
-            <SkillNamePicker
-              value={form.buildSkill}
-              onChange={(name) => setForm({ ...form, buildSkill: name })}
-              placeholder="Select the skill the worker runs"
+          {/* FIR-2283 followup point 6 — split the build into phases. */}
+          <Field label="Split the build into phases">
+            <Switch
+              checked={usePhases}
+              onCheckedChange={(v) => phaseOps.toggle(v === true)}
+              data-testid="issue-loop-build-phases"
             />
           </Field>
-          <Field label="Agent (must have the skill attached)">
-            <AgentPicker
-              agentId={form.buildAgentId || null}
-              onChange={(id) => setForm({ ...form, buildAgentId: id })}
-            />
-          </Field>
-          <Field label="Prompt">
-            <Textarea
-              value={form.goal}
-              onChange={(e) => setForm({ ...form, goal: e.target.value })}
-              rows={4}
-              placeholder="Describe how the agent should work. Tag a skill with @, or use the picker below."
-              data-testid="issue-loop-prompt"
-            />
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">Tag a skill:</span>
-              <SkillNamePicker
-                value=""
-                onChange={(name) => {
-                  if (!name) return;
-                  setForm((f) => ({
-                    ...f,
-                    goal: f.goal.trim() ? `${f.goal.trimEnd()} @${name} ` : `@${name} `,
-                  }));
-                }}
-                placeholder="Add a skill…"
-              />
-            </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Replaces the old Goal / Definition of done. The recipe describes HOW
-              to work — &quot;done&quot; is decided by the gates below, not a fixed text.
-            </p>
-          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            Off = one build then one review. On = an ordered chain of build phases,
+            each with its own review that must pass before the next phase starts.
+          </p>
+          {!usePhases && (
+            <>
+              <Field label="Worker skill">
+                <SkillNamePicker
+                  value={form.buildSkill}
+                  onChange={(name) => setForm({ ...form, buildSkill: name })}
+                  placeholder="Select the skill the worker runs"
+                />
+              </Field>
+              <Field label="Agent (must have the skill attached)">
+                <AgentPicker
+                  agentId={form.buildAgentId || null}
+                  onChange={(id) => setForm({ ...form, buildAgentId: id })}
+                />
+              </Field>
+              <Field label="Prompt">
+                <Textarea
+                  value={form.goal}
+                  onChange={(e) => setForm({ ...form, goal: e.target.value })}
+                  rows={4}
+                  placeholder="Describe how the agent should work. Tag a skill with @, or use the picker below."
+                  data-testid="issue-loop-prompt"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Tag a skill:</span>
+                  <SkillNamePicker
+                    value=""
+                    onChange={(name) => {
+                      if (!name) return;
+                      setForm((f) => ({
+                        ...f,
+                        goal: f.goal.trim() ? `${f.goal.trimEnd()} @${name} ` : `@${name} `,
+                      }));
+                    }}
+                    placeholder="Add a skill…"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Replaces the old Goal / Definition of done. The recipe describes HOW
+                  to work — &quot;done&quot; is decided by the gates below, not a fixed text.
+                </p>
+              </Field>
+            </>
+          )}
         </Section>
 
+        {usePhases && (
+          <Section title="Build phases">
+            <p className="text-[11px] text-muted-foreground">
+              Each phase runs its own build, then its own review. The next phase only
+              starts once the current phase&apos;s review passes.
+            </p>
+            {form.phases.map((phase, pi) => (
+              <div key={phase.key} className="flex flex-col gap-3 rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Phase {pi + 1}
+                  </span>
+                  {form.phases.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Remove phase"
+                      onClick={() => phaseOps.remove(phase.key)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  )}
+                </div>
+                <Field label="Name">
+                  <Input
+                    value={phase.name}
+                    onChange={(e) => phaseOps.set(phase.key, { name: e.target.value })}
+                    placeholder='E.g. "Backend"'
+                  />
+                </Field>
+                <Field label="Worker skill">
+                  <SkillNamePicker
+                    value={phase.buildSkill}
+                    onChange={(name) => phaseOps.set(phase.key, { buildSkill: name })}
+                    placeholder="Select the skill this phase runs"
+                  />
+                </Field>
+                <Field label="Agent (must have the skill attached)">
+                  <AgentPicker
+                    agentId={phase.buildAgentId || null}
+                    onChange={(id) => phaseOps.set(phase.key, { buildAgentId: id })}
+                  />
+                </Field>
+                <Field label="Prompt">
+                  <Textarea
+                    value={phase.goal}
+                    onChange={(e) => phaseOps.set(phase.key, { goal: e.target.value })}
+                    rows={3}
+                    placeholder="Describe how the agent should work in this phase."
+                  />
+                </Field>
+                <div className="flex flex-col gap-2 border-t pt-3">
+                  <p className="text-[11px] text-muted-foreground">This phase is done when…</p>
+                  <div className="flex flex-col gap-4">
+                    {phase.verification.map((row, i) => (
+                      <VerificationRowEditor
+                        key={row.key}
+                        row={row}
+                        index={i}
+                        canRemove={phase.verification.length > 1}
+                        onChange={(patch) =>
+                          phaseOps.setVerification(phase.key, (rows) =>
+                            rows.map((r) => (r.key === row.key ? { ...r, ...patch } : r)),
+                          )
+                        }
+                        onRemove={() =>
+                          phaseOps.setVerification(phase.key, (rows) =>
+                            rows.filter((r) => r.key !== row.key),
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() =>
+                      phaseOps.setVerification(phase.key, (rows) => [...rows, newRow()])
+                    }
+                  >
+                    <Plus className="size-4" />
+                    Add condition
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={phaseOps.add}
+            >
+              <Plus className="size-4" />
+              Add build phase
+            </Button>
+
+            <div className="flex flex-col gap-2 border-t pt-3">
+              <p className="text-xs text-muted-foreground">
+                Give each phase up to{" "}
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.maxAttempts}
+                  onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })}
+                  className="inline-block h-7 w-16 px-2 py-1 text-center"
+                />{" "}
+                attempts, then stop.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                If nothing improves in{" "}
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.noProgressStalls}
+                  onChange={(e) => setForm({ ...form, noProgressStalls: e.target.value })}
+                  className="inline-block h-7 w-16 px-2 py-1 text-center"
+                />{" "}
+                attempts in a row, stop early and ask me.
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Each phase needs at least one condition confirmed by <strong>a command</strong>.
+              </p>
+            </div>
+          </Section>
+        )}
+
+        {!usePhases && (
         <Section title="Delivery gate">
           <p className="text-[11px] text-muted-foreground">
             This is done when…
@@ -506,6 +729,7 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
             only thing the engine can prove on its own; everything else is a judgment call.
           </p>
         </Section>
+        )}
 
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
@@ -551,10 +775,14 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   );
 }
 
-const COMMAND_PRESETS: ReadonlyArray<{ label: string; command: string }> = [
-  { label: "Test suite", command: "make test" },
-  { label: "Build", command: "make build" },
-  { label: "Type check", command: "pnpm typecheck" },
+// FIR-2283 followup point 5 — the presets ARE the interface for a non-developer.
+// Each option pairs a plain-language meaning with the exact command the engine
+// runs, so someone who doesn't know "make test" still understands "Run the
+// tests". `label` seeds the condition's name; `command` is what actually runs.
+const COMMAND_PRESETS: ReadonlyArray<{ label: string; command: string; hint: string }> = [
+  { label: "Run the tests", command: "make test", hint: "the project's automated tests all pass" },
+  { label: "Build the project", command: "make build", hint: "the project compiles with no errors" },
+  { label: "Check the code types", command: "pnpm typecheck", hint: "the code has no type mistakes" },
 ];
 
 function VerificationRowEditor({
@@ -600,41 +828,50 @@ function VerificationRowEditor({
       </Field>
 
       {row.kind === "programmatic" && (
-        <details className="rounded-md border bg-muted/30 p-2 text-xs">
-          <summary className="cursor-pointer select-none text-muted-foreground">Advanced</summary>
-          <div className="mt-2 flex flex-col gap-2">
-            {/* FIR-2283 v2 point 5 — explain, in the editor, what a command
-                is and how to add a new one, instead of leaving it unexplained. */}
-            <p className="text-muted-foreground">
-              A command is anything this issue&apos;s repo can already run — e.g.{" "}
-              <code>make test</code>, <code>pnpm typecheck</code>,{" "}
-              <code>go test ./...</code>. The engine runs it in the repo and reads the
-              exit code: <strong>0 = passed</strong>, anything else = failed. To add a
-              new check, make the command exist in the repo (a Makefile target, an npm
-              script, a shell script) — then type it here. No special registration.
-            </p>
+        // FIR-2283 followup point 5 — "commands" were hidden behind an
+        // "Advanced" toggle and explained in developer terms (exit codes,
+        // Makefile targets). A non-developer never opened it. Now the plain-
+        // language meaning is the default, the ready-made checks are the
+        // primary interface, and the exact command is a clearly-labelled
+        // secondary field for people who know exactly what to run.
+        <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+          <p className="text-muted-foreground">
+            A check is something the computer runs by itself to <strong>prove the
+            work is really finished</strong> — for example that the tests pass or
+            the project builds. Pick a ready-made check, or type the exact one your
+            project uses. Only the computer can mark the issue Done, and only when
+            this check comes back clean.
+          </p>
+          <Field label="Which check?">
             <NativeSelect
-              defaultValue=""
+              value={COMMAND_PRESETS.find((p) => p.command === row.command)?.label ?? ""}
               onChange={(e) => {
                 const preset = COMMAND_PRESETS.find((p) => p.label === e.target.value);
                 if (preset) onChange({ command: preset.command, label: row.label || preset.label });
               }}
             >
-              <option value="">Command preset…</option>
+              <option value="">Choose a ready-made check…</option>
               {COMMAND_PRESETS.map((p) => (
                 <option key={p.label} value={p.label}>
-                  {p.label}
+                  {p.label} — checks that {p.hint}
                 </option>
               ))}
             </NativeSelect>
+          </Field>
+          <Field label="Or type the exact command your project runs">
             <Input
               value={row.command}
               onChange={(e) => onChange({ command: e.target.value })}
-              placeholder="make test"
+              placeholder="e.g. make test"
               data-testid="loop-check-command"
             />
-          </div>
-        </details>
+          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            The computer runs this in the project and treats the check as passed
+            only when it finishes with no error. Anything the project can already
+            run works here — there is nothing to register first.
+          </p>
+        </div>
       )}
 
       {/* FIR-2283 v2 point 6 — one "A review" branch. The assignee picker
@@ -695,159 +932,6 @@ function AssigneeFields({
         />
       </div>
     </Field>
-  );
-}
-
-function ControlStrip({
-  workflowId,
-  wsId,
-  enabled,
-  onToggle,
-  watchIssueId,
-  onChangeWatchIssueId,
-}: {
-  workflowId: string;
-  wsId: string;
-  enabled: boolean;
-  onToggle: (v: boolean) => void;
-  watchIssueId: string;
-  onChangeWatchIssueId: (v: string) => void;
-}) {
-  const navigation = useNavigation();
-  const workspace = useCurrentWorkspace();
-  const loopState = useQuery({
-    ...cerebroLoopStateOptions(wsId, workflowId, watchIssueId),
-  });
-  const approve = useApproveHumanCheckMutation(wsId, workflowId, watchIssueId);
-  // FIR-2283 v2 point 8 — "per-issue workflow activation". Reuses the same
-  // watch-issue selection: pick an issue, then either just watch it (above)
-  // or activate this recipe on it (this recipe stays a reusable template —
-  // activating compiles an independent set of rules for THIS issue alone).
-  const activate = useActivateWorkflowMutation(wsId, watchIssueId);
-  // FIR-2283 v2 point 7 — "ALDRIG at man skal indsætte id'er". The raw
-  // paste-a-UUID input is gone; you search an issue by title and pick it,
-  // and we show its identifier/title, never the UUID.
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [watchIssue, setWatchIssue] = useState<Issue | null>(null);
-
-  return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Loop">
-          <Switch checked={enabled} onCheckedChange={(v) => onToggle(v === true)} />
-        </Field>
-        <Field label="Watch an issue">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-56 justify-start font-normal"
-            onClick={() => setPickerOpen(true)}
-          >
-            <span className="truncate">
-              {watchIssue ? (
-                <>
-                  <span className="text-muted-foreground">{watchIssue.identifier}</span>{" "}
-                  {watchIssue.title}
-                </>
-              ) : (
-                <span className="text-muted-foreground">Search for an issue…</span>
-              )}
-            </span>
-          </Button>
-        </Field>
-        <IssuePickerModal
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          title="Watch an issue"
-          description="Search by title and pick the issue to watch or activate this workflow on."
-          excludeIds={[]}
-          onSelect={(issue) => {
-            setWatchIssue(issue);
-            onChangeWatchIssueId(issue.id);
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!watchIssueId || activate.isPending}
-          onClick={() => activate.mutate(workflowId)}
-        >
-          {activate.isPending ? "Activating…" : "Activate on this issue"}
-        </Button>
-        {workspace && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => navigation.push(`/${workspace.slug}/workflows/${workflowId}/runs`)}
-          >
-            View run history
-          </Button>
-        )}
-      </div>
-      {activate.isSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-400">
-          Activated on this issue — it now runs this recipe independently of the project-wide
-          compile.
-        </p>
-      )}
-      {activate.isError && (
-        <p className="text-xs text-destructive">
-          {activate.error instanceof Error ? activate.error.message : "Could not activate"}
-        </p>
-      )}
-
-      {watchIssueId && loopState.data && (
-        <div className="flex flex-col gap-2 text-xs">
-          <p className="text-muted-foreground">
-            {loopState.data.stopped ? (
-              <span className="font-medium text-amber-600 dark:text-amber-400">
-                Paused · escalated to owner{loopState.data.stop_reason ? ` — ${loopState.data.stop_reason}` : ""}
-              </span>
-            ) : (
-              <>
-                Round {loopState.data.round}
-                {loopState.data.max_iterations ? ` of ${loopState.data.max_iterations}` : ""}
-              </>
-            )}
-          </p>
-          {loopState.data.pending_human_checks.map((check) => (
-            <div
-              key={check.check_id}
-              className="flex items-center justify-between gap-2 rounded-md border bg-background p-2"
-            >
-              <span className="min-w-0 truncate">Waiting on you: {check.prompt}</span>
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => approve.mutate({ checkId: check.check_id, approved: true })}
-                >
-                  Approve
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    approve.mutate({
-                      checkId: check.check_id,
-                      approved: false,
-                      note: "Rejected from the control strip",
-                    })
-                  }
-                >
-                  Reject
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
