@@ -235,7 +235,10 @@ export function ConnectionConfigSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full max-w-xl flex-col gap-0 p-0 sm:max-w-xl"
+        // Wide on purpose (FIR-2640): endpoint paths and their spec names must be
+        // readable while granting — full screen on mobile, 70% of the viewport on
+        // desktop.
+        className="flex w-full max-w-full flex-col gap-0 p-0 sm:w-[70vw] sm:max-w-[70vw]"
       >
         <SheetHeader className="border-b">
           <SheetTitle>
