@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  Activity,
   ArrowLeft,
   BookOpenText,
   FileText,
@@ -11,9 +12,17 @@ import {
   ShieldCheck,
   Wrench,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import type {
+  Agent,
+  AgentRuntime,
+  MemberWithUser,
+  UpdateAgentRequest,
+} from "@multica/core/types";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
+import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
@@ -23,6 +32,7 @@ import { runtimeListOptions } from "@multica/core/runtimes";
 import {
   agentListOptions,
   memberListOptions,
+  workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { CerebroCapabilitiesTab } from "@multica/cerebro-agent-capabilities/views";
 import { CerebroAgentContextTab } from "@multica/cerebro-agent-context/views";
@@ -30,10 +40,13 @@ import { CerebroToolsTab } from "@multica/cerebro-agent-tools/views";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { ActorIssuesPanel } from "@multica/views/common/actor-issues-panel";
+// FIR-2670: reuse the shipped Activity feed + Skills add/remove tab — see
+// CEREBRO-PATCH(views-agent-redesign-reuse).
+import { ActivityTab } from "@multica/views/agents/components/tabs/activity-tab";
+import { SkillsTab } from "@multica/views/agents/components/tabs/skills-tab";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink } from "@multica/views/navigation";
 import { IdentityRail } from "./identity-rail";
-import { RedesignSkillsPanel } from "./skills-panel";
 
 type RedesignTab =
   | "tasks"
@@ -69,7 +82,12 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const workspace = useCurrentWorkspace();
+  const qc = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<RedesignTab>("tasks");
+  // Activity | Tasks toggle inside the Tasks tab (FIR-2670 #6). Board is the
+  // default; Activity is the shipped live-status feed.
+  const [taskView, setTaskView] = useState<"activity" | "tasks">("tasks");
 
   const { data: agents = [], isLoading } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
@@ -87,6 +105,42 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const agent: Agent | null = agents.find((a) => a.id === agentId) ?? null;
   const perms = useAgentPermissions(agent, wsId);
   const canEdit = perms.canEdit.allowed;
+
+  // Optimistic inline-edit write for the identity rail pickers — patch the
+  // cached agent first so the picker chip flips immediately, then reconcile
+  // with the server. Mirrors the shipped agent page's handleUpdate.
+  const handleUpdate = async (data: Record<string, unknown>) => {
+    if (!agent) return;
+    const id = agent.id;
+    const queryKey = workspaceKeys.agents(wsId);
+    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
+    const prevAgent = prevAgents?.find((a) => a.id === id);
+    const prevFields: Record<string, unknown> = {};
+    if (prevAgent) {
+      for (const key of Object.keys(data)) {
+        prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
+      }
+    }
+    qc.setQueryData<Agent[]>(queryKey, (old) =>
+      old?.map((a) => (a.id === id ? ({ ...a, ...data } as Agent) : a)),
+    );
+    try {
+      await api.updateAgent(id, data as UpdateAgentRequest);
+      qc.invalidateQueries({ queryKey });
+      toast.success("Agent updated");
+    } catch (e) {
+      if (prevAgent) {
+        qc.setQueryData<Agent[]>(queryKey, (old) =>
+          old?.map((a) =>
+            a.id === id ? ({ ...a, ...prevFields } as Agent) : a,
+          ),
+        );
+      }
+      qc.invalidateQueries({ queryKey });
+      toast.error(e instanceof Error ? e.message : "Update failed");
+      throw e;
+    }
+  };
 
   const messageAgent = () => {
     if (!agent) return;
@@ -177,6 +231,11 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
               owner={owner}
               presence={presence}
               accountName={workspace?.name ?? null}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUser?.id ?? null}
+              canEdit={canEdit}
+              onUpdate={handleUpdate}
             />
 
             <div className="flex min-w-0 flex-1 flex-col">
@@ -206,14 +265,51 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                   and grows with its content instead of being clipped. */}
               <div className="flex-1 bg-muted/20">
                 {tab === "tasks" && (
-                  <div className="flex min-h-[70vh] flex-col p-2 md:p-4">
-                    <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+                  <div className="flex min-h-[70vh] flex-col gap-3 p-2 md:p-4">
+                    {/* Activity | Tasks segmented toggle (FIR-2670 #6): the
+                        shipped live-status Activity feed sits alongside the
+                        board, matching the design. */}
+                    <div className="inline-flex w-fit items-center gap-1 rounded-lg bg-muted p-[3px]">
+                      {(["activity", "tasks"] as const).map((v) => {
+                        const active = taskView === v;
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setTaskView(v)}
+                            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
+                              active
+                                ? "bg-background text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {v === "activity" ? (
+                              <Activity className="h-[15px] w-[15px]" />
+                            ) : (
+                              <ListTodo className="h-[15px] w-[15px]" />
+                            )}
+                            {v === "activity" ? "Activity" : "Tasks"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {taskView === "activity" ? (
+                      <div className="rounded-xl border bg-background p-4 md:p-5">
+                        <ActivityTab agent={agent} />
+                      </div>
+                    ) : (
+                      <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+                    )}
                   </div>
                 )}
                 {tab === "instructions" && (
                   <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
                 )}
-                {tab === "skills" && <RedesignSkillsPanel agent={agent} />}
+                {tab === "skills" && (
+                  <div className="p-5 md:p-6">
+                    <SkillsTab agent={agent} canEdit={canEdit} />
+                  </div>
+                )}
                 {tab === "tools" && (
                   <div className="p-5 md:p-6">
                     <CerebroToolsTab agent={agent} canEdit={canEdit} />

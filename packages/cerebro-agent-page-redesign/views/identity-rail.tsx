@@ -1,9 +1,25 @@
 "use client";
 
-import { Building2, Cpu, GitBranch, Monitor, Shield, User } from "lucide-react";
-import type { AgentAvailability, AgentPresenceDetail } from "@multica/core/agents";
-import type { Agent, AgentRuntime } from "@multica/core/types";
-import type { MemberWithUser } from "@multica/core/types";
+import { Building2, GitBranch } from "lucide-react";
+import type {
+  AgentAvailability,
+  AgentPresenceDetail,
+} from "@multica/core/agents";
+import type {
+  Agent,
+  AgentRuntime,
+  MemberWithUser,
+} from "@multica/core/types";
+// FIR-2670: reuse the shipped, editable inspector pickers + PropRow instead of
+// re-implementing them — see CEREBRO-PATCH(views-agent-redesign-reuse).
+import { PropRow } from "@multica/views/common/prop-row";
+import { RuntimePicker } from "@multica/views/agents/components/inspector/runtime-picker";
+import { ModelPicker } from "@multica/views/agents/components/inspector/model-picker";
+import { ThinkingPropRow } from "@multica/views/agents/components/inspector/thinking-prop-row";
+import { VisibilityPicker } from "@multica/views/agents/components/inspector/visibility-picker";
+import { ConcurrencyPicker } from "@multica/views/agents/components/inspector/concurrency-picker";
+import { SkillAttach } from "@multica/views/agents/components/inspector/skill-attach";
+import { runtimeVersion } from "./runtime-meta";
 import { timeAgo } from "./time-ago";
 
 /** Presence dot + label colour, mapped to the app's semantic tokens. */
@@ -34,42 +50,12 @@ function availabilityTone(availability: AgentAvailability | undefined): {
   }
 }
 
-function PropRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[13px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate font-medium text-foreground">
-        {children}
-      </span>
-    </div>
-  );
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
     </div>
   );
-}
-
-/**
- * Read the account/host and CLI version off a runtime's loose metadata bag.
- * The daemon reports these under free-form keys, so we probe the common ones
- * and fall back to "—" rather than inventing a value.
- */
-function runtimeVersion(runtime: AgentRuntime | null): string | null {
-  const meta = runtime?.metadata;
-  if (!meta || typeof meta !== "object") return null;
-  const bag = meta as Record<string, unknown>;
-  const v = bag.version ?? bag.cli_version;
-  return typeof v === "string" && v.length > 0 ? v : null;
 }
 
 interface IdentityRailProps {
@@ -79,19 +65,46 @@ interface IdentityRailProps {
   presence: AgentPresenceDetail | null;
   /** Workspace/organization the runtime bills and reports under. */
   accountName: string | null;
+  // Below: needed for the editable Properties section (FIR-2670 #9). The rail
+  // owns the same inline-edit surface the shipped inspector does, so the page
+  // has to pass through everything a write needs.
+  runtimes: AgentRuntime[];
+  members: MemberWithUser[];
+  currentUserId: string | null;
+  /** When false every picker self-renders a read-only display. */
+  canEdit: boolean;
+  onUpdate: (data: Record<string, unknown>) => Promise<void> | void;
 }
 
+/**
+ * Left identity rail of the redesigned agent page. Mirrors the design's left
+ * column: identity block, an editable Properties section, read-only Details,
+ * and Skills with an Attach affordance.
+ *
+ * The Properties pickers (runtime / model / thinking / visibility /
+ * concurrency) and the Skills Attach control are the SAME shipped components
+ * the current agent inspector uses (imported via the FIR-2670 reuse exports),
+ * so editing behaves identically and can't drift from the original. Account
+ * and Runtime version are redesign-only read-only rows the shipped inspector
+ * doesn't carry — the version string comes from `runtimeVersion` (unit-tested
+ * in runtime-meta.test.ts).
+ */
 export function IdentityRail({
   agent,
   runtime,
   owner,
   presence,
   accountName,
+  runtimes,
+  members,
+  currentUserId,
+  canEdit,
+  onUpdate,
 }: IdentityRailProps) {
   const tone = availabilityTone(presence?.availability);
   const initial = (agent.name?.[0] ?? "?").toUpperCase();
+  const isOnline = runtime?.status === "online";
   const skills = agent.skills ?? [];
-  const skillPreview = skills.slice(0, 12);
 
   return (
     <div className="w-full flex-shrink-0 border-b bg-muted/30 md:w-80 md:border-b-0 md:border-r">
@@ -129,65 +142,89 @@ export function IdentityRail({
         ) : null}
       </div>
 
-      {/* properties */}
+      {/* properties — editable via the shipped inspector pickers */}
       <div className="border-b px-5 py-4">
         <SectionLabel>Properties</SectionLabel>
-        <div className="flex flex-col gap-3">
-          <PropRow label="Runtime">
-            <span className="inline-flex items-center gap-1.5">
-              <Monitor className="h-3.5 w-3.5 shrink-0" />
-              {runtime?.name ?? "—"}
-            </span>
+        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+          <PropRow label="Runtime" interactive={false}>
+            <RuntimePicker
+              value={agent.runtime_id}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              canEdit={canEdit}
+              onChange={(id) => onUpdate({ runtime_id: id })}
+            />
           </PropRow>
-          <PropRow label="Account">
-            <span className="inline-flex items-center gap-1.5">
+          <PropRow label="Account" interactive={false}>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
               <Building2 className="h-3.5 w-3.5 shrink-0" />
-              {accountName ?? "—"}
+              <span className="truncate">{accountName ?? "—"}</span>
             </span>
           </PropRow>
-          <PropRow label="Runtime version">
-            <span className="inline-flex items-center gap-1.5">
+          <PropRow label="Runtime version" interactive={false}>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
               <GitBranch className="h-3.5 w-3.5 shrink-0" />
-              <span className="font-mono text-xs">
+              <span className="truncate font-mono text-[11px]">
                 {runtimeVersion(runtime) ?? "—"}
               </span>
             </span>
           </PropRow>
-          <PropRow label="Model">
-            <span className="font-mono text-xs">{agent.model || "—"}</span>
+          <PropRow label="Model" interactive={false}>
+            <ModelPicker
+              runtimeId={agent.runtime_id}
+              runtimeOnline={!!isOnline}
+              value={agent.model ?? ""}
+              canEdit={canEdit}
+              onChange={(m) => onUpdate({ model: m })}
+            />
           </PropRow>
-          <PropRow label="Thinking">
-            <span className="inline-flex items-center gap-1.5">
-              <Cpu className="h-3.5 w-3.5 shrink-0" />
-              {agent.thinking_level ? agent.thinking_level : "Follow CLI config"}
-            </span>
+          <ThinkingPropRow
+            runtimeId={agent.runtime_id}
+            runtimeOnline={!!isOnline}
+            model={agent.model ?? ""}
+            value={agent.thinking_level ?? ""}
+            canEdit={canEdit}
+            onChange={(v) => onUpdate({ thinking_level: v })}
+          />
+          <PropRow label="Visibility" interactive={false}>
+            <VisibilityPicker
+              value={agent.visibility}
+              canEdit={canEdit}
+              onChange={(v) => onUpdate({ visibility: v })}
+            />
           </PropRow>
-          <PropRow label="Visibility">
-            <span className="inline-flex items-center gap-1.5">
-              <Shield className="h-3.5 w-3.5 shrink-0" />
-              {agent.visibility === "private" ? "Personal" : "Workspace"}
-            </span>
+          <PropRow label="Concurrency" interactive={false}>
+            <ConcurrencyPicker
+              value={agent.max_concurrent_tasks}
+              canEdit={canEdit}
+              onChange={(n) => onUpdate({ max_concurrent_tasks: n })}
+            />
           </PropRow>
-          <PropRow label="Concurrency">{agent.max_concurrent_tasks}</PropRow>
         </div>
       </div>
 
-      {/* details */}
+      {/* details — read-only */}
       <div className="border-b px-5 py-4">
         <SectionLabel>Details</SectionLabel>
-        <div className="flex flex-col gap-3">
-          <PropRow label="Owner">
-            <span className="inline-flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5 shrink-0" />
-              {owner?.name ?? "—"}
+        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+          <PropRow label="Owner" interactive={false}>
+            <span className="truncate">{owner?.name ?? "—"}</span>
+          </PropRow>
+          <PropRow label="Created" interactive={false}>
+            <span className="text-muted-foreground">
+              {timeAgo(agent.created_at)}
             </span>
           </PropRow>
-          <PropRow label="Created">{timeAgo(agent.created_at)}</PropRow>
-          <PropRow label="Updated">{timeAgo(agent.updated_at)}</PropRow>
+          <PropRow label="Updated" interactive={false}>
+            <span className="text-muted-foreground">
+              {timeAgo(agent.updated_at)}
+            </span>
+          </PropRow>
         </div>
       </div>
 
-      {/* skills */}
+      {/* skills — chips + the shipped Attach control */}
       <div className="px-5 py-4">
         <div className="mb-3 flex items-center gap-2">
           <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -197,8 +234,8 @@ export function IdentityRail({
             {skills.length}
           </span>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {skillPreview.map((skill) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {skills.map((skill) => (
             <span
               key={skill.id}
               title={skill.description || undefined}
@@ -207,11 +244,7 @@ export function IdentityRail({
               {skill.name}
             </span>
           ))}
-          {skills.length > skillPreview.length ? (
-            <span className="rounded-md border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-              +{skills.length - skillPreview.length} more
-            </span>
-          ) : null}
+          <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
       </div>
     </div>
