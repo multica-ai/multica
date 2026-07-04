@@ -32,7 +32,15 @@ import (
 const (
 	firtalGatewayServerDaemonID  = "server:firtal-gateway"
 	firtalGatewayIssueCommentCap = 200
-	firtalGatewayMaxToolDefs     = 50
+	// firtalGatewayMaxToolDefs is a backstop against a pathological tool list,
+	// not a working budget. A single API connection legitimately exposes ~90
+	// endpoint tools (FIR-2640: "Firtal data sources" has 88), and connection
+	// tools are appended after the platform tools — at the old cap of 50 every
+	// execute tool was silently truncated away on gateway runtimes (FIR-2685).
+	// The compat tool loop already falls back to core tools if a provider
+	// rejects the full list, so the cap only needs to guard against runaway
+	// growth, and any truncation is logged in limitFirtalGatewayTools.
+	firtalGatewayMaxToolDefs = 200
 )
 
 type FirtalGatewayExecutor struct {
@@ -1233,14 +1241,26 @@ func limitFirtalGatewayTools(tools []Tool) []Tool {
 	}
 
 	out := make([]Tool, 0, firtalGatewayMaxToolDefs)
+	var truncated []string
 	for i, tool := range tools {
 		if _, shouldDrop := drop[i]; shouldDrop {
 			continue
 		}
-		out = append(out, tool)
 		if len(out) == firtalGatewayMaxToolDefs {
-			break
+			truncated = append(truncated, tool.Name())
+			continue
 		}
+		out = append(out, tool)
+	}
+	if len(truncated) > 0 {
+		// A dropped tool is invisible to the agent — it cannot report what it
+		// never saw (FIR-2685) — so the truncation must at least be visible here.
+		slog.Warn("firtal gateway: tool list exceeds cap, truncating",
+			"cap", firtalGatewayMaxToolDefs,
+			"total", len(tools),
+			"dropped_count", len(truncated),
+			"dropped", strings.Join(truncated, ","),
+		)
 	}
 	return out
 }

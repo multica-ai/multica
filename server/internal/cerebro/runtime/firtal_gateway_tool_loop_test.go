@@ -422,6 +422,41 @@ func TestLimitFirtalGatewayToolsPreservesAttachmentTools(t *testing.T) {
 	}
 }
 
+func TestLimitFirtalGatewayToolsKeepsRealConnectionToolFleet(t *testing.T) {
+	// FIR-2685: a gateway runtime with the platform tools plus one large API
+	// connection (~90 endpoint tools) carries ~150 tool defs. At the old cap
+	// of 50 every connection tool was silently truncated away; the cap must
+	// admit this fleet untouched.
+	tools := make([]Tool, 0, 150)
+	for i := 0; i < 60; i++ {
+		tools = append(tools, namedTestTool(fmt.Sprintf("platform_tool_%02d", i)))
+	}
+	for i := 0; i < 90; i++ {
+		tools = append(tools, namedTestTool(fmt.Sprintf("firtal_data_sources_registry__execute_%02d", i)))
+	}
+
+	got := limitFirtalGatewayTools(tools)
+	if len(got) != len(tools) {
+		t.Fatalf("limited tools = %d, want all %d (connection tools truncated)", len(got), len(tools))
+	}
+}
+
+func TestLimitFirtalGatewayToolsCapsAtMaxAndDropsTail(t *testing.T) {
+	overflow := 10
+	tools := make([]Tool, 0, firtalGatewayMaxToolDefs+overflow)
+	for i := 0; i < firtalGatewayMaxToolDefs+overflow; i++ {
+		tools = append(tools, namedTestTool(fmt.Sprintf("tool_%03d", i)))
+	}
+
+	got := limitFirtalGatewayTools(tools)
+	if len(got) != firtalGatewayMaxToolDefs {
+		t.Fatalf("limited tools = %d, want %d", len(got), firtalGatewayMaxToolDefs)
+	}
+	if last := got[len(got)-1].Name(); last != fmt.Sprintf("tool_%03d", firtalGatewayMaxToolDefs-1) {
+		t.Fatalf("last kept tool = %s, want tool_%03d", last, firtalGatewayMaxToolDefs-1)
+	}
+}
+
 func TestGatewayCompatRegistryToolLoopFallsBackToCoreToolsOnMalformedFullList(t *testing.T) {
 	var toolCounts []int
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
