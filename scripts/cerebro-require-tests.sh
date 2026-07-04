@@ -129,7 +129,15 @@ opted_out() {
     echo "opt-out: CEREBRO_ALLOW_NO_TEST=1 (no-test-needed label or explicit env)"
     return 0
   fi
-  # Commit-message token on the range.
+  # Commit-message token on the range — but ONLY when the file list came from
+  # git too. When CHANGED_FILES injects a synthetic list (self-test, local
+  # runs), the surrounding repo's commit messages are unrelated to the files
+  # under test; consulting them made the self-test non-hermetic (a token in any
+  # commit on the PR branch flipped the expected-FAIL cases to PASS — the exact
+  # failure seen on PR #2077).
+  if [ -n "${CHANGED_FILES:-}" ]; then
+    return 1
+  fi
   local base="${BASE_REF:-origin/main}"
   if git rev-parse --verify -q "$base" >/dev/null 2>&1; then
     if git log --format='%B' "$base"..HEAD 2>/dev/null | grep -q 'CEREBRO-ALLOW-NO-TEST:'; then
@@ -242,6 +250,25 @@ self_test() {
 
   FILES_CASE=$'server/internal/handler/comment_test.go'; CEREBRO_ALLOW_NO_TEST_CASE=''
   _case 0 "test-only change -> PASS"
+
+  # Hermeticity guard (PR #2077): a CEREBRO-ALLOW-NO-TEST: token in the
+  # surrounding repo's commit log must NOT flip a synthetic CHANGED_FILES
+  # FAIL case to PASS. Reproduce with a temp repo whose HEAD carries the token.
+  local tmprepo out rc
+  tmprepo="$(mktemp -d)"
+  git -C "$tmprepo" init -q -b main
+  git -C "$tmprepo" -c user.email=selftest@local -c user.name=selftest commit -q --allow-empty -m "base"
+  git -C "$tmprepo" branch -q basepoint
+  git -C "$tmprepo" -c user.email=selftest@local -c user.name=selftest commit -q --allow-empty -m "CEREBRO-ALLOW-NO-TEST: planted token"
+  out="$(cd "$tmprepo" && BASE_REF=basepoint CEREBRO_ALLOW_NO_TEST='' CHANGED_FILES=$'server/internal/handler/comment.go' run_gate 2>&1)" && rc=0 || rc=$?
+  rm -rf "$tmprepo"
+  if [ "$rc" -ne 1 ]; then
+    echo "FAIL [repo commit token must not leak into CHANGED_FILES runs]: expected exit 1, got $rc"
+    echo "$out" | sed 's/^/    /'
+    fails=$((fails + 1))
+  else
+    echo "ok   [repo commit token must not leak into CHANGED_FILES runs] (exit 1)"
+  fi
 
   if [ "$fails" -gt 0 ]; then
     echo "self-test: $fails case(s) failed"
