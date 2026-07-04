@@ -282,14 +282,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
+			case "turn_start":
+				output.Reset()
+				textBuffer.Reset()
+
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
 					continue
 				}
 				switch evt.AssistantMessageEvent.Type {
-				case "text_start":
-					output.Reset()
-					textBuffer.Reset()
 				case "text_delta":
 					if d := drainPiTextBuffer(&textBuffer, evt.AssistantMessageEvent.Delta); d != "" {
 						output.WriteString(d)
