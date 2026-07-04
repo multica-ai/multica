@@ -128,7 +128,11 @@ export function FirtalRegistryDataSourceSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full max-w-xl flex-col gap-0 p-0 sm:max-w-xl"
+        // Width classes carry the data-[side=right] prefix so they beat the base
+        // SheetContent's data-[side=right]:w-3/4 / sm:max-w-sm on specificity —
+        // a plain w-full loses and the sheet stays at 75% on mobile (FIR-2640
+        // review). Full width on mobile, xl (36rem) on desktop.
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:max-w-full data-[side=right]:sm:w-[36rem] data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="border-b">
           <SheetTitle>{toolLabel} — data sources</SheetTitle>
@@ -162,7 +166,11 @@ export function FirtalRegistryDataSourceSheet({
           </Button>
         </div>
 
-        <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+        {/* overflow-auto + inner min-w-max column: long data-source names/ids
+            scroll horizontally on a narrow (mobile) sheet instead of truncating
+            (FIR-2640 review). */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="flex min-w-max flex-col gap-1">
           {sourceRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No data sources configured for this workspace yet.
@@ -176,17 +184,17 @@ export function FirtalRegistryDataSourceSheet({
               <div
                 key={r.resource_pattern}
                 data-testid={`registry-data-source-${r.resource_pattern}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+                className="flex w-full items-center justify-between gap-4 rounded-md border px-3 py-2"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
+                <div className="min-w-0">
+                  <div className="whitespace-nowrap text-sm font-medium">
                     {r.title || r.resource_pattern}
                   </div>
-                  <div className="truncate font-mono text-xs text-muted-foreground">
+                  <div className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                     {r.resource_pattern}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <DecisionControl
                     row={r}
                     editLayer={editLayer}
@@ -203,6 +211,7 @@ export function FirtalRegistryDataSourceSheet({
               </div>
             ))
           )}
+          </div>
         </div>
 
         <SheetFooter className="border-t">

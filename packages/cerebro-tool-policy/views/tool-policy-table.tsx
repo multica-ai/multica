@@ -719,7 +719,12 @@ export function ToolPolicyTable({
                       {row.tool_key}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  {/* flex-col-reverse stacks the controls vertically on mobile
+                      with the Decision pill (last child) on TOP and the
+                      Configure / Data sources buttons UNDER it, so the wide
+                      buttons no longer steal the row's width and the capability
+                      name stays readable (FIR-2640 review). */}
+                  <div className="flex shrink-0 flex-col-reverse items-end gap-1.5">
                     {view === "agent" && subjectId ? (
                       <FirtalRegistryRowConfigure
                         toolKey={row.tool_key}

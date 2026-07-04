@@ -142,4 +142,31 @@ describe("ConnectionConfigSheet (TECH-3287 hul 1/6/7)", () => {
     await user.click(within(tool).getByRole("menuitem", { name: "Deny" }));
     expect(mockCerebroRequest).toHaveBeenCalled();
   });
+
+  // FIR-2640 review — mobile layout regression guards. The base SheetContent for
+  // side="right" carries data-[side=right]:w-3/4 + sm:max-w-sm, which have higher
+  // CSS specificity than a plain w-full; the sheet width MUST be overridden with
+  // the same data-[side=right] prefix or it silently reverts to 75% on mobile.
+  it("makes the sheet full width on mobile via the data-[side=right] override", () => {
+    renderSheet(connRow("allow"));
+    const content = document.querySelector('[data-slot="sheet-content"]');
+    expect(content).not.toBeNull();
+    // The specificity-matching override that beats the base w-3/4 on mobile.
+    expect(content?.className).toContain("data-[side=right]:w-full");
+    // A bare w-full (which the base out-specifies) must NOT be relied on.
+    expect(content?.className).not.toMatch(/(^|\s)w-full(\s|$)/);
+  });
+
+  it("lets long endpoint names scroll horizontally instead of truncating", () => {
+    renderSheet(connRow("allow"));
+    // The scroll region scrolls both axes; its inner column is min-w-max so long
+    // paths extend past the viewport and become reachable by horizontal scroll.
+    const scroller = document.querySelector(".overflow-auto");
+    expect(scroller).not.toBeNull();
+    expect(scroller?.querySelector(".min-w-max")).not.toBeNull();
+    // The endpoint name no longer truncates (which hid it on a narrow sheet).
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    expect(tool.querySelector(".truncate")).toBeNull();
+    expect(tool.querySelector(".whitespace-nowrap")).not.toBeNull();
+  });
 });

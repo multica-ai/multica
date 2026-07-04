@@ -989,6 +989,23 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
     expect(table.queryByText("Bash")).not.toBeInTheDocument();
     expect(table.queryByText("Add comment")).not.toBeInTheDocument();
   });
+
+  // FIR-2640 review — on mobile the connection row's controls (the Configure
+  // button + the Decision pill) must stack vertically, Decision on top and
+  // Configure UNDER it (flex-col-reverse), so the wide "Configure" button stops
+  // stealing the row's width and the capability name stays readable.
+  it("stacks the mobile card controls so Configure sits under Allow", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("resources");
+    await tableBody();
+    const card = document.querySelector(
+      '[data-testid="tool-card-connection:slack"]',
+    );
+    expect(card).not.toBeNull();
+    // The right-hand control column stacks (reverse so the Decision pill — the
+    // last child — renders on top and the Configure button below it).
+    expect(card?.querySelector(".flex-col-reverse")).not.toBeNull();
+  });
 });
 
 // FIR-1479 + FIR-2281: credentials are a resource type, rendered as per-box rows

@@ -237,8 +237,11 @@ export function ConnectionConfigSheet({
         side="right"
         // Wide on purpose (FIR-2640): endpoint paths and their spec names must be
         // readable while granting — full screen on mobile, 70% of the viewport on
-        // desktop.
-        className="flex w-full max-w-full flex-col gap-0 p-0 sm:w-[70vw] sm:max-w-[70vw]"
+        // desktop. The width classes carry the data-[side=right] prefix so they
+        // beat the base SheetContent's own data-[side=right]:w-3/4 /
+        // sm:max-w-sm (a plain w-full loses to it on specificity, leaving the
+        // sheet stuck at 75% on mobile — FIR-2640 review).
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:max-w-full data-[side=right]:sm:w-[70vw] data-[side=right]:sm:max-w-[70vw]"
       >
         <SheetHeader className="border-b">
           <SheetTitle>
@@ -299,7 +302,11 @@ export function ConnectionConfigSheet({
           </Button>
         </div>
 
-        <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+        {/* overflow-auto + an inner min-w-max column let long endpoint paths /
+            tool names scroll horizontally on a narrow (mobile) sheet instead of
+            truncating to nothing (FIR-2640 review). */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="flex min-w-max flex-col gap-1">
           {toolRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {isApi
@@ -315,16 +322,16 @@ export function ConnectionConfigSheet({
               <div
                 key={r.resource_pattern}
                 data-testid={`connection-tool-${r.resource_pattern}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+                className="flex w-full items-center justify-between gap-4 rounded-md border px-3 py-2"
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0">
                   <div
-                    className={`truncate text-sm ${!r.title || r.title === r.resource_pattern ? "font-mono" : "font-medium"}`}
+                    className={`whitespace-nowrap text-sm ${!r.title || r.title === r.resource_pattern ? "font-mono" : "font-medium"}`}
                   >
                     {r.title || r.resource_pattern}
                   </div>
                   {r.title && r.title !== r.resource_pattern ? (
-                    <div className="truncate font-mono text-xs text-muted-foreground">
+                    <div className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                       {r.resource_pattern}
                     </div>
                   ) : null}
@@ -334,7 +341,7 @@ export function ConnectionConfigSheet({
                     </div>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <EndpointDecisionControl
                     row={r}
                     editLayer={editLayer}
@@ -353,6 +360,7 @@ export function ConnectionConfigSheet({
               </div>
             ))
           )}
+          </div>
         </div>
 
         <SheetFooter className="border-t">
