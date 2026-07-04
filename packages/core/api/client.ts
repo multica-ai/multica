@@ -2388,25 +2388,30 @@ export class ApiClient {
     size: number;
     asset_group_id?: string;
   }): Promise<{ upload_url: string; asset_id: string; upload_method: string }> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/presign`, {
+    const apiPayload = {
+      filename: payload.filename,
+      content_type: payload.content_type,
+      previous_asset_id: payload.asset_group_id,
+    };
+    return this.fetch(`/api/issues/${issueId}/reviews/assets/presign`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(apiPayload),
     });
   }
 
   async completeReviewAssetUpload(workspaceId: string, issueId: string, assetId: string): Promise<ReviewAsset> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/complete`, {
+    return this.fetch(`/api/issues/${issueId}/reviews/assets/complete`, {
       method: "POST",
       body: JSON.stringify({ asset_id: assetId }),
     });
   }
 
   async listReviewAssets(workspaceId: string, issueId: string): Promise<ReviewAsset[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets`);
+    return this.fetch(`/api/issues/${issueId}/reviews/assets`);
   }
 
   async listReviewComments(workspaceId: string, issueId: string, assetId: string): Promise<ReviewComment[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/comments?asset_id=${assetId}`);
+    return this.fetch(`/api/issues/${issueId}/reviews/comments?asset_id=${assetId}`);
   }
 
   async createReviewComment(workspaceId: string, issueId: string, payload: {
@@ -2416,39 +2421,39 @@ export class ApiClient {
     shapes?: any;
     parent_id?: string;
   }): Promise<ReviewComment> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/comments`, {
+    return this.fetch(`/api/issues/${issueId}/reviews/comments`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
   }
 
   async resolveReviewComment(workspaceId: string, issueId: string, commentId: string): Promise<ReviewComment> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/comments/${commentId}/resolve`, {
+    return this.fetch(`/api/issues/${issueId}/reviews/comments/${commentId}/resolve`, {
       method: "PATCH",
     });
   }
 
   async unresolveReviewComment(workspaceId: string, issueId: string, commentId: string): Promise<ReviewComment> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/comments/${commentId}/unresolve`, {
+    return this.fetch(`/api/issues/${issueId}/reviews/comments/${commentId}/unresolve`, {
       method: "PATCH",
     });
   }
 
   async updateReviewAssetStatus(workspaceId: string, issueId: string, assetId: string, status: string): Promise<ReviewAsset> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/${assetId}/status`, {
+    return this.fetch(`/api/issues/${issueId}/reviews/assets/${assetId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
     });
   }
 
   async listPendingReviewIssueIDs(workspaceId: string): Promise<string[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/issues/default/reviews/pending-issues`, {
+    return this.fetch(`/api/issues/default/reviews/pending-issues`, {
       method: "GET",
     });
   }
 
   async bulkApproveReviewAssets(workspaceId: string, issueId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/bulk-approve`, {
+    await this.fetch(`/api/issues/${issueId}/reviews/assets/bulk-approve`, {
       method: "POST",
       body: JSON.stringify({ issue_id: issueId }),
     });

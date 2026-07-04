@@ -91,7 +91,7 @@ func (h *Handler) ListApprovalsByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "issueId"), "issueId")
+	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issueId")
 	if !ok {
 		return
 	}
@@ -184,7 +184,7 @@ func (h *Handler) CreateApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "issueId"), "issueId")
+	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issueId")
 	if !ok {
 		return
 	}

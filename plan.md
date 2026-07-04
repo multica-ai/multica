@@ -463,6 +463,31 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ---
 
+## Phase 4.5 — UI Polish & Missing Integrations
+
+> **Goal:** Address all lingering UI and integration gaps from Phases 0-4 before moving forward.
+> **Effort:** 3-5 days
+> **Dependencies:** Phases 0-4 backend implementations
+
+### 4.5.1 Multi-Assignee & Terminology (from Phase 0)
+- [x] **UI:** Update assignee picker in `packages/views/issues/` to support multi-select and display multiple assignees.
+- [x] **Data:** Migrate existing `assignee_id` data to `issue_assignees` junction table and deprecate the column.
+- [x] **Terminology:** Clean up developer jargon ("Runtime" → "Agent Environment") in `packages/views/locales/`.
+
+### 4.5.2 Media Review Polish (from Phase 1)
+- [ ] **Thread support:** Reply to review comments (threaded) and Resolve/Unresolve comments.
+- [ ] **Upload UX:** Add upload progress indicator and thumbnail generation.
+- [ ] **Board UI:** Add a visual "Pending Review" indicator on issue cards.
+- [ ] **Versioning:** Support uploading a new version of an asset.
+
+### 4.5.3 Marketing Workflows UI (from Phase 2)
+- [x] **Issue Types UI:** Issue type selector in create/edit forms, type-based icons/badges on board cards.
+- [ ] **Custom Fields UI:** Render per-type custom fields. (Note: Backend missing)
+- [x] **Approvals UI:** Add a button to request approval on an issue and a "Pending My Approval" filter.
+- [ ] **Templates:** Issue/Project template gallery, Autopilot presets gallery. (Note: Backend missing)
+
+---
+
 ## Phase 5 — Enhanced GitHub Integration
 
 > **Goal:** Seamless bidirectional bridge between Multica board and GitHub.

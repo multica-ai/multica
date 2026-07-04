@@ -118,7 +118,7 @@ func (h *Handler) PresignReviewAssetUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	issueUUID, ok := parseUUIDOrBadRequest(w, req.IssueID, "issue_id")
+	issueUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issue_id")
 	if !ok {
 		return
 	}
@@ -289,7 +289,7 @@ func (h *Handler) CreateReviewComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := reviewCommentToResponse(comment)
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		asset, _ := h.Queries.GetReviewAsset(ctx, assetUUID)
 		issue, _ := h.Queries.GetIssue(ctx, asset.IssueID)
@@ -369,7 +369,7 @@ func (h *Handler) UpdateReviewAssetStatus(w http.ResponseWriter, r *http.Request
 	}
 
 	resp := reviewAssetToResponse(asset)
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		issue, _ := h.Queries.GetIssue(ctx, asset.IssueID)
 		h.publish(protocol.EventReviewAssetUpdated, workspaceID, "member", userID, map[string]any{
@@ -395,7 +395,7 @@ func (h *Handler) BulkApproveReviewAssets(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	issueUUID, ok := parseUUIDOrBadRequest(w, req.IssueID, "issue_id")
+	issueUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issue_id")
 	if !ok {
 		return
 	}
@@ -410,7 +410,7 @@ func (h *Handler) BulkApproveReviewAssets(w http.ResponseWriter, r *http.Request
 	if u, ok := requireUserID(w, r); ok {
 		userID = u
 	}
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		issue, _ := h.Queries.GetIssue(ctx, issueUUID)
 		// Empty payload will force clients to refetch
@@ -445,7 +445,7 @@ func (h *Handler) ResolveReviewComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := reviewCommentToResponse(comment)
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		h.publish(protocol.EventReviewCommentResolved, workspaceID, "member", userID, map[string]any{"comment": resp})
 	}
@@ -471,7 +471,7 @@ func (h *Handler) UnresolveReviewComment(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := reviewCommentToResponse(comment)
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		h.publish(protocol.EventReviewCommentUnresolved, workspaceID, "member", userID, map[string]any{"comment": resp})
 	}
@@ -481,7 +481,7 @@ func (h *Handler) UnresolveReviewComment(w http.ResponseWriter, r *http.Request)
 
 func (h *Handler) ListPendingReviewIssueIDs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
