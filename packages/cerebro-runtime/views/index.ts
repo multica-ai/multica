@@ -1,8 +1,17 @@
 export { AddRuntimeDialog } from "./components/add-runtime-dialog";
 export { RuntimeAccountsCard } from "./components/runtime-accounts-card";
 export { RuntimeAccountCell } from "./components/runtime-account-cell";
+// FIR-2669: Machine (computer name) column cell.
+export { RuntimeMachineCell } from "./components/runtime-machine-cell";
 // FIR-2669: configurable runtime list columns + full-field search.
 export { RuntimeColumnPicker } from "./components/runtime-column-picker";
+// FIR-2669: mobile card layout + computer/machine-name column.
+export {
+  RuntimeMobileList,
+  type RuntimeMobileRow,
+} from "./components/runtime-mobile-list";
+export { AgentMobileList } from "./components/agent-mobile-list";
+export { runtimeComputerName } from "./runtime-computer-name";
 export {
   useRuntimesViewStore,
   RUNTIME_COLUMN_KEYS,

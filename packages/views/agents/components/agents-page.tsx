@@ -81,7 +81,8 @@ import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
 // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account column reuses
 // the runtimes' Account cell; the search box + extra columns are flag-gated.
-import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — mobile stacked-card list.
+import { RuntimeAccountCell, AgentMobileList } from "@multica/cerebro-runtime/views";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 
@@ -1153,8 +1154,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
           >
+            {/* CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — mobile stacked cards surface enabled columns; the virtualized table hides below @2xl. */}
+            {extrasEnabled && (
+              <AgentMobileList rows={rows} className="@2xl:hidden" />
+            )}
             <ListGrid
-              className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)]`}
+              // CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — desktop-only when the mobile card layout is active.
+              className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)] ${extrasEnabled ? "hidden @2xl:grid" : ""}`}
               style={columnTrackVars(isColVisible)}
             >
               <AgentListHeader

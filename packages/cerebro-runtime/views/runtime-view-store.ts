@@ -18,16 +18,22 @@ import {
 // column (the primary at-a-glance signal, kept on every breakpoint), the owner
 // column (auto-shown only when the page has more than one owner), and the row
 // actions are structural and stay outside the picker.
-export type RuntimeColumnKey = "agents" | "cost" | "cli" | "account";
+// FIR-2669 follow-up: "machine" is the computer/hostname the runtime runs on.
+// A runtime name reads as "base (hostname)"; the name column shows only the
+// base, so the machine name is otherwise invisible. Opt-in via the picker.
+export type RuntimeColumnKey = "agents" | "cost" | "cli" | "account" | "machine";
 
-// Every column visible by default — the picker only ever hides. Jesper asked
-// to ADD the Account column, not to trim the existing set, so nothing starts
-// hidden (FIR-2669).
-export const RUNTIME_DEFAULT_HIDDEN_COLUMNS: RuntimeColumnKey[] = [];
+// Every existing column visible by default — the picker only ever hides. Jesper
+// asked to ADD the Account column, not to trim the existing set, so nothing
+// starts hidden. "machine" is the one exception: it is opt-in (default hidden)
+// so the default runtime layout is unchanged (FIR-2669).
+export const RUNTIME_DEFAULT_HIDDEN_COLUMNS: RuntimeColumnKey[] = ["machine"];
 
-// Order shown in the column picker. Account sits next to CLI so the identity
-// columns read together.
+// Order shown in the column picker. Machine sits first (it is the computer
+// name), then the workload/cost columns, then the identity columns (account +
+// CLI) which read together.
 export const RUNTIME_COLUMN_KEYS: RuntimeColumnKey[] = [
+  "machine",
   "agents",
   "cost",
   "account",

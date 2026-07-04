@@ -62,8 +62,11 @@ import {
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
 // CEREBRO-PATCH(runtime-list-columns): FIR-2669 — configurable columns + Account cell.
+// CEREBRO-PATCH(runtime-list-mobile-cards): FIR-2669 — mobile card list + computer-name.
 import {
   RuntimeAccountCell,
+  RuntimeMachineCell,
+  RuntimeMobileList,
   useRuntimesViewStore,
   type RuntimeColumnKey,
 } from "@multica/cerebro-runtime/views";
@@ -80,9 +83,10 @@ import { useT } from "../../i18n";
 // operation) is deliberately not offered.
 // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (see agents-page).
 // CEREBRO-PATCH(runtime-list-columns): FIR-2669 — Account track added before CLI.
+// CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine (computer) track before Account.
 const GRID_COLS =
   "grid-cols-[minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)] " +
-  "@2xl:grid-cols-[minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-account)_var(--rtc-cli)_var(--rtc-kebab)]";
+  "@2xl:grid-cols-[minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-machine)_var(--rtc-account)_var(--rtc-cli)_var(--rtc-kebab)]";
 
 const COLUMN_WIDTHS = {
   // Health folds the workload in as a suffix ("Healthy · 2 running") —
@@ -94,11 +98,13 @@ const COLUMN_WIDTHS = {
   cli: 112,
   // CEREBRO-PATCH(runtime-list-columns): FIR-2669 — Account column width.
   account: 180,
+  // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine column width.
+  machine: 160,
 } as const;
 
-// Fixed tracks (name min 140) plus gap-x-3 between the wide template's 8 tracks.
-// CEREBRO-PATCH(runtime-list-columns): FIR-2669 — 7 gaps after adding Account.
-const FIXED_TRACKS_WIDTH = 140 + 7 * 12;
+// Fixed tracks (name min 140) plus gap-x-3 between the wide template's tracks.
+// CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — 8 gaps after adding Machine.
+const FIXED_TRACKS_WIDTH = 140 + 8 * 12;
 
 // The kebab track is conditional like the owner column: on a healthy
 // local machine EVERY row's only action (delete) is hidden by the
@@ -122,6 +128,8 @@ function columnTrackVars(
     (showOwner ? COLUMN_WIDTHS.owner : 0) +
     w("agents") +
     w("cost") +
+    // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine in min-width sum.
+    w("machine") +
     w("account") +
     w("cli") +
     (showActions ? 28 : 0);
@@ -130,6 +138,8 @@ function columnTrackVars(
     "--rtc-owner": showOwner ? `${COLUMN_WIDTHS.owner}px` : "0px",
     "--rtc-agents": px("agents"),
     "--rtc-cost": px("cost"),
+    // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine track var.
+    "--rtc-machine": px("machine"),
     "--rtc-account": px("account"),
     "--rtc-cli": px("cli"),
     "--rtc-kebab": showActions ? "1.75rem" : "0px",
@@ -487,8 +497,9 @@ export function RuntimeList({
   // Account only exists when the flag is on. Flag off = original layout.
   const columnsEnabled = useFlagValue("cerebro_interface_columns");
   const hiddenColumns = useRuntimesViewStore((s) => s.hiddenColumns);
+  // CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine is opt-in like Account.
   const isVisible = (key: RuntimeColumnKey) =>
-    key === "account"
+    key === "account" || key === "machine"
       ? columnsEnabled && !hiddenColumns.includes(key)
       : columnsEnabled
         ? !hiddenColumns.includes(key)
@@ -545,9 +556,22 @@ export function RuntimeList({
   );
 
   return (
-    <div className="overflow-x-auto overflow-y-hidden @container">
+    // CEREBRO-PATCH(runtime-list-mobile-scroll): FIR-2669 — scroll vertically like the agents list (was overflow-y-hidden, which trapped the list in a fixed box on mobile).
+    <div className="min-h-0 flex-1 overflow-auto @container">
+      {/* CEREBRO-PATCH(runtime-list-mobile-cards): FIR-2669 — mobile stacked cards surface enabled columns; desktop table hides below @2xl. */}
+      {columnsEnabled && (
+        <RuntimeMobileList
+          rows={rows.map((r) => ({
+            runtime: r.runtime,
+            agentCount: r.workload.agentIds.length,
+          }))}
+          now={now}
+          className="@2xl:hidden"
+        />
+      )}
       <ListGrid
-        className={`${GRID_COLS} @2xl:min-w-[var(--rtc-minw)]`}
+        // CEREBRO-PATCH(runtime-list-mobile-cards): FIR-2669 — desktop-only when the mobile card layout is active.
+        className={`${GRID_COLS} @2xl:min-w-[var(--rtc-minw)] ${columnsEnabled ? "hidden @2xl:grid" : ""}`}
         // CEREBRO-PATCH(runtime-list-columns): FIR-2669 — pass column visibility.
         style={columnTrackVars(showOwner, showActions, isVisible)}
       >
@@ -574,6 +598,14 @@ export function RuntimeList({
           {isVisible("cost") ? (
             <ListGridHeaderCell className="hidden @2xl:flex" align="right">
               {t(($) => $.list.col_cost)}
+            </ListGridHeaderCell>
+          ) : (
+            <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+          )}
+          {/* CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine (computer) header. */}
+          {isVisible("machine") ? (
+            <ListGridHeaderCell className="hidden @2xl:flex">
+              {t(($) => $.list.col_machine)}
             </ListGridHeaderCell>
           ) : (
             <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -636,6 +668,14 @@ export function RuntimeList({
             {isVisible("cost") ? (
               <ListGridCell className="hidden @2xl:flex">
                 <CostCell runtimeId={row.runtime.id} />
+              </ListGridCell>
+            ) : (
+              <ListGridCell className="hidden px-0 @2xl:flex" />
+            )}
+            {/* CEREBRO-PATCH(runtime-list-machine-col): FIR-2669 — Machine (computer) cell. */}
+            {isVisible("machine") ? (
+              <ListGridCell className="hidden @2xl:flex">
+                <RuntimeMachineCell runtime={row.runtime} />
               </ListGridCell>
             ) : (
               <ListGridCell className="hidden px-0 @2xl:flex" />

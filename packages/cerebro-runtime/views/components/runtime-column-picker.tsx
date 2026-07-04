@@ -29,6 +29,7 @@ export function RuntimeColumnPicker() {
   const toggleColumn = useRuntimesViewStore((s) => s.toggleColumn);
 
   const COLUMN_LABELS: Record<RuntimeColumnKey, string> = {
+    machine: t(($) => $.list.col_machine),
     agents: t(($) => $.list.col_agents),
     cost: t(($) => $.list.col_cost),
     account: t(($) => $.list.col_account),
