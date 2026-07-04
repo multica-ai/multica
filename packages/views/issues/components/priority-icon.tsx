@@ -10,7 +10,8 @@ export function PriorityIcon({
   className?: string;
   inheritColor?: boolean;
 }) {
-  const cfg = PRIORITY_CONFIG[priority];
+  // CEREBRO-PATCH(priority-icon-enum-drift): an unrecognized priority (drifted/unknown server enum) falls back to "none" instead of crashing (FIR-2662).
+  const cfg = PRIORITY_CONFIG[priority] ?? PRIORITY_CONFIG.none;
 
   // "none" — simple horizontal dashes
   if (cfg.bars === 0) {

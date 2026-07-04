@@ -166,8 +166,9 @@ export function StatusIcon({
   className?: string;
   inheritColor?: boolean;
 }) {
-  const cfg = STATUS_CONFIG[status];
-  const Renderer = STATUS_RENDERERS[status];
+  // CEREBRO-PATCH(status-icon-enum-drift): an unrecognized status (drifted/unknown server enum) falls back to the "backlog" look instead of crashing the whole panel (FIR-2662).
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.backlog;
+  const Renderer = STATUS_RENDERERS[status] ?? STATUS_RENDERERS.backlog;
 
   return (
     <svg
