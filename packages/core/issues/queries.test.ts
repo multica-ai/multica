@@ -37,7 +37,7 @@ function makeIssue(idx: number): Issue {
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
     labels: [],
-    metadata: {},
+    metadata: {}, issue_type_id: null,
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
   };

@@ -81,6 +81,14 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  // Issue Types
+  IssueType,
+  CreateIssueTypeRequest,
+  UpdateIssueTypeRequest,
+  // Approvals
+  Approval,
+  CreateApprovalRequest,
+  ApprovalDecisionRequest,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -2440,6 +2448,114 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${workspaceId}/issues/${issueId}/reviews/assets/bulk-approve`, {
       method: "POST",
       body: JSON.stringify({ issue_id: issueId }),
+    });
+  }
+
+  // --- Issue Types ---
+
+  async listIssueTypes(workspaceId: string): Promise<IssueType[]> {
+    return this.fetch(`/api/issue-types`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async getIssueType(workspaceId: string, id: string): Promise<IssueType> {
+    return this.fetch(`/api/issue-types/${id}`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async createIssueType(workspaceId: string, data: CreateIssueTypeRequest): Promise<IssueType> {
+    return this.fetch(`/api/issue-types`, {
+      method: "POST",
+      headers: {
+        "X-Workspace-ID": workspaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateIssueType(workspaceId: string, id: string, data: UpdateIssueTypeRequest): Promise<IssueType> {
+    return this.fetch(`/api/issue-types/${id}`, {
+      method: "PATCH",
+      headers: {
+        "X-Workspace-ID": workspaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIssueType(workspaceId: string, id: string): Promise<void> {
+    return this.fetch(`/api/issue-types/${id}`, {
+      method: "DELETE",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async seedDefaultIssueTypes(workspaceId: string): Promise<IssueType[]> {
+    return this.fetch(`/api/issue-types/seed`, {
+      method: "POST",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  // --- Approvals ---
+
+  async listApprovalsByIssue(workspaceId: string, issueId: string): Promise<Approval[]> {
+    return this.fetch(`/api/issues/${issueId}/approvals`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async listPendingApprovals(workspaceId: string): Promise<Approval[]> {
+    return this.fetch(`/api/approvals/pending`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async getPendingApprovalCount(workspaceId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/approvals/pending-count`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async createApproval(workspaceId: string, issueId: string, data: CreateApprovalRequest): Promise<Approval> {
+    return this.fetch(`/api/issues/${issueId}/approvals`, {
+      method: "POST",
+      headers: {
+        "X-Workspace-ID": workspaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async approveApproval(workspaceId: string, approvalId: string, data: ApprovalDecisionRequest): Promise<Approval> {
+    return this.fetch(`/api/approvals/${approvalId}/approve`, {
+      method: "PATCH",
+      headers: {
+        "X-Workspace-ID": workspaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async rejectApproval(workspaceId: string, approvalId: string, data: ApprovalDecisionRequest): Promise<Approval> {
+    return this.fetch(`/api/approvals/${approvalId}/reject`, {
+      method: "PATCH",
+      headers: {
+        "X-Workspace-ID": workspaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
     });
   }
 }

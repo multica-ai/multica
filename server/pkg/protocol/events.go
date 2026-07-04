@@ -148,4 +148,14 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// Issue Type events
+	EventIssueTypeCreated = "issue_type:created"
+	EventIssueTypeUpdated = "issue_type:updated"
+	EventIssueTypeDeleted = "issue_type:deleted"
+
+	// Approval events
+	EventApprovalRequested = "approval:requested"
+	EventApprovalApproved  = "approval:approved"
+	EventApprovalRejected  = "approval:rejected"
 )

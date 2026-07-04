@@ -339,7 +339,7 @@ const issueDefaults = {
   project_id: null,
   position: 0,
   stage: null,
-  metadata: {},
+  metadata: {}, issue_type_id: null,
 };
 
 const mockIssues: Issue[] = [

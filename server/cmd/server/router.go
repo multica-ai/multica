@@ -1001,6 +1001,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Patch("/comments/{commentId}/resolve", h.ResolveReviewComment)
 						r.Patch("/comments/{commentId}/unresolve", h.UnresolveReviewComment)
 					})
+					
+					// Approvals
+					r.Get("/approvals", h.ListApprovalsByIssue)
+					r.Post("/approvals", h.CreateApproval)
+
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
@@ -1021,6 +1026,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+				})
+			})
+
+			r.Route("/api/issue-types", func(r chi.Router) {
+				r.Get("/", h.ListIssueTypes)
+				r.Post("/", h.CreateIssueType)
+				r.Post("/seed", h.SeedDefaultIssueTypes)
+				r.Route("/{issueTypeId}", func(r chi.Router) {
+					r.Get("/", h.GetIssueType)
+					r.Patch("/", h.UpdateIssueType)
+					r.Delete("/", h.DeleteIssueType)
+				})
+			})
+
+			r.Route("/api/approvals", func(r chi.Router) {
+				r.Get("/pending", h.ListPendingApprovals)
+				r.Get("/pending-count", h.GetPendingApprovalCount)
+				r.Route("/{approvalId}", func(r chi.Router) {
+					r.Patch("/approve", h.ApproveApproval)
+					r.Patch("/reject", h.RejectApproval)
 				})
 			})
 

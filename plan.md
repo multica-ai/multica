@@ -287,15 +287,15 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 2.1 Custom Issue Types
 
-- [ ] **DB Migration:** Add `issue_type` column to issues (or separate `issue_types` table for user-defined types)
-- [ ] **Default types:** Task, Bug, Feature, Story, Creative Brief, Content Piece, Campaign
+- [x] **DB Migration:** Add `issue_type` column to issues (or separate `issue_types` table for user-defined types)
+- [x] **Default types:** Task, Bug, Feature, Story, Creative Brief, Content Piece, Campaign
 - [ ] **Custom fields:** Allow per-type custom fields (text, date, select, URL)
 - [ ] **Views:** Issue type selector in create/edit forms
 - [ ] **Views:** Type-based icons and color badges on board cards
 
 ### 2.2 Approval Workflows
 
-- [ ] **DB Migration:** Create `approvals` table
+- [x] **DB Migration:** Create `approvals` table
   ```sql
   CREATE TABLE approvals (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -307,7 +307,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   ```
-- [ ] **Backend:** Request approval, approve, reject endpoints
+- [x] **Backend:** Request approval, approve, reject endpoints
 - [ ] **Views:** Approval request UI on issues
 - [ ] **Views:** "Pending My Approval" inbox filter
 - [ ] **Notifications:** Email/in-app notification when approval requested or decision made

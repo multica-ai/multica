@@ -24,6 +24,7 @@ export interface CreateIssueRequest {
   due_date?: string;
   attachment_ids?: string[];
   assignees?: IssueAssigneeInput[];
+  issue_type_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -53,6 +54,7 @@ export interface UpdateIssueRequest {
    *  context (MUL-3375). Only consumed when a run actually starts. Control
    *  field — strip from optimistic cache patches. */
   handoff_note?: string;
+  issue_type_id?: string | null;
 }
 
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means

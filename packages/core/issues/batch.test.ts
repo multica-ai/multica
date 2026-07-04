@@ -22,7 +22,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     stage: null,
     start_date: null,
     due_date: null,
-    metadata: {},
+    metadata: {}, issue_type_id: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

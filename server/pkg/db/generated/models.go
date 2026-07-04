@@ -126,6 +126,20 @@ type AgentTaskQueue struct {
 	RuntimeConnectedApps []byte `json:"runtime_connected_apps"`
 }
 
+type Approval struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	RequesterType string             `json:"requester_type"`
+	RequesterID   pgtype.UUID        `json:"requester_id"`
+	ApproverType  string             `json:"approver_type"`
+	ApproverID    pgtype.UUID        `json:"approver_id"`
+	Status        string             `json:"status"`
+	Comment       pgtype.Text        `json:"comment"`
+	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Attachment struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -508,6 +522,7 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
+	IssueTypeID        pgtype.UUID        `json:"issue_type_id"`
 }
 
 type IssueAssignee struct {
@@ -565,6 +580,19 @@ type IssueSubscriber struct {
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
+}
+
+type IssueType struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	Icon        string             `json:"icon"`
+	Color       string             `json:"color"`
+	IsDefault   bool               `json:"is_default"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LarkBindingToken struct {

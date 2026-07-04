@@ -197,3 +197,14 @@ export type {
   CreateBillingPortalSessionResponse,
 } from "./billing";
 export type * from "./review";
+export type {
+  IssueType,
+  CreateIssueTypeRequest,
+  UpdateIssueTypeRequest,
+} from "./issue-type";
+export type {
+  Approval,
+  ApprovalStatus,
+  CreateApprovalRequest,
+  ApprovalDecisionRequest,
+} from "./approval";
