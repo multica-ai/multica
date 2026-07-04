@@ -20,6 +20,9 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import { motion } from "motion/react";
+import { cn } from "@multica/ui/lib/utils";
+import { FileText, Cpu } from "lucide-react";
 
 const MAX_ITEMS = 20;
 
@@ -127,30 +130,48 @@ export const SlashCommandList = forwardRef<
       : item.description;
 
   return (
-    <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      className="flex max-h-[300px] w-64 flex-col overflow-y-auto rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-xl shadow-black/5"
+    >
       {items.map((item, index) => {
-        const description = describe(item);
+        const isBuiltin = !!item.descriptionKey;
+        const Icon = isBuiltin ? FileText : Cpu;
+        const desc = describe(item);
+
         return (
           <button
             key={item.id}
             ref={(el) => {
               itemRefs.current[index] = el;
             }}
-            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
-              selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
-            }`}
+            type="button"
+            className={cn(
+              "flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm cursor-pointer transition-colors outline-none",
+              index === selectedIndex
+                ? "bg-accent text-accent-foreground"
+                : "hover:bg-accent/50",
+            )}
             onClick={() => selectItem(index)}
           >
-            <span className="font-medium">/{item.label}</span>
-            {description && (
-              <span className="truncate text-muted-foreground">
-                {description}
-              </span>
-            )}
+            <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded bg-muted/60 text-muted-foreground">
+              <Icon className="size-3.5" />
+            </div>
+            <div className="flex flex-col overflow-hidden">
+              <span className="truncate font-medium">{item.label}</span>
+              {desc && (
+                <span className="truncate text-xs text-muted-foreground/80">
+                  {desc}
+                </span>
+              )}
+            </div>
           </button>
         );
       })}
-    </div>
+    </motion.div>
   );
 });
 
