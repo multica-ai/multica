@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,7 +100,7 @@ func TestDiscoverAPIEndpoints_FromWellKnownPath(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	eps := discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{})
+	eps, _ := discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{})
 	if len(eps) != 2 {
 		t.Fatalf("expected 2 discovered endpoints, got %d: %+v", len(eps), eps)
 	}
@@ -120,7 +121,7 @@ func TestDiscoverAPIEndpoints_SendsAuthHeaders(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{BearerToken: "secret-token"})
+	_, _ = discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{BearerToken: "secret-token"})
 	if sawBearer != "Bearer secret-token" {
 		t.Fatalf("expected bearer header forwarded to spec fetch, got %q", sawBearer)
 	}
@@ -134,8 +135,71 @@ func TestDiscoverAPIEndpoints_NoSpecReturnsNil(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if eps := discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{}); eps != nil {
-		t.Fatalf("expected nil when no spec is served, got %+v", eps)
+	if eps, rejection := discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{}); eps != nil || rejection != nil {
+		t.Fatalf("expected nil endpoints and no rejection when no spec is served, got %+v / %+v", eps, rejection)
+	}
+}
+
+func TestDiscoverAPIEndpoints_SurfacesAuthRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/openapi.json" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Missing or invalid credential"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	eps, rejection := discoverAPIEndpoints(ctx, srv.Client(), srv.URL, AuthConfig{BearerToken: "bad-key"})
+	if eps != nil {
+		t.Fatalf("expected no endpoints, got %+v", eps)
+	}
+	if rejection == nil {
+		t.Fatal("expected an auth rejection to be surfaced")
+	}
+	if rejection.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rejection.StatusCode)
+	}
+	if rejection.URL != srv.URL+"/openapi.json" {
+		t.Fatalf("unexpected rejection URL %q", rejection.URL)
+	}
+}
+
+func TestResolveExplicitSpec_AuthRejectedURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	eps, errMsg := resolveExplicitSpec(ctx, srv.Client(), srv.URL, "", AuthConfig{BearerToken: "bad-key"})
+	if eps != nil {
+		t.Fatalf("expected no endpoints, got %+v", eps)
+	}
+	if !strings.Contains(errMsg, "HTTP 401") || !strings.Contains(errMsg, "credential") {
+		t.Fatalf("expected credential-rejection message with status, got %q", errMsg)
+	}
+}
+
+func TestResolveExplicitSpec_HTMLLoginWall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>Sign in</title></head><body>login</body></html>"))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	eps, errMsg := resolveExplicitSpec(ctx, srv.Client(), srv.URL, "", AuthConfig{})
+	if eps != nil {
+		t.Fatalf("expected no endpoints, got %+v", eps)
+	}
+	if !strings.Contains(errMsg, "HTML page") || !strings.Contains(errMsg, "login wall") {
+		t.Fatalf("expected HTML login-wall message, got %q", errMsg)
 	}
 }
 

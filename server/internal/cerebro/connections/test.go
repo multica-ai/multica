@@ -487,9 +487,18 @@ func testAPIConnection(ctx context.Context, client *http.Client, url string, aut
 
 	// Discover the API's endpoints from its OpenAPI/Swagger spec (TECH-3410).
 	// Best-effort: a reachable API with no machine-readable spec still tests
-	// green — the admin just adds endpoints by hand.
-	if eps := discoverAPIEndpoints(ctx, client, url, auth); len(eps) > 0 {
+	// green — the admin just adds endpoints by hand. A spec candidate that
+	// answered 401/403 is surfaced explicitly: the admin's credential — not the
+	// URL — is what needs fixing, and hiding that behind "no spec found" sends
+	// them down the wrong path (FIR-2640).
+	eps, rejection := discoverAPIEndpoints(ctx, client, url, auth)
+	if len(eps) > 0 {
 		result.Endpoints = eps
+	} else if rejection != nil {
+		result.Error = fmt.Sprintf(
+			"found an API spec at %s but it rejected the connection's credential (HTTP %d) — check the Bearer token / API key, then test again",
+			rejection.URL, rejection.StatusCode,
+		)
 	}
 	return result
 }
