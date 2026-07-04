@@ -343,7 +343,7 @@ function ConnectionFormBody({
         <form
           id="conn-form"
           onSubmit={(e) => void handleSubmit(e)}
-          className="mx-auto max-w-2xl px-6 py-8 space-y-6"
+          className="w-full px-6 py-8 space-y-6"
         >
           {/* Name (new only) */}
           {isCreate && (
@@ -1023,7 +1023,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />
         </div>
-        <div className="mx-auto max-w-2xl px-6 py-8 space-y-4 w-full">
+        <div className="w-full px-6 py-8 space-y-4">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
