@@ -1165,3 +1165,47 @@ describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
     expect(screen.queryByRole("tab", { name: "Credentials" })).not.toBeInTheDocument();
   });
 });
+
+describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8)", () => {
+  function renderRedesigned(view: "agent" | "runtime" = "agent") {
+    // Only the redesign flag is on; every other flag stays off.
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_agent_page_redesign",
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view={view} subjectId="agent-1" runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders grouped capability cards instead of the flat table when the flag is on", async () => {
+    renderRedesigned("agent");
+    // The capability-card container replaces the <table>.
+    expect(await screen.findByTestId("capability-catalog")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    // Every tool still shows, just grouped into cards.
+    expect(screen.getByText("Post Slack message")).toBeInTheDocument();
+    expect(screen.getByText("Restart deploy")).toBeInTheDocument();
+    expect(screen.getByText("List issues")).toBeInTheDocument();
+  });
+
+  it("keeps the write path: picking a decision still writes the agent layer", async () => {
+    const user = userEvent.setup();
+    renderRedesigned("agent");
+    const slackRow = await screen.findByTestId("tool-card-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Ask" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({
+        tool_key: "slack.post_message",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "ask",
+      });
+    });
+  });
+});

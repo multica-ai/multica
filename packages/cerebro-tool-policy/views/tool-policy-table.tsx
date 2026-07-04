@@ -103,6 +103,7 @@ import {
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
 import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
+import { CapabilityCatalog } from "./capability-catalog";
 
 /**
  * The actor surfaces. Each page renders the same catalog but authors a different
@@ -313,6 +314,14 @@ export function ToolPolicyTable({
   // on; gate them on the same flag the backend gates the rows with so the
   // Credentials type is a consistent surface the moment an admin enables it.
   const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
+  // FIR-2670 #8: the redesigned "Tools & permissions" look — the flat catalog
+  // rendered as grouped capability cards. Presentation only; every verdict,
+  // filter, and write path below is unchanged. Gated by the same preview flag as
+  // the rest of the agent-page redesign so production keeps the classic table
+  // until the flag flips, and every surface that renders this shared component
+  // (agent Tools tab, runtime, group, member, autopilot, connections,
+  // collections, settings) picks up the new look at once when it does.
+  const redesign = useFeatureFlag("cerebro_agent_page_redesign");
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
@@ -496,6 +505,53 @@ export function ToolPolicyTable({
     }
   }
 
+  // The per-row Decision cell — DecisionControl + ConditionControl + the
+  // contextual configure buttons. Shared verbatim between the classic desktop
+  // table and the redesigned capability cards so the two views can never drift
+  // in behavior; only the surrounding layout differs.
+  const renderDecision = (row: ToolPolicyRow) => (
+    <>
+      <DecisionControl
+        row={row}
+        editLayer={editLayer}
+        disabled={busy}
+        onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
+      />
+      <ConditionControl
+        row={row}
+        editLayer={editLayer}
+        disabled={busy}
+        onChange={(c) => applyCondition(row, c)}
+        wsId={wsId}
+        argScopeConfig={argScopeConfig}
+      />
+      {view === "agent" && subjectId ? (
+        <FirtalRegistryRowConfigure
+          toolKey={row.tool_key}
+          agentId={subjectId}
+          variant="outline"
+        />
+      ) : null}
+      {row.source === "connection" ? (
+        <ConnectionRowConfigure
+          connectionKey={row.tool_key}
+          connectionLabel={row.title || row.tool_key}
+          toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
+          connectionRow={row}
+          editLayer={editLayer}
+          subjectId={subjectId}
+        />
+      ) : null}
+      <FirtalRegistryDataSourceConfigure
+        toolKey={row.tool_key}
+        toolLabel={row.title || row.tool_key}
+        sourceRows={registryDataSourcesByKey.get(row.tool_key) ?? []}
+        editLayer={editLayer}
+        subjectId={subjectId}
+      />
+    </>
+  );
+
   return (
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
@@ -550,7 +606,11 @@ export function ToolPolicyTable({
             />
           )}
 
-          {filtered.length > 0 && (
+          {filtered.length > 0 && redesign && (
+            <CapabilityCatalog rows={filtered} renderDecision={renderDecision} />
+          )}
+
+          {filtered.length > 0 && !redesign && (
           <>
           {/* Desktop: the full sortable catalog table. */}
           <div className="hidden overflow-hidden rounded-lg border md:block">
