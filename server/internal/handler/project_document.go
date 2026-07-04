@@ -106,7 +106,7 @@ func (h *Handler) CreateProjectDocument(w http.ResponseWriter, r *http.Request) 
 		Title:     req.Title,
 		Content:   req.Content,
 		SortOrder: req.SortOrder,
-		CreatedBy: requester.UserID,
+		CreatedBy: requester.ID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create project document")

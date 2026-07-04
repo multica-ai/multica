@@ -98,7 +98,7 @@ func (h *Handler) AddProjectMember(w http.ResponseWriter, r *http.Request) {
 		ProjectID: projectID,
 		MemberID:  memberUUID,
 		Role:      req.Role,
-		InvitedBy: requester.UserID,
+		InvitedBy: requester.ID,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {

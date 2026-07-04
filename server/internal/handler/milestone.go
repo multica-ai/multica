@@ -138,7 +138,7 @@ func (h *Handler) CreateMilestone(w http.ResponseWriter, r *http.Request) {
 		DueDate:     dueDate,
 		Status:      req.Status,
 		SortOrder:   req.SortOrder,
-		CreatedBy:   requester.UserID,
+		CreatedBy:   requester.ID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create milestone")

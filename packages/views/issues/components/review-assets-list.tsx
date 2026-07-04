@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Video, Image as ImageIcon, Check, Clock, AlertCircle, Loader2 } from "lucide-react";
 import type { ReviewAsset } from "@multica/core/types";
@@ -14,6 +14,7 @@ interface ReviewAssetsListProps {
 
 export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAssetsListProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const { data: assets, isLoading } = useQuery(listReviewAssetsOptions(workspaceId, issueId));
   const bulkApprove = useBulkApproveReviewAssets();
   const uploadAsset = useReviewAssetUpload();
@@ -36,10 +37,22 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
 
   const hasPending = latestAssets.some(a => a.status === "pending" || a.status === "changes_requested");
 
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      uploadAsset.mutate({ workspaceId, issueId, file });
+      setUploadProgress(0);
+      uploadAsset.mutate(
+        { 
+          workspaceId, 
+          issueId, 
+          file,
+          onProgress: (p) => setUploadProgress(p),
+        },
+        {
+          onSettled: () => setUploadProgress(null)
+        }
+      );
     }
     // reset
     if (fileInputRef.current) {
@@ -61,6 +74,11 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
           Upload Asset
         </Button>
         <input type="file" ref={fileInputRef} className="hidden" accept="video/*,image/*" onChange={handleFileChange} />
+        {uploadProgress !== null && (
+          <div className="w-full max-w-sm mt-4 bg-gray-200 rounded-full h-2.5">
+            <div className="bg-blue-600 h-2.5 rounded-full transition-all" style={{ width: `${uploadProgress}%` }}></div>
+          </div>
+        )}
       </div>
     );
   }
@@ -82,8 +100,17 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadAsset.isPending}>
-            {uploadAsset.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
-            Upload Asset
+            {uploadAsset.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                {uploadProgress !== null ? `Uploading ${Math.round(uploadProgress)}%` : "Uploading..."}
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4 mr-2" />
+                Upload Asset
+              </>
+            )}
           </Button>
           <input type="file" ref={fileInputRef} className="hidden" accept="video/*,image/*" onChange={handleFileChange} />
         </div>
