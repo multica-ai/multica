@@ -38,9 +38,9 @@ The Multica server scans every 30 seconds. Two kinds of timeout trigger a failur
 | Situation | Timeout |
 |---|---|
 | Dispatched but never started (daemon picked it up but didn't launch the AI tool) | **5 minutes** |
-| Running too long | **2.5 hours** |
+| Running too long | **6 hours** by default; override with `MULTICA_TASK_RUNNING_TIMEOUT` |
 
-Both timeouts use failure reason `timeout` and **retry automatically** (next section). For the related runtime-missing check, see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+Both timeouts use failure reason `timeout` and **retry automatically** (next section). `MULTICA_TASK_RUNNING_TIMEOUT` accepts a Go duration string such as `8h` or `30m`. For the related runtime-missing check, see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
 
 ## Which failures retry automatically, which don't
 

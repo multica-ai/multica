@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -36,13 +37,15 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
-	// coarse server-side backstop keyed on started_at (it does NOT look at task
-	// activity) — mainly for runs whose daemon died without reporting. The
-	// daemon itself decides stuck-vs-long-running by activity (idle/tool
-	// watchdog), so this only needs to sit generously above any realistic single
-	// run rather than track a per-run wall-clock cap (MUL-3064).
-	runningTimeoutSeconds = 9000.0
+	// defaultRunningTimeoutSeconds is the fallback for the server-side coarse
+	// running-task timeout. It is a backstop keyed on started_at (it does NOT
+	// look at task activity) — mainly for runs whose daemon died without
+	// reporting. The daemon itself decides stuck-vs-long-running by activity
+	// (idle/tool watchdog), so this only needs to sit generously above any
+	// realistic single run rather than track a per-run wall-clock cap
+	// (MUL-3064). Research-style tasks can legitimately run for several hours,
+	// so the default is 6 hours.
+	defaultRunningTimeoutSeconds = 6 * 3600.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -61,6 +64,29 @@ const (
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
 )
+
+// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
+// It can be overridden at process startup via MULTICA_TASK_RUNNING_TIMEOUT
+// (Go duration string, e.g. "8h"). The daemon's activity-based watchdogs
+// remain the primary protection against stuck tasks; this value is only the
+// coarse server-side backstop.
+var runningTimeoutSeconds = resolveRunningTimeout(defaultRunningTimeoutSeconds)
+
+// resolveRunningTimeout parses MULTICA_TASK_RUNNING_TIMEOUT and falls back to
+// defaultSeconds when the variable is missing, empty, or not a positive
+// duration.
+func resolveRunningTimeout(defaultSeconds float64) float64 {
+	v := os.Getenv("MULTICA_TASK_RUNNING_TIMEOUT")
+	if v == "" {
+		return defaultSeconds
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Warn("task sweeper: invalid MULTICA_TASK_RUNNING_TIMEOUT, using default", "value", v, "error", err)
+		return defaultSeconds
+	}
+	return d.Seconds()
+}
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.

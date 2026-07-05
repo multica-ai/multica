@@ -689,6 +689,31 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 }
 
+func TestResolveRunningTimeout(t *testing.T) {
+	// Default is 6 hours.
+	if got := resolveRunningTimeout(defaultRunningTimeoutSeconds); got != 6*3600.0 {
+		t.Fatalf("expected default 6h (%.0fs), got %.0fs", 6*3600.0, got)
+	}
+
+	// Valid env override.
+	t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", "8h")
+	if got := resolveRunningTimeout(defaultRunningTimeoutSeconds); got != 8*3600.0 {
+		t.Fatalf("expected 8h (%.0fs), got %.0fs", 8*3600.0, got)
+	}
+
+	// Invalid env falls back to default.
+	t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", "not-a-duration")
+	if got := resolveRunningTimeout(defaultRunningTimeoutSeconds); got != defaultRunningTimeoutSeconds {
+		t.Fatalf("expected fallback default %.0fs, got %.0fs", defaultRunningTimeoutSeconds, got)
+	}
+
+	// Non-positive duration falls back to default.
+	t.Setenv("MULTICA_TASK_RUNNING_TIMEOUT", "-1h")
+	if got := resolveRunningTimeout(defaultRunningTimeoutSeconds); got != defaultRunningTimeoutSeconds {
+		t.Fatalf("expected fallback default %.0fs, got %.0fs", defaultRunningTimeoutSeconds, got)
+	}
+}
+
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")

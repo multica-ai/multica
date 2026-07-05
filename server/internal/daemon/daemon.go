@@ -1822,8 +1822,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 
 		// Tell the server about any tasks the previous daemon process was
 		// running on these runtimes. Without this, an issue can stay stuck
-		// at in_progress until the slow heartbeat sweeper or the in-flight
-		// task timeout (2.5h) kicks in.
+		// at in_progress until the slow heartbeat sweeper or the server-side
+		// running timeout (default 6h) kicks in.
 		for _, rid := range runtimeIDs {
 			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
 				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)

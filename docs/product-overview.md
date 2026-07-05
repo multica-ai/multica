@@ -314,7 +314,7 @@ Agent 是 Multica 的灵魂。几乎所有功能都围绕"如何让一个 agent 
 - **注册**：daemon 启动时 POST `/api/daemon/register` 得到 runtime ID
 - **在线**：15 秒一次心跳
 - **离线**：如果 server 45 秒没收到心跳，把 runtime 标记为离线（server 后台 sweeper 每 30 秒巡检）
-- **孤儿任务回收**：超过 5 分钟还在 dispatched 或超过 2.5 小时还在 running 的任务，sweeper 会把它标记为失败
+- **孤儿任务回收**：超过 5 分钟还在 dispatched 或超过 6 小时（可用 `MULTICA_TASK_RUNNING_TIMEOUT` 覆盖）还在 running 的任务，sweeper 会把它标记为失败
 - **长期离线 GC**：7 天没心跳且没活跃 agent 的 runtime 会被回收
 
 #### CLI 与 Daemon 的关系

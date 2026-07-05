@@ -19,8 +19,8 @@ import (
 //
 // This is the targeted fix for "issue stuck at in_progress when daemon
 // restarts mid-task": the runtime heartbeat sweeper takes up to 75s + the
-// in-process task timeout (2.5h) to notice such tasks; the daemon itself
-// knows the moment it comes back up, so we let it report orphan recovery.
+// server-side running timeout (default 6h) to notice such tasks; the daemon
+// itself knows the moment it comes back up, so we let it report orphan recovery.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
