@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -511,6 +512,91 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// DingTalk bot installations — the scan-to-create device flow
+	// ("一键创建钉钉应用" QR install, oapi.dingtalk.com /app/registration/*).
+	// Gated on MULTICA_DINGTALK_SECRET_KEY, the at-rest key for the
+	// per-installation client_secret. Each installation is a per-agent
+	// org-internal app minted in the scanning user's own org; its Stream
+	// Mode connection is supervised like the Lark/Slack channels.
+	if dtKey, err := secretbox.LoadKey("MULTICA_DINGTALK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(dtKey)
+		if err != nil {
+			slog.Error("dingtalk: secretbox.New failed; dingtalk bot integration disabled", "error", err)
+		} else {
+			installSvc, ierr := dingtalk.NewInstallationService(queries, box)
+			if ierr != nil {
+				slog.Error("dingtalk: InstallationService init failed; dingtalk bot integration disabled", "error", ierr)
+			} else {
+				h.DingTalkInstallations = installSvc
+
+				// Inbound channel (DingTalk Stream Mode). The registered Factory
+				// makes the engine.Supervisor open one Stream connection per
+				// active dingtalk installation; the ResolverSet runs the shared
+				// inbound pipeline (identity binding, dedup, chat session,
+				// /issue, run trigger) over the generic channel_* tables.
+				dtMessenger := dingtalk.NewRobotMessenger(os.Getenv("DINGTALK_OPENAPI_BASE"), os.Getenv("DINGTALK_OAPI_BASE"), nil)
+				dtBindingSvc := dingtalk.NewBindingTokenService(queries, pool)
+				h.DingTalkBindingTokens = dtBindingSvc
+				dtReplier := dingtalk.NewOutboundReplier(dingtalk.OutboundReplierConfig{
+					Binding: dtBindingSvc,
+					// The bind link (/dingtalk/bind) is a web-app page, so it must
+					// use the app URL, NOT MULTICA_PUBLIC_URL. Mirrors Slack/Lark.
+					AppURL: appURLFromEnv(),
+					Logger: slog.Default(),
+				})
+				// "Processing" emotion on ingested messages, cleared when the
+				// reply lands (chat-done / task-failed via Outbound below).
+				dtTyping := dingtalk.NewTypingIndicatorManager(dtMessenger, box.Open, queries, slog.Default())
+				// Directory auto-bind: an unbound org member is matched to
+				// their Multica account through the corp directory (unionid /
+				// profile email), so the explicit "click to bind" prompt is
+				// only the fallback.
+				dtAutoBinder := dingtalk.NewAutoBinder(queries, dtMessenger, box.Open, slog.Default())
+				channelRouter.Register(dingtalk.TypeDingtalk, dingtalk.NewDingTalkResolverSet(queries, pool, dtReplier, dingtalk.NewTypingNotifier(dtTyping), dtAutoBinder))
+				dingtalk.NewOutbound(queries, box.Open, dtMessenger, dtTyping, slog.Default()).Register(bus)
+				dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
+					Decrypt:     box.Open,
+					Logger:      slog.Default(),
+					OpenAPIBase: os.Getenv("DINGTALK_OPENAPI_BASE"),
+					Messenger:   dtMessenger,
+				})
+				slog.Info("dingtalk inbound pipeline wired", "connector", "stream-mode")
+
+				// Device-flow registration. The base URL override exists for
+				// staging/mock endpoints; the optional source label is a
+				// DingTalk-assigned partner value (empty omits it, which the
+				// protocol supports).
+				regClient := dingtalk.NewRegistrationClient(dingtalk.RegistrationConfig{
+					BaseURL: strings.TrimSpace(os.Getenv("MULTICA_DINGTALK_REGISTRATION_BASE_URL")),
+					Source:  strings.TrimSpace(os.Getenv("MULTICA_DINGTALK_REGISTRATION_SOURCE")),
+				})
+				// Verifier: exchange the freshly minted credentials for an app
+				// access token before committing them, so a half-created app
+				// surfaces as a clean install error instead of a dead row.
+				verifier := dingtalk.NewCredentialVerifier(os.Getenv("DINGTALK_OPENAPI_BASE"), nil)
+				regSvc, rerr := dingtalk.NewRegistrationService(
+					dingtalk.RegistrationServiceConfig{Logger: slog.Default()},
+					regClient,
+					installSvc,
+					queries,
+					verifier,
+				)
+				if rerr != nil {
+					slog.Error("dingtalk: RegistrationService init failed; install disabled", "error", rerr)
+				} else {
+					// Publish dingtalk_installation:created at row-commit time so
+					// the connection badge refreshes on every workspace client, not
+					// just the tab that polls the install status to success.
+					regSvc.SetEventBus(bus)
+					h.DingTalkRegistration = regSvc
+					slog.Info("dingtalk device-flow install enabled")
+				}
+			}
+		}
+	} else {
+		slog.Info("dingtalk bot integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -880,6 +966,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 				})
+
+				// DingTalk integration. Same admin/member split as Lark and
+				// Slack: listing is member-visible so the Integrations tab
+				// renders connection state for everyone; install / revoke
+				// require admin.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
+					// Scan-to-create device flow. Begin opens a new
+					// registration session against DingTalk and returns
+					// the QR-code URL; the frontend dialog then polls
+					// /install/{sessionId}/status until success or
+					// terminal failure.
+					r.Post("/dingtalk/install/begin", h.BeginDingTalkInstall)
+					r.Get("/dingtalk/install/{sessionId}/status", h.GetDingTalkInstallStatus)
+				})
 			})
 		})
 
@@ -896,6 +1002,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// logged-in user (from the session) is bound to the Slack id the token
 		// carries.
 		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
+		// DingTalk binding-token redemption. Same rationale as Lark/Slack:
+		// not workspace-scoped — the redemption itself mints the binding row
+		// for the logged-in user.
+		r.Post("/api/dingtalk/binding/redeem", h.RedeemDingTalkBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in

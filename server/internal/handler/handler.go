@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -197,7 +198,22 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
-	cfg          Config
+	// DingTalk bot installations (scan-to-create device flow). All three
+	// are nil when the DingTalk master key (MULTICA_DINGTALK_SECRET_KEY)
+	// is unset; the corresponding HTTP handlers return 503 in that case.
+	// Wired in cmd/server/router.go after handler.New.
+	DingTalkInstallations *dingtalk.InstallationService
+	// DingTalkRegistration owns the device-flow install lifecycle: begin
+	// a registration session against oapi.dingtalk.com, poll, and on
+	// success write the dingtalk channel_installation row. Nil when the
+	// at-rest key is unset or the RegistrationService failed to
+	// construct at boot.
+	DingTalkRegistration *dingtalk.RegistrationService
+	// DingTalkBindingTokens mints/redeems the user-binding tokens behind
+	// the "link your DingTalk account" prompt. Nil unless the DingTalk
+	// bot integration is configured (MULTICA_DINGTALK_SECRET_KEY set).
+	DingTalkBindingTokens *dingtalk.BindingTokenService
+	cfg                   Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
