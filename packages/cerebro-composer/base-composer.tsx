@@ -14,6 +14,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useId,
   useImperativeHandle,
   useRef,
@@ -30,7 +31,9 @@ import {
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
+  useAttachmentPreview,
 } from "@multica/views/editor";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -43,6 +46,8 @@ import {
   TranscribingSkeleton,
   type DictationStatus,
 } from "@multica/cerebro-dictation";
+import { ComposerImageTray } from "./composer-image-tray";
+import { useImageTray, serializeTrayImages } from "./use-image-tray";
 
 /**
  * Draft persistence handle injected by the preset. Comment/channel surfaces
@@ -281,10 +286,14 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   // regardless of the frame prop, otherwise it would be unreadable.
   const showFrame = frame || (isFloating && pin === "fixed");
 
-  const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
-    enabled: !disabled,
-  });
+  // Image tray (FIR-2693): images collect as numbered thumbnails above the
+  // input instead of landing inline. Flag-gated so it's a workspace-level
+  // kill-switch. When on, this composer owns drop + paste of image files (see
+  // the capture-phase listeners below) so ProseMirror never inserts them inline.
+  const imageTrayEnabled = useFeatureFlag("cerebro_composer_image_tray");
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [trayDragOver, setTrayDragOver] = useState(false);
+  const preview = useAttachmentPreview();
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -297,11 +306,118 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
     [uploadWithToast, uploadIssueId, trackAttachmentIds],
   );
 
+  const tray = useImageTray(handleUpload);
+
+  // Route picked/dropped files: images → tray, everything else → inline card.
+  const routeFiles = useCallback(
+    (files: File[]) => {
+      const images = files.filter((f) => f.type.startsWith("image/"));
+      const others = files.filter((f) => !f.type.startsWith("image/"));
+      if (images.length) tray.addFiles(images);
+      others.forEach((f) => editorRef.current?.uploadFile(f));
+    },
+    [tray],
+  );
+
+  // Legacy drop path (flag off) inserts every dropped file inline. When the tray
+  // is on we disable it and take over drop/paste via native capture listeners.
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    enabled: !disabled && !imageTrayEnabled,
+  });
+
+  // Refs so the capture-phase listeners stay attached across renders without
+  // re-subscribing (they read the latest tray / router through the ref).
+  const routeFilesRef = useRef(routeFiles);
+  routeFilesRef.current = routeFiles;
+  const trayAddRef = useRef(tray.addFiles);
+  trayAddRef.current = tray.addFiles;
+
+  // Capture-phase drop/paste on the field box. Capturing on the box (an ancestor
+  // of ProseMirror's contenteditable) lets us stopPropagation BEFORE the editor's
+  // own handlers fire, so image files divert to the tray instead of being
+  // inserted inline — without patching the upstream editor extension.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || !imageTrayEnabled || disabled) return;
+
+    const hasFiles = (dt: DataTransfer | null) =>
+      !!dt && Array.from(dt.types).includes("Files");
+
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      setTrayDragOver(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!el.contains(e.relatedTarget as Node)) setTrayDragOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      setTrayDragOver(false);
+      const files = e.dataTransfer?.files;
+      if (!files?.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      routeFilesRef.current(Array.from(files));
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      const images = files
+        ? Array.from(files).filter((f) => f.type.startsWith("image/"))
+        : [];
+      if (images.length === 0) return;
+      // Don't hijack a normal text paste that merely carries an image too.
+      if (e.clipboardData?.getData("text/plain")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      trayAddRef.current(images);
+    };
+    const clearDrag = () => setTrayDragOver(false);
+
+    el.addEventListener("dragenter", onDragEnter, true);
+    el.addEventListener("dragover", onDragOver, true);
+    el.addEventListener("dragleave", onDragLeave, true);
+    el.addEventListener("drop", onDrop, true);
+    el.addEventListener("paste", onPaste, true);
+    document.addEventListener("drop", clearDrag);
+    document.addEventListener("dragend", clearDrag);
+    return () => {
+      el.removeEventListener("dragenter", onDragEnter, true);
+      el.removeEventListener("dragover", onDragOver, true);
+      el.removeEventListener("dragleave", onDragLeave, true);
+      el.removeEventListener("drop", onDrop, true);
+      el.removeEventListener("paste", onPaste, true);
+      document.removeEventListener("drop", clearDrag);
+      document.removeEventListener("dragend", clearDrag);
+    };
+  }, [imageTrayEnabled, disabled]);
+
+  const showDropOverlay = imageTrayEnabled ? trayDragOver : isDragOver;
+
   const handleSubmit = async () => {
-    const content = editorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
+    const text =
+      editorRef.current
+        ?.getMarkdown()
+        ?.replace(/(\n\s*)+$/, "")
+        .trim() ?? "";
+
+    // Append the tray's completed images as numbered markdown so the reader/
+    // agent receives them in the same order the user sees them ("image 2").
+    const { markdown: trayMarkdown, attachmentIds: trayIds } = imageTrayEnabled
+      ? serializeTrayImages(tray.items)
+      : { markdown: "", attachmentIds: [] };
+    const content = trayMarkdown
+      ? text
+        ? `${text}\n\n${trayMarkdown}`
+        : trayMarkdown
+      : text;
+
+    // Block while an image is still uploading so it isn't dropped from the send.
+    if (imageTrayEnabled && tray.hasUploading) return;
     if (!content || submitting || disabled || noAgent) return;
     if (confirmBeforeSend && !(await confirmBeforeSend(content))) return;
 
@@ -311,6 +427,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       for (const [url, id] of uploadMapRef.current) {
         if (content.includes(url)) ids.push(id);
       }
+      for (const id of trayIds) if (!ids.includes(id)) ids.push(id);
       activeIds = ids.length > 0 ? ids : undefined;
     }
 
@@ -322,6 +439,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       setIsEmpty(true);
       setMarkdown("");
       uploadMapRef.current.clear();
+      if (imageTrayEnabled) tray.clear();
       // Chat blurs after send so the caret doesn't blink under the streaming reply.
       if (blurOnSubmit) editorRef.current?.blur();
       if (isPinned) {
@@ -400,9 +518,20 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       size="sm"
       multiple
       disabled={disabled}
-      onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-      onEmbed={(files) =>
-        files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))
+      onAttach={(files) =>
+        imageTrayEnabled
+          ? routeFiles(files)
+          : files.forEach((f) => editorRef.current?.uploadFile(f))
+      }
+      // Flag on: images go to the tray (embed is a per-image action there), so
+      // skip the pre-upload embed-vs-attach dialog entirely.
+      onEmbed={
+        imageTrayEnabled
+          ? undefined
+          : (files) =>
+              files.forEach((f) =>
+                editorRef.current?.uploadFile(f, { embedImage: true }),
+              )
       }
     />
   );
@@ -442,7 +571,13 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       <Button
         size="icon-sm"
         aria-label="Submit"
-        disabled={isEmpty || submitting || disabled || noAgent}
+        disabled={
+          (isEmpty && !(imageTrayEnabled && tray.hasCompleted)) ||
+          (imageTrayEnabled && tray.hasUploading) ||
+          submitting ||
+          disabled ||
+          noAgent
+        }
         onClick={handleSubmit}
       >
         {submitting ? <Loader2 className="animate-spin" /> : <ArrowUp />}
@@ -453,6 +588,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   return (
     <div ref={anchorRef}>
       {confirmDialog}
+      {imageTrayEnabled && preview.modal}
       {isFloating && pin === "sticky-bottom" && (
         <div aria-hidden style={{ height: floatRect?.height }} />
       )}
@@ -474,8 +610,26 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
           )}
           <div className="min-w-0 flex-1">
             {aboveField}
+            {imageTrayEnabled && (
+              <ComposerImageTray
+                items={tray.items}
+                onPreview={(item) =>
+                  preview.open({
+                    kind: "url",
+                    url: item.uploadedUrl || item.blobUrl,
+                    filename: item.filename,
+                  })
+                }
+                onEmbed={(item) => {
+                  const file = tray.takeForEmbed(item.localId);
+                  if (file) editorRef.current?.uploadFile(file, { embedImage: true });
+                }}
+                onRemove={tray.remove}
+              />
+            )}
             <div
               {...dropZoneProps}
+              ref={boxRef}
               data-testid="composer-input"
               onMouseDown={(e) => {
                 if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
@@ -526,7 +680,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
               <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
                 {actionRow}
               </div>
-              {isDragOver && <FileDropOverlay />}
+              {showDropOverlay && <FileDropOverlay />}
             </div>
           </div>
         </div>

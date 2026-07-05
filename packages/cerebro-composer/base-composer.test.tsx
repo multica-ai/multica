@@ -41,8 +41,13 @@ vi.mock("@multica/views/editor", async () => {
     ContentEditor,
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
+    useAttachmentPreview: () => ({ open: vi.fn(), tryOpen: vi.fn(), modal: null }),
   };
 });
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
 
 vi.mock("@multica/core/api", () => ({ api: {} }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({

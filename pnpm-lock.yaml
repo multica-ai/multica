@@ -1893,6 +1893,9 @@ importers:
       '@multica/cerebro-dictation':
         specifier: workspace:*
         version: link:../cerebro-dictation
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/cerebro-pin-input':
         specifier: workspace:*
         version: link:../cerebro-pin-input

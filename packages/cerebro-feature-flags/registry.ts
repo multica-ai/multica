@@ -111,6 +111,12 @@ export type CerebroFlagKey =
   // (preview + name + size + uploader/time). The top shows only a one-line
   // hint. Off = attachments stay inline at the top (the chip grid).
   | "cerebro_attachments_tab"
+  // FIR-2693: images added to a composer (drag-drop, paste, or the attach
+  // button) collect as numbered thumbnails above the input instead of landing
+  // inline in the text. Each has a number (so you can tell the agent "image 2"),
+  // opens a preview on click, can be embedded inline, or removed. Same in every
+  // composer (chat, comments, channels, DMs). Off = images insert inline.
+  | "cerebro_composer_image_tray"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -438,6 +444,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_attachment_chips: true,
   // FIR-2034: OFF until QA signs off — opt-in moves issue attachments into a tab.
   cerebro_attachments_tab: false,
+  // FIR-2693: OFF until the numbered-thumbnail tray is verified on staging
+  // (drag-drop / paste / attach across chat, comments, channels, DMs). Flip on
+  // to make the tray the standard for inserted images.
+  cerebro_composer_image_tray: false,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -869,6 +879,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Move an issue's standalone attachments off the top of the page into a dedicated \"Attachments\" tab next to Comments / Agent Runs / CLI runs. Inside the tab each file is a row: a small preview (image thumbnail or type-coloured icon), the filename and type, its size, and who uploaded it when, with open/download actions on hover. The top of the issue shows only a one-line hint with the file count. Off keeps attachments inline at the top of the issue (the unified chip grid).",
+  },
+  {
+    key: "cerebro_composer_image_tray",
+    label: "Numbered image tray in composers",
+    group: "issues",
+    description:
+      "Images you add to a message (drag-and-drop, paste, or the attach button) collect as numbered thumbnails above the input instead of being inserted inline in the text. Each thumbnail shows its number (so you can tell the agent \"look at image 2\"), opens a full preview on click, can be embedded inline, or removed. On send, the images are appended to the message in order. Works the same in chat, issue comments, channels, and DMs. Off = images insert inline where the cursor is.",
   },
   {
     key: "cerebro_web_push",

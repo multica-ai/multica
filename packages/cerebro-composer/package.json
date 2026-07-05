@@ -14,6 +14,7 @@
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-comment-drafts": "workspace:*",
     "@multica/cerebro-dictation": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-preferences": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
