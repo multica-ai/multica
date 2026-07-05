@@ -47,6 +47,17 @@ type Agent struct {
 	Mode               string             `json:"mode"`
 }
 
+type AgentActionLog struct {
+	ID            int64              `json:"id"`
+	AgentID       pgtype.Text        `json:"agent_id"`
+	IssueID       pgtype.Text        `json:"issue_id"`
+	ToolName      string             `json:"tool_name"`
+	ArgsSummary   pgtype.Text        `json:"args_summary"`
+	ResultSummary pgtype.Text        `json:"result_summary"`
+	Status        pgtype.Text        `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
