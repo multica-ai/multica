@@ -504,7 +504,7 @@ multica issue assign <issue-id> --agent <agent-slug>
   - **Retryable reasons**：runtime_offline / runtime_recovery / timeout
   - **Non-retryable**：agent_error / 手动失败
   - **自动重试仅对 issue-sourced 和 chat-sourced**——**Routines 任务不自动重试**
-  - **Dispatch timeout 5min / Running timeout 2.5h**
+  - **Dispatch timeout 5min / Running timeout 2.5h (override via `MULTICA_TASK_RUNNING_TIMEOUT`)**
   - Priority 来源（issue priority / chat 硬编码 2 / routine priority）
   - Per-issue serialization
   - **Rerun**（最后一节）:

@@ -170,6 +170,14 @@ When a request is over the limit, the server replies with `429 Too Many Requests
 
 This separate `RATE_LIMIT_TRUSTED_PROXIES` is **not** the same as `MULTICA_TRUSTED_PROXIES`, which controls the autopilot-webhook limiter (`/api/webhooks/autopilots/{token}`). Each limiter parses its own list, so a deployment behind a proxy should set both.
 
+## Task sweeper
+
+The server-side sweeper marks orphaned `running` tasks as failed after a coarse wall-clock timeout. This is the backstop that catches tasks whose daemon disappeared without reporting failure; the daemon's activity-based idle and tool watchdogs remain the primary defense against stuck tasks.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_TASK_RUNNING_TIMEOUT` | `2.5h` | Server-side running-task timeout. Accepts a Go duration string such as `8h` or `30m`. |
+
 ## Daemon tuning parameters
 
 The daemon runs on the user's local machine, and its config is read from local environment variables too. The common ones:

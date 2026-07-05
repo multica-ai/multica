@@ -170,6 +170,14 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 这里的 `RATE_LIMIT_TRUSTED_PROXIES` 和 `MULTICA_TRUSTED_PROXIES` **不是同一个**变量——后者控制的是 autopilot webhook 端点（`/api/webhooks/autopilots/{token}`）的限流器。两个限流器各自读各自的列表，部署在代理后面的实例需要两个都配上。
 
+## 任务 sweeper
+
+服务端 sweeper 会在任务 running 超过一个粗粒度墙钟超时后，把孤儿任务标记为失败。这是守护进程未上报失败时的兜底；真正卡死任务的主要防线仍是守护进程基于活动的空闲看门狗和工具看门狗。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_TASK_RUNNING_TIMEOUT` | `2.5h` | 服务端 running 任务超时。接受 Go duration 字符串，例如 `8h` 或 `30m`。 |
+
 ## 守护进程的调节参数
 
 守护进程跑在用户本地机器上，配置也是读本地环境变量。常用的几个：
