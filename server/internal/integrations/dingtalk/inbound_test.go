@@ -79,6 +79,78 @@ func TestInboundFromBotCallback(t *testing.T) {
 			},
 		},
 		{
+			name: "richText flattens text runs",
+			data: botCallbackData{
+				ConversationID: "cid", MsgID: "m4", SenderStaffID: "s", ConversationType: "1", Msgtype: "richText",
+				Content: richTextContent{RichText: []richTextNode{
+					{Text: "给 FDE教练 发一个任务，"},
+					{Text: "让他打印当前工作环境。\n完成后告诉我"},
+				}},
+			},
+			ok: true,
+			check: func(t *testing.T, msg channel.InboundMessage) {
+				if msg.Type != channel.MsgTypeText {
+					t.Errorf("Type = %v, want text (flattened richText is actionable)", msg.Type)
+				}
+				want := "给 FDE教练 发一个任务，让他打印当前工作环境。\n完成后告诉我"
+				if msg.Text != want {
+					t.Errorf("Text = %q, want %q", msg.Text, want)
+				}
+			},
+		},
+		{
+			name: "richText with picture keeps placeholder",
+			data: botCallbackData{
+				ConversationID: "cid", MsgID: "m5", SenderStaffID: "s", ConversationType: "1", Msgtype: "richText",
+				Content: richTextContent{RichText: []richTextNode{
+					{Text: "看下这个报错"},
+					{Type: "picture"},
+				}},
+			},
+			ok: true,
+			check: func(t *testing.T, msg channel.InboundMessage) {
+				if msg.Type != channel.MsgTypeText {
+					t.Errorf("Type = %v, want text", msg.Type)
+				}
+				if msg.Text != "看下这个报错[Image]" {
+					t.Errorf("Text = %q", msg.Text)
+				}
+			},
+		},
+		{
+			name: "richText with no extractable text maps to unknown",
+			data: botCallbackData{
+				ConversationID: "cid", MsgID: "m6", SenderStaffID: "s", ConversationType: "1", Msgtype: "richText",
+			},
+			ok: true,
+			check: func(t *testing.T, msg channel.InboundMessage) {
+				if msg.Type != channel.MsgTypeUnknown {
+					t.Errorf("Type = %v, want unknown", msg.Type)
+				}
+				if msg.Text != "" {
+					t.Errorf("Text = %q, want empty", msg.Text)
+				}
+			},
+		},
+		{
+			name: "richText /new forces fresh session",
+			data: botCallbackData{
+				ConversationID: "cid", MsgID: "m7", SenderStaffID: "s", ConversationType: "1", Msgtype: "richText",
+				Content: richTextContent{RichText: []richTextNode{
+					{Text: "/new 重新来"},
+				}},
+			},
+			ok: true,
+			check: func(t *testing.T, msg channel.InboundMessage) {
+				if !msg.ForceFresh {
+					t.Error("ForceFresh = false, want true")
+				}
+				if msg.Text != "重新来" {
+					t.Errorf("Text = %q", msg.Text)
+				}
+			},
+		},
+		{
 			name: "missing msgId dropped",
 			data: botCallbackData{ConversationID: "cid", SenderStaffID: "s", ConversationType: "1"},
 			ok:   false,

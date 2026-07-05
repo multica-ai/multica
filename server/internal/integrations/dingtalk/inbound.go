@@ -34,6 +34,46 @@ type botCallbackData struct {
 	Text                      struct {
 		Content string `json:"content"`
 	} `json:"text"`
+	// Content carries the non-plain-text payloads. Only richText is
+	// flattened today (see flattenRichText); other media remain a
+	// follow-up.
+	Content richTextContent `json:"content"`
+}
+
+// richTextContent is the content envelope of a richText callback.
+type richTextContent struct {
+	RichText []richTextNode `json:"richText"`
+}
+
+// richTextNode is one node of the richText list: a text run, or a media
+// node discriminated by `type` (text runs carry no type).
+type richTextNode struct {
+	Text string `json:"text"`
+	Type string `json:"type"`
+}
+
+// msgtypeRichText is the callback msgtype for formatted messages. A
+// quote-reply, a copy-paste that keeps formatting, or an image+text mix
+// all arrive as richText — with text.content EMPTY and the real content
+// in content.richText.
+const msgtypeRichText = "richText"
+
+// flattenRichText renders a richText callback's node list to plain text.
+// Text runs are concatenated verbatim (DingTalk encodes line breaks
+// inside the runs); picture nodes degrade to the bracketed placeholder
+// the lark flattener uses, so the agent sees something was attached
+// without us downloading the binary.
+func flattenRichText(data botCallbackData) string {
+	var b strings.Builder
+	for _, node := range data.Content.RichText {
+		switch {
+		case node.Text != "":
+			b.WriteString(node.Text)
+		case node.Type == "picture":
+			b.WriteString("[Image]")
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // dingtalkRawEvent carries the DingTalk-specific fields the cross-platform
@@ -88,16 +128,27 @@ func inboundFromBotCallback(data botCallbackData, clientID string) (channel.Inbo
 		CreateAt:                  data.CreateAt,
 	})
 	msgType := channel.MsgTypeText
-	if data.Msgtype != "text" && data.Msgtype != "" {
-		// richText / picture / audio / video / file — media ingestion is a
-		// follow-up; the core treats unknown as non-actionable but the
-		// message still lands in the session for context.
+	text := strings.TrimSpace(data.Text.Content)
+	switch {
+	case data.Msgtype == "text" || data.Msgtype == "":
+		// Plain text — already extracted above.
+	case data.Msgtype == msgtypeRichText:
+		// Formatted messages carry their content in content.richText and
+		// leave text.content empty; flatten so they don't ingest as empty
+		// messages (which read to the agent as "your message is blank").
+		text = flattenRichText(data)
+		if text == "" {
+			msgType = channel.MsgTypeUnknown
+		}
+	default:
+		// picture / audio / video / file — media ingestion is a follow-up;
+		// the core treats unknown as non-actionable but the message still
+		// lands in the session for context.
 		msgType = channel.MsgTypeUnknown
 	}
 	// /new on the first non-empty line forces a fresh agent session for
 	// this dispatch (mirrors the Lark enricher): the directive is stripped
 	// and the remainder is the prompt.
-	text := strings.TrimSpace(data.Text.Content)
 	forceFresh := false
 	if stripped, ok := parseFreshSessionCommand(text); ok {
 		text = stripped
