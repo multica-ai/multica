@@ -185,6 +185,8 @@ MCP surface adds an endpoint that should be callable by gateway agents, add the
 matching proxy entry in `server/internal/cerebro/runtime/customer_service_mcp_tools.go`
 and cover the name in `TestCustomerServiceMCPToolsAreRegisteredAndInMetadata`.
 
+**FIR-2243 B1 — audit trace, NOT a gate.** `guardToolCall` (`runtime/approval_gate.go`, `logToolDecision`) now emits one structured `tool_call_decision` log line per tool call — the tool, the resolved decision label (`allow_gate_off` / `deny_connection` / `ask_connection` / `tool_policy` / `allow_ungated` / `capability_<outcome>` / `capability_error` / …), the `allowed` flag, the deciding `connection` when a connection rule decided it, and the run identity (`agent_id` / `agent_name` / `task_id` / `issue_id` / `surface`). It fires for **every** call, including the default-off allow path that previously logged nothing, so the runtime audit trail can answer "which agent ran which tool, on which issue, and was it allowed". This is **observability only**: it runs (via a deferred call on named returns) after the verdict is decided and never changes any allow/deny outcome. Its field names match the B2 gateway-trace line (`runtime/api_connection_tools.go`, `logGatewayCall`) so both can be consumed consistently.
+
 Loop-gate reporting tools: `report_loop_check`, `report_loop_judge`, and
 `report_loop_human` are native Firtal Gateway tools registered only when a loop
 store is wired into the task context (`runtime/firtal_gateway_tools_extended.go`).
@@ -226,7 +228,7 @@ read-only `multica_connection_tools_status` diagnostic, so silence is never
 mistaken for a docs/tools load failure. This is documentation of an existing
 tool's argument contract, not a permission gate.
 
-Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
+Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`, `logToolDecision`), `permissions/resolver.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
 
 Note: the resolver is also consulted live by the **credentials** policy (row 1
 above) — that path does not depend on the approval-gate flag. The operator grant

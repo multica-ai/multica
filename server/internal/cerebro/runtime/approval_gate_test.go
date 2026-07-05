@@ -149,6 +149,57 @@ func TestGuardToolCall_NilGate_AllowsWithoutLookup(t *testing.T) {
 	}
 }
 
+// TestGuardToolCall_EmitsDecisionTrace confirms the FIR-2243 B1 runtime audit
+// line fires on the default-off allow path that previously logged nothing, and
+// carries the tool, decision, allowed flag, and run identity.
+func TestGuardToolCall_EmitsDecisionTrace(t *testing.T) {
+	rec := &decisionCaptureHandler{}
+	e := &FirtalGatewayExecutor{logger: slog.New(rec)} // gate == nil
+	allowed, _ := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil,
+		GatewayRequestMeta{AgentID: "agent-1", AgentName: "Mia", TaskID: "task-9", IssueID: "issue-7", Surface: "issue"})
+	if !allowed {
+		t.Fatal("nil gate must allow")
+	}
+	var line map[string]string
+	for _, r := range rec.records {
+		if r["event"] == "tool_call_decision" {
+			line = r
+			break
+		}
+	}
+	if line == nil {
+		t.Fatalf("expected a tool_call_decision trace line, got %v", rec.records)
+	}
+	want := map[string]string{
+		"tool": "web_fetch", "decision": "allow_gate_off", "allowed": "true",
+		"agent_id": "agent-1", "task_id": "task-9", "issue_id": "issue-7",
+	}
+	for k, v := range want {
+		if line[k] != v {
+			t.Errorf("trace attr %q = %q, want %q", k, line[k], v)
+		}
+	}
+}
+
+// decisionCaptureHandler is a minimal slog.Handler that records each record's
+// attributes (flattened to string) for asserting the B1 decision trace line.
+type decisionCaptureHandler struct {
+	records []map[string]string
+}
+
+func (h *decisionCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *decisionCaptureHandler) Handle(_ context.Context, r slog.Record) error {
+	m := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		m[a.Key] = a.Value.String()
+		return true
+	})
+	h.records = append(h.records, m)
+	return nil
+}
+func (h *decisionCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *decisionCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
 func TestGuardToolCall_AgentOutsideAllowlist_Allows(t *testing.T) {
 	res := &gateFakeResolver{decision: permissions.Decision{Kind: permissions.DecisionDeny}}
 	ap := &gateFakeApprovals{}
