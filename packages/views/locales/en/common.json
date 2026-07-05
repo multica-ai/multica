@@ -39,5 +39,20 @@
     "error_already_bound": "This Slack account is already linked to a different Multica user. Account transfers must go through an explicit unbind first.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
+  },
+  "dingtalk_bind": {
+    "page_title": "Link your DingTalk account",
+    "redeeming": "Linking your account…",
+    "needs_auth_description": "Sign in to Multica to finish linking. The token in this link binds your DingTalk account to the Multica user you sign in as.",
+    "sign_in": "Sign in",
+    "done_title": "Linked.",
+    "done_description": "Your next message to the bot in DingTalk will reach the bound agent directly. You can close this page.",
+    "error_title": "Linking didn't complete",
+    "error_admin_hint": "If this keeps failing, message the bot again in DingTalk to get a fresh link.",
+    "error_missing_token": "The link is missing its token. Message the bot again in DingTalk to get a fresh link.",
+    "error_expired": "The link is invalid or expired (links last 15 minutes). Message the bot again for a fresh one.",
+    "error_already_bound": "This DingTalk account is already linked to a different Multica user. Transferring requires an explicit unbind first.",
+    "error_not_member": "The Multica account you signed in with is not a member of this workspace.",
+    "error_unknown": "Something unexpected went wrong. Try again shortly; contact your workspace admin if it keeps failing."
   }
 }

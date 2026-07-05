@@ -1,15 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { MessagesSquare, Webhook } from "lucide-react";
+import { MessagesSquare, ScanLine, Webhook } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
+import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -43,6 +45,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: dingtalkListing } = useQuery({
+    ...dingtalkInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -62,6 +68,13 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const slackInstallSupported = slackListing?.install_supported === true;
   const slackHasActiveInstall =
     slackListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+
+  const dingtalkConfigured = dingtalkListing?.configured === true;
+  const dingtalkInstallSupported = dingtalkListing?.install_supported === true;
+  const dingtalkHasActiveInstall =
+    dingtalkListing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
@@ -159,6 +172,39 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <SlackAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <ScanLine className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.dingtalk.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.dingtalk.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!dingtalkConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.dingtalk.not_enabled_title)}
+            </p>
+          ) : !dingtalkInstallSupported && !dingtalkHasActiveInstall ? (
+            // Key is set but the device-flow registration isn't wired in
+            // this build. An agent that is ALREADY bound is exempt:
+            // install_supported only governs NEW installs.
+            <div className="space-y-1">
+              <p className="text-xs font-medium">{ts(($) => $.dingtalk.preview_title)}</p>
+              <p className="text-xs text-muted-foreground">
+                {ts(($) => $.dingtalk.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <DingTalkAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>

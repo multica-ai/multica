@@ -61,6 +61,13 @@ vi.mock("@multica/core/slack", () => ({
   }),
 }));
 
+vi.mock("@multica/core/dingtalk", () => ({
+  dingtalkInstallationsOptions: () => ({
+    queryKey: ["dingtalk", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
 vi.mock("@multica/core/auth", () => {
   const useAuthStore = Object.assign(
     (sel?: (s: { user: { id: string } }) => unknown) =>
@@ -81,6 +88,13 @@ vi.mock("../../../settings/components/lark-tab", () => ({
 vi.mock("../../../settings/components/slack-tab", () => ({
   SlackAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="slack-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
+// DingTalkAgentBindButton is covered in dingtalk-tab.test.tsx.
+vi.mock("../../../settings/components/dingtalk-tab", () => ({
+  DingTalkAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="dingtalk-bind-button" data-agent-id={agentId} />
   ),
 }));
 
@@ -136,12 +150,14 @@ function resetFixtures() {
 describe("IntegrationsTab", () => {
   beforeEach(resetFixtures);
 
-  it("renders the shared bind entry for both platforms for an owner when configured and supported", () => {
+  it("renders the shared bind entry for every platform for an owner when configured and supported", () => {
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByText("Lark")).toBeTruthy();
     expect(screen.getByText("Slack")).toBeTruthy();
+    expect(screen.getByText("DingTalk")).toBeTruthy();
     expect(screen.getByTestId("lark-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("slack-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
+    expect(screen.getByTestId("dingtalk-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
   });
 
   it("shows the coming-soon notice when the install transport is not wired", () => {
@@ -151,8 +167,12 @@ describe("IntegrationsTab", () => {
       install_supported: false,
     };
     renderTab(<IntegrationsTab agent={agent} />);
-    expect(screen.getByText(/installation coming soon/i)).toBeTruthy();
+    // All the listings share the fixture, so both the Lark and the
+    // DingTalk sections surface their own coming-soon copy.
+    expect(screen.getByText(/Lark Bot installation coming soon/i)).toBeTruthy();
+    expect(screen.getByText(/DingTalk bot installation coming soon/i)).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
+    expect(screen.queryByTestId("dingtalk-bind-button")).toBeNull();
   });
 
   it("shows the not-enabled notice when the deployment has no Lark key", () => {
@@ -163,7 +183,9 @@ describe("IntegrationsTab", () => {
     };
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByText(/Lark integration not enabled/i)).toBeTruthy();
+    expect(screen.getByText(/DingTalk integration not enabled/i)).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
+    expect(screen.queryByTestId("dingtalk-bind-button")).toBeNull();
   });
 
   it("points members at Settings with one role notice (not per-platform) when they can't manage", () => {
@@ -176,6 +198,7 @@ describe("IntegrationsTab", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
+    expect(screen.queryByTestId("dingtalk-bind-button")).toBeNull();
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {
@@ -189,6 +212,7 @@ describe("IntegrationsTab", () => {
     };
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByTestId("lark-bind-button")).toBeTruthy();
+    expect(screen.getByTestId("dingtalk-bind-button")).toBeTruthy();
     expect(screen.queryByText(/installation coming soon/i)).toBeNull();
   });
 });
