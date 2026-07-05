@@ -55,7 +55,7 @@ var (
 	// taskRunLeaseRefresh is deliberately slower than the prepare-lease
 	// refresh: the run phase lasts hours, so a 60s cadence keeps the
 	// steady-state request volume low while still staying far inside the
-	// server-side lease TTL (runLeaseDuration, 5m) even across several
+	// server-side lease TTL (service.RunLeaseDuration, 5m) even across several
 	// consecutive failed renewals.
 	taskRunLeaseRefresh = 60 * time.Second
 	taskRunLeaseTimeout = 10 * time.Second
@@ -3438,6 +3438,14 @@ func (d *Daemon) startTaskRunLeaseExtender(ctx context.Context, task Task, taskL
 		defer close(done)
 		ticker := time.NewTicker(taskRunLeaseRefresh)
 		defer ticker.Stop()
+		// Renewal failures are expected to persist for the whole run in one
+		// legitimate configuration — a new daemon against a server that
+		// predates the run-lease route (404; the task correctly falls back
+		// to the legacy wall-clock timeout). At a 60s cadence that would be
+		// a Warn per minute per running task for hours, so keep the first
+		// failure and every 10th (~10 min) at Warn and demote the rest to
+		// Debug; recovery is logged so operators can bound the gap.
+		consecutiveFailures := 0
 		for {
 			select {
 			case <-leaseCtx.Done():
@@ -3447,8 +3455,18 @@ func (d *Daemon) startTaskRunLeaseExtender(ctx context.Context, task Task, taskL
 				err := d.client.ExtendTaskRunLease(reqCtx, task.RuntimeID, task.ID)
 				reqCancel()
 				if err != nil {
-					taskLog.Warn("extend task run lease failed", "error", err)
+					consecutiveFailures++
+					if consecutiveFailures == 1 || consecutiveFailures%10 == 0 {
+						taskLog.Warn("extend task run lease failed", "error", err, "consecutive_failures", consecutiveFailures)
+					} else {
+						taskLog.Debug("extend task run lease failed", "error", err, "consecutive_failures", consecutiveFailures)
+					}
+					continue
 				}
+				if consecutiveFailures > 0 {
+					taskLog.Info("task run lease renewal recovered", "after_failures", consecutiveFailures)
+				}
+				consecutiveFailures = 0
 			}
 		}
 	}()
