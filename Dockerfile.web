@@ -46,8 +46,23 @@ ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
-# Build the web app (standalone output for minimal runtime)
-RUN pnpm --filter @multica/web build
+# Bake the deployed commit + build time into the force-static /version response
+# so `curl https://Multica.firtal.com/version` reports which commit production is
+# running — parity with staging, where .deploy/deploy.sh exports these before the
+# same build command (FIR-2048). Sliplane exposes its predefined
+# SLIPLANE_COMMIT_HASH (git SHA of the current deploy) as a process env var during
+# the build, so we source COMMIT_SHA from an explicit build arg when given and
+# otherwise fall back to Sliplane's value. BUILD_TIME is stamped here since
+# Sliplane has no equivalent. Absent both the arg and SLIPLANE_COMMIT_HASH,
+# COMMIT_SHA is empty and /version reports "unknown" — exactly today's behaviour.
+ARG COMMIT_SHA=""
+ARG SLIPLANE_COMMIT_HASH=""
+
+# Build the web app (standalone output for minimal runtime). COMMIT_SHA/BUILD_TIME
+# are exported inline so the force-static /version route bakes them at build time.
+RUN COMMIT_SHA="${COMMIT_SHA:-$SLIPLANE_COMMIT_HASH}" \
+    BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    pnpm --filter @multica/web build
 
 # --- Runtime ---
 FROM node:22-alpine AS runner
