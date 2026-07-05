@@ -3,6 +3,11 @@ INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
 VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
 RETURNING *;
 
+-- name: CreateIssueChatSession :one
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, issue_id)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5)
+RETURNING *;
+
 -- name: GetChatSession :one
 SELECT * FROM chat_session
 WHERE id = $1;
@@ -10,6 +15,15 @@ WHERE id = $1;
 -- name: GetChatSessionInWorkspace :one
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetActiveIssueChatSessionByCreator :one
+SELECT * FROM chat_session
+WHERE workspace_id = $1
+  AND creator_id = $2
+  AND issue_id = $3
+  AND status = 'active'
+ORDER BY updated_at DESC
+LIMIT 1;
 
 -- name: ListChatSessionsByCreator :many
 -- Returns active sessions with a boolean unread flag. Unread is strictly

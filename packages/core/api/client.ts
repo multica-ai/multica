@@ -1764,6 +1764,12 @@ export class ApiClient {
     });
   }
 
+  async createIssueShellSession(issueId: string): Promise<ChatSession> {
+    return this.fetch(`/api/issues/${issueId}/shell-session`, {
+      method: "POST",
+    });
+  }
+
   async deleteChatSession(id: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }

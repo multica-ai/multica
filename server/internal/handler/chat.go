@@ -33,6 +33,17 @@ type CreateChatSessionRequest struct {
 	Title   string `json:"title"`
 }
 
+func issueShellSessionTitle(issue db.Issue, prefix string) string {
+	title := prefix + "-" + strconv.Itoa(int(issue.Number))
+	if trimmed := strings.TrimSpace(issue.Title); trimmed != "" {
+		title += ": " + trimmed
+	}
+	if len(title) > chatSessionTitleMaxLen {
+		return title[:chatSessionTitleMaxLen]
+	}
+	return title
+}
+
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -88,6 +99,86 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, chatSessionToResponse(session))
+}
+
+func (h *Handler) GetOrCreateIssueShellSession(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	issueID := chi.URLParam(r, "id")
+
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		writeError(w, http.StatusBadRequest, "issue must be assigned to an agent")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusBadRequest, "agent is archived")
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
+
+	existing, err := h.Queries.GetActiveIssueChatSessionByCreator(r.Context(), db.GetActiveIssueChatSessionByCreatorParams{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   parseUUID(userID),
+		IssueID:     issue.ID,
+	})
+	if err == nil {
+		writeJSON(w, http.StatusOK, chatSessionToResponse(existing))
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load issue shell session")
+		return
+	}
+
+	title := issueShellSessionTitle(issue, h.getIssuePrefix(r.Context(), issue.WorkspaceID))
+	session, err := h.Queries.CreateIssueChatSession(r.Context(), db.CreateIssueChatSessionParams{
+		WorkspaceID: workspaceUUID,
+		AgentID:     issue.AssigneeID,
+		CreatorID:   parseUUID(userID),
+		Title:       title,
+		IssueID:     issue.ID,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			existing, getErr := h.Queries.GetActiveIssueChatSessionByCreator(r.Context(), db.GetActiveIssueChatSessionByCreatorParams{
+				WorkspaceID: workspaceUUID,
+				CreatorID:   parseUUID(userID),
+				IssueID:     issue.ID,
+			})
+			if getErr == nil {
+				writeJSON(w, http.StatusOK, chatSessionToResponse(existing))
+				return
+			}
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create issue shell session")
 		return
 	}
 
