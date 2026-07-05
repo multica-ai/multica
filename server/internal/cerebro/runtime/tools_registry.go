@@ -440,7 +440,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "delete_artifact_folder", Description: "Delete an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
-	{Name: "get_agent_capabilities", Description: "Get an agent's capabilities card: skills, tools, credentials (names only), and limits. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusExcluded},
+	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials/data by name only, never secret values), and are limited by (sandbox + MCP). Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
 	{Name: "get_issue", Description: "Get full details of a Multica issue: title, description, status, priority, and comments.", Status: ToolStatusImplemented},

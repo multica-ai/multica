@@ -92,3 +92,58 @@ func TestAllowTaskScopeForIssue_PassesUserScopeUntouched(t *testing.T) {
 		t.Fatalf("expected 200 for user-scoped request, got %d", rec.Code)
 	}
 }
+
+// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — verify an agent
+// task token reaches the capabilities route only for its OWN agent id (the
+// security invariant behind self-capability lookup), and user scope passes
+// through untouched.
+func TestAllowTaskScopeForAgent_BlocksMismatchedAgent(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	r.With(AllowTaskScopeForAgent("id")).Get("/api/agents/{id}/capabilities", pass.ServeHTTP)
+
+	// Task is bound to agent "ours", request hits agent "theirs".
+	req := httptest.NewRequest("GET", "/api/agents/theirs/capabilities", nil)
+	req = req.WithContext(withTaskScope(req.Context(), TaskScopeContext{AgentID: "ours"}))
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for mismatched agent, got %d", rec.Code)
+	}
+}
+
+func TestAllowTaskScopeForAgent_AllowsOwnAgent(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	r.With(AllowTaskScopeForAgent("id")).Get("/api/agents/{id}/capabilities", pass.ServeHTTP)
+
+	req := httptest.NewRequest("GET", "/api/agents/ours/capabilities", nil)
+	req = req.WithContext(withTaskScope(req.Context(), TaskScopeContext{AgentID: "ours"}))
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for own agent, got %d", rec.Code)
+	}
+}
+
+func TestAllowTaskScopeForAgent_PassesUserScopeUntouched(t *testing.T) {
+	t.Parallel()
+	r := chi.NewRouter()
+	r.With(AllowTaskScopeForAgent("id")).Get("/api/agents/{id}/capabilities", pass.ServeHTTP)
+
+	// User-scoped requests pass regardless of URL id — regular auth has
+	// already gated workspace membership.
+	req := httptest.NewRequest("GET", "/api/agents/anything/capabilities", nil)
+	req = req.WithContext(withUserScope(req.Context()))
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for user-scoped request, got %d", rec.Code)
+	}
+}

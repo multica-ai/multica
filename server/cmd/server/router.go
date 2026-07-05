@@ -1001,6 +1001,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
+			r.With(agentToolScope).Get("/api/agents/{id}/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — an agent reads its OWN capabilities card via its task token to discover what it may do; AllowTaskScopeForAgent restricts task tokens to their own id, user tokens pass through unchanged.
 			// CEREBRO-PATCH(agent-memory-settings-routes): FIR-1794 Gate 3 — the
 			// caller's own per-agent memory read/write toggle. Human-only (RequireUserScope):
 			// a user turns memory on for themselves on one agent, never a task token.
@@ -1645,7 +1646,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
 					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
 					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
-					r.Get("/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-route): TECH-3642 unified per-agent capabilities card.
+					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
 					// task-allowlist group above so agent task tokens can also reach them.
