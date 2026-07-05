@@ -94,11 +94,21 @@ func inboundFromBotCallback(data botCallbackData, clientID string) (channel.Inbo
 		// message still lands in the session for context.
 		msgType = channel.MsgTypeUnknown
 	}
+	// /new on the first non-empty line forces a fresh agent session for
+	// this dispatch (mirrors the Lark enricher): the directive is stripped
+	// and the remainder is the prompt.
+	text := strings.TrimSpace(data.Text.Content)
+	forceFresh := false
+	if stripped, ok := parseFreshSessionCommand(text); ok {
+		text = stripped
+		forceFresh = true
+	}
 	return channel.InboundMessage{
-		EventID:   data.MsgID,
-		MessageID: data.MsgID,
-		Type:      msgType,
-		Text:      strings.TrimSpace(data.Text.Content),
+		EventID:    data.MsgID,
+		MessageID:  data.MsgID,
+		Type:       msgType,
+		Text:       text,
+		ForceFresh: forceFresh,
 		// DingTalk only delivers group messages that @-mention the robot,
 		// so every callback is, by construction, addressed to the bot.
 		AddressedToBot: true,

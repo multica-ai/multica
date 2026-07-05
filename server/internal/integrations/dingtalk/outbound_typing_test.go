@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,7 +75,7 @@ func outboundFixture(t *testing.T, rec *httptest.Server) (*Outbound, *TypingIndi
 	return out, mgr, q
 }
 
-func TestOutboundTaskFailedClearsTypingWithoutReply(t *testing.T) {
+func TestOutboundTaskFailedClearsTypingAndNotifies(t *testing.T) {
 	rec, srv := newRobotAPIServer(t)
 	out, mgr, q := outboundFixture(t, srv)
 
@@ -97,8 +98,14 @@ func TestOutboundTaskFailedClearsTypingWithoutReply(t *testing.T) {
 	if rec.recalls != 1 {
 		t.Fatalf("expected the processing emotion to be recalled, got %d", rec.recalls)
 	}
-	if len(rec.sends) != 0 {
-		t.Fatalf("task-failed must not send a reply, got %d", len(rec.sends))
+	// A failed run must be visibly failed, not silent: the user gets the
+	// failure notice after the emotion clears.
+	if len(rec.sends) != 1 {
+		t.Fatalf("task-failed must send the failure notice, got %d sends", len(rec.sends))
+	}
+	msgParam, _ := rec.sends[0]["msgParam"].(string)
+	if !strings.Contains(msgParam, "处理失败") {
+		t.Fatalf("failure notice text missing, got %q", msgParam)
 	}
 }
 

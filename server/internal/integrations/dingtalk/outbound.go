@@ -25,6 +25,11 @@ type outboundQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
+// taskFailedText is the user-visible notice for a failed chat run. The
+// error detail stays in Multica (the failure payload carries no message);
+// the point is that the wait visibly ended in failure, not silence.
+const taskFailedText = "⚠️ 本次处理失败了，请稍后重试；详情可在 Multica 中查看。"
+
 // Outbound delivers an agent's chat reply back to DingTalk — the outbound
 // half of the round trip. It mirrors slack.Outbound: on EventChatDone it
 // finds the DingTalk chat binding for the finished task's session and posts
@@ -81,9 +86,6 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if o.typing != nil {
 		o.typing.Clear(ctx, sessionID)
 	}
-	if e.Type != protocol.EventChatDone {
-		return nil // task-failed: the clear above is the whole job
-	}
 	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
 		ChatSessionID: sessionID,
 		ChannelType:   string(TypeDingtalk),
@@ -94,9 +96,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		}
 		return fmt.Errorf("lookup dingtalk chat binding: %w", err)
 	}
-	content := chatDoneContent(e.Payload)
-	if content == "" {
-		return nil // nothing to say (empty completion)
+	// task-failed delivers the failure notice; chat-done delivers the reply.
+	// Without the notice a failed run is indistinguishable from a silent
+	// success — the processing emotion just vanishes (the Lark channel
+	// surfaces failures through its run card instead).
+	content := taskFailedText
+	if e.Type == protocol.EventChatDone {
+		content = chatDoneContent(e.Payload)
+		if content == "" {
+			return nil // nothing to say (empty completion)
+		}
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
