@@ -910,7 +910,7 @@ describe("ToolPolicyTable (System actor — FIR-1692)", () => {
   });
 });
 
-describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
+describe("ToolPolicyTable Permissions/Connections tab split (FIR-2281, FIR-2706)", () => {
   const SPLIT = {
     tools: [
       {
@@ -945,10 +945,19 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
         layers: { runtime: null, agent: null, group: null, user: null },
         effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
       },
+      {
+        tool_key: "repo.read",
+        resource_pattern: "github.com/firtal-group/repo-a",
+        title: "Read code",
+        category: "repo",
+        source: "repo",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
     ],
   };
 
-  function renderTab(tabFilter: "permissions" | "resources") {
+  function renderTab(tabFilter: "permissions" | "repos" | "connections") {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={qc}>
@@ -978,16 +987,30 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
     expect(table.getAllByText("Multica").length).toBeGreaterThan(0);
     // A connection is a resource, not a flat permission — never on this tab.
     expect(table.queryByText("Slack workspace")).not.toBeInTheDocument();
+    // Neither is a repo.
+    expect(screen.queryByTestId("repo-policy-section")).not.toBeInTheDocument();
   });
 
-  it("Resources tab shows connections and excludes the flat permissions", async () => {
+  it("Connections tab shows connections and excludes the flat permissions and repos", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
-    renderTab("resources");
+    renderTab("connections");
     const table = await tableBody();
     expect(table.getByText("Slack workspace")).toBeInTheDocument();
     expect(table.getAllByText("Connections").length).toBeGreaterThan(0);
     expect(table.queryByText("Bash")).not.toBeInTheDocument();
     expect(table.queryByText("Add comment")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("repo-policy-section")).not.toBeInTheDocument();
+  });
+
+  it("Repos tab shows the repo group and excludes connections and flat permissions", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("repos");
+    expect(
+      await screen.findByTestId("repo-group-github.com/firtal-group/repo-a"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Slack workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add comment")).not.toBeInTheDocument();
   });
 
   // FIR-2640 review — on mobile the connection row's controls (the Configure
@@ -996,7 +1019,7 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
   // stealing the row's width and the capability name stays readable.
   it("stacks the mobile card controls so Configure sits under Allow", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
-    renderTab("resources");
+    renderTab("connections");
     await tableBody();
     const card = document.querySelector(
       '[data-testid="tool-card-connection:slack"]',
@@ -1009,10 +1032,11 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
 });
 
 // FIR-1479 + FIR-2281: credentials are a resource type, rendered as per-box rows
-// inside the Resources tab. Each row carries a resource_pattern
+// inside the Connections tab (FIR-2706 split repos out into their own tab, but
+// credentials stayed alongside connections). Each row carries a resource_pattern
 // ("cerebro-credential:<id>"), so a decision MUST be written scoped to that box —
 // the prior inline rendering dropped the scope and the toggle silently no-op'd.
-describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () => {
+describe("ToolPolicyTable — Credentials in the Connections tab (FIR-1479)", () => {
   // A single-action box (Agent Vault boxes expose only "Use secret") renders as a
   // plain permission row — resource agentvault-vault:<name>, one reveal capability.
   const vaultRow = (
@@ -1077,7 +1101,7 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
           subjectId="agent-1"
           runtimeId="rt-1"
           userId="user-1"
-          tabFilter="resources"
+          tabFilter="connections"
         />
       </QueryClientProvider>,
     );
@@ -1154,16 +1178,16 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
     });
   });
 
-  it("shows nothing on the Resources tab when only flat permissions exist", async () => {
+  it("shows nothing on the Connections tab when only flat permissions exist", async () => {
     mockCerebroRequest.mockResolvedValue({ tools: [BUILTIN_ROW] });
     renderCredentials();
-    // A builtin tool is a permission, not a resource → the Resources tab is empty.
+    // A builtin tool is a permission, not a resource → the Connections tab is empty.
     expect(await screen.findByText(/No tools match these filters/)).toBeInTheDocument();
     expect(screen.queryByText("List issues")).not.toBeInTheDocument();
   });
 });
 
-describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
+describe("ToolPolicyTabs — three tabs (FIR-2281, FIR-2706)", () => {
   function renderTabs() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
@@ -1173,13 +1197,15 @@ describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
     );
   }
 
-  it("renders exactly the Permissions and Resources tabs", async () => {
+  it("renders exactly the Permissions, Repos and Connections tabs", async () => {
     renderTabs();
     expect(await screen.findByRole("tab", { name: "Permissions" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Resources" })).toBeInTheDocument();
-    // The old five tabs are gone — Resources holds connections/repos/credentials.
+    expect(screen.getByRole("tab", { name: "Repos" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
+    // The old five tabs (and the FIR-2281 combined "Resources" tab) are gone.
     expect(screen.queryByRole("tab", { name: "Multica" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Credentials" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Resources" })).not.toBeInTheDocument();
   });
 });
 

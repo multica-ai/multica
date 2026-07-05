@@ -124,14 +124,18 @@ export type ToolPolicyView =
   | "member"
   | "system";
 
-// FIR-2281: the permission flade is split into TWO tabs instead of five.
+// FIR-2281 split the permission flade into two tabs; FIR-2706 splits the
+// former "resources" tab in two again, so the three resource kinds each get
+// their own dedicated surface instead of being lumped together and told
+// apart only by the Type column/filter:
 //   "permissions" — every flat capability the subject can use (Multica + the
 //                   runtime-reported tools). The simple on/off rights.
-//   "resources"   — the things an agent is granted scoped access TO: workspace
-//                   connections, repositories, and credential boxes. These are
-//                   the per-resource rows (a connection, a repo URL, a vault
-//                   box), shown with a Type column + Type filter.
-export type ToolPolicyTabFilter = "permissions" | "resources";
+//   "repos"       — the repositories an agent is scoped to, one collapsible
+//                   group per repo URL.
+//   "connections" — workspace connections (flat rows) plus credential boxes
+//                   (collapsible groups), since both are "access to an
+//                   external resource" the same way a connection is.
+export type ToolPolicyTabFilter = "permissions" | "repos" | "connections";
 
 export interface ToolPolicyTableProps {
   wsId: string;
@@ -148,11 +152,12 @@ export interface ToolPolicyTableProps {
   userId?: string | null;
   groupIds?: string[];
   /**
-   * Which half of the flade this instance renders (FIR-2281):
+   * Which slice of the flade this instance renders (FIR-2281, split further by FIR-2706):
    *   "permissions" — flat capability rows that are not a connection (Multica +
    *                   runtime-reported tools).
-   *   "resources"   — connection rows (flat) plus the repo and credential
-   *                   collapsible sections.
+   *   "repos"       — the repo collapsible groups only.
+   *   "connections" — connection rows (flat) plus the credential collapsible
+   *                   groups.
    * When omitted, all rows are shown (the single-table fallback).
    */
   tabFilter?: ToolPolicyTabFilter;
@@ -226,10 +231,11 @@ const LAYER_LABEL: Record<string, string> = {
 };
 
 // FIR-2281: the permission "Type" — the single dimension that used to be the
-// five top-level tabs, now a column + filter. The "permissions" tab covers
-// Multica + Runtime; the "resources" tab covers the three resource kinds an
-// agent is scoped to. ONE classifier drives the Type column AND the
-// tab/filter partition, so a row can never land under the wrong type.
+// five top-level tabs, now a column + filter. FIR-2706 maps it onto three
+// tabs instead of two: "permissions" covers Multica + Runtime, "repos" covers
+// Repos, and "connections" covers Connections + Credentials. ONE classifier
+// drives the Type column AND the tab/filter partition, so a row can never
+// land under the wrong type.
 export type PermissionType =
   | "Multica"
   | "Runtime"
@@ -239,7 +245,8 @@ export type PermissionType =
 
 const PERMISSION_TYPES_BY_TAB: Record<ToolPolicyTabFilter, PermissionType[]> = {
   permissions: ["Multica", "Runtime"],
-  resources: ["Connections", "Repos", "Credentials"],
+  repos: ["Repos"],
+  connections: ["Connections", "Credentials"],
 };
 
 // A runtime-reported tool is one a runtime actually advertised — built-ins and
@@ -388,25 +395,27 @@ export function ToolPolicyTable({
     return map;
   }, [rows]);
 
-  // tabFilter splits the flade in two (FIR-2281). TanStack Query deduplicates the
-  // underlying fetch, so the two ToolPolicyTable instances behind the tabs share a
-  // single network request.
+  // tabFilter splits the flade in three (FIR-2281, then FIR-2706). TanStack
+  // Query deduplicates the underlying fetch, so the ToolPolicyTable instances
+  // behind the tabs share a single network request.
   const capRows = useMemo(() => {
-    // Resources tab: the only FLAT capability rows are the connection rows — repos
-    // and credentials render as collapsible sections (repoGroups / credentialGroups
-    // below), so the flat table excludes them on this tab.
-    if (tabFilter === "resources")
+    // Connections tab: the only FLAT capability rows are the connection rows —
+    // credentials render as collapsible sections (credentialGroups below), so
+    // the flat table excludes them on this tab.
+    if (tabFilter === "connections")
       return allCapRows.filter((r) => r.source === "connection");
     if (tabFilter === "permissions")
       // Everything that is not a connection — Multica + the runtime-reported tools.
       return allCapRows.filter((r) => r.source !== "connection");
+    // Repos tab has no flat rows — repos render as collapsible sections only.
+    if (tabFilter === "repos") return [];
     // No tabFilter: the single-table fallback shows every flat capability row.
     return allCapRows;
   }, [tabFilter, allCapRows]);
 
   const repoRows = useMemo(() => {
-    // Repos belong to the Resources tab (and the no-filter fallback).
-    if (!tabFilter || tabFilter === "resources") return allRepoRows;
+    // Repos belong to their own tab (and the no-filter fallback).
+    if (!tabFilter || tabFilter === "repos") return allRepoRows;
     return [];
   }, [tabFilter, allRepoRows]);
 
@@ -418,12 +427,19 @@ export function ToolPolicyTable({
       for (const r of capRows) present.add(permissionType(r));
       const order = tabFilter
         ? PERMISSION_TYPES_BY_TAB.permissions
-        : [...PERMISSION_TYPES_BY_TAB.permissions, ...PERMISSION_TYPES_BY_TAB.resources];
+        : [
+            ...PERMISSION_TYPES_BY_TAB.permissions,
+            ...PERMISSION_TYPES_BY_TAB.repos,
+            ...PERMISSION_TYPES_BY_TAB.connections,
+          ];
       return order.filter((t) => present.has(t));
     }
+    if (tabFilter === "repos") {
+      return allRepoRows.length ? ["Repos"] : [];
+    }
+    // connections tab
     const present: PermissionType[] = [];
     if (capRows.length) present.push("Connections");
-    if (allRepoRows.length) present.push("Repos");
     if (showCredentials && allCredentialRows.length) present.push("Credentials");
     return present;
   }, [tabFilter, capRows, allRepoRows, allCredentialRows, showCredentials]);
@@ -440,11 +456,11 @@ export function ToolPolicyTable({
     [types, repoRows, search],
   );
   // Credential groups: one collapsible group per Agent Vault box, shown on the
-  // Resources tab when the feature is on. Keyed by resource_pattern and narrowed by
-  // the free-text search (on the box name) and the "Credentials" type filter.
+  // Connections tab when the feature is on. Keyed by resource_pattern and narrowed
+  // by the free-text search (on the box name) and the "Credentials" type filter.
   const credentialGroups = useMemo(() => {
-    const onResources = !tabFilter || tabFilter === "resources";
-    if (!onResources || !showCredentials) return [];
+    const onConnections = !tabFilter || tabFilter === "connections";
+    if (!onConnections || !showCredentials) return [];
     if (types.size && !types.has("Credentials")) return [];
     return groupCredentialRows(allCredentialRows, search);
   }, [tabFilter, showCredentials, types, allCredentialRows, search]);
@@ -556,7 +572,13 @@ export function ToolPolicyTable({
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
         shown={filtered.length}
-        total={capRows.length + repoRows.length + (showCredentials ? allCredentialRows.length : 0)}
+        total={
+          capRows.length +
+          repoRows.length +
+          (showCredentials && (!tabFilter || tabFilter === "connections")
+            ? allCredentialRows.length
+            : 0)
+        }
         busy={busy}
         onBulk={bulkSet}
       />
@@ -782,11 +804,13 @@ export function ToolPolicyTable({
 }
 
 export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
-  // FIR-2281: two tabs instead of five. "Permissions" holds the flat capabilities
-  // (Multica + Runtime); "Resources" holds the things an agent is scoped to —
-  // connections, repos and credential boxes — distinguished by the Type column and
-  // filter inside the table. The credentials feature flag is read inside the table
-  // itself, so it never has to gate a whole tab here.
+  // FIR-2281 introduced two tabs instead of five. FIR-2706 splits the former
+  // "Resources" tab in two again: "Repos" and "Connections" now each get their
+  // own dedicated tab instead of being told apart only by the Type column and
+  // filter inside a shared table. "Permissions" is unchanged — the flat
+  // capabilities (Multica + Runtime). Credential boxes live under
+  // "Connections" (see PERMISSION_TYPES_BY_TAB); the credentials feature flag
+  // is read inside the table itself, so it never has to gate a whole tab here.
   return (
     // TECH-3156 Mangel 3: force the tab row horizontal. The shared Tabs primitive
     // renders its list vertically by default, so — like cost-optimization-tabs —
@@ -799,15 +823,21 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
         <TabsTrigger className="!w-auto !flex-none !justify-center" value="permissions">
           Permissions
         </TabsTrigger>
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="resources">
-          Resources
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="repos">
+          Repos
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="connections">
+          Connections
         </TabsTrigger>
       </TabsList>
       <TabsContent value="permissions" className="mt-4">
         <ToolPolicyTable {...props} tabFilter="permissions" />
       </TabsContent>
-      <TabsContent value="resources" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="resources" />
+      <TabsContent value="repos" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="repos" />
+      </TabsContent>
+      <TabsContent value="connections" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="connections" />
       </TabsContent>
     </Tabs>
   );
