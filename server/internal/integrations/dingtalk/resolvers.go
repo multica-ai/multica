@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -213,6 +214,10 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 		BindingKey:     bindingKey,
 		BindingConfig:  config,
 		ChatType:       p.Message.Source.ChatType,
+		// Group sessions take the group's real name so the Multica
+		// session list (and the agent's thread name) says WHICH group,
+		// not a generic "DingTalk group chat". DMs keep the static title.
+		Title: dingtalkSessionTitle(p.Message),
 	})
 }
 
@@ -221,12 +226,49 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
 		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		// DingTalk text is not enriched, so the command source is the body.
+		Body:           dingtalkMessageBody(p.Message),
+		// CommandText is the user's OWN typed text: the /issue parser must
+		// see the bare message, not the speaker-labelled body.
 		CommandText: p.Message.Text,
 		MessageID:   p.Message.MessageID,
 		ClaimToken:  p.ClaimToken,
 	})
+}
+
+// dingtalkSessionTitle derives the chat_session title override: the group's
+// conversation title when present. Empty (DMs, or a callback without a
+// title) falls back to the engine's static SessionTitles.
+func dingtalkSessionTitle(msg channel.InboundMessage) string {
+	if msg.Source.ChatType != channel.ChatTypeGroup {
+		return ""
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(raw.ConversationTitle)
+}
+
+// dingtalkMessageBody is the stored (and prompted) form of one inbound
+// message. Group messages are prefixed with the speaker and the group name
+// — "[张三 @ 项目群]: 内容" — because the agent's chat prompt is nothing but
+// the concatenated message bodies: without the label it cannot tell WHO is
+// talking or WHERE when several members address it in one window. DMs stay
+// bare (a p2p session has exactly one human; mirrors the lark enricher).
+// The DingTalk callback carries both fields for free — no extra API call.
+func dingtalkMessageBody(msg channel.InboundMessage) string {
+	text := msg.Text
+	if text == "" || msg.Source.ChatType != channel.ChatTypeGroup {
+		return text
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil || raw.SenderNick == "" {
+		return text
+	}
+	if title := strings.TrimSpace(raw.ConversationTitle); title != "" {
+		return "[" + raw.SenderNick + " @ " + title + "]: " + text
+	}
+	return "[" + raw.SenderNick + "]: " + text
 }
 
 // ---- unbind ----

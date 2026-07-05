@@ -210,3 +210,64 @@ func TestDingTalkSessionRouting(t *testing.T) {
 		t.Errorf("group binding config staff id = %q, want empty", groupCfg.SenderStaffID)
 	}
 }
+
+// TestDingtalkMessageBodyAndTitle covers the group-context enrichment: the
+// stored body carries WHO is talking and in WHICH group (the agent's chat
+// prompt is nothing but concatenated bodies), and the session title override
+// carries the real group name. DMs stay bare on both counts.
+func TestDingtalkMessageBodyAndTitle(t *testing.T) {
+	group, _ := inboundFromBotCallback(botCallbackData{
+		ConversationID: "cidG==", MsgID: "m1", SenderStaffID: "s1",
+		ConversationType: "2", Msgtype: "text",
+		SenderNick: "张三", ConversationTitle: "项目群",
+		Text: struct {
+			Content string `json:"content"`
+		}{Content: "帮我看下部署状态"},
+	}, "c")
+	if got := dingtalkMessageBody(group); got != "[张三 @ 项目群]: 帮我看下部署状态" {
+		t.Errorf("group body = %q", got)
+	}
+	if got := dingtalkSessionTitle(group); got != "项目群" {
+		t.Errorf("group title = %q", got)
+	}
+
+	// Group without a conversation title: speaker label only, static title.
+	noTitle, _ := inboundFromBotCallback(botCallbackData{
+		ConversationID: "cidG==", MsgID: "m2", SenderStaffID: "s1",
+		ConversationType: "2", Msgtype: "text", SenderNick: "张三",
+		Text: struct {
+			Content string `json:"content"`
+		}{Content: "hi"},
+	}, "c")
+	if got := dingtalkMessageBody(noTitle); got != "[张三]: hi" {
+		t.Errorf("no-title body = %q", got)
+	}
+	if got := dingtalkSessionTitle(noTitle); got != "" {
+		t.Errorf("no-title title = %q, want empty (static fallback)", got)
+	}
+
+	// DM: bare body, no title override.
+	dm, _ := inboundFromBotCallback(botCallbackData{
+		ConversationID: "cidD==", MsgID: "m3", SenderStaffID: "s1",
+		ConversationType: "1", Msgtype: "text", SenderNick: "张三",
+		Text: struct {
+			Content string `json:"content"`
+		}{Content: "hi"},
+	}, "c")
+	if got := dingtalkMessageBody(dm); got != "hi" {
+		t.Errorf("dm body = %q, want bare text", got)
+	}
+	if got := dingtalkSessionTitle(dm); got != "" {
+		t.Errorf("dm title = %q, want empty", got)
+	}
+
+	// Empty text (pure-media) must NOT gain a dangling speaker label —
+	// the daemon's prompt builder skips empty contents.
+	empty, _ := inboundFromBotCallback(botCallbackData{
+		ConversationID: "cidG==", MsgID: "m4", SenderStaffID: "s1",
+		ConversationType: "2", Msgtype: "picture", SenderNick: "张三", ConversationTitle: "项目群",
+	}, "c")
+	if got := dingtalkMessageBody(empty); got != "" {
+		t.Errorf("empty body = %q, want empty", got)
+	}
+}
