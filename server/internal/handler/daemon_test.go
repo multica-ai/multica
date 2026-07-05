@@ -389,6 +389,64 @@ func TestExtendTaskPrepareLease(t *testing.T) {
 	}
 }
 
+func TestExtendTaskRunLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Extend run lease runtime")
+	otherRuntimeID := createClaimReclaimRuntime(t, ctx, "Other run lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend run lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	// A task that has not started running yet must not accept a run lease.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/run-lease", nil,
+		testWorkspaceID, "extend-run-lease")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ExtendTaskRunLease(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ExtendTaskRunLease on dispatched task: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("failed to transition fixture task to running: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/run-lease", nil,
+		testWorkspaceID, "extend-run-lease")
+	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
+	testHandler.ExtendTaskRunLease(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ExtendTaskRunLease wrong runtime: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/run-lease", nil,
+		testWorkspaceID, "extend-run-lease")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ExtendTaskRunLease(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ExtendTaskRunLease: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT run_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load extended run lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected run lease to be extended")
+	}
+}
+
 func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

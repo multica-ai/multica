@@ -216,6 +216,12 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
 }
 
+// ExtendTaskRunLease renews the running-phase liveness lease so the server
+// sweeper does not fail a healthy long run on wall clock alone.
+func (c *Client) ExtendTaskRunLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/run-lease", runtimeID, taskID), map[string]any{}, nil)
+}
+
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }

@@ -421,6 +421,20 @@ WHERE id = $1
   AND started_at IS NULL
 RETURNING *;
 
+-- name: ExtendAgentTaskRunLease :one
+-- Proves a running task is still actively managed by its daemon. While the
+-- lease stays fresh, the running-timeout branch of FailStaleTasks leaves the
+-- task alone, so a healthy long run (heavy compute, multi-hour research) is
+-- never failed on wall clock alone. Daemons that predate this lease never
+-- renew it — their rows keep run_lease_expires_at NULL and retain the pure
+-- wall-clock timeout behavior.
+UPDATE agent_task_queue
+SET run_lease_expires_at = now() + make_interval(secs => @lease_secs::double precision)
+WHERE id = $1
+  AND runtime_id = $2
+  AND status = 'running'
+RETURNING *;
+
 -- name: StartAgentTask :one
 -- Transitions a task to running. Accepts either 'dispatched' (the normal
 -- claim → run flow) or 'waiting_local_directory' (the daemon held the row in
@@ -455,7 +469,7 @@ RETURNING *;
 
 -- name: CompleteAgentTask :one
 UPDATE agent_task_queue
-SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL
+SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL, run_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
 RETURNING *;
 
@@ -535,7 +549,8 @@ SET status = 'failed',
     failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
     session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    run_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
@@ -562,7 +577,8 @@ SET status = 'failed',
     error = 'daemon restarted while task was in flight',
     failure_reason = 'runtime_recovery',
     wait_reason = NULL,
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    run_lease_expires_at = NULL
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
@@ -573,6 +589,12 @@ RETURNING *;
 -- Dispatched tasks with an active prepare lease are excluded because the
 -- daemon is still proving liveness while resolving/cache/preparing startup
 -- inputs before StartTask.
+-- Running tasks with an active run lease are excluded for the same reason:
+-- the daemon renews the lease for the whole life of the agent process
+-- (ExtendAgentTaskRunLease), so the running timeout only fires for rows
+-- whose daemon stopped proving liveness — died, wedged, or predates the
+-- lease (run_lease_expires_at stays NULL, preserving the legacy pure
+-- wall-clock behavior for old daemons).
 -- waiting_local_directory rows are intentionally excluded: the daemon owns
 -- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
 -- of this task can exceed the dispatch / running timeouts without being
@@ -581,13 +603,18 @@ RETURNING *;
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    run_lease_expires_at = NULL
 WHERE (
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision)
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
   )
-   OR (status = 'running' AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision))
+   OR (
+    status = 'running'
+    AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision)
+    AND (run_lease_expires_at IS NULL OR run_lease_expires_at < now())
+  )
 RETURNING *;
 
 -- name: ExpireStaleQueuedTasks :many

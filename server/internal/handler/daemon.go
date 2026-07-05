@@ -2138,6 +2138,36 @@ func (h *Handler) ExtendTaskPrepareLease(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, taskToResponse(*updated, taskWorkspaceID))
 }
 
+// ExtendTaskRunLease proves a running task is still actively managed by its
+// daemon, shielding it from the sweeper's running-timeout branch. Renewed
+// periodically for the whole life of the agent process.
+func (h *Handler) ExtendTaskRunLease(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	taskID := chi.URLParam(r, "taskId")
+
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	task, taskWorkspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+	if taskWorkspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	updated, err := h.TaskService.ExtendTaskRunLease(r.Context(), parseUUID(taskID), parseUUID(runtimeID))
+	if err != nil {
+		slog.Warn("extend task run lease failed", "task_id", taskID, "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, taskToResponse(*updated, taskWorkspaceID))
+}
+
 // StartTask marks a dispatched task as running.
 func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")

@@ -204,6 +204,93 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 }
 
+// TestSweepSparesRunningTaskWithLiveRunLease verifies the liveness-keyed
+// running sweep: a task well past the wall-clock threshold survives as long
+// as its daemon keeps the run lease fresh.
+func TestSweepSparesRunningTaskWithLiveRunLease(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET run_lease_expires_at = now() + interval '5 minutes'
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("failed to set live run lease: %v", err)
+	}
+
+	queries := db.New(testPool)
+	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0, // task is 3 hours old — only the lease protects it
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatalf("expected task %s with a live run lease to be spared", taskID)
+		}
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatalf("failed to query task status: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("expected task to stay 'running', got %q", status)
+	}
+}
+
+// TestSweepFailsRunningTaskWithExpiredRunLease verifies that once the daemon
+// stops renewing the run lease, the wall-clock threshold applies again. The
+// NULL-lease case (daemon predating the run lease) is covered by
+// TestSweepStaleTasksBroadcastsWithWorkspaceID, which never sets one.
+func TestSweepFailsRunningTaskWithExpiredRunLease(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET run_lease_expires_at = now() - interval '1 minute'
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("failed to set expired run lease: %v", err)
+	}
+
+	queries := db.New(testPool)
+	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+	found := false
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			found = true
+			if ft.RunLeaseExpiresAt.Valid {
+				t.Fatal("expected run lease to be cleared on the failed row")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected task %s with an expired run lease to be failed", taskID)
+	}
+}
+
 // TestSweepStaleTasksReconcileAgentStatus verifies that after the sweeper fails
 // stale tasks, the agent status is reconciled from "working" back to "idle".
 func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {

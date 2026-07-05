@@ -36,12 +36,16 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
-	// coarse server-side backstop keyed on started_at (it does NOT look at task
-	// activity) — mainly for runs whose daemon died without reporting. The
-	// daemon itself decides stuck-vs-long-running by activity (idle/tool
-	// watchdog), so this only needs to sit generously above any realistic single
-	// run rather than track a per-run wall-clock cap (MUL-3064).
+	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this — but
+	// only once the task's run lease has lapsed (or was never set). Daemons
+	// renew run_lease_expires_at for the whole life of the agent process
+	// (ExtendAgentTaskRunLease), so a healthy long run is never failed on
+	// wall clock alone; this threshold now only fires for runs whose daemon
+	// died without reporting or predates the run lease (lease stays NULL,
+	// preserving the legacy pure wall-clock behavior). The daemon itself
+	// decides stuck-vs-long-running by activity (idle/tool watchdog), so
+	// this only needs to sit generously above the realistic time-to-lease-
+	// lapse rather than track a per-run wall-clock cap (MUL-3064).
 	runningTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup

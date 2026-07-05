@@ -52,6 +52,13 @@ const (
 var (
 	taskPrepareLeaseRefresh = 15 * time.Second
 	taskPrepareLeaseTimeout = 10 * time.Second
+	// taskRunLeaseRefresh is deliberately slower than the prepare-lease
+	// refresh: the run phase lasts hours, so a 60s cadence keeps the
+	// steady-state request volume low while still staying far inside the
+	// server-side lease TTL (runLeaseDuration, 5m) even across several
+	// consecutive failed renewals.
+	taskRunLeaseRefresh = 60 * time.Second
+	taskRunLeaseTimeout = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -3417,6 +3424,44 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
+// startTaskRunLeaseExtender periodically renews the task's run lease so the
+// server-side sweeper can tell a healthy long run (daemon alive and managing
+// the process) from an orphaned one (daemon died without reporting). It is
+// started right after StartTask succeeds and stopped when the run returns;
+// renewals are best-effort — a failed renewal only matters if it persists
+// past the server's lease TTL AND the run is already past the sweeper's
+// wall-clock threshold.
+func (d *Daemon) startTaskRunLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(taskRunLeaseRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskRunLeaseTimeout)
+				err := d.client.ExtendTaskRunLease(reqCtx, task.RuntimeID, task.ID)
+				reqCancel()
+				if err != nil {
+					taskLog.Warn("extend task run lease failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
 func skillRefKey(source, id string) string {
 	return source + "\x00" + id
 }
@@ -3645,6 +3690,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
+	// The prepare lease's job is done; the run lease takes over as the
+	// liveness signal for the whole running phase, shielding a healthy long
+	// run from the server sweeper's wall-clock timeout.
+	stopRunLease := d.startTaskRunLeaseExtender(ctx, task, taskLog)
+	defer stopRunLease()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
