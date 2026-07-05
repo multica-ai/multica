@@ -33,6 +33,7 @@
     "channels",
     "github-integration",
     "lark-bot-integration",
+    "dingtalk-bot-integration",
     "slack-bot-integration",
     "---セルフホスト & 運用---",
     "environment-variables",

@@ -1,0 +1,142 @@
+---
+title: DingTalk Bot integration
+description: Bind a Multica agent to a DingTalk (钉钉) app bot — scan a QR code with DingTalk to auto-create the app in your org, then DM the bot, @-mention it in groups, or type /issue to file a Multica issue without leaving DingTalk.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bind any [agent](/agents) to a DingTalk (钉钉) app bot and your team can work with it from inside DingTalk — DM the bot, @-mention it in a group, or type `/issue` to file a [Multica issue](/issues) without opening the app. Binding uses a scan-to-create flow: scan one QR code with DingTalk and the app is created automatically as an internal app inside your own organization, credentials provisioned for you.
+
+Each bot is bound **one-to-one** to a single Multica agent. Binding a second agent creates a second app; one agent never has two bots.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | The agent detail page has an **Integrations** tab. Owners and admins see **Bind to DingTalk** there; once bound it flips to a **Connected to DingTalk** state with a **Disconnect** button and a **Manage in DingTalk** link. |
+| **DM the bot** | A workspace member messages the bot directly in DingTalk. Each conversation becomes a Multica [chat](/chat) session with the agent; the agent's replies come back as messages. |
+| **@-mention in a group** | Add the bot to a DingTalk group and @-mention it. DingTalk only delivers messages that @-mention the robot — the bot never sees the rest of the group. |
+| **`/issue` command** | Sending `/issue <title>` (optionally with a body) creates a new Multica issue in the workspace, attributed to you. |
+| **`/new` command** | Drops the current conversation context and handles your message in a brand-new agent session. |
+| **`/unbind` command** | Unlinks your own DingTalk account from Multica. |
+| **🤔思考中 reaction** | Once your message is picked up, the bot pins the 🤔思考中 ("thinking") reaction to it and removes it when the reply lands. |
+
+## Bind an agent (owner / admin)
+
+Binding uses a scan-to-create flow — no app secrets to copy, no manual app creation in the developer console.
+
+1. Open the agent in **Agents → _your agent_**.
+2. Go to the **Integrations** tab and click **Bind to DingTalk**.
+3. A QR code appears. On your phone, open **DingTalk → Scan** and authorize creating the app in your organization. (If scanning is inconvenient, the dialog also offers an "open in DingTalk" link.)
+4. When the authorization completes the dialog closes and the agent shows **Connected to DingTalk**. The app now exists as an internal app in your org, its credentials provisioned automatically and encrypted at rest.
+
+<Callout type="info">
+The QR is single-use and expires after a short window. If it lapses before you authorize, click **Scan again** for a fresh code. Also, unlike the Lark integration, scanning does not bind your own DingTalk identity — the first time you message the bot you are identified by the rules below, and org members usually match automatically.
+</Callout>
+
+Once an agent is connected, the **Bind to DingTalk** button is replaced by the connected state: a **Disconnect** button on one side and a **Manage in DingTalk** link on the other. The link opens the [internal-app list in the DingTalk developer console](https://open-dev.dingtalk.com/fe/app#/corp/app), where the scan-created app lives — permissions, credentials, and release are all managed there. (The scan-to-create flow yields no per-app deep link, so the entry point is the app list page.)
+
+## Use the bot (members)
+
+### Identity: usually fully automatic
+
+The bot needs to know which Multica account "you in DingTalk" corresponds to. Identification works in two steps:
+
+1. **Auto-match via the corp directory.** If you are a member of the organization, the bot matches your DingTalk identity to a Multica account through the corp directory — accounts that sign in to Multica with DingTalk match by unionid, and email-signup accounts match by the email on your directory profile. On a match you are bound automatically, no clicks needed.
+2. **Fallback: a bind link.** When auto-match fails, the bot replies with a "link your account" message. Open the link, sign in to Multica, and your DingTalk account is linked to your Multica membership. The link is single-use and valid for **15 minutes**; if it lapses, message the bot again for a fresh one.
+
+<Callout type="info">
+Auto-match relies on corp directory lookups. If the scan-created app lacks the contacts read-only permission, auto-match fails and the bot falls back to the bind link — grant the app the relevant read-only contacts permission in the DingTalk developer console to restore it.
+</Callout>
+
+<Callout type="warning">
+Only people who are **members of the workspace** can use the bot. If you aren't a member, the bot won't respond — your message is dropped (only a drop reason is recorded for audit, never the contents).
+</Callout>
+
+### Chat and commands (`/issue`, `/new`, `/unbind`)
+
+- **Ask the agent anything** — DM the bot or @-mention it in a group. The conversation is a normal agent chat session; while you wait, your message carries the 🤔思考中 reaction, and the agent's reply comes back as a message.
+- **File an issue** — send `/issue Fix the login redirect` and Multica creates that issue in the workspace, confirming with "✅ 已创建 MUL-123 — Fix the login redirect". Add more lines after the title for a description; a bare `/issue` uses your previous message as the title. The command must be lowercase `/issue`.
+- **Start over** — send `/new` (optionally followed by your next question, e.g. `/new let's talk about deployments`) and the agent drops the conversation's prior context and answers in a fresh session.
+- **Unlink yourself** — send `/unbind` on its own line (no arguments) and the bot removes the link between your DingTalk account and Multica, confirming in the chat; your next message goes through identification again.
+
+If the agent is **offline** (its runtime isn't connected) or **archived**, the bot replies with a short status notice instead of silently dropping your message; if the agent is busy (at its concurrent-task limit), the bot tells you your message is queued and will be handled as soon as a slot frees.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations → DingTalk**:
+
+- **Connected bots** lists every bot in the workspace and the agent each one is bound to. This list is visible to all members.
+- **Disconnect** is **owner / admin only**. Disconnecting stops the bot from receiving DingTalk messages; the installation record is kept for audit (shown with a "revoked" badge), and you can re-install later by scanning again from the same agent.
+
+## Permissions
+
+- **Bind / disconnect** require workspace **owner** or **admin**. Members see the connected-bots list but no bind or disconnect controls.
+- **Talking to the bot** requires being a workspace member whose DingTalk identity has been resolved (auto-matched or manually bound). Everyone else is dropped.
+- The integration never stores message bodies for dropped messages — only a drop reason, for audit.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, DingTalk is **off until you set an at-rest encryption key**. The key encrypts each app's client secret before it touches the database.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+   ```dotenv
+   MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+2. Restart the API. Until the key is set, **Settings → Integrations → DingTalk** shows a "DingTalk integration not enabled" notice and the **Bind to DingTalk** entry points stay hidden.
+
+<Callout type="info">
+Every other environment variable is an optional override; leave them unset for normal operation:
+
+- `DINGTALK_OPENAPI_BASE` — the new-style DingTalk OpenAPI host (default `https://api.dingtalk.com`).
+- `DINGTALK_OAPI_BASE` — the legacy DingTalk OAPI host (default `https://oapi.dingtalk.com`).
+- `MULTICA_DINGTALK_REGISTRATION_BASE_URL` — overrides the scan-to-create (device flow) registration endpoint, for staging or mocks.
+- `MULTICA_DINGTALK_REGISTRATION_SOURCE` — a DingTalk-assigned partner source label; empty omits it.
+</Callout>
+
+## Troubleshooting
+
+### Install errors in the QR dialog
+
+The errors shown in the install dialog map to these reasons (`error_reason`):
+
+| Message | Code | What it means / what to do |
+|---|---|---|
+| QR expired before authorization. Scan again. | `expired` | The QR is time-boxed and lapsed before you authorized. Click **Scan again**. |
+| DingTalk reported the authorization failed or was cancelled. | `install_failed` | You cancelled in DingTalk, or DingTalk failed to create the app. Retry; the small gray text in the dialog carries DingTalk's specific reason. |
+| DingTalk refused the install — try again. | `dingtalk_protocol_error` | The DingTalk API returned a protocol-level error. Retry; if it persists, check network connectivity from the server to DingTalk. |
+| The app was created, but its credentials failed verification. Try again. | `credentials_check_failed` | The app exists, but exchanging its fresh credentials for an access token failed. Scan and install again. |
+| Could not save the installation. Another app may already be bound to this agent. | `installation_conflict` | The agent already has an installation. Disconnect the old one in **Settings → Integrations → DingTalk**, then bind again. |
+| Install session expired or was lost. Scan again to start over. | `session_lost` | Install sessions live only in server memory (about 30 minutes); a restart or timeout loses them. Scan again. |
+| You no longer have permission to install DingTalk bots in this workspace. | `forbidden` | Your role changed mid-install. Ask an owner / admin to continue. |
+| Install failed. Try again. | `internal_error` | An unexpected server-side error. Retry and check the server logs. |
+
+### Settings page states
+
+| State | Meaning |
+|---|---|
+| **DingTalk integration not enabled** | The server has no `MULTICA_DINGTALK_SECRET_KEY`. Follow the self-host setup above. |
+| **DingTalk bot installation coming soon** | The encryption key is set, but this server build does not have the scan-to-create flow enabled (the startup logs say why). |
+
+### Chat problems
+
+- **The bot ignores the group** — group messages must @-mention the robot; DingTalk does not deliver un-mentioned messages to the bot.
+- **No reply even in DM** — you may not be a member of the workspace; the message is dropped (only the drop reason is recorded).
+- **The bind link expired** — send the bot any message and you get a fresh link.
+- **An org member is not auto-matched** — grant the app the contacts read-only permission (DingTalk developer console → the app → permission management), or use the bind link.
+- **You receive "⚠️ 本次处理失败了" (processing failed)** — that run failed. Retry or rephrase; open the agent in Multica for the error details.
+
+## Next
+
+- [Agents](/agents) — each bot is bound to exactly one agent
+- [Chat](/chat) — what a bot conversation maps to inside Multica
+- [Issues](/issues) — what `/issue` creates
+- [Environment variables](/environment-variables) — full self-host configuration reference
