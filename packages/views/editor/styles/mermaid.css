@@ -4,9 +4,16 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin: 0.75rem 0;
-  overflow-x: auto;
   padding: 1rem;
   position: relative;
+}
+
+/* Horizontal scroll lives on this inner wrapper, not on .mermaid-diagram.
+   Keeping the scroll container separate from the positioning context means
+   the absolutely-positioned toolbar (anchored to .mermaid-diagram) no longer
+   scrolls away when a wide diagram is scrolled sideways. */
+.rich-text-editor .mermaid-diagram-scroll {
+  overflow-x: auto;
 }
 
 .rich-text-editor .mermaid-diagram-frame {

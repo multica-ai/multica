@@ -340,16 +340,22 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     >
       {sandboxedDocument ? (
         <>
-          <iframe
-            className="mermaid-diagram-frame"
-            sandbox=""
-            srcDoc={sandboxedDocument}
-            style={{
-              height: layout.height ? `${layout.height}px` : undefined,
-              width: layout.width ? `${layout.width}px` : undefined,
-            }}
-            title="Mermaid diagram"
-          />
+          {/* Only this wrapper scrolls horizontally. The toolbar below stays a
+              child of the non-scrolling .mermaid-diagram so its absolute
+              position stays pinned to the visible top-right corner instead of
+              scrolling away with a wide diagram. */}
+          <div className="mermaid-diagram-scroll">
+            <iframe
+              className="mermaid-diagram-frame"
+              sandbox=""
+              srcDoc={sandboxedDocument}
+              style={{
+                height: layout.height ? `${layout.height}px` : undefined,
+                width: layout.width ? `${layout.width}px` : undefined,
+              }}
+              title="Mermaid diagram"
+            />
+          </div>
           <div className="mermaid-diagram-toolbar">
             <button
               type="button"
