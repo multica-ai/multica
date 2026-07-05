@@ -285,6 +285,10 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_time"
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
+  // FIR-2679: loop-guard — cap how many self-wakeups an agent may chain on one
+  // issue without a human replying. The cap itself is a per-workspace number
+  // setting; this flag turns the guard on/off.
+  | "cerebro_wakeup_loop_guard"
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
   // mirroring the running banner (live countdown / waited-for status / CI).
   | "cerebro_wakeup_bar"
@@ -671,6 +675,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_wakeup_time: true,
   cerebro_wakeup_issue_status: true,
   cerebro_wakeup_github_ci: true,
+  // FIR-2679: ON by default — cap consecutive self-wakeups per issue. Off lets an
+  // agent chain self-wakeups without the loop guard.
+  cerebro_wakeup_loop_guard: true,
   // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
   // sidebar-only wakeup list with no banner.
   cerebro_wakeup_bar: true,
@@ -1607,6 +1614,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+  },
+  {
+    key: "cerebro_wakeup_loop_guard",
+    label: "Wakeup: loop guard",
+    group: "agents",
+    description:
+      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without a human replying, the next wakeup is rejected and the agent is told to post a status or question instead. A human comment resets the count. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-2679.",
   },
   {
     key: "cerebro_wakeup_bar",

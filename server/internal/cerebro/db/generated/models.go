@@ -417,6 +417,7 @@ type CerebroAgentWakeup struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	ConsecutivePostpones int32              `json:"consecutive_postpones"`
 	OriginCommentID      pgtype.UUID        `json:"origin_comment_id"`
+	ModelOverride        string             `json:"model_override"`
 }
 
 type CerebroAgentvaultAgentAccess struct {
@@ -1256,13 +1257,14 @@ type CerebroWorkspaceDefaultGroup struct {
 }
 
 type CerebroWorkspaceSetting struct {
-	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
-	DisplayCurrency          string             `json:"display_currency"`
-	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
-	UpdatedBy                pgtype.UUID        `json:"updated_by"`
-	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
-	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
-	DefaultAgentStartKind    string             `json:"default_agent_start_kind"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency           string             `json:"display_currency"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                 pgtype.UUID        `json:"updated_by"`
+	WakeupMaxSelfPerIssue     int32              `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes  int32              `json:"wakeup_min_interval_minutes"`
+	WakeupMaxConsecutiveLoops int32              `json:"wakeup_max_consecutive_loops"`
+	DefaultAgentStartKind     string             `json:"default_agent_start_kind"`
 }
 
 type ChatMessage struct {

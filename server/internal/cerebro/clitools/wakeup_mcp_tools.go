@@ -43,6 +43,7 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 				"fire_at":        map[string]any{"type": "string", "description": "RFC3339 timestamp (required for trigger_type=time)."},
 				"watch_issue_id": map[string]any{"type": "string", "description": "Issue UUID watched by issue_status/github_ci."},
 				"watch_status":   map[string]any{"type": "string", "description": "Status for trigger_type=issue_status."},
+				"model":          map[string]any{"type": "string", "description": "Optional cheaper model for the woken run (e.g. claude-haiku-4-5-20251001) so a pure check like 'is CI green?' never fires Opus. Empty = the agent's own model."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -76,6 +77,9 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 		}
 		if v := optString(args, "watch_status"); v != "" {
 			body["watch_status"] = v
+		}
+		if v := optString(args, "model"); v != "" {
+			body["model"] = v
 		}
 		var result any
 		if err := client.PostJSON(ctx, "/api/cerebro/wakeups", body, &result); err != nil {

@@ -4310,11 +4310,13 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-wakeup-settings): TECH-3298 per-workspace self-wakeup
-  // limits (max wakeups per issue + minimum gap between two time wakeups).
+  // CEREBRO-PATCH(cerebro-wakeup-settings): TECH-3298 + FIR-2679 per-workspace
+  // self-wakeup limits (max wakeups per issue, min gap between time wakeups, and
+  // the consecutive-loop cap for the loop guard).
   async getWakeupSettings(wsId: string): Promise<{
     max_self_per_issue: number;
     min_interval_minutes: number;
+    max_consecutive_loops: number;
   }> {
     return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`);
   }
@@ -4323,12 +4325,18 @@ export class ApiClient {
     wsId: string,
     maxSelfPerIssue: number,
     minIntervalMinutes: number,
-  ): Promise<{ max_self_per_issue: number; min_interval_minutes: number }> {
+    maxConsecutiveLoops: number,
+  ): Promise<{
+    max_self_per_issue: number;
+    min_interval_minutes: number;
+    max_consecutive_loops: number;
+  }> {
     return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`, {
       method: "PUT",
       body: JSON.stringify({
         max_self_per_issue: maxSelfPerIssue,
         min_interval_minutes: minIntervalMinutes,
+        max_consecutive_loops: maxConsecutiveLoops,
       }),
     });
   }
