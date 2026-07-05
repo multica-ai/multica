@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
 import {
   activeSessionId,
+  defaultSession,
   groupTimelineByThread,
   sessionForTime,
   sessionIdForComment,
@@ -40,6 +41,7 @@ const row = (root_comment_id: string, name: string, handoff: Session["handoff"] 
   root_comment_id,
   position: 0,
   name,
+  phase: null,
   handoff,
   created_at: "2026-06-21T00:00:00Z",
   updated_at: "2026-06-21T00:00:00Z",
@@ -92,6 +94,23 @@ describe("groupTimelineByThread", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]!.session.id).toBe("default");
     expect(groups[0]!.session.name).toBe("Session 1");
+  });
+
+  it("copies the workflow phase from the session row onto the built session", () => {
+    const phasedRow: Session = { ...row("a", "Plan it"), phase: "plan" };
+    const groups = groupTimelineByThread("issue-1", [phasedRow], [
+      commentGroup("a", "2026-06-21T00:00:00Z"),
+      commentGroup("b", "2026-06-21T01:00:00Z"),
+    ]);
+    // Row carries a phase → it flows through; a thread with no row → null.
+    expect(groups[0]!.session.phase).toBe("plan");
+    expect(groups[1]!.session.phase).toBeNull();
+  });
+});
+
+describe("defaultSession", () => {
+  it("has a null phase", () => {
+    expect(defaultSession("issue-1").phase).toBeNull();
   });
 });
 

@@ -1109,7 +1109,7 @@ Pass the THREAD ROOT comment id (the top-level comment that started the thread),
 	// rename_session — set a session's display name.
 	srv.RegisterTool(mcp.Tool{
 		Name:        "rename_session",
-		Description: "Set a session's name (the thread's display name). The session id is the THREAD ROOT comment id.",
+		Description: "Set a session's name (the thread's display name), and optionally its workflow phase badge. The session id is the THREAD ROOT comment id. When running an Issue workflow, name the plan session \"Plan\" with phase \"plan\", then each build/review session \"Build 1\"/\"Review 1\" with phase \"build\"/\"review\", so the session header shows which phase the run is in.",
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"issue_id", "root_comment_id", "name"},
@@ -1117,6 +1117,7 @@ Pass the THREAD ROOT comment id (the top-level comment that started the thread),
 				"issue_id":        map[string]any{"type": "string", "description": "Issue ID"},
 				"root_comment_id": map[string]any{"type": "string", "description": "Thread root comment id (the session id)."},
 				"name":            map[string]any{"type": "string", "description": "New session name."},
+				"phase":           map[string]any{"type": "string", "description": "Optional workflow phase badge: \"plan\", \"build\", or \"review\". Omit for an ordinary (non-workflow) session."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -1132,9 +1133,13 @@ Pass the THREAD ROOT comment id (the top-level comment that started the thread),
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
+		body := map[string]any{"name": name}
+		if phase := optString(args, "phase"); phase != "" {
+			body["phase"] = phase
+		}
 		var result any
 		path := "/api/cerebro/issues/" + url.PathEscape(issueID) + "/sessions/" + url.PathEscape(rootID)
-		if err := client.PatchJSON(ctx, path, map[string]any{"name": name}, &result); err != nil {
+		if err := client.PatchJSON(ctx, path, body, &result); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 		return jsonText(result)

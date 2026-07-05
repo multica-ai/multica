@@ -1175,7 +1175,77 @@ func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID,
 	if len(fields.LoopSpec) == 0 {
 		return fmt.Errorf("this recipe has no loop_spec to compile")
 	}
-	return h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec)
+	if err := h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec); err != nil {
+		return err
+	}
+	// FIR-2283 followup point 1 — activation only MATERIALIZES the loop's
+	// rules; it does not START them. The first phase (plan, or build when the
+	// recipe has no planning phase) is dispatched by a StatusChanged rule, but
+	// an issue born directly on a workflow never changes status, so that rule
+	// never fires and the agent never receives the plan-mode prompt. Synthesize
+	// the entry StatusChanged event here so the just-materialized first-phase
+	// rule fires exactly as it would on a real board move.
+	h.kickoffFirstPhase(ctx, workspaceID, row.ProjectID, issueID, fields.LoopSpec)
+	return nil
+}
+
+// loopEntryFields is the minimal projection of a loop_spec the activator needs
+// to decide which status enters the first phase: the planning toggle and the
+// two entry statuses (planning vs build). The keys match issueLoopSpecWire /
+// loops.Spec so this stays in sync with what Compile reads.
+type loopEntryFields struct {
+	Planning       bool   `json:"planning"`
+	PlanningStatus string `json:"planning_status"`
+	BuildStatus    string `json:"build_status"`
+}
+
+// kickoffFirstPhase dispatches the synthetic entry StatusChanged event that
+// starts a freshly-activated issue loop. The event's ToStatus is the loop's
+// entry status (planning status when the recipe plans, else build status), so
+// the loop:planning-dispatch (plan-mode) or loop:dispatch-build rule that
+// Compile just materialized for this issue fires. The issue-scope condition on
+// those rules matches on Raw["issue"]["id"], so that is the one field the
+// synthetic Raw payload must carry. Best-effort: a nil engine (unit wiring
+// without a Service) or a dispatch error is logged, never surfaced — the loop's
+// rules are already persisted and a later real status move still drives them.
+func (h *Handler) kickoffFirstPhase(ctx context.Context, workspaceID, projectID, issueID pgtype.UUID, loopSpecJSON []byte) {
+	if h.Service == nil {
+		return
+	}
+	var entry loopEntryFields
+	if err := json.Unmarshal(loopSpecJSON, &entry); err != nil {
+		slog.Warn("issue loop kickoff: parse loop_spec failed",
+			"issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	toStatus := entry.BuildStatus
+	if entry.Planning {
+		toStatus = entry.PlanningStatus
+		if toStatus == "" {
+			toStatus = "todo"
+		}
+	} else if toStatus == "" {
+		toStatus = "in_progress"
+	}
+	issueIDStr := util.UUIDToString(issueID)
+	te := TriggerEvent{
+		// Stable per issue: a re-activation replaces the rule rows (new row
+		// ids), so the idempotency key — keyed on (EventID, rule row id) — is
+		// still fresh and the plan re-dispatches after an intentional re-sync.
+		EventID:     "loop_activate:" + issueIDStr,
+		WorkspaceID: util.UUIDToString(workspaceID),
+		ProjectID:   util.UUIDToString(projectID),
+		IssueID:     issueIDStr,
+		Type:        TriggerStatusChanged,
+		ToStatus:    toStatus,
+		Raw: map[string]any{
+			"issue": map[string]any{"id": issueIDStr},
+		},
+	}
+	if err := h.Service.Dispatch(ctx, te); err != nil {
+		slog.Warn("issue loop kickoff: dispatch failed",
+			"issue_id", issueIDStr, "to_status", toStatus, "error", err)
+	}
 }
 
 // ActivateWorkflow handles POST /api/cerebro/workflows/{id}/activate.

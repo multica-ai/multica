@@ -496,7 +496,7 @@ func TestBuildPlanModePrompt(t *testing.T) {
 		t.Fatalf("plan-mode prompt dropped the inner skill instruction: %q", got)
 	}
 	// And the run must be told it is planning and must not write code.
-	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status"} {
+	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status", "rename_session", "\"plan\""} {
 		if !strings.Contains(got, want) {
 			t.Errorf("plan-mode prompt missing %q, got:\n%s", want, got)
 		}

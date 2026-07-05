@@ -470,6 +470,9 @@ func buildPlanModePrompt(inner string) string {
 		"(write it as a comment / plan on the issue). You must NOT write or edit " +
 		"code, must NOT run build, migration, or deploy commands, and must NOT open " +
 		"a pull request or otherwise change the repository. Planning only.\n\n" +
+		"As soon as this run has a session thread, name the session by calling " +
+		"rename_session with name \"Plan\" and phase \"plan\", so the session header " +
+		"badges it as the planning phase.\n\n" +
 		"When the plan is complete, move the issue forward to the build status so the " +
 		"build phase can start — do not start building yourself.\n\n" +
 		inner
