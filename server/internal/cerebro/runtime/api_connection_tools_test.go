@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -225,6 +226,105 @@ func TestAPIConnectionToolCallNon2xx(t *testing.T) {
 		t.Fatalf("expected 401 error, got %v", err)
 	}
 }
+
+// TestAuthScheme confirms the gateway-trace scheme label names the auth scheme(s)
+// without ever exposing a credential value, and reports "none" when unauthenticated.
+func TestAuthScheme(t *testing.T) {
+	cases := []struct {
+		name string
+		auth connections.AuthConfig
+		want string
+	}{
+		{"none", connections.AuthConfig{}, "none"},
+		{"bearer", connections.AuthConfig{BearerToken: "tok"}, "bearer"},
+		{"api_key", connections.AuthConfig{APIKey: "k"}, "api_key"},
+		{"cf", connections.AuthConfig{CFAccessID: "id", CFAccessSecret: "sec"}, "cf_access"},
+		{"combo", connections.AuthConfig{BearerToken: "t", APIKey: "k", CFAccessID: "id"}, "bearer+api_key+cf_access"},
+	}
+	for _, c := range cases {
+		if got := authScheme(c.auth); got != c.want {
+			t.Errorf("authScheme(%s)=%q want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAPIConnectionToolGatewayTrace confirms a dispatched call emits one
+// structured gateway-trace line carrying the connection/tool, target, credential
+// identity, permission decision, HTTP outcome, and run identity — and that the
+// credential VALUE never appears in the log. (FIR-2243 B2.)
+func TestAPIConnectionToolGatewayTrace(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	rec := &captureHandler{}
+	tool := &APIConnectionTool{
+		toolName: "infisical_admin__get_secrets", connName: "infisical-admin",
+		connID:  "conn-123",
+		method:  "GET", path: "/secrets",
+		baseURL: srv.URL, auth: connections.AuthConfig{BearerToken: "super-secret-token-value"},
+		client:  srv.Client(),
+	}
+	tool.attachTrace(slog.New(rec), GatewayRequestMeta{
+		AgentID: "agent-1", AgentName: "Mia", TaskID: "task-9", IssueID: "issue-7", Surface: "issue",
+	}, "allow")
+
+	if _, err := tool.Call(context.Background(), map[string]any{}); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if len(rec.records) != 1 {
+		t.Fatalf("expected exactly 1 trace line, got %d", len(rec.records))
+	}
+	attrs := rec.records[0]
+	want := map[string]string{
+		"event":               "api_connection_call",
+		"connection":          "infisical-admin",
+		"tool":                "infisical_admin__get_secrets",
+		"method":              "GET",
+		"path":                "/secrets",
+		"credential_id":       "conn-123",
+		"credential_name":     "infisical-admin",
+		"credential_scheme":   "bearer",
+		"permission_decision": "allow",
+		"agent_id":            "agent-1",
+		"task_id":             "task-9",
+		"issue_id":            "issue-7",
+	}
+	for k, v := range want {
+		if got := attrs[k]; got != v {
+			t.Errorf("trace attr %q = %q, want %q", k, got, v)
+		}
+	}
+	if attrs["http_status"] != "200" || attrs["ok"] != "true" {
+		t.Errorf("expected http_status=200 ok=true, got status=%q ok=%q", attrs["http_status"], attrs["ok"])
+	}
+	for k, v := range attrs {
+		if strings.Contains(v, "super-secret-token-value") {
+			t.Fatalf("credential value leaked into trace attr %q=%q", k, v)
+		}
+	}
+}
+
+// captureHandler is a minimal slog.Handler that records each log record's
+// attributes (flattened to string) for assertion in tests.
+type captureHandler struct {
+	records []map[string]string
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	m := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		m[a.Key] = a.Value.String()
+		return true
+	})
+	h.records = append(h.records, m)
+	return nil
+}
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
 
 // redactCredentials must strip every non-empty secret half from a response body
 // so an endpoint that echoes its own auth cannot leak the credential to the

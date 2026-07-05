@@ -1007,6 +1007,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			})
 			connTools := make([]Tool, 0, len(resolved.APITools))
 			for _, v := range resolved.APITools {
+				// FIR-2243 B2: stamp the run identity + the admitting verdict onto
+				// the tool so its dispatch emits the gateway-trace line. The registry
+				// holds the same pointer, so the call path sees it.
+				v.Tool.attachTrace(e.logger, meta, string(v.Verdict))
 				connTools = append(connTools, v.Tool)
 			}
 			// FIR-2441 fix-list #4: reach the mcp_http half too. On a local runtime
