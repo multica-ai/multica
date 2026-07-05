@@ -41,6 +41,7 @@ import (
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var defaultOrigins = []string{
@@ -234,6 +235,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		channelRouter.Handle,
 		engine.Config{},
 	)
+	// A freshly-installed bot must not wait out the sweep PollInterval
+	// (default 30s) before its connection opens: platform pushes in that
+	// window are silently dropped (Stream/WS transports do not queue for
+	// absent subscribers), which reads as "the bot ignored my first
+	// message". Kick the Supervisor at every installation-lifecycle commit
+	// so connect (and revoke teardown) happens immediately.
+	channelKick := func(events.Event) { h.ChannelSupervisor.Kick() }
+	for _, evt := range []string{
+		protocol.EventDingTalkInstallationCreated,
+		protocol.EventDingTalkInstallationRevoked,
+		protocol.EventLarkInstallationCreated,
+		protocol.EventLarkInstallationRevoked,
+	} {
+		bus.Subscribe(evt, channelKick)
+	}
 
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
 	// the InstallationService refuses to fall back to plaintext storage

@@ -644,3 +644,42 @@ func TestSupervisorConfigDefaults(t *testing.T) {
 		t.Fatalf("node id must be assigned")
 	}
 }
+
+// TestSupervisorKickSweepsImmediately covers the install-commit fast path:
+// a Kick makes the Supervisor pick up a brand-new installation right away
+// instead of leaving it unconnected until the next PollInterval tick
+// (during which platform pushes would be dropped).
+func TestSupervisorKickSweepsImmediately(t *testing.T) {
+	q := newFakeStore()
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	cfg := fastConfig()
+	cfg.PollInterval = time.Hour // only the boot sweep and explicit kicks
+	sup := NewSupervisor(q, reg, nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	go sup.Run(ctx)
+
+	// Let the boot sweep pass over the (still empty) store.
+	time.Sleep(20 * time.Millisecond)
+
+	// An install commits...
+	instID := uuidFromString(t, "44444444-4444-4444-4444-444444444444")
+	q.mu.Lock()
+	q.installations = []Installation{activeInst(instID, "fp1")}
+	q.mu.Unlock()
+
+	// ...without a kick nothing would happen for an hour.
+	sup.Kick()
+	if !waitFor(500*time.Millisecond, func() bool { return fc.Connects() >= 1 }) {
+		t.Fatalf("kick did not trigger an immediate sweep; connects=%d", fc.Connects())
+	}
+
+	// Kick with no pending work must be harmless (and never block).
+	sup.Kick()
+	sup.Kick()
+
+	cancel()
+	sup.Wait()
+}
