@@ -452,7 +452,7 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "각 Multica 에이전트를 전용 DingTalk 앱 봇에 연결합니다. DingTalk에서 QR 코드를 스캔하면 조직 내에 앱이 자동으로 생성되고 자격 증명이 발급됩니다.",
+    "page_description": "각 Multica 에이전트를 전용 DingTalk 앱 봇에 연결하세요. 멤버는 봇에게 개인 메시지를 보내거나, 그룹에서 @로 멘션하거나, /issue를 입력해 새 Multica 이슈를 만들 수 있습니다. DingTalk으로 QR 코드를 스캔하면 앱이 조직 내에 자동 생성되고 자격 증명도 자동 발급됩니다.",
     "not_enabled_title": "DingTalk 연동이 활성화되지 않았습니다",
     "not_enabled_description_prefix": "서버에서",
     "not_enabled_description_suffix": "을(를) 설정하면 DingTalk 봇 설치가 활성화됩니다.",

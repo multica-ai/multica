@@ -375,7 +375,7 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "Connect each Multica Agent to its own DingTalk app bot. Scan a QR code in DingTalk to create the app in your organization and provision its credentials automatically.",
+    "page_description": "Connect each Multica Agent to its own DingTalk app bot. Members can DM the bot, @ it in groups, and type /issue to spin up a new Multica issue. Scan a QR code in DingTalk to create the app in your organization and provision its credentials automatically.",
     "not_enabled_title": "DingTalk integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable DingTalk bot installations.",

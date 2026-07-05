@@ -375,7 +375,7 @@
   },
   "dingtalk": {
     "section_title": "钉钉",
-    "page_description": "将每个 Multica 智能体绑定到独立的钉钉应用机器人。用钉钉扫码即可在你的组织内自动创建应用并颁发凭证。",
+    "page_description": "将每个 Multica 智能体绑定到独立的钉钉应用机器人。成员可私聊 Bot、群聊 @ 它，或输入 /issue 直接创建 Multica issue；用钉钉扫码即可在你的组织内自动创建应用并颁发凭证。",
     "not_enabled_title": "未启用钉钉集成",
     "not_enabled_description_prefix": "需要在服务器上设置",
     "not_enabled_description_suffix": "才能启用钉钉 Bot 绑定。",

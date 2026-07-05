@@ -375,7 +375,7 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "各 Multica エージェントを専用の DingTalk アプリボットに接続します。DingTalk で QR コードをスキャンすると、組織内にアプリが自動作成され、資格情報が発行されます。",
+    "page_description": "各 Multica エージェントを専用の DingTalk アプリボットに接続します。メンバーはボットに DM したり、グループで @ メンションしたり、/issue と入力して新しい Multica イシューを起票できます。DingTalk で QR コードをスキャンすれば、アプリはあなたの組織内に自動作成され、資格情報も自動発行されます。",
     "not_enabled_title": "DingTalk 連携が有効になっていません",
     "not_enabled_description_prefix": "サーバーで",
     "not_enabled_description_suffix": "を設定すると DingTalk ボットのインストールが有効になります。",
