@@ -45,6 +45,11 @@ type Router struct {
 
 	pendingFreshMu sync.Mutex
 	pendingFresh   map[string]bool
+
+	// busyNoticed rate-limits the OutcomeAgentBusy notice per chat session
+	// (see markBusyNotified).
+	busyNoticeMu sync.Mutex
+	busyNoticed  map[string]time.Time
 }
 
 // Config tunes the Router. Zero values default.
@@ -75,6 +80,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		replyTimeout: cfg.ReplyTimeout,
 		logger:       cfg.Logger,
 		pendingFresh: make(map[string]bool),
+		busyNoticed:  make(map[string]time.Time),
 	}
 }
 
@@ -222,6 +228,24 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return r.drop(ctx, set, msg, inst.ID, DropReasonNotAddressedInGroup), finalizeMark, nil
 	}
 
+	// 3b. /unbind command — resolved BEFORE identity on purpose: identity
+	//     resolution may auto-bind the sender through a directory match,
+	//     and auto-binding someone who is asking to be unbound would be
+	//     absurd. The command consumes the message: no session write, no
+	//     run trigger, dedup marked processed.
+	if set.Unbind != nil && ParseUnbindCommand(msg.Text) {
+		existed, err := set.Unbind.UnbindSender(ctx, inst, msg)
+		if err != nil {
+			return Result{}, finalizeRelease, fmt.Errorf("unbind sender: %w", err)
+		}
+		return Result{
+			Outcome:        OutcomeUnbound,
+			InstallationID: inst.ID,
+			Sender:         msg.Source.SenderID,
+			UnbindExisted:  existed,
+		}, finalizeMark, nil
+	}
+
 	// 4. Identity check: map the platform sender to a Multica user and
 	//    re-verify workspace membership (no binding->member FK; MUL-3515 §4).
 	identity, err := set.Identity.ResolveSender(ctx, inst, msg)
@@ -366,7 +390,56 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
+		return
 	}
+
+	// The run is enqueued; if the agent is already at max_concurrent_tasks
+	// the reply will not start until a slot frees, which can read as "the
+	// bot ignored me". Send a rate-limited "queued" notice so the wait is
+	// explained. Best-effort: a failed capacity read just skips the notice.
+	if r.agentAtCapacity(ctx, session.AgentID) && r.markBusyNotified(sessionID) {
+		r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentBusy)
+	}
+}
+
+// agentAtCapacity reports whether the agent has no free task slot right now.
+func (r *Router) agentAtCapacity(ctx context.Context, agentID pgtype.UUID) bool {
+	agent, err := r.reader.GetAgent(ctx, agentID)
+	if err != nil {
+		return false
+	}
+	if agent.MaxConcurrentTasks <= 0 {
+		return false
+	}
+	running, err := r.reader.CountRunningTasks(ctx, agentID)
+	if err != nil {
+		return false
+	}
+	return running >= int64(agent.MaxConcurrentTasks)
+}
+
+// busyNoticeCooldown bounds how often one chat session gets the "queued"
+// notice: a burst of messages while the agent is busy should read as one
+// wait, not one notice per debounce window.
+const busyNoticeCooldown = 90 * time.Second
+
+// markBusyNotified reports whether a busy notice may fire for the session
+// now, and records the send. Entries are pruned opportunistically.
+func (r *Router) markBusyNotified(sessionID pgtype.UUID) bool {
+	now := time.Now()
+	key := keyForSession(sessionID)
+	r.busyNoticeMu.Lock()
+	defer r.busyNoticeMu.Unlock()
+	if last, ok := r.busyNoticed[key]; ok && now.Sub(last) < busyNoticeCooldown {
+		return false
+	}
+	for k, at := range r.busyNoticed {
+		if now.Sub(at) >= busyNoticeCooldown {
+			delete(r.busyNoticed, k)
+		}
+	}
+	r.busyNoticed[key] = now
+	return true
 }
 
 // clearTyping asks the platform to drop the "processing" indicator for a session
