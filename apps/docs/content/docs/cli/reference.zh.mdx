@@ -87,15 +87,19 @@ The daemon auto-detects these AI CLIs on your PATH:
 | CLI | Command | Description |
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
+| Antigravity | `agy` | Google's coding agent |
+| CodeBuddy | `codebuddy` | Tencent's Claude Code-compatible coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | Google's coding agent |
+| Copilot | `copilot` | GitHub's coding agent |
+| Cursor Agent | `cursor-agent` | Cursor coding agent |
 | OpenCode | `opencode` | Open-source coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | Pi | `pi` | Inflection coding agent |
-| Cursor Agent | `cursor-agent` | Cursor coding agent |
+| Qoder | `qodercli` | Alibaba coding agent |
+| Trae CLI | `traecli` | ByteDance coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -130,6 +134,10 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
+| `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
+| `MULTICA_ANTIGRAVITY_PATH` | Custom path to the `agy` binary |
+| `MULTICA_ANTIGRAVITY_MODEL` | Override the Antigravity model used |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
@@ -146,6 +154,10 @@ Agent-specific overrides:
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
+| `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
+| `MULTICA_TRAECLI_MODEL` | Override the Trae CLI model used |
 
 ### Self-Hosted Server
 
