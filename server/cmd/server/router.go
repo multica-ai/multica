@@ -523,7 +523,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		if err != nil {
 			slog.Error("dingtalk: secretbox.New failed; dingtalk bot integration disabled", "error", err)
 		} else {
-			installSvc, ierr := dingtalk.NewInstallationService(queries, box)
+			installSvc, ierr := dingtalk.NewInstallationService(queries, pool, box)
 			if ierr != nil {
 				slog.Error("dingtalk: InstallationService init failed; dingtalk bot integration disabled", "error", ierr)
 			} else {

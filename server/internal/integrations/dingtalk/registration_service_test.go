@@ -28,7 +28,7 @@ func newInstallationServiceForTest(t *testing.T) *InstallationService {
 	if err != nil {
 		t.Fatalf("secretbox.New: %v", err)
 	}
-	svc, err := NewInstallationService(&db.Queries{}, box)
+	svc, err := NewInstallationService(&db.Queries{}, &fakeTxStarter{tx: &fakeTx{}}, box)
 	if err != nil {
 		t.Fatalf("NewInstallationService: %v", err)
 	}
