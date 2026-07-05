@@ -1316,6 +1316,146 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 	}
 }
 
+// TestDashboardUsageExcludesStaleRuntimeBuckets covers the WS-1494 attribution
+// canary: a runtime whose last heartbeat is older than the activity bucket by
+// more than 24h must not make an employee look active "today" just because a
+// stray usage row was attached to that runtime.
+func TestDashboardUsageExcludesStaleRuntimeBuckets(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	insertRuntime := func(name string, lastSeen time.Time) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_runtime (
+				workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			)
+			VALUES ($1, NULL, $2, 'cloud', 'claude', 'online', '{}'::jsonb, '{}'::jsonb, $3)
+			RETURNING id
+		`, testWorkspaceID, name, lastSeen).Scan(&id); err != nil {
+			t.Fatalf("create runtime %s: %v", name, err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, id) })
+		return id
+	}
+	now := time.Now().UTC()
+	staleRuntimeID := insertRuntime("stale-window-runtime", now.Add(-48*time.Hour))
+	freshRuntimeID := insertRuntime("fresh-window-runtime", now)
+
+	insertAgent := func(name, runtimeID string) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent (
+				workspace_id, name, description, runtime_mode, runtime_config,
+				runtime_id, visibility, max_concurrent_tasks, owner_id,
+				instructions, custom_env, custom_args, mcp_config
+			)
+			VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+			RETURNING id
+		`, testWorkspaceID, name, runtimeID, testUserID).Scan(&id); err != nil {
+			t.Fatalf("create agent %s: %v", name, err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, id) })
+		return id
+	}
+	staleAgentID := insertAgent("stale-window-agent", staleRuntimeID)
+	freshAgentID := insertAgent("fresh-window-agent", freshRuntimeID)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'stale runtime attribution test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	insertUsage := func(agentID, runtimeID, model string, tokens int) {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+			VALUES ($1, $2, $3, 'completed', now()) RETURNING id
+		`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+			t.Fatalf("insert task %s: %v", model, err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
+			VALUES ($1, 'claude', $2, $3, 0, now(), now())
+		`, taskID, model, tokens); err != nil {
+			t.Fatalf("insert usage %s: %v", model, err)
+		}
+	}
+	insertUsage(staleAgentID, staleRuntimeID, "m-stale-runtime-window", 111)
+	insertUsage(freshAgentID, freshRuntimeID, "m-fresh-runtime-window", 222)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE model IN ('m-stale-runtime-window', 'm-fresh-runtime-window')`)
+		testPool.Exec(ctx, `DELETE FROM task_usage_hourly_dirty WHERE model IN ('m-stale-runtime-window', 'm-fresh-runtime-window')`)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("daily: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var dailyRows []struct {
+		Model       string `json:"model"`
+		InputTokens int64  `json:"input_tokens"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&dailyRows); err != nil {
+		t.Fatalf("decode daily: %v", err)
+	}
+	assertModelPresence := func(label string, rows []struct {
+		Model       string `json:"model"`
+		InputTokens int64  `json:"input_tokens"`
+	}) {
+		t.Helper()
+		var fresh, stale bool
+		for _, row := range rows {
+			if row.Model == "m-fresh-runtime-window" {
+				fresh = true
+				if row.InputTokens != 222 {
+					t.Errorf("%s: fresh tokens = %d, want 222", label, row.InputTokens)
+				}
+			}
+			if row.Model == "m-stale-runtime-window" {
+				stale = true
+			}
+		}
+		if !fresh {
+			t.Errorf("%s: fresh runtime usage row missing in %v", label, rows)
+		}
+		if stale {
+			t.Errorf("%s: stale runtime usage row should be excluded: %v", label, rows)
+		}
+	}
+	assertModelPresence("daily", dailyRows)
+
+	w = httptest.NewRecorder()
+	testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var byAgentRows []struct {
+		Model       string `json:"model"`
+		InputTokens int64  `json:"input_tokens"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&byAgentRows); err != nil {
+		t.Fatalf("decode by-agent: %v", err)
+	}
+	assertModelPresence("by-agent", byAgentRows)
+}
+
 // TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete covers the
 // `trg_tu_dirty_hourly` trigger — a BEFORE DELETE trigger on task_usage.
 // Migration 102 notes it has no production callers today and exists purely

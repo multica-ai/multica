@@ -48,20 +48,27 @@ WHERE atq.issue_id = $1;
 -- before the handler lowercased provider on write) merge with new rows
 -- instead of forming a separate case-variant bucket.
 SELECT
-    DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) AS date,
-    LOWER(provider) AS provider,
-    model,
-    SUM(input_tokens)::bigint        AS input_tokens,
-    SUM(output_tokens)::bigint       AS output_tokens,
-    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
-    SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
-WHERE workspace_id = $1
-  AND bucket_hour >= sqlc.arg('since')::timestamptz
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), LOWER(provider), model
-ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(provider), model;
+    DATE(tuh.bucket_hour AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    LOWER(tuh.provider) AS provider,
+    tuh.model,
+    SUM(tuh.input_tokens)::bigint        AS input_tokens,
+    SUM(tuh.output_tokens)::bigint       AS output_tokens,
+    SUM(tuh.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tuh.cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(tuh.task_count)::int             AS task_count
+FROM task_usage_hourly tuh
+JOIN agent_runtime ar ON ar.id = tuh.runtime_id
+WHERE tuh.workspace_id = $1
+  AND tuh.bucket_hour >= sqlc.arg('since')::timestamptz
+  -- Treat usage buckets more than 24h after the runtime's last heartbeat as
+  -- stale attribution noise. This keeps "active today" employee reports from
+  -- counting a machine that has not been seen since an earlier day while still
+  -- preserving historical buckets before the runtime went stale.
+  AND ar.last_seen_at IS NOT NULL
+  AND tuh.bucket_hour <= ar.last_seen_at + INTERVAL '24 hours'
+  AND (sqlc.narg('project_id')::uuid IS NULL OR tuh.project_id = sqlc.narg('project_id'))
+GROUP BY DATE(tuh.bucket_hour AT TIME ZONE sqlc.arg('tz')::text), LOWER(tuh.provider), tuh.model
+ORDER BY DATE(tuh.bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(tuh.provider), tuh.model;
 
 -- name: ListDashboardUsageByAgent :many
 -- Per-(agent, provider, model) token aggregates from `task_usage_hourly`. No
@@ -79,20 +86,27 @@ ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(provide
 -- provider is LOWER()-normalized so mixed-case historical rows merge with
 -- new rows (see ListDashboardUsageDaily).
 SELECT
-    agent_id,
-    LOWER(provider) AS provider,
-    model,
-    SUM(input_tokens)::bigint        AS input_tokens,
-    SUM(output_tokens)::bigint       AS output_tokens,
-    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
-    SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
-WHERE workspace_id = $1
-  AND bucket_hour >= @since::timestamptz
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-GROUP BY agent_id, LOWER(provider), model
-ORDER BY agent_id, LOWER(provider), model;
+    tuh.agent_id,
+    LOWER(tuh.provider) AS provider,
+    tuh.model,
+    SUM(tuh.input_tokens)::bigint        AS input_tokens,
+    SUM(tuh.output_tokens)::bigint       AS output_tokens,
+    SUM(tuh.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tuh.cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(tuh.task_count)::int             AS task_count
+FROM task_usage_hourly tuh
+JOIN agent_runtime ar ON ar.id = tuh.runtime_id
+WHERE tuh.workspace_id = $1
+  AND tuh.bucket_hour >= @since::timestamptz
+  -- Treat usage buckets more than 24h after the runtime's last heartbeat as
+  -- stale attribution noise. This keeps "active today" employee reports from
+  -- counting a machine that has not been seen since an earlier day while still
+  -- preserving historical buckets before the runtime went stale.
+  AND ar.last_seen_at IS NOT NULL
+  AND tuh.bucket_hour <= ar.last_seen_at + INTERVAL '24 hours'
+  AND (sqlc.narg('project_id')::uuid IS NULL OR tuh.project_id = sqlc.narg('project_id'))
+GROUP BY tuh.agent_id, LOWER(tuh.provider), tuh.model
+ORDER BY tuh.agent_id, LOWER(tuh.provider), tuh.model;
 
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
