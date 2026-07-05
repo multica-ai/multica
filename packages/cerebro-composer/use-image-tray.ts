@@ -24,8 +24,10 @@ export interface ImageTrayItem {
   /** `blob:` URL for instant preview + thumbnail, before (and after) upload. */
   blobUrl: string;
   filename: string;
-  /** Kept so "embed inline" can re-insert the original file into the editor. */
-  file: File;
+  /** Kept so "embed inline" can re-insert the original file into the editor.
+   *  Absent for items seeded from already-saved markdown (field editors), which
+   *  have a server URL but no local File to re-upload. */
+  file?: File;
   status: ImageTrayStatus;
   /** Populated on "completed" — the canonical server URL used in the submitted
    *  markdown and matched by BaseComposer's attachment-id tracking. */
@@ -88,8 +90,13 @@ export interface ImageTray {
  * `upload` is BaseComposer's own upload handler (toast + attachment-id map), so
  * completed items are already registered for attachment tracking.
  */
-export function useImageTray(upload: ImageTrayUploader): ImageTray {
-  const [items, setItems] = useState<ImageTrayItem[]>([]);
+export function useImageTray(
+  upload: ImageTrayUploader,
+  /** Seed the tray from already-saved images (field editors lift their trailing
+   *  image block into the tray on mount). Read once — later changes are ignored. */
+  initialItems?: ImageTrayItem[],
+): ImageTray {
+  const [items, setItems] = useState<ImageTrayItem[]>(() => initialItems ?? []);
   const uploadRef = useRef(upload);
   uploadRef.current = upload;
 
@@ -126,6 +133,7 @@ export function useImageTray(upload: ImageTrayUploader): ImageTray {
       setItems((prev) => [...prev, ...fresh]);
 
       fresh.forEach((item) => {
+        if (!item.file) return;
         uploadRef.current(item.file).then(
           (result) => {
             if (result) {
@@ -160,7 +168,7 @@ export function useImageTray(upload: ImageTrayUploader): ImageTray {
     if (!target) return null;
     revoke(target.blobUrl);
     setItems((prev) => prev.filter((i) => i.localId !== localId));
-    return target.file;
+    return target.file ?? null;
   }, []);
 
   const clear = useCallback(() => {

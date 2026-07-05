@@ -76,7 +76,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { type ContentEditorRef } from "../../editor/content-editor"; // CEREBRO-PATCH(issue-description-image-tray): description editor now uses EditorImageTray.
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { TitleEditor } from "../../editor/title-editor";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
@@ -137,7 +137,8 @@ import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
 // CEREBRO-PATCH(issue-composer-unify): FIR-1748 — issue comments use the shared CommentComposer preset.
-import { CommentComposer } from "@multica/cerebro-composer";
+// CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
+import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -2374,7 +2375,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               instead, so the rich-text editor would be a duplicate. */}
           {!isChat && (
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-              <ContentEditor
+              <EditorImageTray
                 ref={descEditorRef}
                 key={id}
                 defaultValue={issue.description || ""}

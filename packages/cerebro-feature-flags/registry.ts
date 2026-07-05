@@ -889,10 +889,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_composer_image_tray",
-    label: "Numbered image tray in composers",
+    label: "Numbered image tray in composers and fields",
     group: "issues",
     description:
-      "Images you add to a message (drag-and-drop, paste, or the attach button) collect as numbered thumbnails above the input instead of being inserted inline in the text. Each thumbnail shows its number (so you can tell the agent \"look at image 2\"), opens a full preview on click, can be embedded inline, or removed. On send, the images are appended to the message in order. Works the same in chat, issue comments, channels, and DMs. Off = images insert inline where the cursor is.",
+      "Images you add (drag-and-drop, paste, or the attach button) collect as numbered thumbnails above the field instead of being inserted inline in the text. Each thumbnail shows its number (so you can tell the agent \"look at image 2\"), opens a full preview on click, and can be removed. Works in chat, issue comments, channels, and DMs (embed inline + appended on send), and in issue descriptions, notes, and documents (the numbered row is saved with the text and shown again on reopen). Off = images insert inline where the cursor is.",
   },
   {
     key: "cerebro_web_push",

@@ -59,10 +59,12 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import {
-  ContentEditor,
   type ContentEditorRef,
   ReadonlyContent,
 } from "@multica/views/editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
+import { api } from "@multica/core/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
@@ -842,6 +844,8 @@ export function NoteEditor({
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
   const editorRef = React.useRef<ContentEditorRef>(null);
+  // Uploader for images dropped/pasted into the note (image tray, FIR-2693).
+  const { uploadWithToast } = useFileUpload(api);
   // Live body driving the outline + word/character count. Seeded from the note
   // and kept current by the editor's debounced onUpdate so the "Oversigt" and
   // counts react while typing, without waiting for the save round-trip.
@@ -1235,11 +1239,12 @@ export function NoteEditor({
                   }}
                 />
               )}
-              <ContentEditor
+              <EditorImageTray
                 key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
                 defaultValue={liveBody}
                 onUpdate={saveBody}
+                onUploadFile={uploadWithToast}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
                 onCommentOnSelection={

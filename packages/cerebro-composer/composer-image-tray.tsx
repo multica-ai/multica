@@ -16,6 +16,10 @@ interface ComposerImageTrayProps {
   onPreview: (item: ImageTrayItem) => void;
   onEmbed: (item: ImageTrayItem) => void;
   onRemove: (localId: string) => void;
+  /** Hide the per-image "Embed inline" action. Field editors (description, note,
+   *  document) use this: their tray images already live in the saved markdown, so
+   *  there is no send-time embed decision to make — only preview + remove. */
+  hideEmbed?: boolean;
 }
 
 export function ComposerImageTray({
@@ -23,6 +27,7 @@ export function ComposerImageTray({
   onPreview,
   onEmbed,
   onRemove,
+  hideEmbed = false,
 }: ComposerImageTrayProps) {
   if (items.length === 0) return null;
 
@@ -74,7 +79,7 @@ export function ComposerImageTray({
               >
                 <ImageOff className="size-3" />
               </button>
-            ) : (
+            ) : hideEmbed ? null : (
               <button
                 type="button"
                 onClick={() => onEmbed(item)}

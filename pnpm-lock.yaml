@@ -1434,6 +1434,9 @@ importers:
       '@multica/cerebro-collections':
         specifier: workspace:*
         version: link:../cerebro-collections
+      '@multica/cerebro-composer':
+        specifier: workspace:*
+        version: link:../cerebro-composer
       '@multica/cerebro-dictation':
         specifier: workspace:*
         version: link:../cerebro-dictation
@@ -2860,6 +2863,9 @@ importers:
       '@multica/cerebro-collections':
         specifier: workspace:*
         version: link:../cerebro-collections
+      '@multica/cerebro-composer':
+        specifier: workspace:*
+        version: link:../cerebro-composer
       '@multica/cerebro-dictation':
         specifier: workspace:*
         version: link:../cerebro-dictation
