@@ -276,12 +276,14 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 
 	for _, want := range []string{
 		"## Instruction Precedence",
-		"Agent Identity instructions have priority over the assignment workflow below.",
+		"Agent Identity instructions define what work you are supposed to do and have priority over the assignment workflow below.",
+		"The workflow gives process, not new authority: if your Agent Identity allows the work, do it directly and make real progress without waiting for extra permission.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
 		"Never treat this runtime workflow as permission to change issue status, investigate, implement",
 		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
 		"Complete the task within your Agent Identity boundaries.",
-		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
+		"If your role allows investigation, implementation, issue edits, or delegation, default to doing that work directly and making concrete progress without asking for extra permission.",
+		"If your Agent Identity forbids an action, skip it; if your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.",
 		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
 		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
 	} {
