@@ -186,6 +186,53 @@ func TestPreviewIssueTrigger_MatchesWritePath(t *testing.T) {
 	}
 }
 
+func TestCreateIssueAssignedChildRespectsStageDependencies(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	parent := createIssueForTest(t, map[string]any{
+		"title":  "stage-gated parent " + t.Name(),
+		"status": "todo",
+	})
+	stage1 := createIssueForTest(t, map[string]any{
+		"title":           "stage-gated step 1 " + t.Name(),
+		"status":          "todo",
+		"parent_issue_id": parent.ID,
+		"stage":           1,
+		"assignee_type":   "agent",
+		"assignee_id":     agentID,
+	})
+
+	blockedStage2 := createIssueForTest(t, map[string]any{
+		"title":           "stage-gated step 2 blocked " + t.Name(),
+		"status":          "todo",
+		"parent_issue_id": parent.ID,
+		"stage":           2,
+		"assignee_type":   "agent",
+		"assignee_id":     agentID,
+	})
+	if got := taskCountFor(t, blockedStage2.ID, agentID); got != 0 {
+		t.Fatalf("stage 2 child must not enqueue while stage 1 is still open, got %d tasks", got)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+stage1.ID, map[string]any{"status": "done"}), "id", stage1.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue stage1 done: %d %s", w.Code, w.Body.String())
+	}
+
+	readyStage2 := createIssueForTest(t, map[string]any{
+		"title":           "stage-gated step 2 ready " + t.Name(),
+		"status":          "todo",
+		"parent_issue_id": parent.ID,
+		"stage":           2,
+		"assignee_type":   "agent",
+		"assignee_id":     agentID,
+	})
+	if got := taskCountFor(t, readyStage2.ID, agentID); got != 1 {
+		t.Fatalf("ready stage 2 child should enqueue exactly once, got %d tasks", got)
+	}
+}
+
 // TestUpdateIssueSuppressRunSkipsEnqueue verifies suppress_run applies the
 // assignee change but starts no run, while the same write without it does.
 func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {

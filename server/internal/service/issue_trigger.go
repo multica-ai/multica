@@ -106,6 +106,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	default:
 		return IssueRunTrigger{}, false
 	}
+	if !s.stageDependenciesReady(ctx, issue) {
+		return IssueRunTrigger{}, false
+	}
 
 	switch issue.AssigneeType.String {
 	case "agent":
@@ -156,6 +159,34 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+// stageDependenciesReady preserves the staged child barrier on direct creates
+// and manual promotions. A child in stage N may start only after every existing
+// lower-stage sibling under the same parent is terminal. Same-stage siblings
+// are allowed to run together, and unstaged children do not participate in the
+// staged frontier.
+func (s *IssueService) stageDependenciesReady(ctx context.Context, issue db.Issue) bool {
+	if !issue.ParentIssueID.Valid || !issue.Stage.Valid {
+		return true
+	}
+	children, err := s.Queries.ListChildIssues(ctx, issue.ParentIssueID)
+	if err != nil {
+		return false
+	}
+	for _, child := range children {
+		if !child.Stage.Valid || child.Stage.Int32 >= issue.Stage.Int32 {
+			continue
+		}
+		if !isTerminalStageDependency(child.Status) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTerminalStageDependency(status string) bool {
+	return status == "done" || status == "cancelled"
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched

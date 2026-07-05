@@ -386,71 +386,27 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 }
 
 func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string) {
-	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+	if s.TaskService == nil {
 		return
 	}
-	if s.shouldEnqueueAgentTask(ctx, issue) {
+	trigger, ok := s.WillEnqueueRun(ctx, IssueTriggerInput{
+		Issue:    issue,
+		IsCreate: true,
+	}, IssueTriggerProbe{})
+	if !ok {
+		return
+	}
+
+	switch trigger.AssigneeType {
+	case "agent":
 		if _, err := s.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
 			slog.Warn("enqueue agent task on create failed",
 				"issue_id", util.UUIDToString(issue.ID),
 				"error", err)
 		}
-	}
-	if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
+	case "squad":
 		s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID)
 	}
-}
-
-// shouldEnqueueAgentTask returns true when an issue create or assignment
-// should trigger the assigned agent. Backlog issues are skipped — backlog
-// acts as a parking lot for pre-assigning without immediate execution.
-// Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
-// self-contained, since both code paths must move together.
-func (s *IssueService) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
-		return false
-	}
-	return s.isAgentAssigneeReady(ctx, issue)
-}
-
-func (s *IssueService) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
-	}
-	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return false
-	}
-	return true
-}
-
-func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
-		return false
-	}
-	return s.isSquadLeaderReady(ctx, issue)
-}
-
-func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		return false
-	}
-	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return false
-	}
-	agent, err := s.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil {
-		return false
-	}
-	ready, _, err := AgentReadiness(ctx, s.Queries, agent)
-	if err != nil {
-		return false
-	}
-	return ready
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
