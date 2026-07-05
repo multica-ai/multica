@@ -1,0 +1,80 @@
+:root {
+  --bg-page: #f7f8fa;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f2f5;
+  --bg-code: #f6f8fa;
+  --border: #e5e7eb;
+  --border-light: #f0f0f0;
+  --text-primary: #1a1d24;
+  --text-secondary: #5c6370;
+  --text-muted: #8b929e;
+  --accent: #3b5bdb;
+  --accent-light: #edf2ff;
+  --accent-hover: #364fc7;
+  --success: #2f9e44;
+  --warning: #e6771b;
+  --danger: #c92a2a;
+  --radius: 8px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 4px 12px rgba(0,0,0,0.06);
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'IBM Plex Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  line-height: 1.7;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.doc-layout { max-width: 1200px; margin: 0 auto; padding: 48px 32px 96px; }
+
+.doc-header { margin-bottom: 48px; }
+.doc-header h1 { font-family: var(--font-serif); font-size: 32px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.5px; margin-bottom: 8px; }
+.doc-header .meta { font-size: 14px; color: var(--text-muted); font-family: var(--font-mono); }
+
+h2 { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 48px 0 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+h2 .chapter-num { font-family: var(--font-mono); font-size: 12px; color: var(--accent); background: var(--accent-light); padding: 2px 8px; border-radius: 4px; }
+
+h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 28px 0 14px; }
+h4 { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin: 20px 0 12px; }
+
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tag-new { background: #d3f9d8; color: #1e6c31; }
+.tag-modify { background: #fff3bf; color: #5c4d00; }
+
+.change-badge { display: inline-block; font-size: 13px; font-weight: 500; padding: 6px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); box-shadow: var(--shadow-sm); }
+
+.table-wrapper { background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); overflow: hidden; margin: 16px 0 24px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+thead { background: var(--bg-hover); }
+th { text-align: left; padding: 12px 16px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+td { padding: 12px 16px; border-bottom: 1px solid var(--border-light); color: var(--text-secondary); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--bg-hover); }
+
+code { font-family: var(--font-mono); font-size: 13px; background: var(--bg-code); padding: 2px 6px; border-radius: 4px; color: var(--accent); }
+pre { background: var(--bg-code); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin: 16px 0; overflow-x: auto; }
+pre code { background: none; padding: 0; color: var(--text-primary); font-size: 13px; line-height: 1.6; }
+
+.mermaid-wrapper { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin: 16px 0 24px; box-shadow: var(--shadow-sm); }
+.mermaid { display: flex; justify-content: center; }
+
+.code-error { color: var(--danger); font-weight: 500; }
+.param-required { color: var(--danger); font-size: 12px; }
+.param-optional { color: var(--text-muted); font-size: 12px; }
+
+p { margin: 12px 0; color: var(--text-secondary); }
+strong { color: var(--text-primary); font-weight: 600; }
+
+@media (max-width: 768px) {
+  .doc-layout { padding: 32px 16px 64px; }
+  .doc-header h1 { font-size: 26px; }
+  th, td { padding: 10px 12px; }
+}

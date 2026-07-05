@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
+import { cn } from "@multica/ui/lib/utils";
 import { ModalRegistry } from "../modals/registry";
 import { SourceBackfillModal } from "../onboarding";
 import { AppSidebar } from "./app-sidebar";
@@ -13,6 +14,8 @@ interface DashboardLayoutProps {
   children: ReactNode;
   /** Rendered inside SidebarInset (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
   extra?: ReactNode;
+  /** Optional SidebarInset overrides for route-specific layouts. */
+  insetClassName?: string;
   /** Rendered inside sidebar header as a search trigger */
   searchSlot?: ReactNode;
   /** Loading indicator */
@@ -22,6 +25,7 @@ interface DashboardLayoutProps {
 export function DashboardLayout({
   children,
   extra,
+  insetClassName,
   searchSlot,
   loadingIndicator,
 }: DashboardLayoutProps) {
@@ -36,7 +40,7 @@ export function DashboardLayout({
       <SidebarProvider className="h-svh">
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
-        <SidebarInset className="relative overflow-hidden">
+        <SidebarInset className={cn("relative overflow-hidden", insetClassName)}>
           <NavigationProgress />
           {children}
           <ModalRegistry />

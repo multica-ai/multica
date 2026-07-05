@@ -53,6 +53,7 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  layout?: "floating" | "page";
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -75,12 +76,17 @@ interface ChatListContext {
   pendingTask: ChatPendingTask | null | undefined;
   liveTaskMessages: readonly TaskMessagePayload[] | undefined;
   availability: AgentAvailability | undefined;
+  layout: "floating" | "page";
+}
+
+function contentWidthClass(_layout: "floating" | "page") {
+  return "mx-auto w-full max-w-4xl";
 }
 
 function ChatListHeader({ context }: { context?: ChatListContext }) {
   const { t } = useT("chat");
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 pt-4">
+    <div className={cn(contentWidthClass(context?.layout ?? "floating"), "px-5 pt-4")}>
       {context?.isFetchingOlderMessages && (
         <div className="text-center text-xs text-muted-foreground">
           {t(($) => $.message_list.loading_older)}
@@ -93,7 +99,7 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 function ChatListFooter({ context }: { context?: ChatListContext }) {
   if (!context) return null;
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+    <div className={cn(contentWidthClass(context.layout), "px-5 pb-4 space-y-4")}>
       {context.hasLive && (
         <div className="w-full space-y-1.5">
           <TimelineView items={context.liveTimeline} isStreaming />
@@ -123,6 +129,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  layout = "floating",
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -172,6 +179,7 @@ export function ChatMessageList({
     pendingTask,
     liveTaskMessages,
     availability,
+    layout,
   };
 
   return (
@@ -182,8 +190,8 @@ export function ChatMessageList({
       className="flex-1 overflow-y-auto"
     >
       {!scrollContainerEl ? (
-        <div className="mx-auto w-full max-w-4xl px-5 pt-4 space-y-3">
-          <ChatMessageSkeleton />
+        <div className={cn(contentWidthClass(layout), "px-5 pt-4 space-y-3")}>
+          <ChatMessageSkeleton layout={layout} />
         </div>
       ) : (
       <Virtuoso
@@ -203,7 +211,7 @@ export function ChatMessageList({
         context={listContext}
         components={LIST_COMPONENTS}
         itemContent={(_, msg) => (
-          <div className="mx-auto w-full max-w-4xl px-5 py-2">
+          <div className={cn(contentWidthClass(layout), "px-5 py-2")}>
             <MessageBubble
               message={msg}
               isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
@@ -222,10 +230,10 @@ export function ChatMessageList({
  * mirrors an assistant → user → assistant exchange so the window doesn't
  * shift under the user when real messages arrive.
  */
-export function ChatMessageSkeleton() {
+export function ChatMessageSkeleton({ layout = "floating" }: { layout?: "floating" | "page" }) {
   return (
     <div className="flex-1 overflow-hidden">
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-5">
+      <div className={cn(contentWidthClass(layout), "px-5 py-4 space-y-5")}>
         <div className="space-y-2">
           <Skeleton className="h-3.5 w-3/4" />
           <Skeleton className="h-3.5 w-1/2" />

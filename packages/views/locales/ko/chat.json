@@ -30,6 +30,7 @@
   },
   "session_history": {
     "untitled": "제목 없음",
+    "count": "채팅 {{count}}개",
     "time": {
       "just_now": "방금 전",
       "minutes": "{{count}}분 전",

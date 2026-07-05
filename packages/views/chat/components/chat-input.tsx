@@ -81,6 +81,7 @@ interface ChatInputProps {
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
+  layout?: "floating" | "page";
 }
 
 export function ChatInput({
@@ -95,6 +96,7 @@ export function ChatInput({
   agentName,
   leftAdornment,
   contextItems,
+  layout = "floating",
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -326,33 +328,33 @@ export function ChatInput({
         : t(($) => $.input.placeholder_default);
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
+  const isPage = layout === "page";
+  const isCompactEmptyPage = isPage && !!noAgent;
+  const showLeftAdornment = !!leftAdornment && !isCompactEmptyPage;
 
   return (
-    <div
-      className={cn(
-        "px-5 pb-3 pt-0",
-        // Outer wrapper carries the disabled cursor. Inner card sets
-        // pointer-events-none, which suppresses hover (and therefore
-        // any cursor of its own) — splitting the two layers lets hover
-        // bubble back here so the browser actually reads cursor.
-        noAgent && "cursor-not-allowed",
-      )}
-    >
+    <div className={cn("px-5 pt-0", isPage ? "pb-2" : "pb-3")}>
       <div
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand",
-          // Visual + interaction lock when there's no agent. We don't
-          // toggle ContentEditor's editable mode (Tiptap can't switch
-          // cleanly post-mount, and the prop has been removed); instead
-          // we drop pointer events at the wrapper level so clicks miss
-          // the editor entirely, and dim the surface so it reads as
-          // "disabled" rather than "broken".
-          noAgent && "pointer-events-none opacity-60",
+          "relative flex w-full flex-col bg-card border-1 border-border transition-colors focus-within:border-brand",
+          isPage
+            ? isCompactEmptyPage
+              ? "h-[120px] min-h-[120px] max-h-[120px] mx-auto max-w-4xl rounded-md"
+              : "min-h-11 max-h-28 mx-auto max-w-4xl rounded-md pb-7"
+            : "min-h-16 max-h-40 rounded-lg pb-9 mx-auto max-w-4xl",
         )}
-        aria-disabled={noAgent || undefined}
       >
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+        <div
+          className={cn(
+            "flex-1 min-h-0 overflow-y-auto",
+            isCompactEmptyPage
+              ? "px-3 py-2 pr-12"
+              : isPage
+                ? "px-2.5 py-1.5 pr-11"
+                : "px-3 py-2",
+          )}
+        >
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey
             // intentionally does not depend on activeSessionId.
@@ -376,6 +378,7 @@ export function ChatInput({
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             attachments={draftAttachments}
             debounceMs={100}
+            density={isPage ? "compact" : "default"}
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
             enableSlashCommands
@@ -389,12 +392,17 @@ export function ChatInput({
             // continues a bullet list, leaving users stuck after one item.
           />
         </div>
-        {leftAdornment && (
-          <div className="absolute bottom-1.5 left-2 flex items-center">
+        {showLeftAdornment && (
+          <div
+            className={cn(
+              "absolute flex items-center",
+              isPage ? "bottom-1 left-1.5" : "bottom-1.5 left-2",
+            )}
+          >
             {leftAdornment}
           </div>
         )}
-        <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <div className={cn("absolute flex items-center gap-1", isPage ? "bottom-1 right-1" : "bottom-1 right-1.5")}>
           {uploadEnabled && (
             <FileUploadButton
               size="sm"

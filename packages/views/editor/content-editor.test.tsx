@@ -152,9 +152,21 @@ describe("ContentEditor", () => {
   it("does not hijack clicks that land inside the ProseMirror node", () => {
     render(<ContentEditor placeholder="Add description..." />);
 
-    fireEvent.mouseDown(screen.getByTestId("prosemirror"));
+    fireEvent.mouseDown(screen.getAllByTestId("prosemirror").at(-1)!);
 
     expect(mockFocus).not.toHaveBeenCalled();
+  });
+
+  it("uses a non-stretch shell in compact mode", () => {
+    render(<ContentEditor placeholder="Add description..." density="compact" />);
+
+    const editorContent = screen.getAllByTestId("editor-content").at(-1)!;
+    const shell = editorContent.parentElement;
+
+    expect(shell).not.toBeNull();
+    expect(shell?.className).toContain("min-h-0");
+    expect(shell?.className).not.toContain("min-h-full");
+    expect(editorContent.className).not.toContain("flex-1");
   });
 
   it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {

@@ -33,6 +33,7 @@
   },
   "session_history": {
     "untitled": "Untitled",
+    "count": "{{count}} chats",
     "time": {
       "just_now": "just now",
       "minutes": "{{count}}m ago",

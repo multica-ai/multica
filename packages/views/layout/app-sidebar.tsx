@@ -4,8 +4,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
-import { HelpLauncher } from "./help-launcher";
-import { JoinDiscordCard } from "./join-discord-card";
 import {
   DndContext,
   PointerSensor,
@@ -35,6 +33,7 @@ import {
   X,
   Zap,
   Users,
+  Sparkles,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -46,7 +45,6 @@ import { openCreateIssueWithPreference } from "@multica/core/issues/stores/creat
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -109,6 +107,7 @@ const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>>
 type NavKey =
   | "inbox"
   | "myIssues"
+  | "obitaplus"
   | "issues"
   | "projects"
   | "autopilots"
@@ -123,6 +122,7 @@ type NavKey =
 type NavLabelKey =
   | "inbox"
   | "my_issues"
+  | "obitaplus"
   | "issues"
   | "projects"
   | "autopilots"
@@ -139,11 +139,12 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 ];
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "obitaplus", labelKey: "obitaplus", icon: Sparkles },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
+  { key: "issues", labelKey: "issues", icon: ListTodo },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
@@ -763,13 +764,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-
-        <SidebarFooter className="p-2">
-          <JoinDiscordCard />
-          <div className="flex justify-end">
-            <HelpLauncher />
-          </div>
-        </SidebarFooter>
         <SidebarRail />
       </Sidebar>
   );

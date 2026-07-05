@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{需求名称}}测试分析 - 业务泳道图与测试关注点</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg: #f7f8fb;
+      --surface: #ffffff;
+      --ink: #1f2937;
+      --muted: #64748b;
+      --border: #d9e2ec;
+      --lane-a: #eef6ff;
+      --lane-b: #f7fbff;
+      --primary: #2563eb;
+      --success: #059669;
+      --warning: #b7791f;
+      --danger: #dc2626;
+      --soft-primary: #dbeafe;
+      --soft-success: #dcfce7;
+      --soft-warning: #fef3c7;
+      --soft-danger: #fee2e2;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page-bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+
+    .test-analysis-section {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 24px 56px;
+    }
+
+    h2 {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.25;
+      font-weight: 650;
+    }
+
+    .chapter-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #ffffff;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .section-intro {
+      margin: 0 0 20px;
+      max-width: 920px;
+      color: var(--muted);
+    }
+
+    .diagram-wrapper {
+      overflow-x: auto;
+      margin: 18px 0 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    .swimlane-svg {
+      display: block;
+      width: 100%;
+      min-width: 980px;
+      height: auto;
+    }
+
+    .lane-label {
+      fill: #0f172a;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .lane-desc {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .step-title {
+      fill: #111827;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .step-body {
+      fill: #475569;
+      font-size: 12px;
+    }
+
+    .flow-label {
+      fill: #334155;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .test-point {
+      fill: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 920px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f1f5f9;
+      color: #0f172a;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #eef2f7;
+      color: #334155;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag-primary {
+      background: var(--soft-primary);
+      color: #1d4ed8;
+    }
+
+    .tag-success {
+      background: var(--soft-success);
+      color: #047857;
+    }
+
+    .tag-warning {
+      background: var(--soft-warning);
+      color: #92400e;
+    }
+
+    .tag-danger {
+      background: var(--soft-danger);
+      color: #b91c1c;
+    }
+
+    @media (max-width: 720px) {
+      .test-analysis-section {
+        padding: 28px 14px 40px;
+      }
+
+      h2 {
+        align-items: flex-start;
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="test-analysis-section" id="swimlane-flow-test-analysis">
+    <h2><span class="chapter-num">{{章节号}}</span>{{业务名称}}业务泳道图与测试关注点</h2>
+    <p class="section-intro">
+      本章节用于将 {{业务名称}} 的端到端流程拆解到不同责任方泳道中，并从节点、分支、状态流转和外部依赖四个角度沉淀测试关注点。
+    </p>
+
+    <div class="diagram-wrapper" aria-label="{{业务名称}}业务泳道图">
+      <svg class="swimlane-svg" viewBox="0 0 1180 620" role="img" aria-labelledby="swimlane-title swimlane-desc" xmlns="http://www.w3.org/2000/svg">
+        <title id="swimlane-title">{{业务名称}}业务泳道图</title>
+        <desc id="swimlane-desc">纵向按 {{角色1}}、{{角色2}}、{{角色3}}、{{角色4}} 表达责任方，横向按业务发生顺序展示流程节点。</desc>
+
+        <defs>
+          <marker id="arrow-primary" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#2563eb" />
+          </marker>
+          <marker id="arrow-danger" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#dc2626" />
+          </marker>
+          <filter id="card-shadow" x="-8%" y="-16%" width="116%" height="132%">
+            <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.12" />
+          </filter>
+        </defs>
+
+        <rect x="0" y="0" width="1180" height="620" fill="#ffffff" />
+        <rect x="0" y="0" width="1180" height="72" fill="#f8fafc" />
+        <text x="28" y="44" fill="#0f172a" font-size="22" font-weight="700">{{业务名称}}端到端流程</text>
+        <text x="310" y="44" fill="#64748b" font-size="13">纵向为角色泳道，横向按流程自然推进；替换占位符即可用于具体业务</text>
+
+        <rect x="0" y="72" width="1180" height="118" fill="#eef6ff" />
+        <rect x="0" y="190" width="1180" height="118" fill="#f7fbff" />
+        <rect x="0" y="308" width="1180" height="118" fill="#eef6ff" />
+        <rect x="0" y="426" width="1180" height="118" fill="#f7fbff" />
+
+        <rect x="0" y="72" width="170" height="472" fill="#f1f5f9" />
+        <line x1="0" y1="190" x2="1180" y2="190" stroke="#d9e2ec" stroke-width="1" />
+        <line x1="0" y1="308" x2="1180" y2="308" stroke="#d9e2ec" stroke-width="1" />
+        <line x1="0" y1="426" x2="1180" y2="426" stroke="#d9e2ec" stroke-width="1" />
+        <line x1="0" y1="544" x2="1180" y2="544" stroke="#cbd5e1" stroke-width="1.5" />
+        <line x1="170" y1="72" x2="170" y2="544" stroke="#cbd5e1" stroke-width="1.5" />
+
+        <text class="lane-label" x="28" y="124">{{角色1}}</text>
+        <text class="lane-desc" x="28" y="150">{{例如：用户端/运营端}}</text>
+        <text class="lane-label" x="28" y="242">{{角色2}}</text>
+        <text class="lane-desc" x="28" y="268">{{例如：前端/BFF}}</text>
+        <text class="lane-label" x="28" y="360">{{角色3}}</text>
+        <text class="lane-desc" x="28" y="386">{{例如：核心服务}}</text>
+        <text class="lane-label" x="28" y="478">{{角色4}}</text>
+        <text class="lane-desc" x="28" y="504">{{例如：外部依赖/异步任务}}</text>
+
+        <g filter="url(#card-shadow)">
+          <rect x="220" y="102" width="152" height="66" rx="8" fill="#ffffff" stroke="#bfdbfe" />
+          <text class="step-title" x="238" y="129">1. 发起请求</text>
+          <text class="step-body" x="238" y="151">{{入口页面/操作}}</text>
+        </g>
+
+        <g filter="url(#card-shadow)">
+          <rect x="420" y="220" width="156" height="66" rx="8" fill="#ffffff" stroke="#bfdbfe" />
+          <text class="step-title" x="438" y="247">2. 前置校验</text>
+          <text class="step-body" x="438" y="269">{{必填/权限/幂等}}</text>
+        </g>
+
+        <g filter="url(#card-shadow)">
+          <rect x="620" y="338" width="166" height="66" rx="8" fill="#ffffff" stroke="#bbf7d0" />
+          <text class="step-title" x="638" y="365">3. 业务处理</text>
+          <text class="step-body" x="638" y="387">{{接口路径/核心编排}}</text>
+        </g>
+
+        <g filter="url(#card-shadow)">
+          <rect x="820" y="456" width="166" height="66" rx="8" fill="#ffffff" stroke="#fde68a" />
+          <text class="step-title" x="838" y="483">4. 下游交互</text>
+          <text class="step-body" x="838" y="505">{{第三方/消息/任务}}</text>
+        </g>
+
+        <g filter="url(#card-shadow)">
+          <rect x="968" y="338" width="156" height="66" rx="8" fill="#ffffff" stroke="#bbf7d0" />
+          <text class="step-title" x="986" y="365">5. 状态落库</text>
+          <text class="step-body" x="986" y="387">{{成功/失败/处理中}}</text>
+        </g>
+
+        <g filter="url(#card-shadow)">
+          <rect x="968" y="102" width="156" height="66" rx="8" fill="#ffffff" stroke="#bfdbfe" />
+          <text class="step-title" x="986" y="129">6. 结果回显</text>
+          <text class="step-body" x="986" y="151">{{页面结果/通知}}</text>
+        </g>
+
+        <path d="M372 135 C396 135, 396 253, 420 253" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-primary)" />
+        <text class="flow-label" x="386" y="126">提交 {{请求参数}}</text>
+
+        <path d="M576 253 C600 253, 596 371, 620 371" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-primary)" />
+        <text class="flow-label" x="590" y="270">调用 {{接口}}</text>
+
+        <path d="M786 371 C812 371, 794 489, 820 489" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-primary)" />
+        <text class="flow-label" x="798" y="390">发送 {{下游请求}}</text>
+
+        <path d="M986 489 C1018 489, 936 371, 968 371" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-primary)" />
+        <text class="flow-label" x="948" y="466">回调/响应</text>
+
+        <path d="M1046 338 C1046 282, 1046 224, 1046 168" fill="none" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-primary)" />
+        <text class="flow-label" x="1058" y="264">查询/推送结果</text>
+
+        <path d="M498 286 C498 318, 552 322, 604 322" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#arrow-danger)" />
+        <text class="flow-label" x="512" y="314" fill="#b91c1c">校验失败分支</text>
+
+        <circle cx="408" cy="212" r="13" fill="#2563eb" />
+        <text class="test-point" x="408" y="212">T1</text>
+        <circle cx="604" cy="328" r="13" fill="#059669" />
+        <text class="test-point" x="604" y="328">T2</text>
+        <circle cx="804" cy="444" r="13" fill="#b7791f" />
+        <text class="test-point" x="804" y="444">T3</text>
+        <circle cx="948" cy="328" r="13" fill="#dc2626" />
+        <text class="test-point" x="948" y="328">T4</text>
+
+        <rect x="188" y="564" width="924" height="1" fill="#e2e8f0" />
+        <text x="188" y="588" fill="#64748b" font-size="12">说明：左侧纵向为角色/责任方；横向不设置角色或阶段表头，节点按业务发生顺序自然向右推进。</text>
+      </svg>
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>关注点</th>
+            <th>覆盖节点</th>
+            <th>测试目标</th>
+            <th>核心用例方向</th>
+            <th>预期断言</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag tag-primary">T1 入口参数</span></td>
+            <td>{{发起请求节点}}</td>
+            <td>验证入口参数、权限、前端约束与后端校验一致。</td>
+            <td>必填缺失、格式非法、越权访问、重复提交、边界金额或数量。</td>
+            <td>错误码、错误文案、HTTP 状态、页面提示与接口响应保持一致。</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-success">T2 主流程</span></td>
+            <td>{{业务处理节点}}</td>
+            <td>验证正常链路完成核心状态推进和关键数据写入。</td>
+            <td>构造最小成功数据、完整成功数据、幂等重放、关键字段映射。</td>
+            <td>数据库状态、响应字段、审计日志、消息或通知内容符合预期。</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-warning">T3 外部依赖</span></td>
+            <td>{{下游交互节点}}</td>
+            <td>验证第三方、MQ、定时任务或异步回调的不确定性处理。</td>
+            <td>下游成功、下游失败、超时、未知态、重复回调、乱序回调。</td>
+            <td>本地状态不误推进，补偿或重试策略生效，异常日志可定位。</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-danger">T4 异常分支</span></td>
+            <td>{{失败分支/拒绝节点}}</td>
+            <td>验证业务拒绝、系统异常和补偿失败的兜底语义。</td>
+            <td>校验拒绝、业务规则拒绝、数据库更新失败、并发状态冲突。</td>
+            <td>状态回滚或保持、失败原因落库、用户可见结果和运营可查结果一致。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</body>
+</html>

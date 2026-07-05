@@ -99,3 +99,24 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.queryByText("Bash")).not.toBeInTheDocument();
   });
 });
+
+describe("ChatMessageList page layout", () => {
+  it("keeps page-mode content centered instead of stretching to the edges", () => {
+    const qc = new QueryClient();
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability={undefined}
+            layout="page"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(container.innerHTML).toContain("max-w-4xl");
+    expect(container.innerHTML).not.toContain("max-w-none");
+  });
+});

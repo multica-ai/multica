@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multica系统级系分文档生成-20260704</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.7;
+      margin: 40px auto;
+      max-width: 980px;
+      padding: 0 24px 48px;
+      color: #1f2937;
+    }
+    h1, h2 {
+      color: #111827;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0 24px;
+    }
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f3f4f6;
+    }
+    ul {
+      padding-left: 20px;
+    }
+    .meta {
+      color: #6b7280;
+      margin-bottom: 24px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Multica系统级系分文档生成</h1>
+  <p class="meta">生成日期：2026-07-04</p>
+
+  <h2>需求澄清</h2>
+  <ul>
+    <li>基于当前仓库代码与现有架构文档，新生成一套系统设计分析文档，而不是修改旧文档。</li>
+    <li>文档目标不是单一功能，而是覆盖整个 Multica 产品当前已实现的系统能力，并按模块分门别类整理。</li>
+    <li>生成内容以代码现状为准，重点覆盖服务端、Web、Desktop、Mobile、共享核心包、数据库实体关系、核心接口、关键时序、状态流转、下游集成与测试设计。</li>
+    <li>本次不以未来规划、待实现方案或纯视觉设计规范为主，而以当前系统如何工作为主。</li>
+    <li>默认输出为 docs/system-design/需求系统分析/ 下的新 HTML 系分文档，并按章节结构组织内容。</li>
+  </ul>
+
+  <h2>变更范围</h2>
+  <ul>
+    <li>新增需求澄清产物到 docs/requirements/，作为后续系统设计输入。</li>
+    <li>新增系统设计 HTML 文档，内容来源于 server/、apps/、packages/ 以及现有产品/架构文档。</li>
+    <li>需要梳理的重点模块包括：Workspace、Issue、Project、Agent、Runtime/Daemon、Skill、Autopilot、Chat、Inbox、成员权限、认证登录、CLI 与跨端适配。</li>
+    <li>需要补充系统级视角下的接口定义、实现时序、ER 图、状态机、下游依赖、测试用例、影响面分析、讨论记录。</li>
+  </ul>
+
+  <h2>影响面分析</h2>
+  <ul>
+    <li>API：需要从服务端接口与前端调用关系中提炼系统级接口分组，避免把每个细枝末节 endpoint 都平铺进去。</li>
+    <li>数据：需要从数据库实体与领域对象映射中抽出核心 ER，而不是穷举全部表。</li>
+    <li>权限：需要体现 workspace 隔离、member/owner/admin 权限边界，以及 member/agent 多态主体模型。</li>
+    <li>集成：需要体现 daemon、本地 CLI provider、MCP、文件存储、邮件/认证、WebSocket/实时同步等外部依赖。</li>
+    <li>测试：需要以系统级测试视角组织，不等于逐个现有测试文件抄录。</li>
+  </ul>
+
+  <h2>需求确认结论</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>确认项</th>
+        <th>结论</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>是否存在现有系统设计文档</td>
+        <td>无现有文档，按全新需求路径生成</td>
+      </tr>
+      <tr>
+        <td>需求输入来源</td>
+        <td>无外部需求文档，基于仓库代码与现有文档整理</td>
+      </tr>
+      <tr>
+        <td>用户确认状态</td>
+        <td>用户已确认上述需求表述准确</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

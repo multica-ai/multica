@@ -213,6 +213,23 @@ describe("ChatInput @ context wiring", () => {
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
   });
+
+  it("keeps the editor writable when no agent is available, but still blocks send", async () => {
+    renderInput({ noAgent: true });
+
+    const editor = screen.getAllByTestId("editor").at(-1)!;
+    fireEvent.change(editor, { target: { value: "draft before creating agent" } });
+
+    expect(editor.closest("[aria-disabled='true']")).toBeNull();
+    expect(useChatStore.getState().setInputDraft).toHaveBeenCalledWith(
+      "__draft_new__:agent-1",
+      "draft before creating agent",
+    );
+
+    const buttons = screen.getAllByRole("button");
+    const sendButton = buttons[buttons.length - 1]!;
+    expect((sendButton as HTMLButtonElement).disabled).toBe(true);
+  });
 });
 
 describe("ChatInput attachment wiring", () => {

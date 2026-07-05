@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{系统设计标题}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="system-design.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="mermaid-config.js"></script>
+</head>
+<body>
+  <div class="doc-layout">
+    <header class="doc-header">
+      <h1>{{系统设计标题}}</h1>
+      <span class="meta">{{模块名称}}</span>
+    </header>
+
+    <h2><span class="chapter-num">变更</span>变更类型判定</h2>
+    <p><span class="change-badge">{{变更类型: 完全新增 / 现有能力升级 / 混合型}}</span></p>
+
+    <h2><span class="chapter-num">需求</span>需求目标与功能范围</h2>
+    <p><strong>业务目标：</strong>{{业务目标描述}}</p>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>需求功能</th><th>一句话描述</th></tr></thead>
+        <tbody>
+          <tr><td>{{功能1}}</td><td>{{描述1}}</td></tr>
+          <tr><td>{{功能2}}</td><td>{{描述2}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">1</span>接口定义（含接口层错误码定义）</h2>
+
+    <h3>1.1 接口定义</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>接口名</th><th>路径</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>{{接口名}}</td><td><code>{{路径}}</code></td><td><strong>{{方法}}</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>1.2 接口定义详情</h3>
+
+    <h4>1.2.1 {{接口名}} {{路径}}</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>参数名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>{{paramName}}</code></td><td>{{类型}}</td><td><span class="param-required">是</span></td><td>{{说明}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>参数名</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>{{paramName}}</code></td><td>{{类型}}</td><td>{{说明}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.2 {{接口名}} {{路径}}</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>参数名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>{{paramName}}</code></td><td>{{类型}}</td><td><span class="param-required">是</span></td><td>{{说明}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>参数名</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>{{paramName}}</code></td><td>{{类型}}</td><td>{{说明}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>1.3 接口层错误码定义</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>错误码</th><th>HTTP</th><th>说明</th><th>处理建议</th></tr></thead>
+        <tbody>
+          <tr><td><code class="code-error">{{ERROR_CODE}}</code></td><td>{{HTTP}}</td><td>{{说明}}</td><td>{{处理建议}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">2</span>接口实现时序</h2>
+
+    <h3>2.1 {{接口名1}} 主流程时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant A as {{调用方}}
+participant B as {{服务方}}
+A->>B: {{请求}}
+B-->>A: {{响应}}
+      </div>
+    </div>
+
+    <h3>2.2 {{接口名2}} 主流程时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant A as {{调用方}}
+participant B as {{服务方}}
+A->>B: {{请求}}
+B-->>A: {{响应}}
+      </div>
+    </div>
+
+    <h2><span class="chapter-num">3</span>数据库 ER 图</h2>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+erDiagram
+{{实体A}} ||--o{ {{实体B}} : {{关系描述}}
+      </div>
+    </div>
+
+    <h2><span class="chapter-num">4</span>状态机</h2>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+stateDiagram-v2
+[*] --> {{初始状态}}
+{{初始状态}} --> {{终态}}
+      </div>
+    </div>
+
+    <h2><span class="chapter-num">5</span>下游依赖模块集成（含下游错误码处理逻辑）</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>下游系统</th><th>集成方式</th><th>调用接口</th><th>错误码</th><th>超时/重试</th><th>降级策略</th></tr></thead>
+        <tbody>
+          <tr><td>{{下游系统}}</td><td>{{集成方式}}</td><td><code>{{调用接口}}</code></td><td>{{错误码}}</td><td>{{策略}}</td><td>{{策略}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>5.1 下游依赖错误码处理逻辑</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>错误码</th><th>错误信息</th><th>业务处理逻辑</th></tr></thead>
+        <tbody>
+          <tr><td><code class="code-error">{{错误码}}</code></td><td>{{错误信息}}</td><td>{{业务处理逻辑}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">6</span>影响面分析</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>影响模块</th><th>影响类型</th><th>风险级别</th><th>回归测试建议</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>{{影响模块}}</td>
+            <td><span class="tag tag-new">新增</span></td>
+            <td>{{风险级别}}</td>
+            <td>{{回归测试建议}}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">差异</span>升级/混合差异对比表（仅升级或混合必填）</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>对比项</th><th>现状</th><th>目标</th><th>改动说明</th><th>风险</th></tr></thead>
+        <tbody>
+          <tr><td>{{对比项}}</td><td>{{现状}}</td><td>{{目标}}</td><td>{{改动说明}}</td><td>{{风险}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

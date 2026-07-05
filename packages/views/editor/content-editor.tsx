@@ -163,6 +163,8 @@ interface ContentEditorProps {
    * before the modal closes.
    */
   flushPendingOnUnmount?: boolean;
+  /** Compact mode keeps the editor from stretching vertically to fill its container. */
+  density?: "default" | "compact";
 }
 
 interface ContentEditorRef {
@@ -203,6 +205,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       slashCommandMode = "skill",
       attachments,
       flushPendingOnUnmount = false,
+      density = "default",
     },
     ref,
   ) {
@@ -526,14 +529,22 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     if (!editor) return null;
 
+    const isCompact = density === "compact";
+
     return (
       <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
-          className="relative flex flex-1 min-h-full flex-col"
+          className={cn(
+            "relative flex flex-1 flex-col",
+            isCompact ? "min-h-0" : "min-h-full",
+          )}
           onMouseDown={handleContainerMouseDown}
         >
-          <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          <EditorContent
+            className={cn("flex flex-col", isCompact ? "min-h-0" : "flex-1")}
+            editor={editor}
+          />
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
           )}

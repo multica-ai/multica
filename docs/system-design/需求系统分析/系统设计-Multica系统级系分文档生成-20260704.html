@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>系统设计-Multica系统级系分文档生成-20260704</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="system-design.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="mermaid-config.js"></script>
+</head>
+<body>
+  <div class="doc-layout">
+    <header class="doc-header">
+      <h1>系统设计-Multica系统级系分文档生成-20260704</h1>
+      <span class="meta">Multica 系统级能力分析</span>
+    </header>
+
+    <h2><span class="chapter-num">变更</span>变更类型判定</h2>
+    <p><span class="change-badge">完全新增</span></p>
+    <p>本次新增的是 Multica 当前已实现系统能力的系统设计文档资产，不是新增单一业务功能。</p>
+
+    <h2><span class="chapter-num">需求</span>需求目标与功能范围</h2>
+    <p><strong>业务目标：</strong>基于当前仓库代码、数据库结构与现有产品文档，沉淀一份覆盖 Multica 核心模块、系统边界、核心接口、关键时序、状态流转、数据关系与集成依赖的系统级系分文档。</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>需求功能</th>
+            <th>一句话描述</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>系统能力全景梳理</td>
+            <td>覆盖 Workspace、Issue、Project、Agent、Runtime/Daemon、Skill、Autopilot、Chat、Inbox、权限与认证等核心模块。</td>
+          </tr>
+          <tr>
+            <td>系统设计结构化沉淀</td>
+            <td>以接口定义、实现时序、ER 图、状态机、下游依赖、测试用例、影响面分析、讨论记录等固定章节组织内容。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">1</span>接口定义（含接口层错误码定义）</h2>
+
+    <h3>1.1 接口定义</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>接口名</th>
+            <th>路径</th>
+            <th>方法</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>发送登录验证码</td><td><code>/auth/send-code</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>校验验证码登录</td><td><code>/auth/verify-code</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>创建工作区</td><td><code>/api/workspaces</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>查询议题列表</td><td><code>/api/issues</code></td><td><strong>GET</strong></td></tr>
+          <tr><td>创建议题</td><td><code>/api/issues</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>创建议题评论</td><td><code>/api/issues/{id}/comments</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>创建 Agent</td><td><code>/api/agents</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>Daemon 注册</td><td><code>/api/daemon/register</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>Daemon 心跳</td><td><code>/api/daemon/heartbeat</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>回传任务完成结果</td><td><code>/api/daemon/tasks/{taskId}/complete</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>创建技能</td><td><code>/api/skills</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>创建聊天会话</td><td><code>/api/chat/sessions</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>发送聊天消息</td><td><code>/api/chat/sessions/{sessionId}/messages</code></td><td><strong>POST</strong></td></tr>
+          <tr><td>查询收件箱</td><td><code>/api/inbox</code></td><td><strong>GET</strong></td></tr>
+          <tr><td>创建 Autopilot</td><td><code>/api/autopilots</code></td><td><strong>POST</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>1.2 接口定义详情</h3>
+
+    <h4>1.2.1 发送登录验证码 /auth/send-code</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>email</code></td><td>string</td><td><span class="param-required">是</span></td><td>用户登录邮箱地址。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>message</code></td><td>string</td><td>成功时返回已受理语义；当前主流程通常不依赖具体业务体。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.2 校验验证码登录 /auth/verify-code</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>email</code></td><td>string</td><td><span class="param-required">是</span></td><td>用户邮箱地址。</td></tr>
+          <tr><td><code>code</code></td><td>string</td><td><span class="param-required">是</span></td><td>六位验证码。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>token</code></td><td>string</td><td>登录成功后签发的 JWT。</td></tr>
+          <tr><td><code>user</code></td><td>object</td><td>用户信息对象，含 id、name、email、avatar_url、language、timezone 等字段。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.3 创建工作区 /api/workspaces</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>string</td><td><span class="param-required">是</span></td><td>工作区名称。</td></tr>
+          <tr><td><code>slug</code></td><td>string</td><td><span class="param-required">是</span></td><td>工作区唯一标识，参与 URL 路由。</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>否</td><td>工作区描述。</td></tr>
+          <tr><td><code>context</code></td><td>string</td><td>否</td><td>工作区级 Agent 上下文。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>工作区主键。</td></tr>
+          <tr><td><code>name</code></td><td>string</td><td>工作区名称。</td></tr>
+          <tr><td><code>slug</code></td><td>string</td><td>工作区 URL 标识。</td></tr>
+          <tr><td><code>context</code></td><td>string</td><td>工作区级上下文说明。</td></tr>
+          <tr><td><code>issue_prefix</code></td><td>string</td><td>议题编号前缀。</td></tr>
+          <tr><td><code>repos</code></td><td>array</td><td>允许 Agent 使用的仓库清单。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.4 查询议题列表 /api/issues</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>limit</code></td><td>number</td><td>否</td><td>分页大小。</td></tr>
+          <tr><td><code>offset</code></td><td>number</td><td>否</td><td>分页偏移量。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>否</td><td>按状态筛选。</td></tr>
+          <tr><td><code>priority</code></td><td>string</td><td>否</td><td>按优先级筛选。</td></tr>
+          <tr><td><code>assignee_id</code></td><td>string</td><td>否</td><td>按单个负责人筛选。</td></tr>
+          <tr><td><code>assignee_ids</code></td><td>string[]</td><td>否</td><td>按多个负责人筛选。</td></tr>
+          <tr><td><code>assignee_types</code></td><td>string[]</td><td>否</td><td>按负责人类型筛选，支持 member、agent、squad。</td></tr>
+          <tr><td><code>creator_id</code></td><td>string</td><td>否</td><td>按创建人筛选。</td></tr>
+          <tr><td><code>project_id</code></td><td>string</td><td>否</td><td>按所属项目筛选。</td></tr>
+          <tr><td><code>involves_user_id</code></td><td>string</td><td>否</td><td>按间接参与用户筛选。</td></tr>
+          <tr><td><code>open_only</code></td><td>boolean</td><td>否</td><td>是否仅返回未关闭议题。</td></tr>
+          <tr><td><code>scheduled</code></td><td>boolean</td><td>否</td><td>是否仅返回已设置日期的议题。</td></tr>
+          <tr><td><code>date_field</code></td><td>string</td><td>否</td><td>日期筛选字段。</td></tr>
+          <tr><td><code>date_start</code></td><td>string</td><td>否</td><td>开始日期。</td></tr>
+          <tr><td><code>date_end</code></td><td>string</td><td>否</td><td>结束日期。</td></tr>
+          <tr><td><code>sort</code></td><td>string</td><td>否</td><td>排序字段。</td></tr>
+          <tr><td><code>direction</code></td><td>string</td><td>否</td><td>排序方向。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>issues</code></td><td>array</td><td>议题列表，元素含 id、identifier、title、status、priority、assignee、project、stage、created_at、updated_at 等字段。</td></tr>
+          <tr><td><code>total</code></td><td>number</td><td>总条数。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.5 创建议题 /api/issues</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>title</code></td><td>string</td><td><span class="param-required">是</span></td><td>议题标题。</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>否</td><td>议题描述。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>否</td><td>初始状态。</td></tr>
+          <tr><td><code>priority</code></td><td>string</td><td>否</td><td>优先级。</td></tr>
+          <tr><td><code>assignee_type</code></td><td>string</td><td>否</td><td>负责人类型。</td></tr>
+          <tr><td><code>assignee_id</code></td><td>string</td><td>否</td><td>负责人 ID。</td></tr>
+          <tr><td><code>parent_issue_id</code></td><td>string</td><td>否</td><td>父议题 ID。</td></tr>
+          <tr><td><code>project_id</code></td><td>string</td><td>否</td><td>所属项目 ID。</td></tr>
+          <tr><td><code>stage</code></td><td>number</td><td>否</td><td>父子议题阶段序号。</td></tr>
+          <tr><td><code>start_date</code></td><td>string</td><td>否</td><td>计划开始日期。</td></tr>
+          <tr><td><code>due_date</code></td><td>string</td><td>否</td><td>截止日期。</td></tr>
+          <tr><td><code>attachment_ids</code></td><td>string[]</td><td>否</td><td>附件 ID 列表。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>议题主键。</td></tr>
+          <tr><td><code>identifier</code></td><td>string</td><td>带前缀的议题编号。</td></tr>
+          <tr><td><code>title</code></td><td>string</td><td>议题标题。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>议题状态。</td></tr>
+          <tr><td><code>priority</code></td><td>string</td><td>议题优先级。</td></tr>
+          <tr><td><code>assignee_type</code></td><td>string</td><td>负责人类型。</td></tr>
+          <tr><td><code>assignee_id</code></td><td>string</td><td>负责人标识。</td></tr>
+          <tr><td><code>project_id</code></td><td>string</td><td>所属项目。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.6 创建议题评论 /api/issues/{id}/comments</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>content</code></td><td>string</td><td><span class="param-required">是</span></td><td>评论正文。</td></tr>
+          <tr><td><code>type</code></td><td>string</td><td>否</td><td>评论类型，默认 comment。</td></tr>
+          <tr><td><code>parent_id</code></td><td>string</td><td>否</td><td>父评论 ID，用于线程回复。</td></tr>
+          <tr><td><code>attachment_ids</code></td><td>string[]</td><td>否</td><td>附带附件。</td></tr>
+          <tr><td><code>suppress_agent_ids</code></td><td>string[]</td><td>否</td><td>本次不触发的 Agent 列表。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>评论主键。</td></tr>
+          <tr><td><code>issue_id</code></td><td>string</td><td>所属议题。</td></tr>
+          <tr><td><code>author_type</code></td><td>string</td><td>作者类型，支持 member、agent。</td></tr>
+          <tr><td><code>author_id</code></td><td>string</td><td>作者标识。</td></tr>
+          <tr><td><code>attachments</code></td><td>array</td><td>评论附件列表。</td></tr>
+          <tr><td><code>reactions</code></td><td>array</td><td>评论反应列表。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.7 创建 Agent /api/agents</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>string</td><td><span class="param-required">是</span></td><td>Agent 名称。</td></tr>
+          <tr><td><code>runtime_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>绑定的运行时。</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>否</td><td>Agent 描述。</td></tr>
+          <tr><td><code>instructions</code></td><td>string</td><td>否</td><td>系统提示词。</td></tr>
+          <tr><td><code>runtime_config</code></td><td>object</td><td>否</td><td>运行时配置。</td></tr>
+          <tr><td><code>custom_env</code></td><td>object</td><td>否</td><td>启动环境变量。</td></tr>
+          <tr><td><code>custom_args</code></td><td>string[]</td><td>否</td><td>CLI 附加参数。</td></tr>
+          <tr><td><code>visibility</code></td><td>string</td><td>否</td><td>可见性。</td></tr>
+          <tr><td><code>permission_mode</code></td><td>string</td><td>否</td><td>调用权限模式。</td></tr>
+          <tr><td><code>invocation_targets</code></td><td>array</td><td>否</td><td>允许调用的对象范围。</td></tr>
+          <tr><td><code>max_concurrent_tasks</code></td><td>number</td><td>否</td><td>最大并发任务数。</td></tr>
+          <tr><td><code>model</code></td><td>string</td><td>否</td><td>指定模型。</td></tr>
+          <tr><td><code>thinking_level</code></td><td>string</td><td>否</td><td>推理强度档位。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>Agent 主键。</td></tr>
+          <tr><td><code>name</code></td><td>string</td><td>Agent 名称。</td></tr>
+          <tr><td><code>runtime_id</code></td><td>string</td><td>运行时 ID。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>当前状态。</td></tr>
+          <tr><td><code>visibility</code></td><td>string</td><td>可见性配置。</td></tr>
+          <tr><td><code>permission_mode</code></td><td>string</td><td>调用权限模式。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.8 Daemon 注册 /api/daemon/register</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>workspace_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>工作区 ID。</td></tr>
+          <tr><td><code>daemon_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>本机 daemon 标识。</td></tr>
+          <tr><td><code>legacy_daemon_ids</code></td><td>string[]</td><td>否</td><td>历史 daemon 标识列表，用于迁移兼容。</td></tr>
+          <tr><td><code>device_name</code></td><td>string</td><td><span class="param-required">是</span></td><td>设备名称。</td></tr>
+          <tr><td><code>cli_version</code></td><td>string</td><td><span class="param-required">是</span></td><td>Multica CLI 版本。</td></tr>
+          <tr><td><code>launched_by</code></td><td>string</td><td>否</td><td>拉起来源，例如 desktop。</td></tr>
+          <tr><td><code>runtimes</code></td><td>array</td><td><span class="param-required">是</span></td><td>当前设备发现到的运行时清单。</td></tr>
+          <tr><td><code>failed_profiles</code></td><td>array</td><td>否</td><td>启动失败的自定义运行时配置。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>daemon_id</code></td><td>string</td><td>注册成功后的 daemon 标识。</td></tr>
+          <tr><td><code>runtimes</code></td><td>array</td><td>已建立绑定的运行时列表及其注册状态。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.9 Daemon 心跳 /api/daemon/heartbeat</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>runtime_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>运行时 ID。</td></tr>
+          <tr><td><code>supports_batch_import</code></td><td>boolean</td><td>否</td><td>是否支持本地技能批量导入。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>status</code></td><td>string</td><td>心跳是否受理成功。</td></tr>
+          <tr><td><code>pending_work</code></td><td>object</td><td>待处理任务、模型请求、本地技能请求等调度信号集合。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.10 回传任务完成结果 /api/daemon/tasks/{taskId}/complete</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>pr_url</code></td><td>string</td><td>否</td><td>关联 PR 地址。</td></tr>
+          <tr><td><code>output</code></td><td>string</td><td>否</td><td>任务执行结果摘要。</td></tr>
+          <tr><td><code>session_id</code></td><td>string</td><td>否</td><td>会话恢复 ID。</td></tr>
+          <tr><td><code>work_dir</code></td><td>string</td><td>否</td><td>任务执行工作目录。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>任务主键。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>任务完成后的状态。</td></tr>
+          <tr><td><code>completed_at</code></td><td>string</td><td>完成时间。</td></tr>
+          <tr><td><code>result</code></td><td>object</td><td>执行结果体。</td></tr>
+          <tr><td><code>session_id</code></td><td>string</td><td>持久化后的会话 ID。</td></tr>
+          <tr><td><code>work_dir</code></td><td>string</td><td>持久化后的工作目录。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.11 创建技能 /api/skills</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>string</td><td><span class="param-required">是</span></td><td>技能名称。</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>否</td><td>技能说明。</td></tr>
+          <tr><td><code>content</code></td><td>string</td><td>否</td><td>主技能文档内容。</td></tr>
+          <tr><td><code>config</code></td><td>object</td><td>否</td><td>技能配置。</td></tr>
+          <tr><td><code>files</code></td><td>array</td><td>否</td><td>附加文件列表。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>技能主键。</td></tr>
+          <tr><td><code>workspace_id</code></td><td>string</td><td>所属工作区。</td></tr>
+          <tr><td><code>name</code></td><td>string</td><td>技能名称。</td></tr>
+          <tr><td><code>content</code></td><td>string</td><td>技能主文档内容。</td></tr>
+          <tr><td><code>files</code></td><td>array</td><td>技能文件列表。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.12 创建聊天会话 /api/chat/sessions</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>agent_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>对话绑定的 Agent。</td></tr>
+          <tr><td><code>title</code></td><td>string</td><td>否</td><td>会话标题。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>会话主键。</td></tr>
+          <tr><td><code>workspace_id</code></td><td>string</td><td>所属工作区。</td></tr>
+          <tr><td><code>agent_id</code></td><td>string</td><td>绑定的 Agent。</td></tr>
+          <tr><td><code>title</code></td><td>string</td><td>会话标题。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>会话状态。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.13 发送聊天消息 /api/chat/sessions/{sessionId}/messages</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>content</code></td><td>string</td><td><span class="param-required">是</span></td><td>用户发送的消息正文。</td></tr>
+          <tr><td><code>attachment_ids</code></td><td>string[]</td><td>否</td><td>消息附件。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>message</code></td><td>object</td><td>新写入的用户消息。</td></tr>
+          <tr><td><code>task</code></td><td>object</td><td>如触发 Agent 执行，则返回对应待运行任务信息。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.14 查询收件箱 /api/inbox</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>X-Workspace-Slug</code></td><td>header</td><td>是</td><td>工作区上下文头，由客户端自动注入。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>items</code></td><td>array</td><td>通知项列表，包含通知类型、关联对象、已读状态、归档状态、创建时间。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>1.2.15 创建 Autopilot /api/autopilots</h4>
+    <h5>请求参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>必填</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>title</code></td><td>string</td><td><span class="param-required">是</span></td><td>Autopilot 标题。</td></tr>
+          <tr><td><code>assignee_id</code></td><td>string</td><td><span class="param-required">是</span></td><td>默认执行对象。</td></tr>
+          <tr><td><code>execution_mode</code></td><td>string</td><td><span class="param-required">是</span></td><td>执行模式。</td></tr>
+          <tr><td><code>description</code></td><td>string</td><td>否</td><td>规则描述。</td></tr>
+          <tr><td><code>project_id</code></td><td>string</td><td>否</td><td>关联项目。</td></tr>
+          <tr><td><code>assignee_type</code></td><td>string</td><td>否</td><td>执行对象类型。</td></tr>
+          <tr><td><code>issue_title_template</code></td><td>string</td><td>否</td><td>生成议题标题模板。</td></tr>
+          <tr><td><code>subscribers</code></td><td>array</td><td>否</td><td>订阅模板。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h5>响应参数</h5>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>参数名</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>string</td><td>Autopilot 主键。</td></tr>
+          <tr><td><code>title</code></td><td>string</td><td>规则标题。</td></tr>
+          <tr><td><code>assignee_type</code></td><td>string</td><td>执行对象类型。</td></tr>
+          <tr><td><code>assignee_id</code></td><td>string</td><td>执行对象 ID。</td></tr>
+          <tr><td><code>execution_mode</code></td><td>string</td><td>执行模式。</td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>启停状态。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>1.3 接口层错误码定义</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>错误码</th>
+            <th>HTTP</th>
+            <th>说明</th>
+            <th>处理建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code class="code-error">INVALID_REQUEST</code></td><td>400</td><td>请求体非法、字段缺失、路径参数或 UUID 格式错误。</td><td>修正入参与请求格式后重试。</td></tr>
+          <tr><td><code class="code-error">UNAUTHORIZED</code></td><td>401</td><td>登录态、PAT、Daemon Token 或 Task Token 无效或过期。</td><td>重新登录或重新签发令牌。</td></tr>
+          <tr><td><code class="code-error">FORBIDDEN</code></td><td>403</td><td>工作区成员身份不足、角色不匹配、调用主体受限。</td><td>检查角色、工作区归属和调用来源。</td></tr>
+          <tr><td><code class="code-error">NOT_FOUND</code></td><td>404</td><td>工作区、议题、Agent、Runtime、Task 等目标不存在。</td><td>刷新上下文并重新获取对象。</td></tr>
+          <tr><td><code class="code-error">CONFLICT</code></td><td>409</td><td>资源冲突、重复操作或当前状态不允许执行目标动作。</td><td>读取最新状态后再次提交。</td></tr>
+          <tr><td><code class="code-error">VALIDATION_FAILED</code></td><td>422</td><td>业务校验失败，例如模板导入失败、组合参数不合法。</td><td>根据返回 message 修正业务输入。</td></tr>
+          <tr><td><code class="code-error">DEPENDENCY_UNAVAILABLE</code></td><td>503</td><td>Cloud Runtime、Composio、Lark、Slack 等依赖未配置或不可用。</td><td>补齐依赖配置或走降级方案。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">2</span>接口实现时序</h2>
+
+    <h3>2.1 用户登录与工作区初始化时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant C as 客户端
+participant A as 认证服务
+participant VC as 验证码存储
+participant U as 用户服务
+participant CFG as 配置服务
+participant W as 工作区服务
+participant WS as 实时通道
+
+C->>A: POST /auth/verify-code
+A->>VC: 校验邮箱与验证码
+alt 验证码无效
+    A-->>C: 返回(status=401, errorMsg=UNAUTHORIZED)
+else 验证码有效
+    A->>U: 查询或创建用户
+    A-->>C: 返回 token + user
+    C->>CFG: GET /api/config
+    C->>U: GET /api/me
+    C->>W: GET /api/workspaces
+    alt 无工作区
+        W-->>C: 返回空工作区列表
+        C->>C: 进入 onboarding / 创建工作区流程
+    else 已有工作区
+        W-->>C: 返回工作区列表
+        C->>C: 选择当前工作区并注入 X-Workspace-Slug
+        C->>WS: 连接 /ws
+        WS-->>C: 订阅工作区实时事件
+    end
+end
+      </div>
+    </div>
+
+    <h3>2.2 议题创建与任务触发时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant C as 客户端
+participant I as 议题服务
+participant P as 权限层
+participant DB as 议题库
+participant R as 关联模块
+participant ACT as 活动流服务
+participant T as 触发判定服务
+participant Q as 任务队列
+participant BUS as 实时事件总线
+
+C->>I: POST /api/issues
+I->>P: 校验登录态与工作区成员身份
+alt 参数或权限校验失败
+    P-->>I: 校验失败
+    I-->>C: 返回(status=400/422, errorMsg=VALIDATION_FAILED)
+else 校验通过
+    I->>DB: 创建 issue 主记录
+    I->>R: 写入 labels / project / parent / metadata / attachments
+    I->>ACT: 记录 activity_log
+    I->>T: 判断是否启动 Agent 任务
+    alt 命中可运行 Agent
+        T->>Q: 创建 agent_task_queue（状态=queued）
+        alt runtime 离线或暂不可认领
+            Q->>Q: 不推进状态机，等待补偿
+        end
+    end
+    I->>BUS: 广播 issue 创建/更新事件
+    I-->>C: 返回新建 issue
+end
+      </div>
+    </div>
+
+    <h3>2.3 Daemon 认领并执行任务时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant D as Daemon
+participant API as 后端
+participant Q as 任务队列
+participant CLI as 本地 CLI Runtime
+participant TS as 任务服务
+participant R as 关联对象
+participant BUS as 实时事件总线
+
+D->>API: POST /api/daemon/register
+API-->>D: 确认 daemon / runtime 注册关系
+D->>API: POST /api/daemon/heartbeat
+API->>Q: 检查待处理任务 / 模型请求 / 本地技能请求
+D->>API: POST /api/daemon/runtimes/{runtimeId}/tasks/claim
+API->>Q: 原子认领任务并更新为 dispatched
+API-->>D: 返回任务上下文
+D->>CLI: 启动 Agent 执行
+alt 本地目录冲突
+    D->>API: POST /api/daemon/tasks/{taskId}/wait-local-directory
+    API->>TS: 更新状态为 waiting_local_directory（一锁二判三更新）
+    API-->>D: 返回等待结果
+else 正常执行
+    D->>API: POST /api/daemon/tasks/{taskId}/start
+    D->>API: 持续上报 progress / messages / usage
+    alt 执行失败
+        D->>API: POST /api/daemon/tasks/{taskId}/fail
+        API->>TS: 更新状态为 failed（一锁二判三更新）
+        API->>BUS: 广播失败事件
+        API-->>D: 返回(status=FAILED, errorMsg=failure_reason)
+    else 执行完成
+        D->>API: POST /api/daemon/tasks/{taskId}/complete
+        API->>TS: 更新状态为 completed（一锁二判三更新）
+        API->>R: 回写 session_id、work_dir、usage、activity、评论/回复
+        API->>BUS: 广播 task completed / issue updated / chat updated
+        API-->>D: 返回完成后的任务对象
+    end
+end
+      </div>
+    </div>
+
+    <h3>2.4 Chat 会话消息触发 Agent 时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant U as 用户端
+participant C as Chat 服务
+participant DB as 会话库
+participant AT as 附件服务
+participant Q as 任务队列
+participant API as 后端
+participant D as Daemon
+participant CLI as 本地 CLI Runtime
+
+U->>C: POST /api/chat/sessions/{sessionId}/messages
+C->>DB: 写入用户消息
+C->>AT: 绑定消息附件
+C->>Q: 判断是否已有 pending task
+alt 无 pending task
+    Q->>Q: 创建新的 chat 任务（状态=queued）
+else 已有 pending task
+    Q->>Q: 仅追加消息，不重复创建任务
+end
+API->>D: 返回待认领 chat 任务
+D->>API: 认领任务并读取 prior session + unanswered messages
+D->>CLI: 携带 prior session 执行
+alt 任务取消
+    U->>API: POST /api/tasks/{taskId}/cancel
+    API-->>U: 返回 cancelled_chat_message
+    U->>U: 恢复输入框草稿
+else 正常完成
+    D->>API: 回传执行结果
+    API->>DB: 写入 assistant 消息
+    API-->>U: 推送 chat message / pending task 状态变化
+end
+      </div>
+    </div>
+
+    <h3>2.5 Autopilot 触发执行时序</h3>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+sequenceDiagram
+participant S as 触发源
+participant AP as Autopilot 服务
+participant V as 权限/签名校验层
+participant RUN as 运行记录
+participant I as 议题服务
+participant Q as 任务队列
+participant BUS as 实时事件总线
+participant D as Daemon
+
+S->>AP: 手动触发 / cron / webhook
+AP->>V: 校验协作者权限、token、签名、事件过滤条件
+alt Webhook 非法或条件不命中
+    V-->>AP: 校验失败
+    AP-->>S: 返回(status=403/422, errorMsg=FORBIDDEN or VALIDATION_FAILED)
+else 校验通过
+    AP->>RUN: 创建 autopilot_run
+    AP->>AP: 判断 execution_mode
+    alt execution_mode = run_only
+        AP->>Q: 直接创建 agent_task_queue
+    else execution_mode = create_issue
+        AP->>I: 先创建 issue
+        I->>Q: 创建或触发关联任务
+    end
+    AP->>BUS: 广播 autopilot run / delivery / issue / task 事件
+    D->>Q: 后续认领并执行任务
+    Q-->>AP: 回写 run 状态、delivery 状态与结果摘要
+end
+      </div>
+    </div>
+
+    <h2><span class="chapter-num">3</span>数据库 ER 图</h2>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+erDiagram
+USER ||--o{ MEMBER : belongs_to
+WORKSPACE ||--o{ MEMBER : contains
+WORKSPACE ||--o{ AGENT_RUNTIME : owns
+AGENT_RUNTIME ||--o{ AGENT : runs
+WORKSPACE ||--o{ SKILL : defines
+AGENT ||--o{ AGENT_SKILL : binds
+SKILL ||--o{ AGENT_SKILL : bound_by
+WORKSPACE ||--o{ PROJECT : contains
+WORKSPACE ||--o{ ISSUE : contains
+PROJECT ||--o{ ISSUE : groups
+ISSUE ||--o{ ISSUE : parent_of
+ISSUE ||--o{ COMMENT : has
+ISSUE ||--o{ ATTACHMENT : owns
+COMMENT ||--o{ ATTACHMENT : owns
+CHAT_SESSION ||--o{ ATTACHMENT : owns
+WORKSPACE ||--o{ CHAT_SESSION : contains
+AGENT ||--o{ CHAT_SESSION : chats_with
+CHAT_SESSION ||--o{ CHAT_MESSAGE : has
+AGENT ||--o{ AGENT_TASK_QUEUE : executes
+AGENT_RUNTIME ||--o{ AGENT_TASK_QUEUE : claims
+ISSUE ||--o{ AGENT_TASK_QUEUE : triggers
+CHAT_SESSION ||--o{ AGENT_TASK_QUEUE : triggers
+WORKSPACE ||--o{ INBOX_ITEM : contains
+USER ||--o{ INBOX_ITEM : receives
+WORKSPACE ||--o{ AUTOPILOT : owns
+AUTOPILOT ||--o{ AUTOPILOT_TRIGGER : has
+AUTOPILOT ||--o{ AUTOPILOT_RUN : produces
+AUTOPILOT_RUN ||--o{ AGENT_TASK_QUEUE : triggers
+      </div>
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>关系分组</th>
+            <th>关系说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>租户与身份</td>
+            <td><code>workspace</code> 是多租户边界；<code>user</code> 通过 <code>member</code> 加入工作区并获得角色。</td>
+          </tr>
+          <tr>
+            <td>Agent 执行域</td>
+            <td><code>agent_runtime</code> 是 Agent 的实际执行环境；<code>agent</code> 绑定运行时并通过 <code>agent_skill</code> 关联工作区技能。</td>
+          </tr>
+          <tr>
+            <td>议题协作域</td>
+            <td><code>issue</code> 是核心工作对象，可归属 <code>project</code>，也可形成父子任务；<code>comment</code>、<code>attachment</code> 围绕 issue 协作。</td>
+          </tr>
+          <tr>
+            <td>会话与任务域</td>
+            <td><code>chat_session</code> 绑定 Agent 持久化会话；<code>agent_task_queue</code> 连接 issue、chat、autopilot 三类任务来源。</td>
+          </tr>
+          <tr>
+            <td>通知域</td>
+            <td><code>inbox_item</code> 归属于 workspace 并投递到具体 user，用于承载跨对象通知。</td>
+          </tr>
+          <tr>
+            <td>自动化域</td>
+            <td><code>autopilot</code> 通过 <code>autopilot_trigger</code> 定义触发方式，通过 <code>autopilot_run</code> 记录每次执行，并进一步触发任务队列。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">4</span>状态机</h2>
+
+    <h3>4.1 议题状态机</h3>
+    <p>议题状态机表达工作项从创建、处理中、受阻到完成/取消的生命周期。Agent 执行结果不会直接替代议题状态，而是通过评论、任务结果和人工操作间接推动状态变化。</p>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+stateDiagram-v2
+[*] --> todo
+todo --> in_progress: 开始处理
+in_progress --> blocked: 遇到阻塞
+blocked --> in_progress: 阻塞解除
+in_progress --> completed: 完成处理
+todo --> cancelled: 主动取消
+in_progress --> cancelled: 主动取消
+blocked --> cancelled: 主动取消
+completed --> [*]
+cancelled --> [*]
+      </div>
+    </div>
+
+    <h3>4.2 Agent 任务状态机</h3>
+    <p>任务状态机覆盖 issue、chat、autopilot 三类来源的统一执行生命周期，是 daemon 调度与运行结果回传的核心状态机。</p>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+stateDiagram-v2
+[*] --> queued
+queued --> dispatched: runtime 原子认领
+dispatched --> waiting_local_directory: 本地目录冲突
+waiting_local_directory --> dispatched: 资源释放后重新调度
+dispatched --> running: daemon 上报 start
+running --> completed: 上报 complete（一锁二判三更新）
+running --> failed: 上报 fail（一锁二判三更新）
+queued --> cancelled: 用户/系统取消
+dispatched --> cancelled: 用户/系统取消
+running --> cancelled: 用户/系统取消
+completed --> [*]
+failed --> [*]
+cancelled --> [*]
+      </div>
+    </div>
+
+    <h3>4.3 Runtime 在线状态机</h3>
+    <p>Runtime 在线状态机由 daemon 注册、heartbeat、Redis/DB liveness 联合驱动，用于表示运行时是否可接单以及是否稳定。</p>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+stateDiagram-v2
+[*] --> offline
+offline --> idle: register + heartbeat 成功
+idle --> working: 认领并启动任务
+working --> idle: 任务全部完成
+idle --> unstable: 心跳/探测异常
+working --> unstable: 运行抖动
+unstable --> idle: 恢复正常
+unstable --> working: 恢复但仍有执行任务
+idle --> offline: 长时间未心跳
+working --> offline: 长时间未心跳
+unstable --> offline: 长时间未心跳
+offline --> archived: 删除/归档
+archived --> [*]
+      </div>
+    </div>
+
+    <h3>4.4 Autopilot 运行状态机</h3>
+    <p>Autopilot run 状态机记录每次自动化触发的执行结果。run_only 与 create_issue 两种模式共用同一状态流转。</p>
+    <div class="mermaid-wrapper">
+      <div class="mermaid">
+stateDiagram-v2
+[*] --> queued
+queued --> running: 开始消费 run
+running --> completed: 执行完成
+running --> failed: 执行失败
+queued --> skipped: 判定无需执行
+running --> skipped: 命中过滤或重复事件
+completed --> [*]
+failed --> [*]
+skipped --> [*]
+      </div>
+    </div>
+
+    <h2><span class="chapter-num">5</span>下游依赖模块集成（含下游错误码处理逻辑）</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>下游系统</th>
+            <th>集成方式</th>
+            <th>调用接口</th>
+            <th>错误码</th>
+            <th>超时/重试</th>
+            <th>降级策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>本地 CLI Runtime（Claude Code / Codex / Gemini / Hermes 等）</td><td>Daemon 本地进程调用</td><td><code>Daemon 启动本地命令，不走公网 HTTP</code></td><td>启动失败、执行失败、session/workdir 不可恢复</td><td>由 daemon 轮询与任务重试机制控制</td><td>runtime 不可用时任务保留 queued，Agent 保持不可执行</td></tr>
+          <tr><td>WebSocket 实时通道</td><td>服务端 WS</td><td><code>/ws</code></td><td>连接断开、鉴权失败、事件丢失</td><td>客户端自动重连</td><td>前端退化为轮询/刷新可见数据</td></tr>
+          <tr><td>PostgreSQL</td><td>服务端直连数据库</td><td><code>SQL / sqlc Query</code></td><td>查询失败、事务失败、唯一键冲突、行不存在</td><td>事务内重试有限，依赖上层幂等</td><td>返回 4xx/5xx，保持数据一致性优先</td></tr>
+          <tr><td>Redis / Liveness / 临时状态存储</td><td>服务端内部依赖</td><td><code>心跳、pending probe、本地技能导入等</code></td><td>liveness 读写失败、claim probe 失败</td><td>心跳周期性重试</td><td>回退到 DB staleness 判定，降低在线判断精度</td></tr>
+          <tr><td>文件存储（本地磁盘 / S3 / CloudFront）</td><td>服务端上传与签名下载</td><td><code>/api/upload-file</code></td><td>上传失败、签名 URL 不可用、预览不支持</td><td>上传由客户端重试；下载按需重新获取 metadata</td><td>降级为仅下载、不预览</td></tr>
+          <tr><td>Email（Resend / SMTP）</td><td>服务端 HTTP/SMTP</td><td><code>登录验证码发送</code></td><td>邮件发送失败、配置缺失</td><td>发送失败时按请求失败返回</td><td>本地开发可退化为日志验证码</td></tr>
+          <tr><td>Google OAuth</td><td>服务端第三方登录</td><td><code>/auth/google</code></td><td>code 无效、client 配置错误</td><td>单次登录请求，不自动重试</td><td>退回邮箱验证码登录</td></tr>
+          <tr><td>GitHub</td><td>OAuth/Webhook/API</td><td><code>安装、PR 关联、Webhook</code></td><td>安装失效、Webhook 投递失败、API 调用失败</td><td>Webhook delivery 支持重放</td><td>保留 issue 主流程，PR/安装视图显示失败状态</td></tr>
+          <tr><td>Lark</td><td>OAuth/长连接/Webhook/开放平台 API</td><td><code>安装、绑定、消息路由、卡片消息</code></td><td>token 失效、connector 初始化失败、绑定失效</td><td>supervisor/connector 机制负责重连</td><td>配置缺失时相关功能返回 503，不影响主系统</td></tr>
+          <tr><td>Slack</td><td>OAuth/BYO Token/API</td><td><code>安装、绑定、会话历史、消息触发</code></td><td>token 失效、安装缺失、历史拉取失败</td><td>依赖 API 调用重试与重连</td><td>通道能力不可用时仅关闭 Slack 能力，不影响 issue/chat 主链路</td></tr>
+          <tr><td>Composio</td><td>服务端第三方平台 API</td><td><code>toolkits / connections / connect init</code></td><td>COMPOSIO_API_KEY 缺失、连接删除失败、初始化失败</td><td>以用户发起请求为单位，不做强自动重试</td><td>返回 503 或错误消息，Agent 不挂载相关 toolkit</td></tr>
+          <tr><td>Cloud Runtime Fleet</td><td>服务端代理远程能力</td><td><code>/api/cloud-runtime/*</code></td><td>服务未配置、远端不可达、节点操作失败</td><td>以单次请求为主</td><td>SaaS 外场景直接返回 503，自托管不启用</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>5.1 依赖处理策略</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>改动对象</th>
+            <th>修改前</th>
+            <th>修改后</th>
+            <th>影响范围</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>系统级外部依赖处理方式</td>
+            <td>文档中尚未定义</td>
+            <td>所有依赖以“主链路优先、外围能力可降级”为原则；不让 GitHub、Lark、Slack、Composio、Cloud Runtime 等扩展能力拖垮 Issue、Chat、Agent 基本链路；对于 daemon/runtime 依赖优先保持任务与状态一致性。</td>
+            <td>登录、Agent 执行、自动化触发、附件上传下载、通知与外部通道、远端运行时能力</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>5.2 下游依赖错误码处理逻辑</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>错误码</th>
+            <th>错误信息</th>
+            <th>业务处理逻辑</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code class="code-error">DEPENDENCY_UNAVAILABLE</code></td><td>依赖未配置或当前不可用</td><td>返回 503；主业务对象不回滚到错误状态，前端隐藏或置灰该能力</td></tr>
+          <tr><td><code class="code-error">UNAUTHORIZED</code></td><td>第三方 token 失效或本地令牌无效</td><td>返回 401/403；引导重新授权或重新登录</td></tr>
+          <tr><td><code class="code-error">NOT_FOUND</code></td><td>远端对象不存在，如安装、连接、节点不存在</td><td>返回 404；清理本地引用或提示用户刷新</td></tr>
+          <tr><td><code class="code-error">CONFLICT</code></td><td>资源冲突，如重复安装、重复认领、状态冲突</td><td>返回 409；读取最新状态后重试</td></tr>
+          <tr><td><code class="code-error">VALIDATION_FAILED</code></td><td>第三方参数校验失败、事件过滤不命中</td><td>返回 422；保留现有主记录，不启动后续动作</td></tr>
+          <tr><td><code class="code-error">TIMEOUT</code></td><td>外部调用超时</td><td>记录失败日志与 delivery/run 状态；按能力类型决定是否可重试</td></tr>
+          <tr><td><code class="code-error">PARTIAL_FAILURE</code></td><td>扩展链路失败但主链路成功</td><td>主链路成功提交，扩展链路单独记录失败状态，供补偿或人工重放</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>5.3 关键降级场景</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>对比项</th>
+            <th>现状</th>
+            <th>目标</th>
+            <th>改动说明</th>
+            <th>风险</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Runtime 离线</td><td>任务有立即失败风险</td><td>任务保留 queued，等待可用 runtime</td><td>优先保持任务状态一致性，不直接判死主流程</td><td>任务执行延迟上升</td></tr>
+          <tr><td>WebSocket 断连</td><td>前端实时性下降</td><td>前端自动重连，必要时依赖刷新恢复</td><td>实时链路失败不阻塞核心读写接口</td><td>短时界面数据滞后</td></tr>
+          <tr><td>附件预览失败</td><td>内容不可直读</td><td>保留下载能力，预览可关闭</td><td>把预览能力与下载能力解耦</td><td>阅读体验下降</td></tr>
+          <tr><td>GitHub / Lark / Slack 不可用</td><td>扩展集成不可工作</td><td>主业务继续，集成功能单独报错</td><td>外围通道能力失败不回滚 issue/chat 主链路</td><td>集成侧功能缺失</td></tr>
+          <tr><td>Cloud Runtime 未配置</td><td>云运行时能力不可调用</td><td>返回 503，不影响本地 runtime 方案</td><td>SaaS 扩展能力与本地执行链路解耦</td><td>云节点能力不可用</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">6</span>测试用例</h2>
+
+    <h3>6.1 认证接口测试用例</h3>
+    <p>接口：验证码登录 <code>/auth/send-code</code> + <code>/auth/verify-code</code></p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>用例名称</th>
+            <th>测试类型</th>
+            <th>输入</th>
+            <th>预期结果</th>
+            <th>Mock 接口</th>
+            <th>Mock 方法</th>
+            <th>Mock 返回值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>正常发送验证码</td><td>正常</td><td>email=user@example.com</td><td>返回成功受理</td><td>Email Service</td><td>send</td><td>发送成功</td></tr>
+          <tr><td>正常验证码登录</td><td>正常</td><td>email=user@example.com, code=有效验证码</td><td>返回 token + user</td><td>Verification Store</td><td>verify</td><td>验证通过</td></tr>
+          <tr><td>验证码错误</td><td>异常</td><td>code=错误验证码</td><td>返回 401 UNAUTHORIZED</td><td>Verification Store</td><td>verify</td><td>验证失败</td></tr>
+          <tr><td>验证码过期</td><td>异常</td><td>code=过期验证码</td><td>返回 401 UNAUTHORIZED</td><td>Verification Store</td><td>verify</td><td>已过期</td></tr>
+          <tr><td>email 为空</td><td>边界值</td><td>email=null</td><td>返回 400 INVALID_REQUEST</td><td>-</td><td>-</td><td>-</td></tr>
+          <tr><td>code 非 6 位</td><td>边界值</td><td>code=123</td><td>返回 400/401</td><td>Verification Store</td><td>verify</td><td>格式不匹配</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.2 议题接口测试用例</h3>
+    <p>接口：创建议题 <code>/api/issues</code></p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>用例名称</th>
+            <th>测试类型</th>
+            <th>输入</th>
+            <th>预期结果</th>
+            <th>Mock 接口</th>
+            <th>Mock 方法</th>
+            <th>Mock 返回值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>正常创建普通议题</td><td>正常</td><td>title=Fix bug, status=todo</td><td>返回新建 issue，状态为 todo</td><td>DB</td><td>CreateIssue</td><td>创建成功</td></tr>
+          <tr><td>创建并指派给在线 Agent</td><td>正常</td><td>title=Implement feature, assignee_type=agent, assignee_id=A001</td><td>返回 issue，生成 queued task</td><td>Trigger Service</td><td>preview/enqueue</td><td>命中触发</td></tr>
+          <tr><td>创建父子议题</td><td>正常</td><td>title=Sub task, parent_issue_id=I001, stage=1</td><td>返回子议题，挂接到父议题</td><td>DB</td><td>CreateIssue</td><td>创建成功</td></tr>
+          <tr><td>标题为空</td><td>异常</td><td>title=""</td><td>返回 400/422 VALIDATION_FAILED</td><td>-</td><td>-</td><td>-</td></tr>
+          <tr><td>非成员创建议题</td><td>异常</td><td>登录用户不属于 workspace</td><td>返回 403 FORBIDDEN</td><td>Permission Layer</td><td>check</td><td>不通过</td></tr>
+          <tr><td>project_id 不存在</td><td>异常</td><td>project_id=无效ID</td><td>返回 404/422</td><td>DB</td><td>GetProject</td><td>不存在</td></tr>
+          <tr><td>start_date 大于 due_date</td><td>边界值</td><td>start_date=2026-07-10, due_date=2026-07-01</td><td>返回参数校验失败</td><td>Validator</td><td>validate</td><td>不通过</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.3 Agent / Daemon 执行链路测试用例</h3>
+    <p>接口：Daemon 注册 + 心跳 + 完成任务</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>用例名称</th>
+            <th>测试类型</th>
+            <th>输入</th>
+            <th>预期结果</th>
+            <th>Mock 接口</th>
+            <th>Mock 方法</th>
+            <th>Mock 返回值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>正常注册 daemon</td><td>正常</td><td>workspace_id=W001, daemon_id=D001, runtimes=[...]</td><td>返回注册成功，runtime 可见</td><td>DB</td><td>UpsertRuntime</td><td>成功</td></tr>
+          <tr><td>正常 heartbeat</td><td>正常</td><td>runtime_id=R001</td><td>返回在线确认与 pending 信号</td><td>Liveness Store</td><td>probe</td><td>有效</td></tr>
+          <tr><td>正常认领并完成任务</td><td>正常</td><td>taskId=T001, output=done</td><td>任务状态更新为 completed</td><td>Task Service</td><td>CompleteTask</td><td>成功</td></tr>
+          <tr><td>runtime 不存在</td><td>异常</td><td>runtime_id=无效ID</td><td>返回 404 NOT_FOUND</td><td>DB</td><td>GetAgentRuntime</td><td>不存在</td></tr>
+          <tr><td>任务执行失败回传</td><td>异常</td><td>taskId=T001, error=command failed</td><td>状态更新为 failed</td><td>Task Service</td><td>FailTask</td><td>成功</td></tr>
+          <tr><td>本地目录冲突</td><td>异常</td><td>认领任务后目录被占用</td><td>状态更新为 waiting_local_directory</td><td>Task Service</td><td>MarkTaskWaitingLocalDirectory</td><td>成功</td></tr>
+          <tr><td>重复 complete 同一任务</td><td>边界值</td><td>对同一 taskId 连续上报 complete</td><td>第二次更新被拒绝或幂等处理</td><td>Task Service</td><td>CompleteTask</td><td>状态冲突</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.4 Chat 测试用例</h3>
+    <p>接口：发送聊天消息 <code>/api/chat/sessions/{sessionId}/messages</code></p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>用例名称</th>
+            <th>测试类型</th>
+            <th>输入</th>
+            <th>预期结果</th>
+            <th>Mock 接口</th>
+            <th>Mock 方法</th>
+            <th>Mock 返回值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>正常发送消息并触发任务</td><td>正常</td><td>content=请帮我分析这个 issue</td><td>写入 user message，生成 queued task</td><td>Task Queue</td><td>enqueue</td><td>成功</td></tr>
+          <tr><td>连续发送多条消息</td><td>正常</td><td>同一 session 连发 2 条消息</td><td>若已有 pending task，则仅追加消息，不重复建任务</td><td>Task Queue</td><td>check pending</td><td>已存在 pending task</td></tr>
+          <tr><td>附件消息发送</td><td>正常</td><td>content=见附件, attachment_ids=[ATT1]</td><td>消息与附件绑定成功</td><td>Attachment Service</td><td>bind</td><td>成功</td></tr>
+          <tr><td>session 不存在</td><td>异常</td><td>sessionId=无效ID</td><td>返回 404 NOT_FOUND</td><td>DB</td><td>GetChatSession</td><td>不存在</td></tr>
+          <tr><td>content 为空</td><td>边界值</td><td>content=""</td><td>返回 400 VALIDATION_FAILED</td><td>-</td><td>-</td><td>-</td></tr>
+          <tr><td>取消 pending chat task</td><td>异常</td><td>调用 cancel task</td><td>返回 cancelled_chat_message 并可恢复输入框</td><td>Task Service</td><td>CancelTask</td><td>成功</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.5 Autopilot 测试用例</h3>
+    <p>接口：创建与触发 Autopilot <code>/api/autopilots</code></p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>用例名称</th>
+            <th>测试类型</th>
+            <th>输入</th>
+            <th>预期结果</th>
+            <th>Mock 接口</th>
+            <th>Mock 方法</th>
+            <th>Mock 返回值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>正常创建 Autopilot</td><td>正常</td><td>title=Daily triage, assignee_id=A001, execution_mode=run_only</td><td>返回新建 autopilot</td><td>DB</td><td>CreateAutopilot</td><td>成功</td></tr>
+          <tr><td>手动触发 run_only</td><td>正常</td><td>autopilotId=AP001</td><td>创建 autopilot_run 和 queued task</td><td>Task Queue</td><td>enqueue</td><td>成功</td></tr>
+          <tr><td>webhook 触发 create_issue</td><td>正常</td><td>合法 webhook 请求</td><td>创建 run、创建 issue、再触发任务</td><td>Issue Service</td><td>CreateIssue</td><td>成功</td></tr>
+          <tr><td>webhook token 非法</td><td>异常</td><td>token=错误值</td><td>返回 403 FORBIDDEN</td><td>Validator</td><td>verify token</td><td>不通过</td></tr>
+          <tr><td>事件过滤不命中</td><td>异常</td><td>webhook event 不满足 trigger filter</td><td>返回跳过或 422 语义</td><td>Trigger Filter</td><td>match</td><td>false</td></tr>
+          <tr><td>assignee_id 为空</td><td>边界值</td><td>assignee_id=null</td><td>返回 400/422 VALIDATION_FAILED</td><td>-</td><td>-</td><td>-</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>6.6 测试实现建议</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>项目</th>
+            <th>建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>单元测试框架</td><td>Go 侧以现有 handler/service 测试模式为主；前端共享逻辑沿用 Vitest。</td></tr>
+          <tr><td>Mock 原则</td><td>Mock DB、第三方服务、邮件发送、外部平台 API、本地 runtime 结果。</td></tr>
+          <tr><td>幂等数据</td><td>使用唯一 email、唯一 issue title 后缀、唯一 task/session id，避免串用历史数据。</td></tr>
+          <tr><td>重点断言</td><td>状态迁移正确、任务是否入队、错误码是否符合预期、主链路成功时扩展链路失败不回滚。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">7</span>影响面分析</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>影响模块</th>
+            <th>影响类型</th>
+            <th>风险级别</th>
+            <th>回归测试建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>认证与登录</td><td>系统入口</td><td>高</td><td>回归验证码登录、Google 登录、JWT 鉴权、未登录访问拦截</td></tr>
+          <tr><td>Workspace 多租户隔离</td><td>数据与权限</td><td>高</td><td>回归 X-Workspace-Slug / member 权限校验、跨工作区数据不可见性</td></tr>
+          <tr><td>Issue 协作主链路</td><td>核心业务</td><td>高</td><td>回归 issue 创建、更新、评论、订阅、附件、timeline、批量操作</td></tr>
+          <tr><td>Agent / Runtime / Daemon</td><td>执行链路</td><td>高</td><td>回归 daemon 注册、heartbeat、claim、start、progress、complete、fail、cancel</td></tr>
+          <tr><td>Chat 会话</td><td>核心业务</td><td>高</td><td>回归 session 创建、消息发送、pending task、消息分页、取消恢复</td></tr>
+          <tr><td>Skill / Agent 配置</td><td>配置与权限</td><td>中</td><td>回归 skill 创建导入、agent 技能绑定、env 管理、权限边界</td></tr>
+          <tr><td>Autopilot</td><td>自动化</td><td>高</td><td>回归创建、trigger、cron/webhook、run_only/create_issue、delivery replay</td></tr>
+          <tr><td>Realtime / Inbox / Notification</td><td>用户感知链路</td><td>中</td><td>回归 WS 重连、inbox 已读/归档、通知偏好、跨工作区未读汇总</td></tr>
+          <tr><td>第三方集成（GitHub / Lark / Slack / Composio）</td><td>扩展能力</td><td>中</td><td>回归安装、解绑、连接状态、失败场景降级</td></tr>
+          <tr><td>Cloud Runtime / Billing</td><td>SaaS 扩展能力</td><td>中</td><td>回归未配置 503、已配置基础查询、错误可控返回</td></tr>
+          <tr><td>数据统计与 Dashboard</td><td>统计读模型</td><td>中</td><td>回归 usage、runtime usage、dashboard 聚合接口</td></tr>
+          <tr><td>文件上传下载</td><td>基础能力</td><td>中</td><td>回归上传、下载、预览失败降级、签名 URL 刷新</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>7.1 系统级风险判断</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>改动对象</th>
+            <th>修改前</th>
+            <th>修改后</th>
+            <th>影响范围</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>系统设计文档对现网能力的覆盖视角</td>
+            <td>文档中尚未定义</td>
+            <td>系统是“多租户协作 + 本地 daemon 执行 + 外部集成扩展”的复合架构；最高风险区集中在工作区隔离、任务状态一致性、runtime 在线判断、聊天与任务联动、自动化触发链路；第三方集成通常可降级但会影响扩展体验。</td>
+            <td>回归测试优先级排序、发布核查重点、线上告警分层</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>7.2 建议回归优先级</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>回归范围</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>P0</td><td>登录、工作区隔离、issue 主链路、daemon 执行、chat 主链路、autopilot 触发</td><td>系统核心生存链路，任何一项异常都会直接影响主业务可用性。</td></tr>
+          <tr><td>P1</td><td>skill/agent 配置、realtime、inbox、notification、附件</td><td>影响日常协作效率和感知，但通常不阻断所有主流程。</td></tr>
+          <tr><td>P2</td><td>GitHub/Lark/Slack/Composio、cloud runtime、billing、dashboard</td><td>扩展能力或统计能力，失败需可观测、可降级，但不应影响核心 issue/agent/chat 运转。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>7.3 关键发布检查项</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>检查项</th>
+            <th>发布前需确认内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>多租户边界</td><td>任意 workspace 下的 issue、agent、chat、autopilot 数据不得串读串写。</td></tr>
+          <tr><td>状态一致性</td><td>task、issue、chat、autopilot 的终态与前端展示一致。</td></tr>
+          <tr><td>daemon 兼容性</td><td>旧版 desktop / daemon / CLI 与当前 API 的兼容降级路径仍可工作。</td></tr>
+          <tr><td>外部依赖降级</td><td>未配置或失效时返回明确错误，不把主链路拖死。</td></tr>
+          <tr><td>实时与轮询兜底</td><td>WS 失败后前端仍能通过刷新/查询恢复主要可见状态。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="chapter-num">8</span>讨论记录</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>记录项</th>
+            <th>内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>文档生成方式</td><td>本文档不是基于单一 PRD，而是基于现有仓库代码、数据库迁移、路由定义、共享类型和产品全景文档逆向整理生成。</td></tr>
+          <tr><td>文档定位</td><td>这是一份“系统级现状系分文档”，目标是帮助研发、测试、产品快速理解 Multica 当前架构与关键链路，不是对所有实现细节的穷举。</td></tr>
+          <tr><td>接口取舍原则</td><td>第 1 章只收录系统主干接口，没有把所有 handler 全量展开，否则会损失系统文档的可读性。</td></tr>
+          <tr><td>时序取舍原则</td><td>第 2 章选取登录初始化、议题创建、daemon 执行、chat 触发、autopilot 触发 5 条最能代表系统骨架的链路。</td></tr>
+          <tr><td>ER 图取舍原则</td><td>第 3 章只绘制主干实体，不把统计表、审计扩展表、第三方集成细表全部塞进图里，避免图形失焦。</td></tr>
+          <tr><td>状态机取舍原则</td><td>第 4 章只保留最核心的 4 组状态机：issue、task、runtime、autopilot run。</td></tr>
+          <tr><td>依赖分析原则</td><td>第 5 章把本地 runtime、数据库、实时通道、文件存储、邮件、第三方集成、cloud runtime 视为系统主要依赖；强调“主链路优先、外围可降级”。</td></tr>
+          <tr><td>测试设计原则</td><td>第 6 章以系统级验证视角组织，不直接复制现有测试文件，而是抽取最关键的正常/异常/边界样例。</td></tr>
+          <tr><td>风险判断原则</td><td>第 7 章将最高风险集中在多租户隔离、任务状态一致性、runtime 在线判断、chat-task 联动、autopilot 触发链路。</td></tr>
+          <tr><td>当前文档边界</td><td>本文档仍偏“系统蓝图”；若后续需要更细粒度的模块系分，可继续拆分为 Issue、Agent、Autopilot、Chat 等专题文档。</td></tr>
+          <tr><td>待补充项</td><td>若后续要求用于正式评审，可继续补充：1. 更完整的接口目录附录 2. 更细的第三方集成专题 3. 更细的数据库字段字典 4. 更严格的发布回滚策略。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>8.1 本轮结论</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>项目</th>
+            <th>结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>需求类型</td><td>全新系统设计文档生成</td></tr>
+          <tr><td>输入来源</td><td>无外部需求文档，基于代码与仓库文档整理</td></tr>
+          <tr><td>输出路径</td><td><code>docs/system-design/需求系统分析/系统设计-Multica系统级系分文档生成-20260704.html</code></td></tr>
+          <tr><td>覆盖范围</td><td>已覆盖接口、时序、ER 图、状态机、依赖、测试、影响面、讨论记录。</td></tr>
+          <tr><td>文档用途</td><td>适合作为现状理解、评审入门、回归范围梳理与后续专题拆分的基础文档。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

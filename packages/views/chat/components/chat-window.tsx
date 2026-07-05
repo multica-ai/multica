@@ -158,9 +158,16 @@ function replaceOptimisticChatMessageId(
   );
 }
 
-export function ChatWindow() {
+export function ChatWindow({
+  variant = "floating",
+  showSessionHistoryTrigger = true,
+}: {
+  variant?: "floating" | "page";
+  showSessionHistoryTrigger?: boolean;
+}) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  const isPage = variant === "page";
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -657,102 +664,101 @@ export function ChatWindow() {
   // a real message, or a pending task whose timeline will stream in.
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  const isVisible = isOpen && (isExpanded || boundsReady);
+  const isVisible = isPage || (isOpen && (isExpanded || boundsReady));
 
-  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
-  const containerStyle: React.CSSProperties = {
-    transformOrigin: "bottom right",
-    pointerEvents: isOpen ? "auto" : "none",
-  };
+  const containerClass = isPage
+    ? "flex h-full min-h-0 flex-col overflow-hidden bg-background"
+    : "absolute bottom-2 right-2 z-50 flex flex-col overflow-hidden rounded-xl bg-sidebar shadow-2xl ring-1 ring-foreground/10";
+  const containerStyle: React.CSSProperties | undefined = isPage
+    ? undefined
+    : {
+        transformOrigin: "bottom right",
+        pointerEvents: isOpen ? "auto" : "none",
+      };
 
   const contextItems = useChatContextItems(wsId);
 
-  return (
-    <motion.div
-      ref={windowRef}
-      className={containerClass}
-      style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
-      animate={{
-        opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0.95,
-        width: renderWidth,
-        height: renderHeight,
-      }}
-      transition={{
-        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        opacity: { duration: 0.15 },
-        scale: { type: "spring", duration: 0.2, bounce: 0 },
-      }}
-    >
-      <ChatResizeHandles onDragStart={startDrag} />
+  const content = (
+    <>
+      {!isPage && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
-      <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
+      <div className={cn("flex items-center justify-between gap-2 border-b", isPage ? "px-5 py-4" : "px-4 py-2.5")}>
         <div className="flex items-center gap-1 min-w-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={handleNewChat}
-                />
-              }
-            >
-              <Plus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
-          </Tooltip>
-          <SessionDropdown
-            sessions={sessions}
-            // Use the full agent list (incl. archived) so historical
-            // sessions can still resolve their avatar.
-            agents={agents}
-            activeSessionId={activeSessionId}
-            onSelectSession={handleSelectSession}
-          />
+          {showSessionHistoryTrigger && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={handleNewChat}
+                  />
+                }
+              >
+                <Plus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
+          {showSessionHistoryTrigger ? (
+            <SessionDropdown
+              sessions={sessions}
+              // Use the full agent list (incl. archived) so historical
+              // sessions can still resolve their avatar.
+              agents={agents}
+              activeSessionId={activeSessionId}
+              onSelectSession={handleSelectSession}
+            />
+          ) : (
+            <CurrentSessionLabel
+              sessions={sessions}
+              agents={agents}
+              activeSessionId={activeSessionId}
+            />
+          )}
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
-            >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={handleMinimize}
-                />
-              }
-            >
-              <Minus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
-          </Tooltip>
-        </div>
+        {!isPage && (
+          <div className="flex items-center gap-0.5 shrink-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={handleMinimize}
+                  />
+                }
+              >
+                <Minus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
       </div>
 
       {/* Messages / skeleton / empty state */}
       {showSkeleton ? (
-        <ChatMessageSkeleton />
+        <ChatMessageSkeleton layout={isPage ? "page" : "floating"} />
       ) : hasMessages ? (
         <ChatMessageList
           key={activeSessionId}
@@ -763,6 +769,7 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          layout={isPage ? "page" : "floating"}
         />
       ) : (
         <EmptyState
@@ -782,9 +789,13 @@ export function ChatWindow() {
        *  `!activeAgent`, so the loading window between mount and the
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
-        <NoAgentBanner />
+        <NoAgentBanner layout={isPage ? "page" : "floating"} />
       ) : (
-        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+        <OfflineBanner
+          agentName={activeAgent?.name}
+          availability={availability}
+          layout={isPage ? "page" : "floating"}
+        />
       )}
 
       {/* Input — disabled for legacy archived sessions; locked out entirely
@@ -808,7 +819,39 @@ export function ChatWindow() {
           />
         }
         contextItems={contextItems}
+        layout={isPage ? "page" : "floating"}
       />
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <div ref={windowRef} className={containerClass}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      ref={windowRef}
+      className={containerClass}
+      style={containerStyle}
+      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
+      animate={{
+        opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : 0.95,
+        width: renderWidth,
+        height: renderHeight,
+      }}
+      transition={{
+        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        opacity: { duration: 0.15 },
+        scale: { type: "spring", duration: 0.2, bounce: 0 },
+      }}
+    >
+      {content}
     </motion.div>
   );
 }
@@ -949,6 +992,69 @@ function AgentPickerItem({
   );
 }
 
+function CurrentSessionLabel({
+  sessions,
+  agents,
+  activeSessionId,
+}: {
+  sessions: ChatSession[];
+  agents: Agent[];
+  activeSessionId: string | null;
+}) {
+  const { t } = useT("chat");
+  const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
+  const agent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
+
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 px-1.5 py-1">
+      {agent && (
+        <ActorAvatar
+          actorType="agent"
+          actorId={agent.id}
+          size={24}
+          enableHoverCard
+          showStatusDot
+        />
+      )}
+      <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+    </div>
+  );
+}
+
+export function ChatSessionHistoryPanel() {
+  const wsId = useWorkspaceId();
+  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+
+  const activeAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
+
+  const handleSelectSession = useCallback(
+    (session: ChatSession) => {
+      if (activeAgent && session.agent_id !== activeAgent.id) {
+        setSelectedAgentId(session.agent_id);
+      }
+      setActiveSession(session.id);
+    },
+    [activeAgent, setActiveSession, setSelectedAgentId],
+  );
+
+  return (
+    <SessionDropdown
+      presentation="panel"
+      sessions={sessions}
+      agents={agents}
+      activeSessionId={activeSessionId}
+      onSelectSession={handleSelectSession}
+    />
+  );
+}
+
 /**
  * Session dropdown: a flat "Chat history" list of all non-archived
  * sessions. Selecting a session from a different agent implicitly
@@ -957,11 +1063,13 @@ function AgentPickerItem({
  * ⊕ button, not inside this dropdown.
  */
 function SessionDropdown({
+  presentation = "popover",
   sessions,
   agents,
   activeSessionId,
   onSelectSession,
 }: {
+  presentation?: "popover" | "panel";
   sessions: ChatSession[];
   agents: Agent[];
   activeSessionId: string | null;
@@ -1373,6 +1481,49 @@ function SessionDropdown({
       </div>
     );
   };
+
+  if (presentation === "panel") {
+    return (
+      <aside
+        data-testid="chat-history-panel"
+        className="hidden h-full min-h-0 w-80 shrink-0 flex-col border-l bg-sidebar/40 lg:flex"
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">
+              {t(($) => $.window.history_group)}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {historySessions.length === 0
+                ? t(($) => $.window.no_previous)
+                : t(($) => $.session_history.count, { count: historySessions.length })}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5 px-2.5"
+            onClick={() => setActiveSession(null)}
+          >
+            <Plus className="size-3.5" />
+            <span>{t(($) => $.window.new_chat_tooltip)}</span>
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {historySessions.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+              {t(($) => $.window.no_previous)}
+            </div>
+          ) : (
+            <div role="group" aria-label={t(($) => $.window.history_group)} className="space-y-0.5">
+              {historySessions.map(renderRow)}
+            </div>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <>

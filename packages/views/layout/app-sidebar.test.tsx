@@ -103,6 +103,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     myIssues: () => "/acme/my-issues",
+    obitaplus: () => "/acme/obitaplus",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
     autopilots: () => "/acme/autopilots",
@@ -240,6 +241,33 @@ describe("workspace-switcher unread dot", () => {
     summary.current = [];
     const { container } = render(<AppSidebar />);
     expect(dot(container)).toBeNull();
+  });
+});
+
+describe("workspace navigation", () => {
+  it("renders obitaplus above projects, moves issues below squads, and removes the discord card", () => {
+    render(<AppSidebar />);
+
+    const workspaceLinks = screen
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("data-href"))
+      .filter((href): href is string => href !== null && href.startsWith("/acme/"));
+
+    expect(workspaceLinks).toEqual([
+      "/acme/inbox",
+      "/acme/my-issues",
+      "/acme/obitaplus",
+      "/acme/projects",
+      "/acme/autopilots",
+      "/acme/agents",
+      "/acme/squads",
+      "/acme/issues",
+      "/acme/usage",
+      "/acme/runtimes",
+      "/acme/skills",
+      "/acme/settings",
+    ]);
+    expect(screen.queryByText("Join our Discord")).toBeNull();
   });
 });
 

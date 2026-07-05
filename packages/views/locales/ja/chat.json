@@ -30,6 +30,7 @@
   },
   "session_history": {
     "untitled": "無題",
+    "count": "チャット {{count}}件",
     "time": {
       "just_now": "たった今",
       "minutes": "{{count}}分前",

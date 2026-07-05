@@ -30,6 +30,7 @@
   },
   "session_history": {
     "untitled": "无标题",
+    "count": "{{count}} 个对话",
     "time": {
       "just_now": "刚刚",
       "minutes": "{{count}} 分钟前",

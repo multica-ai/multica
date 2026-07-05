@@ -9,10 +9,11 @@ config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = resolveRemoteApiUrl(process.env);
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
+const localDevOrigins = ["localhost", "127.0.0.1"];
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
-const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
+const configuredDevOrigins = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(",")
       .map((origin) => {
         try {
@@ -22,14 +23,17 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
         }
       })
       .filter(Boolean)
-  : undefined;
+  : [];
+
+const allowedDevOrigins = Array.from(new Set([...localDevOrigins, ...configuredDevOrigins]));
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
-  ...(allowedDevOrigins && allowedDevOrigins.length > 0
+  ...(allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
     : {}),
+  devIndicators: false,
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
