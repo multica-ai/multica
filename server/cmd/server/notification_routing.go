@@ -87,9 +87,10 @@ var defaultChannelChoices = map[string]map[string]bool{
 		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill change-request /
 		// fork / agent-assigned notifications. Inbox on by default to preserve
 		// the pre-existing inbox-only delivery; push channels stay opt-in below.
-		"skill_change_request": true,
-		"skill_fork":           true,
-		"skill_agent_assigned": true,
+		"skill_change_request":         true,
+		"skill_fork":                   true,
+		"skill_agent_assigned":         true,
+		"agent_context_change_request": true, // CEREBRO-PATCH(agent-office-notif-channels): FIR-1775 — inbox on by default for agent-context proposals.
 	},
 	channelNotifications: {
 		"issue_assigned": false,
@@ -121,9 +122,10 @@ var defaultChannelChoices = map[string]map[string]bool{
 		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — keep the lightweight
 		// notifications feed quiet for skill events by default (parity with the
 		// prior inbox-only behavior); the user can switch them on here.
-		"skill_change_request": false,
-		"skill_fork":           false,
-		"skill_agent_assigned": false,
+		"skill_change_request":         false,
+		"skill_fork":                   false,
+		"skill_agent_assigned":         false,
+		"agent_context_change_request": false, // CEREBRO-PATCH(agent-office-notif-channels): FIR-1775 — quiet in the notifications feed by default.
 	},
 	channelMobile: {
 		"issue_assigned": true,
@@ -155,9 +157,10 @@ var defaultChannelChoices = map[string]map[string]bool{
 		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill push to phone is
 		// opt-in; off by default so enabling the feature doesn't start paging
 		// owners on their phones.
-		"skill_change_request": false,
-		"skill_fork":           false,
-		"skill_agent_assigned": false,
+		"skill_change_request":         false,
+		"skill_fork":                   false,
+		"skill_agent_assigned":         false,
+		"agent_context_change_request": false, // CEREBRO-PATCH(agent-office-notif-channels): FIR-1775 — phone push opt-in for agent-context proposals.
 	},
 	channelDesktop: {
 		"issue_assigned": true,
@@ -188,9 +191,10 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"system_notification": false,
 		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill push to the
 		// computer browser is opt-in; off by default.
-		"skill_change_request": false,
-		"skill_fork":           false,
-		"skill_agent_assigned": false,
+		"skill_change_request":         false,
+		"skill_fork":                   false,
+		"skill_agent_assigned":         false,
+		"agent_context_change_request": false, // CEREBRO-PATCH(agent-office-notif-channels): FIR-1775 — desktop push opt-in for agent-context proposals.
 	},
 	// Mail is forward-compatible; no events fire by default until the
 	// transport is built.

@@ -281,7 +281,9 @@
     "common": {
       "save": "保存",
       "add": "追加",
-      "unsaved_changes": "保存していない変更"
+      "unsaved_changes": "保存していない変更",
+      "propose_change": "変更を提案",
+      "discard": "破棄"
     },
     "instructions": {
       "intro": "このエージェントのアイデンティティと作業スタイルを定義します。すべてのタスクでエージェントのコンテキストに注入されます。Markdown に対応しています。",
@@ -328,7 +330,9 @@
       "saved_toast": "MCP config を保存しました",
       "save_failed_toast": "MCP config を保存できませんでした",
       "redacted_title": "設定済み — 現在の表示では非表示",
-      "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。"
+      "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。",
+      "_comment_agent_office_versioned": "CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — propose-flow strings for Skills/MCP tabs",
+      "versioned_note": "変更はバージョン管理されます。下で編集し、オーナーがレビューできるよう変更を提案してください。"
     },
     "skills": {
       "intro": "このエージェントに割り当てられたワークスペースのスキルです。ローカルランタイムのスキルは常に自動的に利用できます。",
@@ -346,7 +350,10 @@
       "add_dialog_confirm_default": "追加",
       "add_dialog_confirm_other": "スキル {{count}} 件を追加",
       "add_dialog_cancel": "キャンセル",
-      "add_failed_toast": "スキルを追加できませんでした"
+      "add_failed_toast": "スキルを追加できませんでした",
+      "versioned_note": "変更はバージョン管理されます。下で追加・削除し、オーナーがレビューできるよう変更を提案してください。",
+      "added_draft_badge": "追加（下書き）",
+      "draft_hint": "未保存の下書き — レビューに送るには変更を提案してください。"
     },
     "integrations": {
       "intro": "このエージェントを外部のチャットプラットフォームに接続し、普段使っているツールから直接やり取りできるようにします。",

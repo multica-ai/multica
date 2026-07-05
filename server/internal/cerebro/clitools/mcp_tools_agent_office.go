@@ -94,9 +94,9 @@ by the context owner/approvers; on approval it is applied atomically and
 snapshotted as a new version. Nothing changes until approved.
 
 You may either edit individual fields (instructions, model, thinking_level,
-persona_sandbox, skill_ids) which are merged onto the agent's current context,
-OR pass a full proposed_snapshot object. proposed_version must be a semver
-X.Y.Z strictly greater than the agent's current context_version.`,
+persona_sandbox, skill_ids, mcp_config) which are merged onto the agent's current
+context, OR pass a full proposed_snapshot object. proposed_version must be a
+semver X.Y.Z strictly greater than the agent's current context_version.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"agent_id", "title", "proposed_version"},
@@ -113,6 +113,16 @@ X.Y.Z strictly greater than the agent's current context_version.`,
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
 					"description": "Full replacement set of bound skill ids",
+				},
+				"mcp_config": map[string]any{
+					"type":        "object",
+					"description": "Full replacement MCP server config object (e.g. {\"mcpServers\": …}); null/omit to leave unchanged",
+				},
+				"custom_args": map[string]any{
+					"description": "Full replacement custom runtime args (JSON)",
+				},
+				"runtime_config": map[string]any{
+					"description": "Full replacement runtime config (JSON)",
 				},
 			},
 		},
@@ -147,6 +157,18 @@ X.Y.Z strictly greater than the agent's current context_version.`,
 		}
 		if v, ok := args["skill_ids"]; ok {
 			body["skill_ids"] = v
+		}
+		// mcp_config / custom_args / runtime_config are free-form JSON that the
+		// API captures as RawMessage; forward them verbatim when present so the
+		// MCP/CLI/API surfaces stay symmetric.
+		if v, ok := args["mcp_config"]; ok {
+			body["mcp_config"] = v
+		}
+		if v, ok := args["custom_args"]; ok {
+			body["custom_args"] = v
+		}
+		if v, ok := args["runtime_config"]; ok {
+			body["runtime_config"] = v
 		}
 		// Link the proposal to the agent run that produced it when available.
 		if taskID := strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")); taskID != "" {

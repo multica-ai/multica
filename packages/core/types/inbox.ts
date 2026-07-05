@@ -32,6 +32,8 @@ export type InboxItemType =
   // CEREBRO-PATCH(inbox-skill-change-request): FIR-2627/FIR-2629 — a skill change request was opened (owner/approvers notified) or reviewed (proposer notified). Clicking deep-links to the skill detail with the proposal focused.
   | "skill_change_request_created"
   | "skill_change_request_reviewed"
+  // CEREBRO-PATCH(inbox-agent-context-change-request): FIR-1775 — an agent-context (Instructions) change was proposed; owner/approvers notified. Clicking deep-links to the agent's Instructions tab.
+  | "agent_context_change_request"
   // CEREBRO-PATCH(inbox-skill-notify-settings): FIR-1587 — a skill the user owns was forked, or assigned to an agent. Gated per skill by the owner's notify toggles.
   | "skill_forked"
   | "skill_agent_assigned"

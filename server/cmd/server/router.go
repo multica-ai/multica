@@ -576,7 +576,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance handler.
-	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool))
+	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool, bus)) // CEREBRO-PATCH(agent-office-notif-bus): FIR-1775 — bus drives change-request inbox notifications.
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)

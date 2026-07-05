@@ -533,6 +533,16 @@ export function InboxPage() {
       push(wsPaths.skillDetail(String(item.details.skill_id)));
       return;
     }
+    // CEREBRO-PATCH(inbox-agent-context-change-request): FIR-1775 — agent-context
+    // change requests have no issue_id; deep-link to the agent's Instructions tab
+    // (?tab=instructions) so clicking the inbox row lands on the proposal queue.
+    if (item.type === "agent_context_change_request" && item.details?.agent_id) {
+      const cr = item.details.change_request_id;
+      push(
+        `${wsPaths.agentDetail(item.details.agent_id)}?tab=instructions${cr ? `&cr=${cr}` : ""}`,
+      );
+      return;
+    }
     // CEREBRO-PATCH(inbox-note-mention-deeplink): TECH-3421 / FIR-2589 — note @-mentions have no issue_id; deep-link to the note, plus the comment id when the mention was in a comment so it opens the exact comment.
     if (item.details?.note_id) {
       const c = item.details?.comment_id;

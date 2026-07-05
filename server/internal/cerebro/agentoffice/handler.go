@@ -2,6 +2,7 @@ package agentoffice
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -83,12 +84,15 @@ type CreateChangeRequestRequest struct {
 	ProposedSnapshot *ContextSnapshot `json:"proposed_snapshot"`
 	// Convenience overrides applied on top of the current snapshot when
 	// ProposedSnapshot is absent.
-	Instructions   *string   `json:"instructions"`
-	Model          *string   `json:"model"`
-	ThinkingLevel  *string   `json:"thinking_level"`
-	PersonaSandbox *string   `json:"persona_sandbox"`
-	SkillIDs       *[]string `json:"skill_ids"`
-	WorkSessionID  *string   `json:"work_session_id"`
+	Instructions   *string          `json:"instructions"`
+	Model          *string          `json:"model"`
+	ThinkingLevel  *string          `json:"thinking_level"`
+	PersonaSandbox *string          `json:"persona_sandbox"`
+	SkillIDs       *[]string        `json:"skill_ids"`
+	McpConfig      *json.RawMessage `json:"mcp_config"`
+	CustomArgs     *json.RawMessage `json:"custom_args"`
+	RuntimeConfig  *json.RawMessage `json:"runtime_config"`
+	WorkSessionID  *string          `json:"work_session_id"`
 }
 
 // ReviewChangeRequestRequest approves or rejects a pending proposal.
@@ -331,17 +335,37 @@ func (h *Handler) ListPendingChangeRequests(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// derefRawOrNil returns the pointed-to raw JSON, or nil when the pointer is nil
+// (an explicit JSON null) so the field is cleared rather than set to "null".
+func derefRawOrNil(p *json.RawMessage) json.RawMessage {
+	if p == nil {
+		return nil
+	}
+	return json.RawMessage(*p)
+}
+
 // CreateChangeRequest proposes a versioned edit to an agent's context.
 func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 	agent, member, ok := h.loadAgent(w, r)
 	if !ok {
 		return
 	}
-	var req CreateChangeRequestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	var req CreateChangeRequestRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Decode the raw keys too so we can tell an explicit `mcp_config: null`
+	// (clear it) apart from an omitted field (leave it unchanged) — a pointer
+	// alone cannot, because JSON null and absence both decode to a nil pointer.
+	var rawKeys map[string]json.RawMessage
+	_ = json.Unmarshal(bodyBytes, &rawKeys)
+	keyPresent := func(k string) bool { _, ok := rawKeys[k]; return ok }
 	if strings.TrimSpace(req.Title) == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
@@ -382,6 +406,17 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		if req.SkillIDs != nil {
 			snap.SkillIDs = *req.SkillIDs
 		}
+		// For the free-form JSON fields, presence of the key (even as null) means
+		// "set this field"; a null value clears it. Absence leaves it unchanged.
+		if keyPresent("mcp_config") {
+			snap.McpConfig = derefRawOrNil(req.McpConfig)
+		}
+		if keyPresent("custom_args") {
+			snap.CustomArgs = derefRawOrNil(req.CustomArgs)
+		}
+		if keyPresent("runtime_config") {
+			snap.RuntimeConfig = derefRawOrNil(req.RuntimeConfig)
+		}
 	}
 
 	var sessionUUID pgtype.UUID
@@ -407,6 +442,10 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create change request: "+err.Error())
 		return
 	}
+	// Notify the reviewers (context owner + approvers) that a proposal is
+	// waiting, mirroring the skill change-request flow. Best-effort: a failed
+	// notification must not fail the request.
+	h.notifyChangeRequestCreated(r.Context(), agent, cr, member.UserID)
 	writeJSON(w, http.StatusCreated, changeRequestToResponse(cr))
 }
 

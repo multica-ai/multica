@@ -182,6 +182,19 @@ const ROW_GROUPS: RowGroup[] = [
     ],
   },
   {
+    // FIR-1775: agent-context (Instructions) change requests. The owner and
+    // named approvers are notified when someone proposes a versioned edit to
+    // an agent's instructions — inbox by default, phone/browser push opt-in.
+    title: "Agents you own",
+    rows: [
+      {
+        routingKey: "agent_context_change_request",
+        label: "Change request",
+        hint: "Someone proposed a change to the instructions of an agent you own or approve for.",
+      },
+    ],
+  },
+  {
     title: "System",
     rows: [
       {

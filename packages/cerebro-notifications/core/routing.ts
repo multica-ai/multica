@@ -87,7 +87,11 @@ export type RoutingKey =
   // with `skillRoutingKey` in server/cmd/server/notification_routing.go.
   | "skill_change_request"
   | "skill_fork"
-  | "skill_agent_assigned";
+  | "skill_agent_assigned"
+  // FIR-1775: agent-context (Instructions) change proposed. Mirrors
+  // skill_change_request; keep in sync with defaultChannelChoices in
+  // server/cmd/server/notification_routing.go.
+  | "agent_context_change_request";
 
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
@@ -121,6 +125,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     skill_change_request: "on",
     skill_fork: "on",
     skill_agent_assigned: "on",
+    // FIR-1775: agent-context proposals land in the inbox by default.
+    agent_context_change_request: "on",
   },
   notifications: {
     issue_assigned: "off",
@@ -148,6 +154,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     skill_change_request: "off",
     skill_fork: "off",
     skill_agent_assigned: "off",
+    // FIR-1775: agent-context proposals — push opt-in, off by default.
+    agent_context_change_request: "off",
   },
   mobile: {
     issue_assigned: "on",
@@ -174,6 +182,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     skill_change_request: "off",
     skill_fork: "off",
     skill_agent_assigned: "off",
+    // FIR-1775: agent-context proposals — push opt-in, off by default.
+    agent_context_change_request: "off",
   },
   desktop: {
     issue_assigned: "on",
@@ -200,6 +210,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     skill_change_request: "off",
     skill_fork: "off",
     skill_agent_assigned: "off",
+    // FIR-1775: agent-context proposals — push opt-in, off by default.
+    agent_context_change_request: "off",
   },
   // Mail is forward-compatible; no events fire by default until the
   // transport is built.
@@ -228,6 +240,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     skill_change_request: "off",
     skill_fork: "off",
     skill_agent_assigned: "off",
+    // FIR-1775: agent-context proposals — push opt-in, off by default.
+    agent_context_change_request: "off",
   },
 };
 

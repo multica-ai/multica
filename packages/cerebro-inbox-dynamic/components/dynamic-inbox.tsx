@@ -336,6 +336,13 @@ export function DynamicInbox() {
         push(paths.skillDetail(String(item.details.skill_id)));
         return true;
       }
+      // FIR-1775 — agent-context change requests carry no issue_id; deep-link to
+      // the agent's Instructions tab (?tab=instructions) with the proposal queue.
+      if (item.type === "agent_context_change_request" && item.details?.agent_id) {
+        const cr = item.details.change_request_id;
+        push(`${paths.agentDetail(item.details.agent_id)}?tab=instructions${cr ? `&cr=${cr}` : ""}`);
+        return true;
+      }
       if (item.details?.note_id) {
         // TECH-3690 — open the note in the detail pane (parity with the Notes
         // box); fall back to the full Notes page when the pane is off.

@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -101,6 +102,8 @@ func init() {
 	agentContextProposeCmd.Flags().String("persona-sandbox", "", "Persona sandbox override")
 	agentContextProposeCmd.Flags().StringArray("skill-id", nil, "Full replacement set of bound skill ids (repeatable)")
 	agentContextProposeCmd.Flags().Bool("replace-skills", false, "Apply the --skill-id set even if empty (clears bindings)")
+	agentContextProposeCmd.Flags().String("mcp-config", "", "Full replacement MCP config as a JSON object string (mutually exclusive with --mcp-config-file)")
+	agentContextProposeCmd.Flags().String("mcp-config-file", "", "Read the replacement MCP config JSON from a local file")
 	agentContextProposeCmd.Flags().String("output", "json", "Output format: json")
 
 	agentContextChangeRequestsCmd.Flags().Bool("pending", false, "Workspace-wide: only pending change requests (ignores agent-id)")
@@ -183,6 +186,28 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if len(skillIDs) > 0 || replaceSkills {
 		body["skill_ids"] = skillIDs
 	}
+
+	mcpConfig, _ := cmd.Flags().GetString("mcp-config")
+	mcpConfigFile, _ := cmd.Flags().GetString("mcp-config-file")
+	if mcpConfig != "" && mcpConfigFile != "" {
+		return fmt.Errorf("--mcp-config and --mcp-config-file are mutually exclusive")
+	}
+	if mcpConfigFile != "" {
+		data, err := os.ReadFile(mcpConfigFile)
+		if err != nil {
+			return fmt.Errorf("read mcp-config-file: %w", err)
+		}
+		mcpConfig = string(data)
+	}
+	if strings.TrimSpace(mcpConfig) != "" {
+		// Validate locally so a malformed config fails here with a clear message
+		// rather than as an opaque server error; forward the raw JSON verbatim.
+		if !json.Valid([]byte(mcpConfig)) {
+			return fmt.Errorf("--mcp-config is not valid JSON")
+		}
+		body["mcp_config"] = json.RawMessage(mcpConfig)
+	}
+
 	if taskID := strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")); taskID != "" {
 		body["work_session_id"] = taskID
 	}

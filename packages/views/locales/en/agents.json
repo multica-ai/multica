@@ -313,7 +313,9 @@
     "common": {
       "save": "Save",
       "add": "Add",
-      "unsaved_changes": "Unsaved changes"
+      "unsaved_changes": "Unsaved changes",
+      "propose_change": "Propose change",
+      "discard": "Discard"
     },
     "instructions": {
       "intro": "Define this agent's identity and working style. Injected into the agent's context for every task. Markdown is supported.",
@@ -385,7 +387,9 @@
       "saved_toast": "MCP config saved",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "_comment_agent_office_versioned": "CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — propose-flow strings for Skills/MCP tabs",
+      "versioned_note": "Changes are versioned — edit below, then propose the change for the owner to review."
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
@@ -404,7 +408,10 @@
       "add_dialog_confirm_one": "Add {{count}} skill",
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
-      "add_failed_toast": "Failed to add skill"
+      "add_failed_toast": "Failed to add skill",
+      "versioned_note": "Changes are versioned — add or remove below, then propose the change for the owner to review.",
+      "added_draft_badge": "added (draft)",
+      "draft_hint": "Unsaved draft — propose the change to send it for review."
     },
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",

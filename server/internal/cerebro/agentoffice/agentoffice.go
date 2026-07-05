@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -32,15 +33,19 @@ type TxStarter interface {
 }
 
 // Service wires the agent-context governance queries together. Cerebro holds the
-// cerebrodb queries; Tx (the pool) lets review/rollback run atomically.
+// cerebrodb queries; Tx (the pool) lets review/rollback run atomically. Bus is
+// the event bus used to fan a "change request proposed" event out to the
+// inbox/notification channel matrix (mirrors the skill-governance flow); it may
+// be nil in tests, in which case notifications are silently skipped.
 type Service struct {
 	Cerebro *cerebrodb.Queries
 	Tx      TxStarter
+	Bus     *events.Bus
 }
 
 // New constructs the service.
-func New(cerebro *cerebrodb.Queries, tx TxStarter) *Service {
-	return &Service{Cerebro: cerebro, Tx: tx}
+func New(cerebro *cerebrodb.Queries, tx TxStarter, bus *events.Bus) *Service {
+	return &Service{Cerebro: cerebro, Tx: tx, Bus: bus}
 }
 
 // ContextSnapshot is the composite document stored in

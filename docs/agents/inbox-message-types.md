@@ -171,6 +171,14 @@ losing hand-offs).
 
 **Platform / governance:** `private_agent_run_request`,
 `skill_change_request_created`, `skill_change_request_reviewed`,
+`agent_context_change_request` (FIR-1775 Agent Office — fires when someone
+proposes a versioned edit to an agent's context; recipients are the context
+owner + named approvers minus the proposer, `severity` `action_required`,
+`route` `inbox` by default with push opt-in; `details` carries `agent_id`,
+`agent_name`, `change_request_id`, `base_version`, `proposed_version`; carries no
+`issue_id` — the inbox UI deep-links from `details.agent_id` to the agent's
+Instructions tab, mirroring skill change-request rows. Emitted by the
+agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
 Bid C — the capability drift watcher alerts workspace owners/admins, `severity`
 `attention`, when an agent uses a tool its declared policy denies; `details`
