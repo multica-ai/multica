@@ -5,10 +5,28 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// TestRunningTimeoutForUptime locks in the post-boot grace: for one full run
+// lease TTL after a server restart the running-timeout branch is disabled, so
+// live daemons can land a renewal before expired-during-outage leases are
+// enforced; after the grace the normal threshold applies.
+func TestRunningTimeoutForUptime(t *testing.T) {
+	if got := runningTimeoutForUptime(0); got != neverRunningTimeoutSeconds {
+		t.Fatalf("expected running branch disabled at boot, got %v", got)
+	}
+	if got := runningTimeoutForUptime(service.RunLeaseDuration - time.Second); got != neverRunningTimeoutSeconds {
+		t.Fatalf("expected running branch disabled during grace, got %v", got)
+	}
+	if got := runningTimeoutForUptime(service.RunLeaseDuration); got != runningTimeoutSeconds {
+		t.Fatalf("expected normal timeout once grace has passed, got %v", got)
+	}
+}
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
 // timestamps old enough to trigger the sweeper. Returns (issueID, agentID, taskID).

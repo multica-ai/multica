@@ -64,7 +64,28 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// neverRunningTimeoutSeconds effectively disables the running-timeout
+	// branch during the post-boot grace window (see runningTimeoutForUptime).
+	neverRunningTimeoutSeconds = 1e10
 )
+
+// runningTimeoutForUptime returns the running-timeout threshold to enforce
+// given how long this server process has been up. After a restart, every run
+// lease in the DB may have expired while the server was unreachable (daemons
+// cannot renew against a dead server), and the first sweep tick can land
+// before a live daemon's next renewal (up to taskRunLeaseRefresh away) —
+// failing exactly the healthy long runs the lease exists to protect. Disable
+// the running branch for one full lease TTL so every live daemon gets a
+// renewal in first; genuinely dead runs are reaped at most one TTL later,
+// which is fine for a backstop that already waits hours. Dispatched-phase
+// sweeping is not gated: its prepare lease predates this grace and its blast
+// radius is a task that never started.
+func runningTimeoutForUptime(uptime time.Duration) float64 {
+	if uptime < service.RunLeaseDuration {
+		return neverRunningTimeoutSeconds
+	}
+	return runningTimeoutSeconds
+}
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
@@ -78,6 +99,7 @@ const (
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+	bootTime := time.Now()
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -87,7 +109,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			return
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
-			sweepStaleTasks(ctx, queries, taskSvc, bus)
+			sweepStaleTasks(ctx, queries, taskSvc, bus, time.Since(bootTime))
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
@@ -247,10 +269,10 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // - The agent process hangs and the daemon is still heartbeating
 // - The daemon failed to report task completion/failure
 // - A server restart left tasks in a non-terminal state
-func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
+func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, uptime time.Duration) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		RunningTimeoutSecs:  runningTimeoutForUptime(uptime),
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)

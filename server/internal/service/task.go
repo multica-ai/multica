@@ -123,11 +123,13 @@ const (
 	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
-	// runLeaseDuration is deliberately generous relative to the daemon's
+	// RunLeaseDuration is deliberately generous relative to the daemon's
 	// renewal interval (taskRunLeaseRefresh, 60s): a brief server or network
 	// blip must not let the lease lapse right when a long run is past the
 	// sweeper's wall-clock threshold, or the run would be failed spuriously.
-	runLeaseDuration = 5 * time.Minute
+	// Exported because the sweeper's boot grace must cover exactly one lease
+	// TTL (see runningTimeoutForUptime in cmd/server).
+	RunLeaseDuration = 5 * time.Minute
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -1567,7 +1569,7 @@ func (s *TaskService) ExtendTaskRunLease(ctx context.Context, taskID, runtimeID 
 	task, err := s.Queries.ExtendAgentTaskRunLease(ctx, db.ExtendAgentTaskRunLeaseParams{
 		ID:        taskID,
 		RuntimeID: runtimeID,
-		LeaseSecs: runLeaseDuration.Seconds(),
+		LeaseSecs: RunLeaseDuration.Seconds(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("extend task run lease: %w", err)
