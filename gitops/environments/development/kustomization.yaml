@@ -40,4 +40,4 @@ images:
     newTag: "f8c42a53"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "bd4c2510"
+    newTag: "f8c42a53"
