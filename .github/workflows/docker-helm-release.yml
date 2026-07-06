@@ -15,13 +15,13 @@ on:
         required: false
         default: "false"
       next_public_base_path:
-        description: "Next.js basePath for subpath deployment (e.g. /multica-web). Leave empty for root deployment."
+        description: "Next.js basePath for subpath deployment (e.g. /workflow-web). Leave empty for root deployment."
         required: false
-        default: ""
+        default: "/workflow-web"
       next_public_api_url:
-        description: "API base path for subpath deployment (e.g. /multica-backend). Leave empty for root deployment."
+        description: "API base path for subpath deployment (e.g. /workflow-backend). Leave empty for root deployment."
         required: false
-        default: ""
+        default: "/workflow-backend"
 
 permissions:
   contents: write
