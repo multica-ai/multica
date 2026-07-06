@@ -176,11 +176,8 @@ func argsContain(args []string, needle string) bool {
 }
 
 func hasFlag(args []string, flag string) bool {
-	for i, arg := range args {
+	for _, arg := range args {
 		if arg == flag || strings.HasPrefix(arg, flag+"=") {
-			return true
-		}
-		if len(flag) == 2 && strings.HasPrefix(flag, "-") && !strings.HasPrefix(flag, "--") && arg == flag && i+1 < len(args) {
 			return true
 		}
 	}

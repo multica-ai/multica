@@ -90,8 +90,8 @@ func TestHardenWindowsBrowserMcpConfigRespectsExplicitBrowserArgs(t *testing.T) 
 
 	tempDir := t.TempDir()
 	raw := json.RawMessage(`{"mcpServers":{
-		"playwright":{"command":"npx","args":["@playwright/mcp@latest","--config","custom.json"]},
-		"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest","--channel=beta"]}
+		"playwright":{"command":"npx","args":["@playwright/mcp@latest","--config=custom.json"]},
+		"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest","-e","D:\\Browsers\\Chrome\\chrome.exe"]}
 	}}`)
 
 	got, err := hardenBrowserMcpConfig(raw, tempDir)

@@ -418,7 +418,7 @@ type codebuddySDKMessage struct {
 
 	// result fields
 	ResultText string                               `json:"result,omitempty"`
-	IsError    bool                                 `json:"is_error,omitempty"`
+	IsError    bool                                  `json:"is_error,omitempty"`
 	DurationMs float64                              `json:"duration_ms,omitempty"`
 	NumTurns   int                                  `json:"num_turns,omitempty"`
 	Usage      *codebuddyUsage                      `json:"usage,omitempty"`
