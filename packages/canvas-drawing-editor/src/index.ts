@@ -780,7 +780,7 @@ const defaultConfig: EditorConfig = {
   showImport: true,
   showColor: true,
   showClear: true,
-  lang: 'zh',
+  lang: 'en',
   themeColor: DEFAULT_THEME_COLOR,
   enableHotzone: false, // 默认关闭热区功能
 };
@@ -1413,8 +1413,11 @@ export class CanvasDrawingEditor extends HTMLElement {
       return { x: 0, y: 0 };
     }
 
-    const x = (clientX - rect.left - this.panOffset.x) / this.scale;
-    const y = (clientY - rect.top - this.panOffset.y) / this.scale;
+    // Account for any CSS-to-buffer size difference (e.g. overlay mode absolute sizing,
+    // device pixel ratio). rect reflects the CSS visual size; canvas.width is the buffer size.
+    const cssToBuffer = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const x = ((clientX - rect.left) * cssToBuffer - this.panOffset.x) / this.scale;
+    const y = ((clientY - rect.top) * cssToBuffer - this.panOffset.y) / this.scale;
     return { x, y };
   }
 
@@ -1433,7 +1436,8 @@ export class CanvasDrawingEditor extends HTMLElement {
       return { x: 0, y: 0 };
     }
 
-    return { x: clientX - rect.left, y: clientY - rect.top };
+    const cssToBuffer = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    return { x: (clientX - rect.left) * cssToBuffer, y: (clientY - rect.top) * cssToBuffer };
   }
 
   // 获取对象边界
@@ -3854,6 +3858,17 @@ export class CanvasDrawingEditor extends HTMLElement {
   }
 
   // 导出画布数据为 JSON 对象
+  // Public API: re-sync the internal canvas with the host size (e.g. after the
+  // host element is resized externally, which does not fire window `resize`).
+  public resize(): void {
+    this.initCanvas(false);
+  }
+
+  // Public API: remove all objects without the confirm popup.
+  public clear(): void {
+    this.clearCanvas();
+  }
+
   public exportJSON(): { version: string; objects: any[] } {
     return {
       version: '1.0',
@@ -4810,9 +4825,11 @@ export class CanvasDrawingEditor extends HTMLElement {
     // 清空画布
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // 绘制背景
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    // 绘制背景 (skipped in transparent/overlay mode, e.g. when overlaying media for annotation)
+    if (!this.hasAttribute('transparent') && !this.hasAttribute('overlay')) {
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
 
     // 应用缩放和平移
     this.ctx.save();
@@ -7724,6 +7741,28 @@ export class CanvasDrawingEditor extends HTMLElement {
         height: 100%;
         background: #f1f5f9;
         position: relative;
+      }
+
+      /* Overlay mode: transparent drawing surface over media (host has the "overlay" attribute).
+         The top bar is hidden and the toolbar floats so the canvas fills the host exactly. */
+      :host([overlay]) .editor-container,
+      :host([overlay]) .canvas-container {
+        background: transparent;
+      }
+      :host([overlay]) .top-bar {
+        display: none;
+      }
+      :host([overlay]) .toolbar {
+        position: absolute;
+        left: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        max-height: calc(100% - 16px);
+        overflow-y: auto;
+        z-index: 20;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       }
 
       /* 工具栏 */
