@@ -396,17 +396,21 @@ function GotoSection({ team }: { team: Team }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">
         {t(($) => $.settings.goto)}
       </h3>
-      {links.map((link) => (
-        <AppLink
-          key={link.href}
-          href={link.href}
-          className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent/60"
-        >
-          <link.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{link.label}</span>
-          <span className="text-xs tabular-nums text-muted-foreground">{link.value}</span>
-        </AppLink>
-      ))}
+      {/* Equal-width cells, three across in the detail container; auto-fit
+          wraps them cleanly when the container narrows. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2">
+        {links.map((link) => (
+          <AppLink
+            key={link.href}
+            href={link.href}
+            className="flex items-center gap-2 rounded-md border border-input/60 px-3 py-2 text-sm transition-colors hover:bg-accent/60"
+          >
+            <link.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">{link.label}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{link.value}</span>
+          </AppLink>
+        ))}
+      </div>
     </div>
   );
 }
