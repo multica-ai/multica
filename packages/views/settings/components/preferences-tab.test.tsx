@@ -44,6 +44,19 @@ vi.mock("sonner", () => ({
   toast: { warning: mockToastWarning, error: mockToastError },
 }));
 
+vi.mock("../../common/timezone-select", () => ({
+  browserTimezone: () => "America/Chicago",
+  timezoneOptions: (current: string) =>
+    Array.from(
+      new Set([
+        current,
+        "America/Chicago",
+        "Asia/Shanghai",
+        "Asia/Tokyo",
+      ]),
+    ),
+}));
+
 vi.mock("@multica/core/auth", async () => {
   const actual =
     await vi.importActual<typeof import("@multica/core/auth")>(
@@ -199,8 +212,7 @@ describe("PreferencesTab — Timezone section", () => {
   });
 
   // handleChange PATCHes then updates the store asynchronously, so the
-  // post-pick assertions must waitFor it to settle. The extended timeout
-  // covers querying the Select's full ~600-option IANA list on slow CI.
+  // post-pick assertions must waitFor it to settle.
   it("saving a new timezone PATCHes /api/me and updates the auth store", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
     const updatedUser = { id: "user-1", timezone: "Asia/Tokyo" };
@@ -214,7 +226,7 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
       expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
     });
-  }, 20000);
+  });
 
   it("surfaces a toast when the PATCH fails", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
@@ -229,7 +241,7 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockToastError).toHaveBeenCalledTimes(1);
     });
     expect(mockSetUser).not.toHaveBeenCalled();
-  }, 20000);
+  });
 
   it("clearing the preference sends an empty-string timezone", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
@@ -248,5 +260,5 @@ describe("PreferencesTab — Timezone section", () => {
       // so the picker switches back to "(browser)" without a refetch.
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
-  }, 20000);
+  });
 });
