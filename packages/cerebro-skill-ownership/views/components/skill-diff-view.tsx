@@ -96,7 +96,7 @@ export function SkillDiffView({ base, proposed, baseLabel = "base", proposedLabe
   );
 
   return (
-    <div className="overflow-hidden rounded-md border bg-muted/20 text-sm leading-6">
+    <div className="shrink-0 overflow-hidden rounded-md border bg-muted/20 text-sm leading-6">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-3 py-1.5 font-mono text-xs">
         <div className="flex items-center gap-3 text-muted-foreground">
           <span className="text-destructive/70">− {baseLabel}</span>
