@@ -651,10 +651,8 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 		t.Fatalf("expected %s, got %s", raw, data)
 	}
 
-	// Cleanup should remove the file.
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("remove temp file: %v", err)
-	}
+	// Cleanup should remove the temp directory and every related sidecar file.
+	cleanupMcpConfigTemp(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file to be removed, but it still exists")
 	}
