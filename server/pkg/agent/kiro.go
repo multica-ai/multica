@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -159,6 +160,31 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			default:
 			}
 		},
+	}
+
+	// Kiro CLI 2.10+ dropped the ACP-standard `usage` field on
+	// `session/prompt` responses and never emits `usage_update`
+	// notifications — every per-turn credit reading arrives on a
+	// vendor-namespaced `_kiro.dev/metadata` frame instead. The client
+	// hook (see hermes.go) forwards those frames here; parse them and
+	// accumulate the metered credit value onto the shared usage state.
+	// See MUL-4091 / GH #4943 for the reproduction trace.
+	c.onVendorNotification = func(method string, params json.RawMessage) {
+		if method != "_kiro.dev/metadata" {
+			return
+		}
+		if !streamingCurrentTurn.Load() {
+			// A metering frame for a turn we already stopped listening on
+			// (e.g. after cancel). Skip so we don't inflate the next turn.
+			return
+		}
+		credit, ok := parseKiroMeteringCredit(params)
+		if !ok {
+			return
+		}
+		c.usageMu.Lock()
+		c.usage.Credits += credit
+		c.usageMu.Unlock()
 	}
 
 	readerDone := make(chan struct{})
@@ -396,7 +422,11 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		// Kiro CLI 2.10+ only reports a per-turn `credit` value on
+		// `_kiro.dev/metadata` — no input/output/cache tokens — so gate
+		// on Credits as well; otherwise every Kiro task ships nil usage
+		// and the dashboard shows zero attribution (GH #4943).
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 || u.Credits > 0 {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -533,4 +563,58 @@ func kiroToolNameFromTitle(title string) string {
 	}
 
 	return strings.ReplaceAll(lower, " ", "_")
+}
+
+// parseKiroMeteringCredit reads the credit total out of a
+// `_kiro.dev/metadata` notification's `params`.
+//
+// The frame shape observed on kiro-cli 2.11.0 (identical to the 2.10.x
+// series that motivated GH #4943) is:
+//
+//	{
+//	  "sessionId": "...",
+//	  "contextUsagePercentage": 1.72,
+//	  "meteringUsage": [
+//	    {"value": 0.0890, "unit": "credit", "unitPlural": "credits"}
+//	  ],
+//	  "turnDurationMs": 2194
+//	}
+//
+// Not every metadata frame carries `meteringUsage` — Kiro emits an
+// initial context-only frame at the top of the turn — so a missing or
+// empty array yields (0, false) and the caller skips the accumulator.
+// Only entries whose `unit` normalises to "credit" contribute; anything
+// else is ignored defensively in case Kiro grows a second metering unit
+// later (e.g. tokens) that this daemon doesn't yet know how to price.
+func parseKiroMeteringCredit(params json.RawMessage) (float64, bool) {
+	if len(params) == 0 || string(params) == "null" {
+		return 0, false
+	}
+	var msg struct {
+		MeteringUsage []struct {
+			Value json.Number `json:"value"`
+			Unit  string      `json:"unit"`
+		} `json:"meteringUsage"`
+	}
+	if err := json.Unmarshal(params, &msg); err != nil {
+		return 0, false
+	}
+	if len(msg.MeteringUsage) == 0 {
+		return 0, false
+	}
+	var total float64
+	var any bool
+	for _, m := range msg.MeteringUsage {
+		unit := strings.ToLower(strings.TrimSpace(m.Unit))
+		if unit != "credit" && unit != "credits" {
+			continue
+		}
+		v, err := m.Value.Float64()
+		if err != nil || v <= 0 {
+			continue
+		}
+		total += v
+		any = true
+	}
+	return total, any
 }

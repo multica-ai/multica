@@ -1,0 +1,27 @@
+-- Kiro CLI 2.10+ dropped the ACP-standard `usage` field on session/prompt
+-- and stopped emitting `usage_update` notifications; every per-turn cost
+-- now arrives on a vendor-namespaced `_kiro.dev/metadata` frame as a
+-- fractional `credit` value with no input/output/cache token breakdown.
+-- The four existing per-token columns cannot carry that signal — the
+-- daemon has to persist the credit reading as-is or lose Kiro
+-- attribution entirely (GH #4943, MUL-4091).
+--
+-- Scope of this migration is intentionally narrow:
+--
+--   * Only `task_usage` gets a `credits` column here. `task_usage_hourly`
+--     (migration 101) and the rollup pipeline (102) stay
+--     token-only. A separate migration threads credits through the
+--     hourly bucket + dashboard queries once we agree on how to expose
+--     them to the frontend — folding that into this change would drag
+--     the rollup recompute, dirty triggers, and dashboard SQL along and
+--     bloat the fix beyond `parse the new payload shape`.
+--
+--   * DOUBLE PRECISION, not BIGINT micro-credit, because Kiro's payload
+--     is a JSON number with real fractional precision and the source of
+--     truth stays a float. We are storing exactly what Kiro sent us.
+--
+--   * DEFAULT 0 so every existing row and every non-Kiro backend keeps
+--     working without a backfill: token-only backends never write this
+--     column and readers see 0 (== no credit metering available).
+ALTER TABLE task_usage
+    ADD COLUMN credits DOUBLE PRECISION NOT NULL DEFAULT 0;

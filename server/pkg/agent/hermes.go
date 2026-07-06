@@ -465,6 +465,14 @@ type hermesClient struct {
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
+	// onVendorNotification receives JSON-RPC notifications outside the
+	// ACP spec — anything whose method is not `session/update` or
+	// `session/notification`. Backends set this to grab provider-specific
+	// signals: Kiro CLI 2.10+ emits its per-turn credit metering on
+	// `_kiro.dev/metadata`, and dropping that frame silently is exactly
+	// what caused the daemon to lose usage attribution after #4867.
+	// Handlers run on the reader goroutine — keep them non-blocking.
+	onVendorNotification func(method string, params json.RawMessage)
 
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
@@ -756,6 +764,13 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	_ = json.Unmarshal(raw["method"], &method)
 
 	if method != "session/update" && method != "session/notification" {
+		// Off-spec / vendor-namespaced notification (e.g. Kiro CLI's
+		// `_kiro.dev/metadata` credit-metering frame). Hand it to the
+		// backend hook if one is registered, then stop — ACP dispatch
+		// below only recognises `session/update` / `session/notification`.
+		if c.onVendorNotification != nil {
+			c.onVendorNotification(method, raw["params"])
+		}
 		return
 	}
 

@@ -195,13 +195,20 @@ type SkillFileRefData struct {
 }
 
 // TaskUsageEntry represents token usage for a single model during a task execution.
+//
+// Credits is a vendor-billed cost in the runtime's native metering unit.
+// Kiro CLI 2.10+ reports each turn as a fractional credit value on
+// `_kiro.dev/metadata`, with no per-input/output/cache token breakdown
+// available — omit the field for every backend that already fills in
+// tokens (`omitempty` keeps the wire payload unchanged for those).
 type TaskUsageEntry struct {
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Credits          float64 `json:"credits,omitempty"`
 }
 
 // TaskResult is the outcome of executing a task.

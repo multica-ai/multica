@@ -108,11 +108,19 @@ type Message struct {
 }
 
 // TokenUsage tracks token consumption for a single model.
+//
+// Credits carries a vendor-specific billed cost when the runtime does not
+// expose an input/output/cache token breakdown. Kiro CLI 2.10+ is the
+// motivating case: its ACP transport reports each turn's cost as a
+// fractional `credit` value on `_kiro.dev/metadata` and never populates
+// the ACP-standard `usage` field, so token-only accounting would drop the
+// signal entirely. Zero on every backend that already reports tokens.
 type TokenUsage struct {
 	InputTokens      int64
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
+	Credits          float64
 }
 
 // Result is the final outcome after an agent session completes.

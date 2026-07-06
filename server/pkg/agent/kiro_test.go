@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -687,5 +688,194 @@ func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
 		t.Fatalf("session/load.mcpServers: got %v, want one entry named fetch", servers)
+	}
+}
+
+// fakeKiroACPKiroMeteringScript emits exactly the two `_kiro.dev/metadata`
+// frames the real kiro-cli 2.11.0 sends on a `session/prompt` turn,
+// captured by driving `kiro-cli acp --trust-all-tools` against a live
+// login (GH #4943 reproduction, MUL-4091). Two properties matter:
+//
+//   - The first frame carries only `contextUsagePercentage` and MUST NOT
+//     inflate the credit accumulator.
+//   - The second frame carries `meteringUsage[0]` as `{value, unit:
+//     "credit"}` — this is the entire per-turn cost signal.
+//
+// The `session/prompt` response is `{"stopReason":"end_turn"}` with no
+// `usage` field, exactly as kiro-cli emits it.
+func fakeKiroACPKiroMeteringScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_kiro_meter","models":{"currentModelId":"auto","availableModels":[{"modelId":"auto","name":"auto"}]}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"_kiro.dev/metadata","params":{"sessionId":"ses_kiro_meter","contextUsagePercentage":3.389}}\n'
+      printf '{"jsonrpc":"2.0","method":"_kiro.dev/metadata","params":{"sessionId":"ses_kiro_meter","contextUsagePercentage":1.7237,"meteringUsage":[{"value":0.08904971814262025,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":2194}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// Regression for GH #4943 / MUL-4091. Kiro CLI 2.10+ stopped filling the
+// ACP-standard `usage` field on `session/prompt` responses and never
+// emits `usage_update` notifications; instead every per-turn cost
+// arrives on a vendor-namespaced `_kiro.dev/metadata` notification.
+// Before this fix, `hermesClient.handleNotification` early-returned on
+// every non-`session/update` method, so credits fell on the floor,
+// `TokenUsage` stayed zero, `usageMap` stayed nil, and the entire task
+// showed no usage / no cost — matching the reporter's dashboard.
+func TestKiroBackendParsesKiroMeteringCredit(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPKiroMeteringScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	usage, ok := result.Usage["auto"]
+	if !ok {
+		t.Fatalf("expected usage map keyed by the current-model id `auto`, got %+v", result.Usage)
+	}
+	// The two `_kiro.dev/metadata` frames combined MUST yield exactly one
+	// credit reading — the initial context-only frame contributes nothing.
+	const wantCredits = 0.08904971814262025
+	if got := usage.Credits; got != wantCredits {
+		t.Fatalf("credits: got %v, want %v (single frame, no double-counting)", got, wantCredits)
+	}
+	// Kiro's ACP transport does not surface tokens at all in 2.10+, so
+	// every token counter must stay zero — writing anything else here
+	// would poison the token-based rollup and dashboard downstream.
+	if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CacheReadTokens != 0 || usage.CacheWriteTokens != 0 {
+		t.Fatalf("tokens must stay zero for kiro-cli 2.10+, got %+v", usage)
+	}
+}
+
+func TestParseKiroMeteringCredit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		params  string
+		want    float64
+		wantOK  bool
+	}{
+		{
+			// Initial per-turn frame kiro-cli emits before any billing —
+			// context-only, no meteringUsage. Must NOT count as a signal.
+			name:   "context-only frame",
+			params: `{"sessionId":"s","contextUsagePercentage":3.389}`,
+			want:   0,
+			wantOK: false,
+		},
+		{
+			// Second frame from the live capture; happy path.
+			name:   "credit frame",
+			params: `{"sessionId":"s","contextUsagePercentage":1.72,"meteringUsage":[{"value":0.089049718,"unit":"credit","unitPlural":"credits"}],"turnDurationMs":2194}`,
+			want:   0.089049718,
+			wantOK: true,
+		},
+		{
+			// Defensive: if kiro-cli ever ships a `unit`-plural spelling
+			// on this JSON field we still want to accept it, rather than
+			// silently dropping a real cost.
+			name:   "plural unit label",
+			params: `{"meteringUsage":[{"value":0.5,"unit":"credits"}]}`,
+			want:   0.5,
+			wantOK: true,
+		},
+		{
+			// Same defensive posture in the other direction: an unknown
+			// unit must be ignored so we don't count tokens as credits
+			// when kiro-cli grows a second metering unit.
+			name:   "unknown unit ignored",
+			params: `{"meteringUsage":[{"value":42,"unit":"token"}]}`,
+			want:   0,
+			wantOK: false,
+		},
+		{
+			// Multiple entries sum — the transport reserves the array
+			// shape, and even if only one entry is emitted today, an
+			// operator running a bill dispute should be able to trust
+			// the total.
+			name:   "multiple entries sum",
+			params: `{"meteringUsage":[{"value":0.1,"unit":"credit"},{"value":0.2,"unit":"credit"}]}`,
+			want:   0.3,
+			wantOK: true,
+		},
+		{
+			name:   "empty meteringUsage",
+			params: `{"meteringUsage":[]}`,
+			want:   0,
+			wantOK: false,
+		},
+		{
+			name:   "malformed json",
+			params: `not json`,
+			want:   0,
+			wantOK: false,
+		},
+		{
+			name:   "null params",
+			params: `null`,
+			want:   0,
+			wantOK: false,
+		},
+		{
+			// Zero-value entries are the metering ledger telling us
+			// nothing was billed; treat them as no-signal so a background
+			// frame doesn't flip the `Credits > 0` gate on for a free turn.
+			name:   "zero value entry",
+			params: `{"meteringUsage":[{"value":0,"unit":"credit"}]}`,
+			want:   0,
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := parseKiroMeteringCredit(json.RawMessage(tc.params))
+			// Float sum imprecision (0.1 + 0.2 != 0.3 exactly) is a known
+			// artefact of the JSON payload being float64; compare with a
+			// small epsilon so `multiple entries sum` doesn't fail on
+			// architectures where the arithmetic reorders. 1e-9 is small
+			// enough to still catch a real regression that reads the
+			// wrong field.
+			if ok != tc.wantOK || math.Abs(got-tc.want) > 1e-9 {
+				t.Fatalf("parseKiroMeteringCredit(%q) = (%v, %v), want (%v, %v)",
+					tc.params, got, ok, tc.want, tc.wantOK)
+			}
+		})
 	}
 }
