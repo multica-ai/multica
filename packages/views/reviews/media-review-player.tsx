@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import type { ReviewAsset } from "@multica/core/types";
-import "@multica/canvas-drawing-editor";
 
 export interface MediaReviewPlayerProps {
   asset: ReviewAsset;
@@ -17,15 +16,18 @@ export interface MediaReviewPlayerRef {
 
 export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPlayerProps>(
   ({ asset, onTimeUpdate, comments }, ref) => {
-    const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLVideoElement | HTMLImageElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<any>(null);
+
+  useEffect(() => {
+    import("@multica/canvas-drawing-editor").catch(() => {});
+  }, []);
 
   const [layout, setLayout] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
-  // Calculate the true rendered dimensions of the video/image to account for letterboxing
   const calculateTrueLayout = useCallback(() => {
-    if (!containerRef.current || !mediaRef.current || !canvasRef.current) return;
+    if (!containerRef.current || !mediaRef.current) return;
 
     const container = containerRef.current.getBoundingClientRect();
     let mediaWidth = 0;
@@ -41,75 +43,56 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       mediaHeight = img.naturalHeight;
     }
 
-    if (mediaWidth === 0 || mediaHeight === 0) return;
+    if (!mediaWidth || !mediaHeight || !container.width || !container.height) return;
 
     const containerAspect = container.width / container.height;
     const mediaAspect = mediaWidth / mediaHeight;
 
-    let renderWidth, renderHeight, offsetX, offsetY;
+    let renderWidth: number, renderHeight: number, offsetX: number, offsetY: number;
 
     if (containerAspect > mediaAspect) {
-      // Container is wider than media -> pillarboxed (bars on sides)
+      // Pillarboxed: bars on sides
       renderHeight = container.height;
       renderWidth = renderHeight * mediaAspect;
       offsetX = (container.width - renderWidth) / 2;
       offsetY = 0;
     } else {
-      // Container is taller than media -> letterboxed (bars on top/bottom)
+      // Letterboxed: bars on top/bottom
       renderWidth = container.width;
       renderHeight = renderWidth / mediaAspect;
       offsetX = 0;
       offsetY = (container.height - renderHeight) / 2;
     }
 
-    setLayout({
-      x: offsetX,
-      y: offsetY,
-      width: renderWidth,
-      height: renderHeight,
-    });
-
-    // Update canvas resolution to match rendered size for crisp drawing
-    canvasRef.current.width = renderWidth;
-    canvasRef.current.height = renderHeight;
+    setLayout({ x: offsetX, y: offsetY, width: renderWidth, height: renderHeight });
   }, [asset.asset_type]);
 
-  // Convert a mouse event (clientX/Y) to a normalized 0.0-1.0 coordinate
-  // @ts-ignore
-  const getNormalizedCoordinates = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!canvasRef.current) return { x: 0, y: 0 };
-      const rect = canvasRef.current.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left) / layout.width,
-        y: (clientY - rect.top) / layout.height,
-      };
-    },
-    [layout]
-  );
-
-  // Convert a normalized 0.0-1.0 coordinate to a render pixel coordinate
-  // @ts-ignore
-  const getRenderCoordinates = useCallback(
-    (nx: number, ny: number) => {
-      return {
-        x: nx * layout.width,
-        y: ny * layout.height,
-      };
-    },
-    [layout]
-  );
-
+  // ResizeObserver — covers dialog-open animation and window resize
   useEffect(() => {
     if (!containerRef.current) return;
-
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(calculateTrueLayout);
-    });
-
+    const observer = new ResizeObserver(() => requestAnimationFrame(calculateTrueLayout));
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [calculateTrueLayout]);
+
+  // Retry after mount: handles cached images whose naturalWidth is already set
+  useEffect(() => {
+    requestAnimationFrame(calculateTrueLayout);
+  }, [calculateTrueLayout]);
+
+  // Reset when switching assets
+  useEffect(() => {
+    setLayout({ x: 0, y: 0, width: 0, height: 0 });
+  }, [asset.id]);
+
+  // Sync canvas editor size whenever the overlay dimensions change.
+  // The editor is only rendered when layout.width > 0, so canvasRef is always
+  // mounted with the correct host size — resize() just keeps it in sync on change.
+  useEffect(() => {
+    if (layout.width > 0) {
+      requestAnimationFrame(() => (canvasRef.current as any)?.resize?.());
+    }
+  }, [layout]);
 
   useImperativeHandle(ref, () => ({
     seek: (time: number) => {
@@ -122,17 +105,8 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         (mediaRef.current as HTMLVideoElement).pause();
       }
     },
-    getCanvasShapes: () => {
-      if (canvasRef.current && (canvasRef.current as any).exportJSON) {
-        return (canvasRef.current as any).exportJSON().objects;
-      }
-      return [];
-    },
-    clearCanvasShapes: () => {
-      if (canvasRef.current && (canvasRef.current as any).clear) {
-        (canvasRef.current as any).clear();
-      }
-    }
+    getCanvasShapes: () => (canvasRef.current as any)?.exportJSON?.()?.objects ?? [],
+    clearCanvasShapes: () => (canvasRef.current as any)?.clear?.(),
   }));
 
   const handleTimeUpdate = () => {
@@ -142,69 +116,83 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   };
 
   return (
-    <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden">
+    <div ref={containerRef} className="relative w-full h-full bg-black overflow-hidden">
+      {/*
+        Media element: fills the container via absolute positioning + object-contain.
+        The browser handles the letterbox; calculateTrueLayout then computes where
+        the visible image pixels start so we can position the annotation canvas on top.
+      */}
       {asset.asset_type === "video" ? (
-        <video 
-          ref={mediaRef as React.RefObject<HTMLVideoElement>} 
-          src={asset.file_url} 
-          className="max-w-full max-h-full" 
-          controls 
+        <video
+          ref={mediaRef as React.RefObject<HTMLVideoElement>}
+          src={asset.src_url}
+          className="absolute inset-0 w-full h-full object-contain"
+          controls
           onLoadedMetadata={calculateTrueLayout}
           onTimeUpdate={handleTimeUpdate}
         />
       ) : (
-        <img 
-          ref={mediaRef as React.RefObject<HTMLImageElement>} 
-          src={asset.file_url} 
-          alt={asset.name} 
-          className="max-w-full max-h-full object-contain" 
+        <img
+          ref={mediaRef as React.RefObject<HTMLImageElement>}
+          src={asset.src_url}
+          alt={asset.name}
+          className="absolute inset-0 w-full h-full object-contain"
           onLoad={calculateTrueLayout}
         />
       )}
-      
-      
-      {/* 
-        The canvas editor is absolutely positioned exactly over the rendered pixels of the media. 
-        pointer-events-auto ensures it catches mouse events for drawing. 
-      */}
-      {/* @ts-ignore */}
-      <canvas-drawing-editor 
-        ref={canvasRef as any}
-        class="absolute pointer-events-auto touch-none"
-        style={{
-          left: `${layout.x}px`,
-          top: `${layout.y}px`,
-          width: `${layout.width}px`,
-          height: `${layout.height}px`,
-          backgroundColor: 'transparent'
-        }}
-      />
 
+      {/*
+        Annotation overlay: only rendered once we have a valid layout so the
+        canvas-drawing-editor always mounts at the correct size. A 0×0 mount
+        would leave the canvas buffer empty and break all drawing tools.
+
+        The editor's built-in mouse-wheel zoom (handleWheel in its source) and
+        space+drag pan work normally — use those to navigate a zoomed-in frame.
+      */}
+      {layout.width > 0 && (
+        /* @ts-ignore */
+        <canvas-drawing-editor
+          ref={canvasRef}
+          overlay=""
+          lang="en"
+          class="absolute pointer-events-auto touch-none"
+          style={{
+            left: layout.x,
+            top: layout.y,
+            width: layout.width,
+            height: layout.height,
+          }}
+        />
+      )}
+
+      {/* Video comment timestamp markers along the bottom */}
       {asset.asset_type === "video" && asset.duration && comments && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600/50 pointer-events-none">
-          {comments.filter(c => c.timestamp !== null && c.timestamp !== undefined && !c.parent_id).map((comment) => (
-            <div 
-              key={comment.id}
-              className="absolute top-0 bottom-0 w-1.5 -ml-0.5 rounded-full pointer-events-auto cursor-pointer hover:scale-150 transition-transform"
-              style={{
-                left: `${(comment.timestamp / asset.duration!) * 100}%`,
-                backgroundColor: comment.resolved ? '#22c55e' : '#3b82f6'
-              }}
-              title={comment.content}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (mediaRef.current) {
-                  (mediaRef.current as HTMLVideoElement).currentTime = comment.timestamp;
-                }
-              }}
-            />
-          ))}
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-600/50 pointer-events-none z-10">
+          {comments
+            .filter(c => c.timestamp !== null && c.timestamp !== undefined && !c.parent_id)
+            .map((comment) => (
+              <div
+                key={comment.id}
+                className="absolute top-0 bottom-0 w-1.5 -ml-0.5 rounded-full pointer-events-auto cursor-pointer hover:scale-150 transition-transform"
+                style={{
+                  left: `${(comment.timestamp / asset.duration!) * 100}%`,
+                  backgroundColor: comment.resolved ? '#22c55e' : '#3b82f6',
+                }}
+                title={comment.content}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (mediaRef.current) {
+                    (mediaRef.current as HTMLVideoElement).currentTime = comment.timestamp;
+                  }
+                }}
+              />
+            ))}
         </div>
       )}
     </div>
   );
 });
-// Register the custom element type for TypeScript
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
