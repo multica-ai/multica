@@ -186,12 +186,13 @@ OAuth entry points (`findOrCreateUser` is the single emission site).
 | `signup_source` | string | Opaque attribution bundle from the frontend cookie `multica_signup_source` (UTM + referrer). Empty when the cookie is absent. |
 | `auth_method` | string | Optional. `"google"` for Google OAuth signups. Absent for verification-code signups. |
 
-Person properties set with `$set_once`:
+Historical PostHog person properties (`$set_once`) — **no longer emitted** since
+MUL-4127, because `signup` is now Prometheus-only and never reaches PostHog:
 
 | Property | Type | Description |
 |---|---|---|
-| `email` | string | Full email. Never broadcast per-event. |
-| `signup_source` | string | Same as above; kept on the person for later segmentation. |
+| `email` | string | Full email. Was never broadcast per-event. |
+| `signup_source` | string | Attribution bundle. Today only its bucketed form survives, as the `multica_signup_total{signup_source}` Prometheus label (see `NormalizeSignupSource`); it is no longer set as a person property for segmentation. |
 
 ### `workspace_created`
 
@@ -400,11 +401,12 @@ emit `n=1`. PostHog answers the same question at query time via
 and funnel steps of the form "workspace has had ≥2 `issue_executed`
 events" are expressible without the property. No information is lost.
 
-`issue_executed` is the canonical **PostHog** core-loop success signal (the
-`agent_task_*` lifecycle that previously served per-task success dashboards is
-now Prometheus-only). Per-task completion counts live in Grafana via
-`BusinessMetrics.RecordTaskTerminal`; use `issue_executed` for the
-PostHog-side activation funnel and filter by `source` as needed.
+`issue_executed` is the canonical core-loop success signal. Since MUL-4127 it is
+metrics-only like every server event: recorded to Prometheus as
+`multica_issue_executed_total{source}` (not PostHog) and backed in the DB by
+`issue.first_executed_at`. Per-task completion counts live in Grafana via
+`BusinessMetrics.RecordTaskTerminal`; use `multica_issue_executed_total` for the
+activation funnel and break down by `source` as needed.
 
 ### `team_invite_sent`
 
@@ -713,9 +715,10 @@ Compare against the equivalent Prometheus counter in Grafana. The expected
 difference should be near zero; sustained drift means either an emission site
 is missing or the metrics pipeline is unhealthy.
 
-On the PostHog side, `issue_executed` remains the product-level success signal
-(at most one per issue) and can be reconciled against
-`issue.first_executed_at` if needed.
+`issue_executed` remains the product-level success signal (at most one per
+issue). Since MUL-4127 it is Prometheus-only, so reconcile
+`multica_issue_executed_total` against `issue.first_executed_at` rather than a
+PostHog event.
 
 ## Governance
 
