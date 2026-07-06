@@ -55,6 +55,20 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
+	if goos == "windows" {
+		if v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE")); v != "" {
+			return codexSandboxPolicy{
+				Mode:          v,
+				NetworkAccess: v == "workspace-write",
+				Reason:        "MULTICA_CODEX_WINDOWS_SANDBOX_MODE override",
+			}
+		}
+		return codexSandboxPolicy{
+			Mode:          "workspace-write",
+			NetworkAccess: true,
+			Reason:        "windows default",
+		}
+	}
 	if goos != "darwin" {
 		return codexSandboxPolicy{
 			Mode:          "workspace-write",

@@ -659,7 +659,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
+	unlock := acquireCodexLaunchLock(b.cfg.Logger)
+	var unlockOnce sync.Once
+	safeUnlock := func() {
+		unlockOnce.Do(func() {
+			unlock()
+		})
+	}
+
 	if err := cmd.Start(); err != nil {
+		safeUnlock()
 		cancel()
 		return nil, fmt.Errorf("start codex: %w", err)
 	}
@@ -828,6 +837,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer close(msgCh)
 		defer close(resCh)
 		defer drainAndWait()
+		defer safeUnlock()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -844,6 +854,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				"experimentalApi": true,
 			},
 		})
+		safeUnlock()
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
