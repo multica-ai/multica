@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local tool-policy import.
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -476,6 +477,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					Capabilities: raw,
 				}); err == nil {
 					registered.Capabilities = raw
+					h.persistRuntimeCapabilitySnapshot(r, registered.ID, registered.WorkspaceID, raw) // CEREBRO-PATCH(capability-register-register): FIR-2129 mirror initial daemon snapshot into normalized registry on register.
 				} else {
 					slog.Warn("failed to persist runtime capabilities", "runtime_id", uuidToString(registered.ID), "error", err)
 				}
@@ -929,6 +931,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 		rt.CliVersion = strToText(strings.TrimSpace(req.CLIVersion))
 		rt.Capabilities = raw
+		h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, raw) // CEREBRO-PATCH(capability-register): FIR-2129 keep normalized registry in step with heartbeat drift reports.
 	}
 
 	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport, req.Account)
@@ -1078,6 +1081,11 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		return nil, m, err
 	}
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
+
+	// CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 keep the
+	// runtime's tool inventory loaded continuously in the capability register the
+	// unified tool table reads. Throttled + detached, so it adds no heartbeat latency.
+	h.maybeMirrorRuntimeCapabilitySnapshot(rt.ID, rt.WorkspaceID, rt.Capabilities)
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
@@ -1401,12 +1409,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — surface the runtime's
+	// per-runtime sandbox override + policy so the daemon can honour them on the
+	// next buildSandboxConfig without a restart (restored after upstream sync #4454, FIR-2743).
+	resp.SandboxEnabled = boolToPtr(runtime.SandboxEnabled)
+	if len(runtime.SandboxPolicy) > 0 {
+		resp.RuntimeSandboxPolicy = json.RawMessage(runtime.SandboxPolicy) // CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 policy payload.
+	}
+
 	// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — fold the resolved
 	// agent-browser verdict into the sandbox policy the daemon receives. Only an
 	// allow/ask grant opens the Unix-socket bind + ~/.agent-browser write rule;
 	// deny / no-grant leaves the policy untouched and the socket sealed.
 	if agentBrowserAllowed {
 		resp.RuntimeSandboxPolicy = withAgentBrowserSandbox(resp.RuntimeSandboxPolicy)
+	}
+
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — resolve the staged
+	// local-runtime enforcement mode from workspace settings so the daemon
+	// wires the Claude PreToolUse hook only when the workspace opted in.
+	// Off (default) leaves the field empty and the daemon wires nothing.
+	if stage := h.localToolPolicyMode(r.Context(), runtime.WorkspaceID); stage != localtoolpolicy.ModeOff {
+		resp.LocalToolPolicyStage = string(stage)
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can
@@ -1559,6 +1583,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// CEREBRO-PATCH(agent-capabilities-claim): FIR-458 — apply the workspace
+			// capability policy to the claim: sandbox network allowlist onto the agent,
+			// per-agent MCP denies filtered out of mcp_config before runtime start.
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1603,6 +1634,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							resp.InitiatorName = u.Name
 							resp.InitiatorEmail = u.Email
 						}
+					}
+					// CEREBRO-PATCH(user-profile-prompt): JEH-304 — apply the comment
+					// author's communication profile when the author is a member.
+					// Agents don't have profiles.
+					if comment.AuthorID.Valid {
+						resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), comment.AuthorID)
 					}
 				}
 				// Count comments that arrived issue-wide since this agent's last
@@ -1666,6 +1703,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// CEREBRO-PATCH(user-profile-prompt): JEH-304 — apply the chat session
+			// creator's communication profile.
+			resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), cs.CreatorID)
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {

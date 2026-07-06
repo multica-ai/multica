@@ -3519,6 +3519,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
+		UserProfilePrompt:                task.UserProfilePrompt, // CEREBRO-PATCH(user-profile-prompt): JEH-304 carry the compiled profile into the brief.
 		InitiatorType:                    task.InitiatorType,
 		InitiatorID:                      task.InitiatorID,
 		InitiatorName:                    task.InitiatorName,
@@ -3761,10 +3762,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
+	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
+	// has opted in (claim carries the resolved stage). No-op for the default
+	// "off" stage and for non-Claude providers.
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, task.LocalToolPolicyStage, env.WorkDir)
+	if tperr != nil {
+		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
+	}
+	if toolPolicySpawn != nil {
+		for k, v := range toolPolicySpawn.Env {
+			agentEnv[k] = v
+		}
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — honour the claim's per-runtime sandbox override + policy at spawn (restored after upstream sync #4530, FIR-2743).
+		Sandbox: d.buildSandboxConfig(provider, task.SandboxEnabled, parseRuntimeSandboxPolicy(task.RuntimeSandboxPolicy), task.Agent),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -3791,6 +3807,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+	}
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
+	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
+	// CLI actually consumes). No-op unless prepareToolPolicySpawn wired a settings file.
+	if toolPolicySpawn != nil && provider == "claude" && toolPolicySpawn.SettingsPath != "" {
+		customArgs = append(customArgs, "--settings", toolPolicySpawn.SettingsPath)
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
