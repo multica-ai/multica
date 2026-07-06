@@ -27,6 +27,26 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 	return err
 }
 
+const copySkillFiles = `-- name: CopySkillFiles :exec
+INSERT INTO skill_file (skill_id, path, content)
+SELECT $1::uuid, path, content
+FROM skill_file
+WHERE skill_id = $2::uuid
+ON CONFLICT (skill_id, path) DO NOTHING
+`
+
+type CopySkillFilesParams struct {
+	NewSkillID    pgtype.UUID `json:"new_skill_id"`
+	SourceSkillID pgtype.UUID `json:"source_skill_id"`
+}
+
+// Duplicates all skill_file rows from source_skill_id under new_skill_id.
+// ON CONFLICT is safe for re-runs if the target skill already existed.
+func (q *Queries) CopySkillFiles(ctx context.Context, arg CopySkillFilesParams) error {
+	_, err := q.db.Exec(ctx, copySkillFiles, arg.NewSkillID, arg.SourceSkillID)
+	return err
+}
+
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -97,6 +117,51 @@ DELETE FROM skill_file WHERE skill_id = $1
 func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteSkillFilesBySkill, skillID)
 	return err
+}
+
+const findOrCreateSkillByName = `-- name: FindOrCreateSkillByName :one
+INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id, name) DO UPDATE
+    SET id = skill.id
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+`
+
+type FindOrCreateSkillByNameParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Content     string      `json:"content"`
+	Config      []byte      `json:"config"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// Returns the existing skill if one with this name already exists in the
+// workspace (preserving its content), otherwise inserts a new one.
+// Used when copying an agent so the target workspace's customised skills
+// are never overwritten.
+func (q *Queries) FindOrCreateSkillByName(ctx context.Context, arg FindOrCreateSkillByNameParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, findOrCreateSkillByName,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+		arg.Config,
+		arg.CreatedBy,
+	)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getSkill = `-- name: GetSkill :one

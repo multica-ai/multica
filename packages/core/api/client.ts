@@ -954,6 +954,16 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
+  async copyAgent(
+    id: string,
+    data: { target_workspace_slug: string; name?: string; target_runtime_id?: string },
+  ): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/copy`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);

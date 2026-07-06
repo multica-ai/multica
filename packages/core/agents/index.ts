@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./derive-presence";
 export * from "./queries";
+export * from "./mutations";
 export * from "./use-agent-presence";
 export * from "./use-update-agent-allowlist";
 export * from "./use-agent-activity";

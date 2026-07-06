@@ -27,7 +27,7 @@ ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     token_expires_at = EXCLUDED.token_expires_at,
     connected_by_id  = EXCLUDED.connected_by_id,
     updated_at       = now()
-RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, refresh_token, token_expires_at, connected_by_id, created_at, updated_at
+RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token
 `
 
 type CreateGitLabConnectionParams struct {
@@ -60,39 +60,13 @@ func (q *Queries) CreateGitLabConnection(ctx context.Context, arg CreateGitLabCo
 		&i.NamespaceType,
 		&i.AvatarUrl,
 		&i.AccessToken,
-		&i.RefreshToken,
 		&i.TokenExpiresAt,
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RefreshToken,
 	)
 	return i, err
-}
-
-const updateGitLabConnectionTokens = `-- name: UpdateGitLabConnectionTokens :exec
-UPDATE gitlab_connection SET
-    access_token     = $2,
-    refresh_token    = $3,
-    token_expires_at = $4,
-    updated_at       = now()
-WHERE id = $1
-`
-
-type UpdateGitLabConnectionTokensParams struct {
-	ID             pgtype.UUID        `json:"id"`
-	AccessToken    string             `json:"access_token"`
-	RefreshToken   pgtype.Text        `json:"refresh_token"`
-	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
-}
-
-func (q *Queries) UpdateGitLabConnectionTokens(ctx context.Context, arg UpdateGitLabConnectionTokensParams) error {
-	_, err := q.db.Exec(ctx, updateGitLabConnectionTokens,
-		arg.ID,
-		arg.AccessToken,
-		arg.RefreshToken,
-		arg.TokenExpiresAt,
-	)
-	return err
 }
 
 const deleteGitLabConnection = `-- name: DeleteGitLabConnection :exec
@@ -110,7 +84,7 @@ func (q *Queries) DeleteGitLabConnection(ctx context.Context, arg DeleteGitLabCo
 }
 
 const getFirstGitLabConnectionByWorkspace = `-- name: GetFirstGitLabConnectionByWorkspace :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at FROM gitlab_connection WHERE workspace_id = $1 LIMIT 1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE workspace_id = $1 LIMIT 1
 `
 
 func (q *Queries) GetFirstGitLabConnectionByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (GitlabConnection, error) {
@@ -127,12 +101,13 @@ func (q *Queries) GetFirstGitLabConnectionByWorkspace(ctx context.Context, works
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RefreshToken,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByID = `-- name: GetGitLabConnectionByID :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at FROM gitlab_connection WHERE id = $1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE id = $1
 `
 
 func (q *Queries) GetGitLabConnectionByID(ctx context.Context, id pgtype.UUID) (GitlabConnection, error) {
@@ -149,12 +124,13 @@ func (q *Queries) GetGitLabConnectionByID(ctx context.Context, id pgtype.UUID) (
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RefreshToken,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByNamespace = `-- name: GetGitLabConnectionByNamespace :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at FROM gitlab_connection
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection
 WHERE workspace_id = $1 AND namespace = $2
 `
 
@@ -177,12 +153,13 @@ func (q *Queries) GetGitLabConnectionByNamespace(ctx context.Context, arg GetGit
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RefreshToken,
 	)
 	return i, err
 }
 
 const getGitLabConnectionByNamespaceGlobal = `-- name: GetGitLabConnectionByNamespaceGlobal :one
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at FROM gitlab_connection WHERE namespace = $1 LIMIT 1
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection WHERE namespace = $1 LIMIT 1
 `
 
 // Used by the webhook handler to resolve workspace from project namespace
@@ -202,6 +179,7 @@ func (q *Queries) GetGitLabConnectionByNamespaceGlobal(ctx context.Context, name
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RefreshToken,
 	)
 	return i, err
 }
@@ -380,7 +358,7 @@ func (q *Queries) LinkIssueToMergeRequest(ctx context.Context, arg LinkIssueToMe
 }
 
 const listGitLabConnectionsByWorkspace = `-- name: ListGitLabConnectionsByWorkspace :many
-SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at FROM gitlab_connection
+SELECT id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at, refresh_token FROM gitlab_connection
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -405,6 +383,7 @@ func (q *Queries) ListGitLabConnectionsByWorkspace(ctx context.Context, workspac
 			&i.ConnectedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RefreshToken,
 		); err != nil {
 			return nil, err
 		}
@@ -484,6 +463,32 @@ func (q *Queries) ListMergeRequestsByIssue(ctx context.Context, issueID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateGitLabConnectionTokens = `-- name: UpdateGitLabConnectionTokens :exec
+UPDATE gitlab_connection SET
+    access_token     = $2,
+    refresh_token    = $3,
+    token_expires_at = $4,
+    updated_at       = now()
+WHERE id = $1
+`
+
+type UpdateGitLabConnectionTokensParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	AccessToken    string             `json:"access_token"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
+	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
+}
+
+func (q *Queries) UpdateGitLabConnectionTokens(ctx context.Context, arg UpdateGitLabConnectionTokensParams) error {
+	_, err := q.db.Exec(ctx, updateGitLabConnectionTokens,
+		arg.ID,
+		arg.AccessToken,
+		arg.RefreshToken,
+		arg.TokenExpiresAt,
+	)
+	return err
 }
 
 const updateGitLabIssueAssignee = `-- name: UpdateGitLabIssueAssignee :exec

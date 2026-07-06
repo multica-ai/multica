@@ -448,6 +448,39 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 	return i, err
 }
 
+const getFirstRuntimeForWorkspace = `-- name: GetFirstRuntimeForWorkspace :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY (status = 'online') DESC, created_at ASC
+LIMIT 1
+`
+
+// Returns the best available runtime in a workspace: online runtimes first,
+// then by oldest created_at. Used as the default when copying an agent.
+func (q *Queries) GetFirstRuntimeForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, getFirstRuntimeForWorkspace, workspaceID)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+	)
+	return i, err
+}
+
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE workspace_id = $1

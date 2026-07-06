@@ -117,3 +117,23 @@ FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
 ORDER BY s.name ASC;
+
+-- name: FindOrCreateSkillByName :one
+-- Returns the existing skill if one with this name already exists in the
+-- workspace (preserving its content), otherwise inserts a new one.
+-- Used when copying an agent so the target workspace's customised skills
+-- are never overwritten.
+INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+VALUES (@workspace_id, @name, @description, @content, @config, @created_by)
+ON CONFLICT (workspace_id, name) DO UPDATE
+    SET id = skill.id
+RETURNING *;
+
+-- name: CopySkillFiles :exec
+-- Duplicates all skill_file rows from source_skill_id under new_skill_id.
+-- ON CONFLICT is safe for re-runs if the target skill already existed.
+INSERT INTO skill_file (skill_id, path, content)
+SELECT @new_skill_id::uuid, path, content
+FROM skill_file
+WHERE skill_id = @source_skill_id::uuid
+ON CONFLICT (skill_id, path) DO NOTHING;
