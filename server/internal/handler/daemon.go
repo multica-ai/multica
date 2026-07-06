@@ -1590,6 +1590,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
 				applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
 			}
+			// CEREBRO-PATCH(daemon-snapshot-saving): inline issue+thread + measure when the snapshot_prompt cost saving is on (FIR-2384)
+			h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)
+			// CEREBRO-PATCH(daemon-bundled-saving): point prompt at `issue context` (on) or record would-save (shadow) for bundled_read; defers to snapshot (FIR-2384)
+			h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)
+			// CEREBRO-PATCH(daemon-context-duplication): score meta-skill duplication (FIR-2765)
+			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
+			// CEREBRO-PATCH(daemon-graphify-nudge): nudge agents to use the graphify code graph when the saving is on (FIR-1311)
+			h.applyGraphifyNudge(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

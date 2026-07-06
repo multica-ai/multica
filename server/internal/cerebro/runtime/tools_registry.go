@@ -517,6 +517,7 @@ func AllBuiltinToolMeta() []ToolMeta {
 	out = append(out, legacyGatewayToolMeta...)
 	out = append(out, multicaMCPToolMatrix...)
 	out = append(out, customerServiceMCPToolMeta()...)
+	out = append(out, cerebroMemoryToolMeta()...) // CEREBRO-PATCH(memory-tools-offer): FIR-1794 — excluded status, gate-driven only.
 	return out
 }
 

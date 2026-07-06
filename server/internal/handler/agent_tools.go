@@ -112,6 +112,12 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — the memory tools are driven
+	// by the three memory gates (workspace flag, create_memory capability,
+	// per-user×agent switches), not by grants. Resolve the caller's real gate
+	// state once so the listing matches what the runtime will actually offer.
+	memRecallEnabled, memWriteEnabled := h.cerebroMemoryToolStates(r, agent.ID, agent.WorkspaceID)
+
 	// Build response from the ordered tool list merged with grant data.
 	out := make([]AgentToolResponse, 0, len(h.cerebroToolItems))
 	for _, item := range h.cerebroToolItems {
@@ -136,6 +142,15 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		}
 		if item.Status == "explicitly_excluded" {
 			resp.Enabled = false
+		}
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools carry the
+		// excluded status (never manually grantable) but ARE enabled when the
+		// memory gates pass, so this override runs after the excluded reset.
+		switch item.Name {
+		case "memory_recall":
+			resp.Enabled = memRecallEnabled
+		case "memory_remember", "memory_delete":
+			resp.Enabled = memWriteEnabled
 		}
 		out = append(out, resp)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -166,4 +167,40 @@ func (h *Handler) requireCerebroMemoryEnabled(w http.ResponseWriter, r *http.Req
 		return pgtype.UUID{}, false
 	}
 	return workspaceUUID, true
+}
+
+// cerebroMemoryToolStates resolves the three memory gates for the calling user
+// and this agent, mirroring runtime.CerebroMemoryToolsForTask (which cannot be
+// imported here — the runtime package depends on handler). recall follows the
+// workspace flag alone (company memory is readable by every agent once the
+// feature is on); write additionally needs the create_memory capability and the
+// per-(user × agent) write switch. Fail closed on every error path.
+//
+// CEREBRO-PATCH(memory-tools-offer): FIR-1794.
+func (h *Handler) cerebroMemoryToolStates(r *http.Request, agentID, workspaceID pgtype.UUID) (recall, write bool) {
+	ctx := r.Context()
+	if !h.cerebroMemoryEnabled(ctx, workspaceID) {
+		return false, false
+	}
+	recall = true
+	if h.CerebroQueries == nil || h.AgentMemory == nil {
+		return recall, false
+	}
+	userUUID, err := util.ParseUUID(r.Header.Get("X-User-ID"))
+	if err != nil {
+		return recall, false
+	}
+	has, err := h.CerebroQueries.HasCerebroCapability(ctx, cerebrodb.HasCerebroCapabilityParams{
+		WorkspaceID: workspaceID,
+		UserID:      userUUID,
+		Capability:  "create_memory",
+	})
+	if err != nil || !has {
+		return recall, false
+	}
+	settings, err := h.AgentMemory.GetSettings(ctx, userUUID, agentID)
+	if err != nil {
+		return recall, false
+	}
+	return recall, settings.CanWriteMemory
 }
