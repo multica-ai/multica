@@ -45,6 +45,7 @@ type Agent struct {
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 	Mode               string             `json:"mode"`
+	AllowedTools       []byte             `json:"allowed_tools"`
 }
 
 type AgentActionLog struct {
