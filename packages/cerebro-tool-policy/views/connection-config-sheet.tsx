@@ -379,6 +379,129 @@ export function ConnectionConfigSheet({
   );
 }
 
+// ConnectionToolList (FIR-2706) renders a connection's per-tool rows as an inline
+// list — the SAME rows the sheet shows, but mounted directly under an expanded
+// connection row in the capability catalog instead of inside a right-side Sheet.
+// It reuses EndpointDecisionControl (one toggle per tool) and the identical
+// tighten-only write semantics, so inline editing and sheet editing can never
+// drift. The wide Sheet stays for the classic table; this is the redesign's
+// "expand and show the group" surface Jesper asked for.
+export function ConnectionToolList({
+  connectionKey,
+  connectionRow,
+  toolRows,
+  editLayer,
+  subjectId,
+}: {
+  connectionKey: string;
+  connectionRow: ToolPolicyRow;
+  toolRows: ToolPolicyRow[];
+  editLayer: ToolLayer;
+  subjectId: string;
+}) {
+  const setPolicy = useSetToolPolicy();
+  const clearPolicy = useClearToolPolicy();
+  const busy = setPolicy.isPending || clearPolicy.isPending;
+
+  // The connection-wide Effective is the floor every per-tool row inherits; a
+  // per-tool choice can only tighten it (TECH-3287 hul 7), same as the sheet.
+  const floor = connectionRow.effective.setting;
+  const floorRank = SETTING_RANK[floor];
+  const isApi = toolRows.some((r) => r.source === "connection-endpoint");
+  const unitLabel = isApi ? "endpoint" : "tool";
+
+  const sorted = useMemo(
+    () =>
+      [...toolRows].sort((a, b) =>
+        (a.title || a.resource_pattern).localeCompare(
+          b.title || b.resource_pattern,
+        ),
+      ),
+    [toolRows],
+  );
+
+  // Write (or clear) one tool's decision at this surface's layer — verbatim the
+  // sheet's write(), so the two entry points behave identically.
+  function write(tool: string, setting: ToolSetting) {
+    const scope = { resource_pattern: tool };
+    if (setting === "inherit") {
+      clearPolicy.mutate({ tool_key: connectionKey, layer: editLayer, subject_id: subjectId, ...scope });
+      return;
+    }
+    setPolicy.mutate({ tool_key: connectionKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+  }
+
+  function applyCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    const setting = editLayer === "group" ? null : row.layers[editLayer];
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    setPolicy.mutate({
+      tool_key: connectionKey,
+      layer: editLayer,
+      subject_id: subjectId,
+      setting,
+      condition,
+      resource_pattern: row.resource_pattern,
+    });
+  }
+
+  if (sorted.length === 0) {
+    return (
+      <p className="py-3 text-center text-xs text-muted-foreground">
+        {isApi
+          ? "No endpoints configured yet. Test the connection to fetch them."
+          : "No tools discovered yet. Test the connection to fetch its tool list."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1" data-testid={`connection-tool-list-${connectionKey}`}>
+      {sorted.map((r) => (
+        <div
+          key={r.resource_pattern}
+          data-testid={`connection-tool-${r.resource_pattern}`}
+          className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2"
+        >
+          <div className="min-w-0">
+            <div
+              className={`truncate text-sm ${!r.title || r.title === r.resource_pattern ? "font-mono" : "font-medium"}`}
+            >
+              {r.title || r.resource_pattern}
+            </div>
+            {r.title && r.title !== r.resource_pattern ? (
+              <div className="truncate font-mono text-xs text-muted-foreground">
+                {r.resource_pattern}
+              </div>
+            ) : null}
+            {r.effective.capped_by ? (
+              <div className="text-xs text-muted-foreground">
+                Capped by {r.effective.capped_by}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <EndpointDecisionControl
+              row={r}
+              editLayer={editLayer}
+              disabled={busy}
+              floorRank={floorRank}
+              floorLabel={CHOICE_LABEL[floor]}
+              onChange={(setting) => write(r.resource_pattern, setting)}
+            />
+            <ConditionControl
+              row={r}
+              editLayer={editLayer}
+              disabled={busy}
+              onChange={(c) => applyCondition(r, c)}
+            />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">{unitLabel} list</span>
+    </div>
+  );
+}
+
 // EndpointDecisionControl is the single editable pill — one compact control per
 // endpoint row instead of the old four-button row that overflowed on mobile and
 // read differently from the rest of the app. It mirrors the main tool-policy

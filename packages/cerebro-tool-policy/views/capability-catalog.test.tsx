@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ToolPolicyRow } from "../core";
 import { CapabilityCatalog, groupByCapability } from "./capability-catalog";
 
@@ -80,5 +80,35 @@ describe("CapabilityCatalog", () => {
     const slackCard = screen.getByTestId("capability-group-slack");
     expect(within(slackCard).getByText("Post to Slack")).toBeInTheDocument();
     expect(within(slackCard).getByText("slack_post")).toBeInTheDocument();
+  });
+
+  it("expands a group row inline to reveal its detail, and leaves leaf rows flat (FIR-2706)", () => {
+    const rows = [
+      // a connection row that has an inline group of underlying tools
+      row({ tool_key: "connection:acme", title: "Acme", category: "Acme", source: "connection" }),
+      // a plain leaf row with no underlying group
+      row({ tool_key: "create_issue", title: "Create issue", category: "tools", source: "multica" }),
+    ];
+    render(
+      <CapabilityCatalog
+        rows={rows}
+        renderDecision={(r) => <button type="button">decide:{r.tool_key}</button>}
+        renderDetail={(r) =>
+          r.source === "connection" ? <div>group-of:{r.tool_key}</div> : null
+        }
+      />,
+    );
+    // The leaf row shows no expand affordance…
+    expect(screen.queryByTestId("tool-expand-create_issue")).not.toBeInTheDocument();
+    // …the group row does, and its detail is hidden until expanded.
+    const expander = screen.getByTestId("tool-expand-connection:acme");
+    expect(expander).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("group-of:connection:acme")).not.toBeInTheDocument();
+    // Clicking the row reveals the inline group; clicking again collapses it.
+    fireEvent.click(expander);
+    expect(expander).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("group-of:connection:acme")).toBeInTheDocument();
+    fireEvent.click(expander);
+    expect(screen.queryByText("group-of:connection:acme")).not.toBeInTheDocument();
   });
 });

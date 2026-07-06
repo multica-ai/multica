@@ -102,7 +102,11 @@ import {
 } from "./data-source-scope";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
-import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
+import { ConnectionToolList } from "./connection-config-sheet";
+import {
+  FirtalRegistryDataSourceConfigure,
+  DataSourceList,
+} from "./firtal-registry-data-source-sheet";
 import { CapabilityCatalog } from "./capability-catalog";
 
 /**
@@ -521,10 +525,22 @@ export function ToolPolicyTable({
     }
   }
 
-  // The per-row Decision cell — DecisionControl + ConditionControl + the
-  // contextual configure buttons. Shared verbatim between the classic desktop
-  // table and the redesigned capability cards so the two views can never drift
-  // in behavior; only the surrounding layout differs.
+  // FIR-2706 — a catalog row is itself a GROUP when it carries underlying rows:
+  // a connection with per-tool rows, or a tool (firtal_registry) with data
+  // sources. Group rows expand inline instead of opening a Sheet, so the wide
+  // "Configure (N)" / "Data sources (N)" buttons no longer crowd the row on
+  // mobile. Leaf rows keep the compact inline When beside the single toggle.
+  const connToolsFor = (row: ToolPolicyRow) =>
+    row.source === "connection" ? (connectionToolsByKey.get(row.tool_key) ?? []) : [];
+  const dataSourcesFor = (row: ToolPolicyRow) =>
+    registryDataSourcesByKey.get(row.tool_key) ?? [];
+  const rowIsGroup = (row: ToolPolicyRow) =>
+    connToolsFor(row).length > 0 || dataSourcesFor(row).length > 0;
+
+  // The per-row header cell in the redesigned catalog: the single Decision
+  // toggle Jesper asked for. Leaf rows also show the compact When inline (they
+  // have no expand to hold it); group rows move their When into the expanded
+  // detail below, so the header stays one toggle + the expand chevron.
   const renderDecision = (row: ToolPolicyRow) => (
     <>
       <DecisionControl
@@ -533,40 +549,65 @@ export function ToolPolicyTable({
         disabled={busy}
         onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
       />
-      <ConditionControl
-        row={row}
-        editLayer={editLayer}
-        disabled={busy}
-        onChange={(c) => applyCondition(row, c)}
-        wsId={wsId}
-        argScopeConfig={argScopeConfig}
-      />
-      {view === "agent" && subjectId ? (
-        <FirtalRegistryRowConfigure
-          toolKey={row.tool_key}
-          agentId={subjectId}
-          variant="outline"
-        />
-      ) : null}
-      {row.source === "connection" ? (
-        <ConnectionRowConfigure
-          connectionKey={row.tool_key}
-          connectionLabel={row.title || row.tool_key}
-          toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
-          connectionRow={row}
+      {!rowIsGroup(row) ? (
+        <ConditionControl
+          row={row}
           editLayer={editLayer}
-          subjectId={subjectId}
+          disabled={busy}
+          onChange={(c) => applyCondition(row, c)}
+          wsId={wsId}
+          argScopeConfig={argScopeConfig}
         />
       ) : null}
-      <FirtalRegistryDataSourceConfigure
-        toolKey={row.tool_key}
-        toolLabel={row.title || row.tool_key}
-        sourceRows={registryDataSourcesByKey.get(row.tool_key) ?? []}
-        editLayer={editLayer}
-        subjectId={subjectId}
-      />
     </>
   );
+
+  // The inline detail for a group row: the group-wide When on top, the per-tool
+  // list (connections), and data sources as their own labelled sub-group —
+  // "expand and show the group" (FIR-2706). Returns null for a leaf row, which
+  // keeps its chevron hidden in the catalog.
+  const renderCatalogDetail = (row: ToolPolicyRow): ReactNode | null => {
+    const connTools = connToolsFor(row);
+    const dataSources = dataSourcesFor(row);
+    if (connTools.length === 0 && dataSources.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">When</span>
+          <ConditionControl
+            row={row}
+            editLayer={editLayer}
+            disabled={busy}
+            onChange={(c) => applyCondition(row, c)}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
+          />
+        </div>
+        {connTools.length > 0 ? (
+          <ConnectionToolList
+            connectionKey={row.tool_key}
+            connectionRow={row}
+            toolRows={connTools}
+            editLayer={editLayer}
+            subjectId={subjectId}
+          />
+        ) : null}
+        {dataSources.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">
+              Data sources
+            </span>
+            <DataSourceList
+              toolKey={row.tool_key}
+              sourceRows={dataSources}
+              editLayer={editLayer}
+              subjectId={subjectId}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
@@ -629,7 +670,11 @@ export function ToolPolicyTable({
           )}
 
           {filtered.length > 0 && redesign && (
-            <CapabilityCatalog rows={filtered} renderDecision={renderDecision} />
+            <CapabilityCatalog
+              rows={filtered}
+              renderDecision={renderDecision}
+              renderDetail={renderCatalogDetail}
+            />
           )}
 
           {filtered.length > 0 && !redesign && (

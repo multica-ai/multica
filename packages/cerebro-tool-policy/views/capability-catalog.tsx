@@ -11,8 +11,8 @@
 // table. The whole surface is gated behind `cerebro_agent_page_redesign` at the
 // call site, so production keeps the flat table until the flag flips.
 
-import type { ReactNode } from "react";
-import { FolderGit2, KeyRound, LayoutGrid, Plug, Terminal } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight, FolderGit2, KeyRound, LayoutGrid, Plug, Terminal } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { ToolEffectiveSetting, ToolPolicyRow } from "../core";
 import { permissionType, type PermissionType } from "./tool-policy-table";
@@ -123,6 +123,13 @@ export interface CapabilityCatalogProps {
   renderDecision: (row: ToolPolicyRow) => ReactNode;
   /** Optional per-card bulk action rendered on the right of the header. */
   renderGroupAction?: (group: CapabilityGroup) => ReactNode;
+  /**
+   * FIR-2706 — optional inline detail for a row that is itself a group (a
+   * connection with per-tool rows, a tool with data sources). When it returns a
+   * node, the row gets an expand chevron and the node renders in a collapsible
+   * panel below the row. Returning null keeps the row a plain leaf.
+   */
+  renderDetail?: (row: ToolPolicyRow) => ReactNode | null;
 }
 
 // CapabilityCatalog renders the flat catalog as grouped capability cards. It is
@@ -133,8 +140,19 @@ export function CapabilityCatalog({
   rows,
   renderDecision,
   renderGroupAction,
+  renderDetail,
 }: CapabilityCatalogProps) {
   const groups = groupByCapability(rows);
+  // FIR-2706 — which rows are expanded to show their inline group. Keyed by the
+  // same tool_key:resource_pattern string used for the row's React key.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   return (
     <div className="flex flex-col gap-3.5" data-testid="capability-catalog">
       {groups.map((group) => {
@@ -163,27 +181,70 @@ export function CapabilityCatalog({
                 {renderGroupAction?.(group)}
               </div>
             </div>
-            {group.rows.map((row) => (
-              <div
-                key={`${row.tool_key}:${row.resource_pattern ?? ""}`}
-                data-testid={`tool-card-${row.tool_key}${
-                  row.resource_pattern ? `:${row.resource_pattern}` : ""
-                }`}
-                className="flex items-center justify-between gap-4 border-t px-4 py-3 first:border-t-0"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">
-                    {row.title || row.tool_key}
+            {group.rows.map((row) => {
+              const rowKey = `${row.tool_key}:${row.resource_pattern ?? ""}`;
+              const detail = renderDetail?.(row) ?? null;
+              const isOpen = detail != null && expanded.has(rowKey);
+              return (
+                <div
+                  key={rowKey}
+                  data-testid={`tool-card-${row.tool_key}${
+                    row.resource_pattern ? `:${row.resource_pattern}` : ""
+                  }`}
+                  className="border-t first:border-t-0"
+                >
+                  <div className="flex items-center justify-between gap-4 px-4 py-3">
+                    {/* The name area doubles as the expand target when the row is
+                        itself a group, so a big touch target opens it on mobile
+                        without stealing the row from the Decision toggle. */}
+                    {detail != null ? (
+                      <button
+                        type="button"
+                        onClick={() => toggle(rowKey)}
+                        aria-expanded={isOpen}
+                        data-testid={`tool-expand-${row.tool_key}`}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        <ChevronRight
+                          className={cn(
+                            "size-4 shrink-0 text-muted-foreground transition-transform",
+                            isOpen && "rotate-90",
+                          )}
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">
+                            {row.title || row.tool_key}
+                          </span>
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {row.tool_key}
+                          </span>
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">
+                          {row.title || row.tool_key}
+                        </div>
+                        <div className="truncate font-mono text-xs text-muted-foreground">
+                          {row.tool_key}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {renderDecision(row)}
+                    </div>
                   </div>
-                  <div className="truncate font-mono text-xs text-muted-foreground">
-                    {row.tool_key}
-                  </div>
+                  {isOpen ? (
+                    <div
+                      data-testid={`tool-detail-${row.tool_key}`}
+                      className="border-t bg-muted/30 px-4 py-3"
+                    >
+                      {detail}
+                    </div>
+                  ) : null}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {renderDecision(row)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

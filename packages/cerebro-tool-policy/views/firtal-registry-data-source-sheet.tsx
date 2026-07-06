@@ -281,3 +281,93 @@ export function FirtalRegistryDataSourceConfigure({
     </>
   );
 }
+
+// DataSourceList (FIR-2706) renders the firtal_registry data sources as an inline
+// list — the SAME per-source rows the sheet shows, mounted directly under an
+// expanded row in the capability catalog as a "Data sources" sub-group, instead
+// of behind the "Data sources (N)" button. Reuses DecisionControl + the identical
+// write semantics so inline and sheet editing can never drift.
+export function DataSourceList({
+  toolKey,
+  sourceRows,
+  editLayer,
+  subjectId,
+}: {
+  toolKey: string;
+  sourceRows: ToolPolicyRow[];
+  editLayer: ToolLayer;
+  subjectId: string;
+}) {
+  const setPolicy = useSetToolPolicy();
+  const clearPolicy = useClearToolPolicy();
+  const busy = setPolicy.isPending || clearPolicy.isPending;
+
+  const sorted = useMemo(
+    () =>
+      [...sourceRows].sort((a, b) =>
+        (a.title || a.resource_pattern).localeCompare(
+          b.title || b.resource_pattern,
+        ),
+      ),
+    [sourceRows],
+  );
+
+  function applySetting(resourcePattern: string, setting: ToolSetting) {
+    const scope = { resource_pattern: resourcePattern };
+    if (setting === "inherit") {
+      clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
+      return;
+    }
+    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+  }
+
+  function applyCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    const setting = editLayer === "group" ? null : row.layers[editLayer];
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    setPolicy.mutate({
+      tool_key: toolKey,
+      layer: editLayer,
+      subject_id: subjectId,
+      setting,
+      condition,
+      resource_pattern: row.resource_pattern,
+    });
+  }
+
+  if (sorted.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1" data-testid={`data-source-list-${toolKey}`}>
+      {sorted.map((r) => (
+        <div
+          key={r.resource_pattern}
+          data-testid={`registry-data-source-${r.resource_pattern}`}
+          className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2"
+        >
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">
+              {r.title || r.resource_pattern}
+            </div>
+            <div className="truncate font-mono text-xs text-muted-foreground">
+              {r.resource_pattern}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <DecisionControl
+              row={r}
+              editLayer={editLayer}
+              disabled={busy}
+              onChange={(s) => applySetting(r.resource_pattern, s)}
+            />
+            <ConditionControl
+              row={r}
+              editLayer={editLayer}
+              disabled={busy}
+              onChange={(c) => applyCondition(r, c)}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
