@@ -1462,13 +1462,11 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. Team leads: it owns the issue's
-              identifier namespace; moving renumbers the issue server-side. */}
+              identifier namespace. Display-only in v1 — moving an issue
+              between teams was cut from the UI (the server capability and
+              identifier aliasing remain for a later surface). */}
           <PropRow label={t(($) => $.detail.prop_team)}>
-            <TeamPicker
-              teamId={issue.team_id ?? null}
-              onChange={(team_id) => handleUpdateField({ team_id })}
-              align="start"
-            />
+            <TeamPicker teamId={issue.team_id ?? null} onChange={() => {}} align="start" disabled />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />

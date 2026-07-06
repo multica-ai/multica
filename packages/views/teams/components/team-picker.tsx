@@ -104,11 +104,14 @@ export function TeamMultiPicker({
   onChange,
   triggerRender,
   align = "start",
+  disabled = false,
 }: {
   teamIds: string[];
   onChange: (teamIds: string[]) => void;
   triggerRender?: ReactElement;
   align?: "start" | "center" | "end";
+  // Display-only rendering of the current selection.
+  disabled?: boolean;
 }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
@@ -126,10 +129,11 @@ export function TeamMultiPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        disabled={disabled}
         className={
           triggerRender
             ? undefined
-            : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"
+            : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden disabled:cursor-default disabled:hover:bg-transparent"
         }
         render={triggerRender}
       >
