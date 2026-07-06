@@ -456,6 +456,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("Note: this is an attested identity for your own routing and privacy logic. Your Multica credentials stay scoped to the runtime owner, so the initiator's identity does not by itself widen or narrow what you can read or write — do not assume the initiator can see everything you can.\n\n")
 	}
 
+	b.WriteString(userProfilePromptSection(ctx.UserProfilePrompt)) // CEREBRO-PATCH(user-profile-prompt): JEH-304 user communication profile section.
+
 	// Workspace Context block: the workspace-level system prompt set by
 	// workspace owners in Settings → General (`workspace.context` DB column).
 	// Applies to every agent run in the workspace regardless of task kind, so
