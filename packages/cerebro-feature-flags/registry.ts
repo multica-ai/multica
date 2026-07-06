@@ -366,7 +366,11 @@ export type CerebroFlagKey =
   // FIR-2670: opt-in preview of the redesigned agent detail page (new card
   // chrome, identity rail, flat tab strip). Default OFF — the live agent page
   // is untouched until this is flipped on per workspace/user.
-  | "cerebro_agent_page_redesign";
+  | "cerebro_agent_page_redesign"
+  // FIR-2698: Settings tab for the single-source model registry (prices,
+  // context windows, display labels) with propose → review → approve
+  // versioning. Default OFF until the tab has been QA'd on staging.
+  | "cerebro_model_registry";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -735,6 +739,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_interface_columns: true,
   // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
   cerebro_agent_page_redesign: false,
+  // FIR-2698: default OFF until QA'd on staging.
+  cerebro_model_registry: false,
 };
 
 /**
@@ -825,6 +831,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+  },
+  {
+    key: "cerebro_model_registry",
+    label: "Model registry",
+    group: "agents",
+    description:
+      "Add a Model registry tab under Settings: view and propose changes to model prices, context windows, and display labels. Changes go through the same propose → review → approve flow as Agent Context, so a bad edit never lands without a second pair of eyes.",
   },
   {
     key: "cerebro_credentials_per_actor",

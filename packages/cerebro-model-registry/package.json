@@ -1,0 +1,30 @@
+{
+  "name": "@multica/cerebro-model-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./views": "./views/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -865,6 +865,19 @@ var catalog = []Capability{
 			"POST /api/workspaces/{id}/lark/install/begin",
 		},
 	},
+	{
+		Key:           "manage_model_registry",
+		Title:         "Manage model registry",
+		Category:      CategoryWorkspace,
+		Description:   "Propose, review, approve, and roll back changes to the single-source model registry (prices, context windows, display labels) under Settings → Model registry (FIR-2698). The direct analog of manage_skills: reviewing/approving is additionally gated in-handler to the registry owner, a named approver, or a workspace admin (modelregistry/handler.go canManage).",
+		DescriptionZh: "在 Settings → Model registry 下提交、审阅、批准和回滚对单一来源模型注册表（价格、上下文窗口、显示名称）的更改（FIR-2698）。与 manage_skills 直接类似：审阅/批准操作在处理程序内额外限定为注册表所有者、指定审批人或工作区管理员（modelregistry/handler.go canManage）。",
+		Ops: []string{
+			"POST /api/model-registry/change-requests",
+			"POST /api/model-registry/change-requests/{crId}/review",
+			"POST /api/model-registry/rollback",
+			"PUT /api/model-registry/ownership",
+		},
+	},
 
 	// --- Skills ---------------------------------------------------------------
 	{

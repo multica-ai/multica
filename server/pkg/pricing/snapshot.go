@@ -3,12 +3,6 @@
 // pricing source — no mirrored copy lives outside this package.
 package pricing
 
-// Version stamps every snapshot the pricing endpoint serves. Bump it whenever
-// modelPricing changes so the registry can tell costed rows apart by table
-// revision. Format: <source>-<date>.<rev>; the date mirrors the public price
-// list cerebro's Anthropic rates were verified against (see modelPricing).
-const Version = "cerebro-2026-05-11.1"
-
 // ModelRate is one model's list price, USD-cents per million tokens. JSON tags
 // are the wire contract the registry pricing client parses.
 type ModelRate struct {
@@ -26,17 +20,10 @@ type TableSnapshot struct {
 	Models        map[string]ModelRate `json:"models"`
 }
 
-// Snapshot returns a copy of the in-code price table. The map is freshly
-// allocated so callers cannot mutate the package-level table.
+// Snapshot returns a copy of the injected registry price table. The map is
+// freshly allocated so callers cannot mutate the package-level table. The
+// version stamp is "registry-<semver>" — it changes on every approved
+// registry merge, which is what the hourly pull keys revisions on.
 func Snapshot() TableSnapshot {
-	models := make(map[string]ModelRate, len(modelPricing))
-	for name, p := range modelPricing {
-		models[name] = ModelRate{
-			InputCentsPerMtok:      p.InputCentsPerMtok,
-			OutputCentsPerMtok:     p.OutputCentsPerMtok,
-			CacheReadCentsPerMtok:  p.CacheReadCentsPerMtok,
-			CacheWriteCentsPerMtok: p.CacheWriteCentsPerMtok,
-		}
-	}
-	return TableSnapshot{Version: Version, FallbackModel: fallbackModel, Models: models}
+	return tableSnapshot() // CEREBRO-PATCH(pricing-registry-table): snapshot is built from the injected registry table.
 }

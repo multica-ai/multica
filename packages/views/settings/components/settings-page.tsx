@@ -19,6 +19,8 @@ import {
   KeyRound,
   // CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models tab icon
   Workflow,
+  // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 model registry tab icon
+  Coins,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -49,6 +51,8 @@ import { AccountsSettingsTab } from "@multica/cerebro-runtime/views";
 import { StatusModelsTab } from "@multica/cerebro-status-models/views";
 // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions tab
 import { AuthPermissionsTab } from "@multica/cerebro-identity/views";
+// CEREBRO-PATCH(settings-page-model-registry): FIR-2698 model registry settings tab
+import { ModelRegistryTab } from "@multica/cerebro-model-registry/views";
 import { useT } from "../../i18n";
 import {
   CerebroMobileTabNav,
@@ -92,6 +96,8 @@ const GROUPS_TAB_VALUE = "groups";
 const STATUS_MODELS_TAB_VALUE = "status-models";
 // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions tab value
 const AUTH_PERMISSIONS_TAB_VALUE = "auth-permissions";
+// CEREBRO-PATCH(settings-page-model-registry): FIR-2698 model registry tab value
+const MODEL_REGISTRY_TAB_VALUE = "model-registry";
 
 const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
@@ -150,6 +156,8 @@ export function SettingsPage({
   const statusModelsEnabled = useFeatureFlag("cerebro_workflows");
   // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 feature-flagged Auth & Permissions tab
   const googleIdentityEnabled = useFeatureFlag("cerebro_google_identity");
+  // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 feature-flagged Model registry tab
+  const modelRegistryEnabled = useFeatureFlag("cerebro_model_registry");
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.
@@ -166,6 +174,8 @@ export function SettingsPage({
         ...(statusModelsEnabled ? [STATUS_MODELS_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 valid tab
         ...(googleIdentityEnabled ? [AUTH_PERMISSIONS_TAB_VALUE] : []),
+        // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 valid tab
+        ...(modelRegistryEnabled ? [MODEL_REGISTRY_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-accounts-valid): include cerebro Konti tab (JEH-999)
         ACCOUNTS_TAB_VALUE,
         // CEREBRO-PATCH(settings-page-documentation): documentation tab is valid
@@ -174,7 +184,8 @@ export function SettingsPage({
       ]),
     // CEREBRO-PATCH(settings-page-status-models): FIR-1550 recompute when flag changes
     // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 recompute when flag changes
-    [extraAccountTabs, documentationContent, groupsEnabled, statusModelsEnabled, googleIdentityEnabled],
+    // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 recompute when flag changes
+    [extraAccountTabs, documentationContent, groupsEnabled, statusModelsEnabled, googleIdentityEnabled, modelRegistryEnabled],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -237,6 +248,8 @@ export function SettingsPage({
     if (statusModelsEnabled) workspaceItems.push({ value: STATUS_MODELS_TAB_VALUE, label: "Status models", icon: Workflow });
     // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 mobile nav entry
     if (googleIdentityEnabled) workspaceItems.push({ value: AUTH_PERMISSIONS_TAB_VALUE, label: "Auth & Permissions", icon: KeyRound });
+    // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 mobile nav entry
+    if (modelRegistryEnabled) workspaceItems.push({ value: MODEL_REGISTRY_TAB_VALUE, label: "Model registry", icon: Coins });
     const groups: CerebroMobileTabNavGroup[] = [
       {
         label: t(($) => $.page.my_account),
@@ -264,7 +277,8 @@ export function SettingsPage({
     return groups;
     // CEREBRO-PATCH(settings-page-status-models): FIR-1550 rebuild mobile nav when flag changes
     // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 rebuild mobile nav when flag changes
-  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled, statusModelsEnabled, googleIdentityEnabled]);
+    // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 rebuild mobile nav when flag changes
+  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled, statusModelsEnabled, googleIdentityEnabled, modelRegistryEnabled]);
 
   return (
     <Tabs
@@ -346,6 +360,13 @@ export function SettingsPage({
               Auth & Permissions
             </TabsTrigger>
           )}
+          {/* CEREBRO-PATCH(settings-page-model-registry): FIR-2698 Model registry trigger */}
+          {modelRegistryEnabled && (
+            <TabsTrigger value={MODEL_REGISTRY_TAB_VALUE}>
+              <Coins className="h-4 w-4" />
+              Model registry
+            </TabsTrigger>
+          )}
 
           {/* CEREBRO-PATCH(settings-page-documentation): Resources group with Documentation tab */}
           {documentationContent && (
@@ -396,6 +417,8 @@ export function SettingsPage({
             {statusModelsEnabled && (<TabsContent value={STATUS_MODELS_TAB_VALUE}><StatusModelsTab /></TabsContent>)}
             {/* CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions content */}
             {googleIdentityEnabled && (<TabsContent value={AUTH_PERMISSIONS_TAB_VALUE}><AuthPermissionsTab /></TabsContent>)}
+            {/* CEREBRO-PATCH(settings-page-model-registry): FIR-2698 Model registry content */}
+            {modelRegistryEnabled && (<TabsContent value={MODEL_REGISTRY_TAB_VALUE}><ModelRegistryTab /></TabsContent>)}
             {extraAccountTabs?.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
             ))}

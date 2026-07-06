@@ -57,6 +57,13 @@ import type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  // CEREBRO-PATCH(model-registry-api-types): FIR-2698 model registry governance types.
+  ModelRegistry,
+  ModelRegistryVersion,
+  ModelRegistryChangeRequest,
+  CreateModelRegistryChangeRequestRequest,
+  ReviewModelRegistryChangeRequestRequest,
+  RollbackModelRegistryRequest,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -3286,6 +3293,53 @@ export class ApiClient {
     data: RollbackAgentContextRequest,
   ): Promise<AgentContextVersion> {
     return this.fetch(`/api/agents/${id}/context/rollback`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(model-registry-api-methods): FIR-2698 model registry — the single source for model prices,
+  // context windows, and display metadata. A deployment-wide singleton (no
+  // id in the routes). Backs onto
+  // server/internal/cerebro/modelregistry/handler.go.
+  async getModelRegistry(): Promise<ModelRegistry> {
+    return this.fetch(`/api/model-registry`);
+  }
+
+  async listModelRegistryVersions(): Promise<ModelRegistryVersion[]> {
+    return this.fetch(`/api/model-registry/versions`);
+  }
+
+  async listModelRegistryChangeRequests(
+    status?: "pending",
+  ): Promise<ModelRegistryChangeRequest[]> {
+    const qs = status ? `?status=${status}` : "";
+    return this.fetch(`/api/model-registry/change-requests${qs}`);
+  }
+
+  async createModelRegistryChangeRequest(
+    data: CreateModelRegistryChangeRequestRequest,
+  ): Promise<ModelRegistryChangeRequest> {
+    return this.fetch(`/api/model-registry/change-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reviewModelRegistryChangeRequest(
+    crId: string,
+    data: ReviewModelRegistryChangeRequestRequest,
+  ): Promise<ModelRegistryChangeRequest> {
+    return this.fetch(`/api/model-registry/change-requests/${crId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async rollbackModelRegistry(
+    data: RollbackModelRegistryRequest,
+  ): Promise<ModelRegistryVersion> {
+    return this.fetch(`/api/model-registry/rollback`, {
       method: "POST",
       body: JSON.stringify(data),
     });

@@ -1603,6 +1603,45 @@ type Member struct {
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
 }
 
+type ModelRegistry struct {
+	ID             pgtype.UUID        `json:"id"`
+	RegistryKey    string             `json:"registry_key"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	ApproverIds    []pgtype.UUID      `json:"approver_ids"`
+	CurrentVersion string             `json:"current_version"`
+	Snapshot       []byte             `json:"snapshot"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelRegistryChangeRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	RegistryID       pgtype.UUID        `json:"registry_id"`
+	Title            string             `json:"title"`
+	Description      string             `json:"description"`
+	BaseVersion      string             `json:"base_version"`
+	ProposedVersion  string             `json:"proposed_version"`
+	ProposedSnapshot []byte             `json:"proposed_snapshot"`
+	Status           string             `json:"status"`
+	ProposedBy       pgtype.UUID        `json:"proposed_by"`
+	ReviewedBy       pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewComment    string             `json:"review_comment"`
+	WorkSessionID    pgtype.UUID        `json:"work_session_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelRegistryVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	RegistryID  pgtype.UUID        `json:"registry_id"`
+	Version     string             `json:"version"`
+	Snapshot    []byte             `json:"snapshot"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

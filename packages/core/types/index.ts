@@ -50,6 +50,20 @@ export type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+} from "./agent";
+// CEREBRO-PATCH(model-registry-types-export): FIR-2698 single-source model registry governance types.
+export type {
+  ModelRegistryEntry,
+  ModelRegistrySnapshot,
+  ModelRegistry,
+  ModelRegistryVersion,
+  ModelRegistryChangeRequestStatus,
+  ModelRegistryChangeRequest,
+  CreateModelRegistryChangeRequestRequest,
+  ReviewModelRegistryChangeRequestRequest,
+  RollbackModelRegistryRequest,
+} from "./model-registry";
+export type {
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,

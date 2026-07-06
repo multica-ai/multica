@@ -400,8 +400,10 @@ function HourlyTab({
 // Two cases worth distinguishing:
 //   1. No tokens at all → "no usage" (genuinely nothing happened).
 //   2. Tokens present but cost is $0 → almost always means the model name
-//      reported by the daemon isn't in our pricing table. List the offenders
-//      so a developer can update MODEL_PRICING in one go.
+//      reported by the daemon isn't in the model registry's price table
+//      (Settings → Model registry). List the offenders so someone can add it.
+//      CEREBRO-PATCH(usage-section-model-registry-note): FIR-2698 updated
+//      from the removed MODEL_PRICING table reference.
 // ---------------------------------------------------------------------------
 
 function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {

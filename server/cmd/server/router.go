@@ -577,6 +577,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance handler.
 	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool, bus)) // CEREBRO-PATCH(agent-office-notif-bus): FIR-1775 — bus drives change-request inbox notifications.
+	cerebroModelRegistryHandler := wireCerebroModelRegistry(cerebroQueries, pool)                                 // CEREBRO-PATCH(cerebro-model-registry-routes): FIR-2698 model registry — startup table load + metrics hook + handler (cerebro_model_registry_routes.go).
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
@@ -1689,6 +1690,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAgentTemplates)
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
+
+			mountCerebroModelRegistryRoutes(r, cerebroModelRegistryHandler) // CEREBRO-PATCH(cerebro-model-registry-routes): FIR-2698 model-registry governance routes (wiring in cerebro_model_registry_routes.go).
 
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {

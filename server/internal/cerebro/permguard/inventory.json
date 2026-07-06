@@ -1041,6 +1041,22 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/model-registry/change-requests",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/model-registry/change-requests/{crId}/review",
+      "gate": "model_registry_manage"
+    },
+    {
+      "id": "POST /api/model-registry/rollback",
+      "gate": "model_registry_manage"
+    },
+    {
+      "id": "PUT /api/model-registry/ownership",
+      "gate": "model_registry_manage"
+    },
+    {
       "id": "POST /api/me/onboarding/cloud-waitlist",
       "gate": "self_only"
     },

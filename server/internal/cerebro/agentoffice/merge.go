@@ -1,22 +1,21 @@
 package agentoffice
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/versioning"
 )
 
-// errStaleProposal is returned when the proposed version is no longer greater
-// than the agent's current version (the owner edited the context between propose
-// and approve). It maps to 409 so the client knows to rebase.
-var errStaleProposal = errors.New("proposed_version is no longer greater than current — rebase the change request")
-
-// errNotPending is returned when a concurrent reviewer already moved the change
-// request out of the pending state.
-var errNotPending = errors.New("change request is no longer pending")
+// The stale-proposal / not-pending sentinels and their HTTP mapping moved to
+// the shared versioning package (FIR-2698); the local names below keep the
+// call sites unchanged.
+var (
+	errStaleProposal = versioning.ErrStaleProposal
+	errNotPending    = versioning.ErrNotPending
+)
 
 // approveAndMerge applies a pending change request in one transaction: lock the
 // row, re-validate semver against the freshly-read agent, write the snapshot onto
@@ -81,10 +80,5 @@ func (h *Handler) approveAndMerge(r *http.Request, agent cerebrodb.Agent, cr cer
 
 // statusForMergeError maps a merge error to an HTTP status.
 func statusForMergeError(err error) int {
-	switch {
-	case errors.Is(err, errStaleProposal), errors.Is(err, errNotPending):
-		return http.StatusConflict
-	default:
-		return http.StatusInternalServerError
-	}
+	return versioning.StatusForMergeError(err)
 }
