@@ -7,7 +7,7 @@
 // that skill's current body and shows the diff + approve/reject inline — the
 // same review affordance as the per-skill queue, but without leaving the page.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
@@ -33,6 +33,7 @@ import {
   SheetTitle,
 } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 import {
   filterSkillChanges,
   sortSkillChanges,
@@ -98,6 +99,7 @@ export function SkillChangesReviewSheet({
   hasMine,
 }: Props) {
   const isMobile = useIsMobile();
+  const mobileVvh = useMobileViewportHeight();
   const wsId = useWorkspaceId();
   const [scope, setScope] = useState<SkillChangeScope>(hasMine ? "mine" : "all");
   const [search, setSearch] = useState("");
@@ -152,8 +154,17 @@ export function SkillChangesReviewSheet({
         side={isMobile ? "bottom" : "right"}
         className={
           isMobile
-            ? "flex h-[85vh]! flex-col gap-0 rounded-t-xl p-0"
+            ? "inset-0! flex h-[var(--cerebro-vvh,100dvh)]! w-full! max-w-none! translate-x-0! translate-y-0! flex-col gap-0 rounded-none! p-0"
             : "flex w-[52vw]! max-w-[52vw]! flex-col gap-0 p-0 sm:max-w-[52vw]!"
+        }
+        // Full-screen (not a partial bottom sheet) on mobile — the diff needs all
+        // the vertical room it can get, and --cerebro-vvh tracks the on-screen
+        // keyboard so Approve/Reject stay reachable while the comment field is
+        // focused (same fix as FIR-2708 for the per-skill queue / FIR-2504).
+        style={
+          isMobile && mobileVvh != null
+            ? ({ ["--cerebro-vvh" as string]: `${mobileVvh}px` } as CSSProperties)
+            : undefined
         }
       >
         <SheetHeader className="border-b p-4">

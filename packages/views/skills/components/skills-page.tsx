@@ -433,16 +433,19 @@ export default function SkillsPage() {
         </div>
       )}
 
-      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — alert for pending changes on skills you own. */}
+      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742/FIR-2748 — personal review alert (count + controls). */}
       {ownershipEnabled && (
         <SkillChangesAlert
           count={skillChanges.mine.length}
           onReview={() => setReviewOpen(true)}
+          pendingOnly={pendingOnly}
+          onTogglePending={() => setPendingOnly((v) => !v)}
         />
       )}
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
-        {!showEmpty && (
+        {/* CEREBRO-PATCH(skill-changes-review): FIR-2748 — the personal review alert replaces this intro banner when the user has pending reviews. */}
+        {!showEmpty && !(ownershipEnabled && skillChanges.mine.length > 0) && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">
               {t(($) => $.page.intro_banner.title)}
@@ -475,34 +478,7 @@ export default function SkillsPage() {
                 category={categoryFilter}
                 onCategoryChange={setCategoryFilter}
               />
-              {/* CEREBRO-PATCH(skill-list-columns): FIR-1530 — filter to skills awaiting review. */}
-              {ownershipEnabled && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className={
-                    pendingOnly
-                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "shrink-0 text-muted-foreground"
-                  }
-                  onClick={() => setPendingOnly((v) => !v)}
-                >
-                  Pending changes
-                </Button>
-              )}
-              {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — open the cross-skill review sheet (filter + sort). */}
-              {ownershipEnabled && skillChanges.all.length > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 text-muted-foreground"
-                  onClick={() => setReviewOpen(true)}
-                >
-                  Review changes
-                </Button>
-              )}
+              {/* CEREBRO-PATCH(skill-changes-review): FIR-2748 — review entry (Pending changes + Review) moved into the personal SkillChangesAlert at the top of the page. */}
             </div>
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
