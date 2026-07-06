@@ -3710,6 +3710,9 @@ importers:
 
   packages/cerebro-skill-ownership:
     dependencies:
+      '@multica/cerebro-duplicate-check':
+        specifier: workspace:*
+        version: link:../cerebro-duplicate-check
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

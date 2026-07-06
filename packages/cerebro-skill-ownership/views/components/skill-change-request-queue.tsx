@@ -22,6 +22,7 @@ import {
   SheetTitle,
 } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { skillChangeRequestsOptions } from "../../core/queries";
@@ -70,6 +71,7 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const isMobile = useIsMobile();
+  const mobileVvh = useMobileViewportHeight();
 
   const { data: requests = [], isLoading } = useQuery(
     skillChangeRequestsOptions(skill.id),
@@ -183,8 +185,17 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
           side={isMobile ? "bottom" : "right"}
           className={
             isMobile
-              ? "h-[80vh]! gap-3 overflow-y-auto rounded-t-xl p-4"
+              ? "inset-0! h-[var(--cerebro-vvh,100dvh)]! w-full! max-w-none! translate-x-0! translate-y-0! gap-3 overflow-y-auto rounded-none! p-4 pb-[max(env(safe-area-inset-bottom),1rem)]!"
               : "w-[60vw]! max-w-[60vw]! gap-3 overflow-y-auto p-6 sm:max-w-[60vw]!"
+          }
+          // Full-screen (not a partial bottom sheet) on mobile: the diff needs
+          // all the vertical room it can get, and --cerebro-vvh tracks the
+          // on-screen keyboard so Approve/Reject stay reachable while the
+          // review-comment field is focused (same fix as FIR-2504).
+          style={
+            isMobile && mobileVvh != null
+              ? ({ ["--cerebro-vvh" as string]: `${mobileVvh}px` } as React.CSSProperties)
+              : undefined
           }
         >
           {selected && (

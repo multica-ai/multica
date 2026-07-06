@@ -76,10 +76,13 @@ export function SkillDiffView({ base, proposed, baseLabel = "base", proposedLabe
             : "flex text-muted-foreground"
       }
     >
-      <span className="w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums">
+      {/* Line-number gutters: dropped below `md` — on a phone-width sheet
+          two 9-char columns eat the space the diff text needs to stay
+          readable, and line numbers matter far less than the words. */}
+      <span className="hidden w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums md:block">
         {line.oldLine ?? ""}
       </span>
-      <span className="w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums">
+      <span className="hidden w-9 shrink-0 select-none pr-2 text-right font-mono text-[11px] text-muted-foreground/50 tabular-nums md:block">
         {line.newLine ?? ""}
       </span>
       <span className="mr-2 shrink-0 select-none font-mono">
