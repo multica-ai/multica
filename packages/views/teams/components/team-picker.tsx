@@ -36,29 +36,22 @@ export function TeamPicker({
   onChange,
   triggerRender,
   align = "start",
-  allowedTeamIds,
   disabled = false,
 }: {
   teamId: string | null;
   onChange: (teamId: string) => void;
   triggerRender?: ReactElement;
   align?: "start" | "center" | "end";
-  // When set, restricts the offered teams to this id set (e.g. the selected
-  // project's teams). Undefined means no constraint.
-  allowedTeamIds?: string[];
   // Locked display (e.g. sub-issues inherit the parent's team server-side).
   disabled?: boolean;
 }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
-  const { data: allTeams = [] } = useQuery(activeTeamListOptions(wsId));
-  const teams = allowedTeamIds
-    ? allTeams.filter((team) => allowedTeamIds.includes(team.id))
-    : allTeams;
-  // Resolve the display label against the unfiltered list so a selection
-  // outside `allowedTeamIds` (e.g. before the caller converges it) still
-  // renders instead of flashing the placeholder.
-  const current = allTeams.find((team) => team.id === teamId);
+  // Always the full active list: team is a creation-time default, never
+  // constrained by the selected project (the old allowedTeamIds filter was
+  // a strong-association-model leftover).
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const current = teams.find((team) => team.id === teamId);
 
   return (
     <DropdownMenu>

@@ -174,6 +174,17 @@ one explicitly (the team owns the `TEAM_KEY-NUMBER` identifier namespace), or om
 it to fall back to the workspace's default team, whose key is the legacy workspace
 prefix. `multica issue list --team <UUID>` filters a listing to one team.
 
+Team binds at creation time only, and it can change later:
+
+- `multica issue update <id> --team <UUID-or-key>` moves the issue to another
+  team. It is renumbered under the target team's key; the old identifier is
+  recorded as an alias and keeps resolving (CLI lookups, API, GitHub branch/PR
+  linking), so existing references never break.
+- Parent and child issues may live in different teams. A child only inherits
+  its parent's team as a creation-time default when you don't pass `--team`.
+- A project's team set is likewise a creation-time default, not a constraint —
+  an issue in a project may belong to any team.
+
 Parallel children — all start now:
 
 ```bash

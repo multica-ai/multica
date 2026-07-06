@@ -63,14 +63,6 @@ WHERE pt.workspace_id = $1
   AND pt.project_id = $2
 ORDER BY wt.is_default DESC, wt.name ASC, wt.created_at ASC;
 
--- name: ProjectHasTeam :one
-SELECT EXISTS (
-  SELECT 1 FROM project_team
-  WHERE workspace_id = $1
-    AND project_id = $2
-    AND team_id = $3
-)::boolean;
-
 -- name: ListProjectTeamsByProjects :many
 SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
        wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by,
