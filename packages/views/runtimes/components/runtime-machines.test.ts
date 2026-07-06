@@ -52,6 +52,21 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("collects distinct runtime owners for the machine, ignoring null owners", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-a", provider: "claude", owner_id: "user-1" }),
+        makeRuntime({ id: "rt-b", provider: "codex", owner_id: "user-2" }),
+        makeRuntime({ id: "rt-c", provider: "cursor", owner_id: "user-1" }),
+        makeRuntime({ id: "rt-d", provider: "pi", owner_id: null }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1" },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.ownerIds).toEqual(["user-1", "user-2"]);
+  });
+
   it("counts machines with any offline runtime as issues", () => {
     const machines = buildRuntimeMachines(
       [

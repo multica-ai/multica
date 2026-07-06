@@ -10,6 +10,7 @@ import {
   Server,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -34,6 +35,7 @@ import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
+import { ActorAvatar } from "../../common/actor-avatar";
 import {
   pendingRuntimesForProfiles,
   type PendingRuntimeProfile,
@@ -638,15 +640,18 @@ function MachineRow({
         </span>
         <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
           <ProviderIconStack providers={machine.providerNames} />
-          {busyCount > 0 ? (
-            <span className="ml-auto shrink-0 text-xs font-medium text-primary">
-              {t(($) => $.machine.busy_count, { count: busyCount })}
-            </span>
-          ) : (
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              {runtimeCount}
-            </span>
-          )}
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <MachineOwners ownerIds={machine.ownerIds} />
+            {busyCount > 0 ? (
+              <span className="text-xs font-medium text-primary">
+                {t(($) => $.machine.busy_count, { count: busyCount })}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {runtimeCount}
+              </span>
+            )}
+          </span>
         </span>
       </span>
     </button>
@@ -668,6 +673,55 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
       ))}
       {extra > 0 && (
         <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground ring-1 ring-border">
+          +{extra}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Owner avatars for a machine's runtimes, shown in the sidebar row. Surfaces
+// "whose machine is this" at a glance: the runtime owner is where commands and
+// file access actually run, so a member can tell a shared (public) runtime from
+// their own machine before routing work to it. Renders plain, non-interactive
+// avatars (the row itself is the click target) with the owner name as a native
+// tooltip. Owners that no longer resolve to a workspace member are skipped
+// rather than rendered as an "Unknown" placeholder.
+function MachineOwners({ ownerIds }: { ownerIds: string[] }) {
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const owners = useMemo<MemberWithUser[]>(() => {
+    if (ownerIds.length === 0) return [];
+    const byUserId = new Map(members.map((m) => [m.user_id, m]));
+    return ownerIds
+      .map((id) => byUserId.get(id))
+      .filter((m): m is MemberWithUser => !!m);
+  }, [ownerIds, members]);
+
+  if (owners.length === 0) return null;
+
+  const visible = owners.slice(0, 2);
+  const extra = owners.length - visible.length;
+  return (
+    <span className="flex shrink-0 items-center -space-x-1">
+      {visible.map((owner) => (
+        <span
+          key={owner.user_id}
+          className="inline-flex rounded-full ring-2 ring-background"
+          title={owner.name}
+          aria-label={owner.name}
+        >
+          <ActorAvatar
+            actorType="member"
+            actorId={owner.user_id}
+            size={18}
+            enableHoverCard={false}
+            profileLink={false}
+          />
+        </span>
+      ))}
+      {extra > 0 && (
+        <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium text-muted-foreground ring-2 ring-background">
           +{extra}
         </span>
       )}

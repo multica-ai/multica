@@ -31,6 +31,7 @@ function makeMachine(
     runningCount: 0,
     queuedCount: 0,
     providerNames: ["claude"],
+    ownerIds: ["user-1"],
     lastSeenAt: "2026-05-17T11:59:50Z",
     ...overrides,
   };

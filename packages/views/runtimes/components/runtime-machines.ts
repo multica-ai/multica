@@ -27,6 +27,8 @@ export interface RuntimeMachine {
   runningCount: number;
   queuedCount: number;
   providerNames: string[];
+  /** Distinct workspace user ids that own this machine's runtimes. */
+  ownerIds: string[];
   lastSeenAt: string | null;
 }
 
@@ -129,6 +131,7 @@ function placeholderLocalMachine(
     runningCount: 0,
     queuedCount: 0,
     providerNames: [],
+    ownerIds: [],
     lastSeenAt: null,
   };
 }
@@ -181,6 +184,12 @@ function finalizeRuntimeMachine(
   );
   const first = runtimes[0];
   const providerNames = Array.from(new Set(runtimes.map((r) => r.provider))).sort();
+  // Distinct owners of this machine's runtimes. In practice a daemon has a
+  // single registrant, but a machine can technically host runtimes owned by
+  // different members, so keep every distinct owner for the sidebar avatars.
+  const ownerIds = Array.from(
+    new Set(runtimes.map((r) => r.owner_id).filter((id): id is string => !!id)),
+  );
   // Device-name consolidation is only safe for the current user's own
   // local runtimes — the list spans the whole workspace, so a host-name
   // match alone could claim another member's identically-named machine.
@@ -248,6 +257,7 @@ function finalizeRuntimeMachine(
     runningCount: workload.runningCount,
     queuedCount: workload.queuedCount,
     providerNames,
+    ownerIds,
     lastSeenAt: latestLastSeenAt(runtimes),
   };
 }
