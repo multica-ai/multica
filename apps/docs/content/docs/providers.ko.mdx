@@ -90,7 +90,7 @@ Inflection AI에서 제공하며, 미니멀합니다. **세션 재개 방식이 
 
 Alibaba에서 제공합니다. 에이전트형 코딩 CLI입니다. stdio 위에서 ACP 프로토콜을 사용합니다(Hermes, Kimi, Kiro CLI와 전송 계층을 공유합니다). 세션 재개는 ACP `session/resume`를 통해 동작하고, MCP 구성은 ACP `mcpServers`로 전달되며, 모델 선택은 동적으로 탐색되고, 스킬은 네이티브 탐색을 위해 `.qoder/skills/`로 복사됩니다.
 
-### Trae CLI
+### Trae
 
 ByteDance의 공식 TRAE CLI(`traecli`, Trae IDE와 함께 쓰는 제품이며 오픈소스 `bytedance/trae-agent`가 아닙니다)입니다. ACP 네이티브라서 Multica는 `traecli acp serve --yolo`로 stdio 위에서 구동하며, Kiro 및 Qoder와 같은 전송 계층을 사용합니다. 세션 재개는 ACP `session/load`로 동작하고, MCP 구성은 ACP `mcpServers`로 전달되며, 모델은 동적으로 탐색되어 작업별로 `session/set_model`로 전환됩니다. 스킬은 `.traecli/skills/`로 복사됩니다.
 

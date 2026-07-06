@@ -90,7 +90,7 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 
 Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Kimi、Kiro CLI 共享传输层）。会话恢复通过 ACP `session/resume` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现，skill 复制到 `.qoder/skills/` 做原生发现。
 
-### Trae CLI
+### Trae
 
 ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `bytedance/trae-agent`）。它是 ACP 原生工具，Multica 通过 `traecli acp serve --yolo` 在 stdio 上驱动它，传输层和 Kiro、Qoder 相同。会话恢复通过 ACP `session/load` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现并可通过 `session/set_model` 在任务中切换，skill 复制到 `.traecli/skills/`。
 
