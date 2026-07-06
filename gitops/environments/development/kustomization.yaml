@@ -40,4 +40,4 @@ images:
     newTag: "bd4c2510"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "21469a25"
+    newTag: "bd4c2510"
