@@ -78,6 +78,19 @@ func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, e
 	return nil, fmt.Errorf("mockStorage GetReader: key not found: %q", key)
 }
 
+type cancelOnUploadStorage struct {
+	*mockStorage
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnUploadStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
+	link, err := s.mockStorage.Upload(ctx, key, data, contentType, filename)
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return link, err
+}
+
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
 	testHandler.Storage = &mockStorage{}
@@ -214,6 +227,46 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 		"uuid-upload.txt",
 	); err != nil {
 		t.Fatalf("cleanup attachment: %v", err)
+	}
+}
+
+func TestUploadFileFailsWhenAttachmentRecordCannotBeCreated(t *testing.T) {
+	store := &mockStorage{}
+	ctx, cancel := context.WithCancel(context.Background())
+	origStorage := testHandler.Storage
+	testHandler.Storage = &cancelOnUploadStorage{mockStorage: store, cancel: cancel}
+	defer func() {
+		testHandler.Storage = origStorage
+		cancel()
+	}()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "orphan.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Write([]byte("uploaded but not persisted"))
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body).WithContext(ctx)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("UploadFile with failed attachment record: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "failed to create attachment record") {
+		t.Fatalf("expected create attachment error message, got: %s", w.Body.String())
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.files) != 0 {
+		t.Fatalf("expected uploaded object to be cleaned up after DB failure, got %d file(s)", len(store.files))
 	}
 }
 
@@ -502,4 +555,3 @@ func TestIsTextPreviewable(t *testing.T) {
 		})
 	}
 }
-

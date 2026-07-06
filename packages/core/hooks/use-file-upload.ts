@@ -36,6 +36,9 @@ export function useFileUpload(
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
         });
+        if (!att.id || !att.url) {
+          throw new Error("Upload failed: invalid attachment response");
+        }
         return { ...att, link: att.url };
       } finally {
         setUploading(false);

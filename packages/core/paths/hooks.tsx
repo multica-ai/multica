@@ -35,7 +35,12 @@ export function WorkspaceSlugProvider({
 
 /** Current workspace slug from URL, or null outside workspace-scoped routes. */
 export function useWorkspaceSlug(): string | null {
-  return useContext(WorkspaceSlugContext);
+  const contextSlug = useContext(WorkspaceSlugContext);
+  if (contextSlug) return contextSlug;
+  if (typeof window === "undefined") return null;
+
+  const firstSegment = window.location.pathname.split("/").filter(Boolean)[0];
+  return firstSegment || null;
 }
 
 /** Same as useWorkspaceSlug, but throws if called outside a workspace route. */

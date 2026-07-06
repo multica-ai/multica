@@ -21,7 +21,7 @@ This is a **technique skill** — follow the steps in order. Do not improvise al
 ## Critical Rules (DO NOT SKIP)
 
 1. **Binary copy**: Compiled binary is `server/bin/server`. Runtime path is `data/bin/multica-server`. Must copy after `make build` or the backend runs stale code.
-2. **Env export**: Use `set -a && source .env && set +a`. Bare `source .env` does NOT export `JWT_SECRET` — every API request returns 401 "invalid token".
+2. **Env export**: Use `set -a && source .env && set +a` before starting the backend. Bare `source .env` does NOT export values: `JWT_SECRET` misses cause 401 "invalid token", and `MULTICA_DEV_VERIFICATION_CODE=888888` misses disable fixed-code login when no real email/SMS verification service is configured.
 3. **Frontend = standalone, NEVER dev**: `pnpm dev` OOMs on 3.5G server (compile peak 1.7G, killed repeatedly). Must `STANDALONE=true pnpm --filter @multica/web build` then run `node server.js` with 128MB heap. Standalone is stable — no supervisor needed.
 4. **Build prerequisites**: Before standalone build, set `vm.overcommit_memory=1` (default 0 blocks the 21G virtual memory allocation and silently OOM-kills the build), ensure 4G+ swap, kill memory-hungry processes (puppeteer/chrome), and stop backend to free RAM.
 5. **Stop order**: frontend → backend → nginx (reverse of start).
@@ -120,6 +120,11 @@ cd server
 nohup /home/admin/multica/data/bin/multica-server > /tmp/go-server.log 2>&1 & disown
 echo "backend PID: $!"
 
+# Confirm auth-critical env reached the running process. If email delivery is
+# not configured, fixed-code login depends on MULTICA_DEV_VERIFICATION_CODE.
+tr '\0' '\n' < /proc/$(pgrep -f "^/home/admin/multica/data/bin/multica-server$")/environ \
+  | grep -E '^(APP_ENV|JWT_SECRET|MULTICA_DEV_VERIFICATION_CODE|RESEND_API_KEY|SMTP_HOST)='
+
 # Verify before continuing
 for i in 1 2 3 4 5; do
   code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
@@ -187,7 +192,7 @@ The daemon does not need the web stack running — it polls the cloud server URL
 
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
-| Bare `source .env` (no `set -a`) | All API requests 401 "invalid token" | Use `set -a && source .env && set +a` |
+| Bare `source .env` (no `set -a`) | All API requests 401 "invalid token"; fixed `888888` login rejected because `MULTICA_DEV_VERIFICATION_CODE` was not exported | Use `set -a && source .env && set +a` before starting backend |
 | `pnpm dev` for frontend | OOM killed, supervisor restart loop | Build standalone, run `node server.js` |
 | `make build` but no binary copy | Backend runs old code | `cp server/bin/server data/bin/multica-server` |
 | Build with `overcommit_memory=0` | Build silently OOM-killed, no standalone | `sudo sysctl -w vm.overcommit_memory=1` |

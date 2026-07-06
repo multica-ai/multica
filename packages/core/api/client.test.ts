@@ -262,7 +262,12 @@ describe("ApiClient", () => {
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+        new Response(JSON.stringify({
+          id: "att-1",
+          url: "https://cdn/x",
+          download_url: "https://cdn/x?download=1",
+          filename: "hi.png",
+        }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -282,6 +287,23 @@ describe("ApiClient", () => {
       expect(body.get("chat_session_id")).toBe("session-123");
       expect(body.get("issue_id")).toBeNull();
       expect(body.get("comment_id")).toBeNull();
+    });
+
+    it("uploadFile rejects a successful response that cannot be bound as an attachment", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ id: "", url: "https://cdn/orphan", filename: "orphan.txt" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "orphan.txt", { type: "text/plain" });
+
+      await expect(client.uploadFile(file)).rejects.toThrow("Upload failed: invalid attachment response");
     });
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {

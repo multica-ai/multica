@@ -184,7 +184,8 @@ function CommentRow({
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
-  const { uploadWithToast } = useFileUpload(api);
+  const showUploadError = useCallback((err: Error) => toast.error(err.message), []);
+  const { uploadWithToast } = useFileUpload(api, showUploadError);
   // Pending uploads from this edit pass. Merged with `entry.attachments` so
   // newly uploaded text/code files get an Eye button in the edit-mode editor;
   // the active subset is sent as `attachmentIds` on save so the server binds
@@ -418,7 +419,8 @@ function CommentCardImpl({
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  const showUploadError = useCallback((err: Error) => toast.error(err.message), []);
+  const { uploadWithToast } = useFileUpload(api, showUploadError);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;

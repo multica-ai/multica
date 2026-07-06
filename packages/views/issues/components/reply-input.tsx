@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -59,7 +60,8 @@ function ReplyInput({
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useFileUpload(api);
+  const showUploadError = useCallback((err: Error) => toast.error(err.message), []);
+  const { uploadWithToast } = useFileUpload(api, showUploadError);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });

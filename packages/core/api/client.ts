@@ -1269,9 +1269,14 @@ export class ApiClient {
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
     const raw = (await res.json()) as unknown;
-    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+    const attachment = parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
     });
+    if (!attachment.id || !attachment.url) {
+      this.logger.error("← invalid /api/upload-file response", { rid, duration: `${Date.now() - start}ms` });
+      throw new Error("Upload failed: invalid attachment response");
+    }
+    return attachment;
   }
 
   // Chat Sessions

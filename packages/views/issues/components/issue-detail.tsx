@@ -632,7 +632,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  const showUploadError = useCallback((err: Error) => toast.error(err.message), []);
+  const { uploadWithToast } = useFileUpload(api, showUploadError);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
