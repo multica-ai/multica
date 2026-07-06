@@ -425,14 +425,25 @@ func ensureWorktreePathAvailable(wtPath string) error {
 }
 
 // worktreeIsDirty reports whether the worktree at path has uncommitted
-// changes. Returning err != nil means we couldn't tell — the caller
-// treats that the same as dirty (better to leak a directory than lose
-// work). We use `git status --porcelain=v1 -z --untracked-files=no`:
-// porcelain=v1 is the historically-stable format; -z avoids escape-quoting
-// weirdness; excluding untracked keeps the check narrow — the point is
-// "did the agent leave modifications behind", not "is the tree pristine".
+// changes OR untracked files. Returning err != nil means we couldn't
+// tell — the caller treats that the same as dirty (better to leak a
+// directory than lose work).
+//
+// We include untracked files (`--untracked-files=normal`) because the
+// whole point of the dirty check is "did the agent leave anything the
+// user might want to inspect?", and a fresh file the agent created but
+// hasn't committed is exactly that. Excluding it here would let us log
+// "clean → remove", then have `git worktree remove` refuse the removal
+// because untracked files exist (git itself has always refused this) —
+// the outcome (directory preserved) is correct, but the log path is
+// misleading and future maintainers seeing "worktree removed" would
+// assume the disk was actually reclaimed. Including untracked keeps
+// the observability honest with what actually happens on disk.
+//
+// Porcelain=v1 is the historically-stable format; -z avoids
+// escape-quoting weirdness; any non-empty content means dirty.
 func worktreeIsDirty(path string) (bool, error) {
-	cmd := exec.Command("git", "-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=no")
+	cmd := exec.Command("git", "-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
 	out, err := cmd.Output()
 	if err != nil {
 		if runtime.GOOS == "windows" {

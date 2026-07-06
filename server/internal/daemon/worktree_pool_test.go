@@ -217,6 +217,61 @@ func TestWorktreePool_DirtyWorktreeIsKept(t *testing.T) {
 	defer alloc2.Release()
 }
 
+// TestWorktreePool_UntrackedOnlyIsKept pins the guarantee flagged in the
+// #4986 review: an agent that only creates fresh, untracked files (never
+// running `git add`) must not have those files deleted on release. Prior
+// to the fix `worktreeIsDirty` ran with `--untracked-files=no`, which
+// classified this state as "clean" and asked git to `remove` the tree —
+// git itself would then refuse, but the log line lied about the disk
+// state. The current implementation counts untracked as dirty so the
+// "leaving on disk for user inspection" path fires directly.
+func TestWorktreePool_UntrackedOnlyIsKept(t *testing.T) {
+	base := t.TempDir()
+	initGitRepo(t, base)
+	poolRoot := t.TempDir()
+
+	mgr := NewWorktreePoolManager(discardLogger())
+
+	alloc, err := mgr.Acquire(context.Background(), base, poolRoot, 4, "task-untracked")
+	if err != nil {
+		t.Fatalf("acquire failed: %v", err)
+	}
+
+	// A brand new untracked file — the exact "agent scribbled a
+	// draft" scenario. Deliberately no `git add`.
+	fresh := filepath.Join(alloc.WorkDir, "draft.txt")
+	if err := os.WriteFile(fresh, []byte("agent draft"), 0o644); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+
+	// Confirm worktreeIsDirty now classes untracked-only as dirty.
+	dirty, err := worktreeIsDirty(alloc.WorkDir)
+	if err != nil {
+		t.Fatalf("worktreeIsDirty: %v", err)
+	}
+	if !dirty {
+		t.Fatalf("worktreeIsDirty on untracked-only tree = false, want true")
+	}
+
+	alloc.Release()
+
+	// The user's untracked file — and the worktree directory itself —
+	// must still exist. Regression guard: reverting to
+	// `--untracked-files=no` would silently delete `draft.txt` here
+	// (well, git would refuse, but the code path would look correct
+	// while the file was still gone in the untested async version).
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("untracked file missing after release: %v", err)
+	}
+
+	// And the slot returned to the pool.
+	alloc2, err := mgr.Acquire(context.Background(), base, poolRoot, 1, "task-followup")
+	if err != nil {
+		t.Fatalf("post-untracked-dirty acquire failed: %v", err)
+	}
+	defer alloc2.Release()
+}
+
 func TestWorktreePool_ConcurrentAllocationsAreSerialised(t *testing.T) {
 	// Regression guard for the claude-code#34645 class of bug: two
 	// concurrent `git worktree add` calls racing on `.git/config.lock`.
