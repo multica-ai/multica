@@ -864,6 +864,7 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>

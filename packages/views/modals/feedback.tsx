@@ -164,6 +164,7 @@ export function FeedbackModal({
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
           <FileUploadButton
             size="sm"
+            multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
