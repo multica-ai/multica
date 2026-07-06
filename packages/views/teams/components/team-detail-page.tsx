@@ -433,7 +433,15 @@ function ArchiveSection({ team }: { team: Team }) {
   const archiveTeam = useArchiveTeam();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (team.is_default || team.archived_at) return null;
+  // Only an already-archived team drops the section (archiving it again is
+  // meaningless). Every other blocked state renders disabled with the reason
+  // in a tooltip — nothing is hidden, so the rule is always discoverable.
+  if (team.archived_at) return null;
+  const blockedReason = team.is_default
+    ? "default"
+    : !isAdmin
+      ? "admin"
+      : null;
 
   const doArchive = async () => {
     setConfirmOpen(false);
@@ -452,22 +460,27 @@ function ArchiveSection({ team }: { team: Team }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">
         {t(($) => $.settings.danger_title)}
       </h3>
-      {/* Archiving is admin-only (server enforces with a 403). The button
-          stays visible but disabled so members learn the rule instead of
-          wondering where the action went. */}
+      {/* Archiving is admin-only and never applies to the default team
+          (server enforces both). Blocked states stay visible but disabled
+          with the reason, so users learn the rule instead of wondering
+          where the action went. */}
       <Tooltip>
         <TooltipTrigger render={<span className="-mx-1.5 inline-flex w-fit" />}>
           <button
             type="button"
-            disabled={!isAdmin}
+            disabled={blockedReason !== null}
             onClick={() => setConfirmOpen(true)}
             className="flex items-center rounded-md px-1.5 py-1 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {t(($) => $.actions.archive)}
           </button>
         </TooltipTrigger>
-        {!isAdmin && (
-          <TooltipContent>{t(($) => $.settings.archive_admin_only)}</TooltipContent>
+        {blockedReason !== null && (
+          <TooltipContent>
+            {blockedReason === "default"
+              ? t(($) => $.settings.default_cannot_archive)
+              : t(($) => $.settings.archive_admin_only)}
+          </TooltipContent>
         )}
       </Tooltip>
 
