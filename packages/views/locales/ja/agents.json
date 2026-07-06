@@ -202,6 +202,7 @@
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
+    "composio_mcp": "MCP アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
@@ -219,6 +220,17 @@
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
     "visibility_label": "公開範囲",
+    "access": {
+      "label": "アクセス",
+      "private_title": "プライベート",
+      "private_desc": "このエージェントを実行できるのはあなただけです",
+      "public_title": "公開",
+      "public_desc": "このエージェントを実行できる人を選択します",
+      "public_workspace_option": "ワークスペース全員",
+      "public_members_group": "特定のメンバー",
+      "public_members_empty": "選択できるワークスペースメンバーがいません",
+      "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
+    },
     "runtime_label": "ランタイム",
     "runtime_filter_mine": "自分のもの",
     "runtime_filter_all": "すべて",
@@ -312,6 +324,22 @@
       "save_failed_toast": "MCP config を保存できませんでした",
       "redacted_title": "設定済み — 現在の表示では非表示",
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。"
+    },
+    "composio_mcp": {
+      "subtitle": "ツールキットにチェックを入れると、あなた（この agent の作成者）が直接または下位 agent のチェーン経由でこの agent をトリガーしたときに限り、MCP サーバーとしてマウントされます。",
+      "loading": "接続を読み込み中…",
+      "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
+      "empty_title": "接続済みのアプリがありません",
+      "empty_hint": "サードパーティサービスをまだ接続していません。先に 1 つ認可してから、ここで許可してください。",
+      "empty_link_to_settings": "設定 → 連携 で接続する",
+      "connected": "接続済み",
+      "toggle_aria": "この agent に {{toolkit}} を許可",
+      "saving": "保存中…",
+      "save_failed_toast": "保存できませんでした。もう一度お試しください",
+      "redacted_title": "設定済み — あなたには非表示",
+      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
+      "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
+      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
     },
     "runtime_config": {
       "intro": "OpenClaw ランタイムがこのエージェントの各ターンをどのように実行するかを選択します。Local モードはエージェントを daemon プロセス内で実行します。Gateway モードは各ターンを OpenClaw Gateway に転送します — daemon のホストが軽量な調整役で、エージェントの実作業はより強力なマシンで動かしたい場合に有用です。",
@@ -411,6 +439,28 @@
       "tooltip": "ワークスペース · このワークスペースの全員がこのエージェントを使用できます"
     }
   },
+  "access": {
+    "tooltip": "アクセス · 誰がこのエージェントを実行できるか",
+    "trigger_private": "自分のみ",
+    "trigger_workspace": "ワークスペース",
+    "trigger_members_count": "{{count}} 人",
+    "trigger_members_empty": "特定のメンバー",
+    "trigger_team": "チーム",
+    "private_title": "プライベート",
+    "private_desc": "あなただけがこのエージェントを実行できます",
+    "workspace_title": "ワークスペースに公開",
+    "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
+    "members_title": "特定のメンバーに公開",
+    "members_desc": "選択した人だけがこのエージェントを実行できます",
+    "team_title": "チームに公開",
+    "team_desc": "チーム全体にアクセス権を付与します",
+    "team_coming_soon": "近日公開",
+    "members_group": "メンバー",
+    "public_group": "公開アクセス",
+    "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
+    "members_empty": "選択できるワークスペースメンバーがいません",
+    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+  },
   "profile_card": {
     "unavailable": "エージェントを利用できません",
     "detail_link": "詳細 →",
@@ -443,7 +493,11 @@
     "no_data": "記録された実行データがありません。",
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
-    "sort_newest_first": "新しい順"
+    "sort_newest_first": "新しい順",
+    "expand_visible": "表示中を展開",
+    "collapse_visible": "表示中を折りたたむ",
+    "preserve_filters": "フィルターを保持",
+    "default_expanded": "詳細をデフォルトで展開"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",

@@ -294,6 +294,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.36",
+        date: "2026-07-03",
+        title: "Transcript view memory, external PostgreSQL for Helm, and reliability fixes",
+        changes: [],
+        features: [
+          "The task transcript remembers your filter and expansion choices, and restores them the next time you open the run.",
+          "Self-hosted (Helm): a new `postgres.external.enabled` toggle points Multica at an externally managed PostgreSQL (RDS, CNPG, Cloud SQL, Neon…) and skips the built-in database.",
+        ],
+        fixes: [
+          "Ordered-list caret no longer strands on the block below when a comment draft with an empty `1. ` line reloads.",
+          "The daemon now finds the correct agent CLI (Claude, Codex, …) even when a login-shell hook wrapper sits in front of it on PATH.",
+          "PR review agents re-run when a new commit is pushed instead of silently reusing the previous verdict on the older commit.",
+          "Realtime clients no longer miss events published while a server pod restarts — a bounded 5-minute replay window covers the gap.",
+          "Kiro ACP runtime task usage is accounted correctly in the usage log again.",
+          "Autopilot 'create issue' runs stay visible on the runs list even when the runtime is offline.",
+          "Slack alert cards (Grafana, incoming webhooks) whose real message body lives in the attachment are now read from the attachment instead of the short fallback line.",
+          "Codex agent tasks see the daemon's Codex model catalog inside the task home again. (Community-reported.)",
+          "Legacy `/squads/…` and `/usage` web routes redirect to their current equivalents instead of 404-ing.",
+          "The desktop app's Save dialog uses the real attachment filename instead of defaulting to `download.txt`. (Community contribution.)",
+          "Squad coordination: a private squad leader now wakes correctly when the worker agent it dispatched posts its completion comment via the HTTP API — the leader → worker → leader loop no longer stalls after the first hop.",
+          "Tasks no longer hard-fail on hosts whose Claude CLI predates `--effort` — the daemon drops the effort flag with a warning and runs the task plainly.",
+        ],
+      },
+      {
         version: "0.3.35",
         date: "2026-07-02",
         title: "Show sub-issues toggle, snappier issue views, and safer agent CLI writes",

@@ -45,7 +45,7 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
-import { VisibilityPicker } from "./inspector/visibility-picker";
+import { AccessPicker } from "./inspector/access-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../settings/components/slack-tab";
 
@@ -151,10 +151,22 @@ export function AgentDetailInspector({
           onChange={(v) => update({ thinking_level: v })}
         />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-          <VisibilityPicker
-            value={agent.visibility}
-            canEdit={canEdit}
-            onChange={(v) => update({ visibility: v })}
+          <AccessPicker
+            permissionMode={agent.permission_mode}
+            invocationTargets={agent.invocation_targets}
+            visibility={agent.visibility}
+            members={members}
+            // Access is OWNER-ONLY (MUL-3963): a workspace admin can edit other
+            // agent properties (canEdit) but NOT who may run the agent. Gate the
+            // picker on ownership specifically so non-owners get the read-only
+            // state instead of a control the backend would reject with 403.
+            canEdit={
+              currentUserId !== null && agent.owner_id === currentUserId
+            }
+            hasComposioAllowlist={
+              (agent.composio_toolkit_allowlist ?? []).length > 0
+            }
+            onChange={(next) => update(next)}
           />
         </PropRow>
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>

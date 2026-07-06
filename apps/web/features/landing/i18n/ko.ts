@@ -269,6 +269,30 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.3.36",
+          date: "2026-07-03",
+          title: "Transcript 뷰 상태 기억, Helm 외부 PostgreSQL 지원, 안정성 수정",
+          changes: [],
+          features: [
+            "태스크 Transcript가 필터·펼침 상태를 기억해, 같은 실행을 다시 열 때 그대로 복원합니다.",
+            "셀프호스트(Helm): 새 `postgres.external.enabled` 토글로 Multica를 외부 관리형 PostgreSQL(RDS, CNPG, Cloud SQL, Neon 등)에 연결하고 내장 DB를 건너뛸 수 있습니다.",
+          ],
+          fixes: [
+            "댓글 초안에 빈 `1. ` 항목이 있을 때, 재로딩 후 캐럿이 아래 블록에 갇히던 문제를 고쳤습니다.",
+            "로그인 셸의 훅 래퍼가 앞에 있어도, 데몬이 올바른 에이전트 CLI(Claude, Codex 등)를 정확히 발견합니다.",
+            "새 커밋이 푸시되면 PR 리뷰 에이전트가 다시 실행되며, 이전 커밋의 결과를 그대로 재사용하지 않습니다.",
+            "서버 파드 재시작 사이에 발행된 실시간 이벤트가 조용히 유실되지 않도록, 5분 경계 리플레이 윈도우로 보완합니다.",
+            "Kiro ACP 런타임 태스크 사용량이 사용량 로그에 다시 정확히 기록됩니다.",
+            "런타임이 오프라인이어도, Autopilot의 'Issue 생성' 실행이 실행 목록에 계속 표시됩니다.",
+            "본문이 첨부·블록·rich_text에만 있는 Slack 알림 카드(Grafana, Incoming Webhook 등)를 폴백 문구 대신 첨부 본문에서 읽습니다.",
+            "Codex 에이전트 태스크가 태스크 홈에서 데몬의 Codex 모델 카탈로그를 다시 볼 수 있습니다. (커뮤니티 보고)",
+            "레거시 `/squads/…`, `/usage` 웹 경로가 404 대신 현재 대응 페이지로 리다이렉트됩니다.",
+            "데스크톱 앱의 저장 대화상자가 `download.txt`로 폴백하지 않고 실제 첨부 파일명을 사용합니다. (커뮤니티 기여)",
+            "스쿼드 협업: 리더가 mention으로 디스패치한 워커 에이전트가 완료 댓글을 HTTP API로 게시할 때, 프라이빗 스쿼드 리더가 정확히 깨어나며, 리더 → 워커 → 리더 루프가 첫 홉에서 멈추지 않습니다.",
+            "호스트의 Claude CLI가 `--effort` 플래그 이전 버전이어도 태스크가 하드 실패하지 않고, 데몬이 effort 플래그를 경고와 함께 제거하고 기본 실행으로 폴백합니다.",
+          ],
+        },
+        {
           version: "0.3.35",
           date: "2026-07-02",
           title: "하위 Issue 표시 토글, 더 빠른 Issue 뷰, 더 안전한 에이전트 CLI",

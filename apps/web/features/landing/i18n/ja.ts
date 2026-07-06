@@ -270,6 +270,30 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.3.36",
+          date: "2026-07-03",
+          title: "Transcript の表示設定を記憶、Helm の外部 PostgreSQL 対応、信頼性の修正",
+          changes: [],
+          features: [
+            "タスクの Transcript（ログ）が絞り込みと展開状態を記憶し、同じ実行を次に開いたときに復元します。",
+            "セルフホスト（Helm）：新しい `postgres.external.enabled` トグルで Multica を外部管理の PostgreSQL（RDS、CNPG、Cloud SQL、Neon など）に向けられ、内蔵データベースをスキップできます。",
+          ],
+          fixes: [
+            "コメント下書きに空の `1. ` 行があると、再読込後にキャレットが下のブロックへ流れてしまう不具合を修正しました。",
+            "ログイン シェルのフック ラッパー越しでも、デーモンが正しいエージェント CLI（Claude、Codex ほか）を検出できるようになりました。",
+            "PR レビュー エージェントは新しいコミットが push されると再度実行され、以前のコミットの評価をそのまま使い回さなくなりました。",
+            "サーバー Pod の再起動中に発行されたリアルタイム イベントが黙って失われないよう、5 分の有界リプレイ ウィンドウで補うようになりました。",
+            "Kiro ACP ランタイムのタスク使用量が使用量ログに正しく記録されるようになりました。",
+            "ランタイムがオフラインでも、Autopilot の「Issue を作成」実行がラン リストに残るようになりました。",
+            "本文が Attachment / Block Kit / rich_text にしか無い Slack アラート カード（Grafana、Incoming Webhook 等）を、フォールバック文ではなく Attachment 本体から読み込みます。",
+            "Codex エージェントのタスク ホームからデーモンの Codex モデル カタログが再び見えるようになりました。（コミュニティ報告）",
+            "レガシーの `/squads/…` と `/usage` の Web ルートが 404 ではなく現行ページへリダイレクトされます。",
+            "デスクトップ アプリの保存ダイアログが `download.txt` にフォールバックせず、正しい添付ファイル名を使うようになりました。（コミュニティ貢献）",
+            "スクワッド連携：Leader が mention でディスパッチしたワーカー エージェントが完了コメントを HTTP API で投稿したとき、プライベート スクワッドの Leader が正しく起動され、Leader → Worker → Leader のループが初回ホップで止まらなくなりました。",
+            "ホストの Claude CLI が `--effort` フラグより古い場合でも、タスクはハード フェイルせず、デーモンが effort フラグを警告付きで外して素の実行にフォールバックします。",
+          ],
+        },
+        {
           version: "0.3.35",
           date: "2026-07-02",
           title: "サブ Issue 表示トグル、より軽快な Issue ビュー、より安全なエージェント CLI",

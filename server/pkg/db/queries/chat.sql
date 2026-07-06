@@ -110,11 +110,15 @@ WHERE id = $1;
 -- name: CreateChatTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
-    initiator_user_id, force_fresh_session
+    initiator_user_id, originator_user_id, force_fresh_session, runtime_mcp_overlay,
+    runtime_connected_apps
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
-    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)
+    sqlc.narg(originator_user_id),
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 )
 RETURNING *;
 

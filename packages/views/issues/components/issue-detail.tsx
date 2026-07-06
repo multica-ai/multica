@@ -2017,6 +2017,7 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
               />
               <FileUploadButton
                 size="sm"
+                multiple
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
               />
             </div>

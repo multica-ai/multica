@@ -171,7 +171,10 @@ func init() {
 	agentCreateCmd.Flags().String("mcp-config", "", "MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{\"shortcut\":{...}}}'. Treated as secret material (MCP entries often carry API tokens) — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
 	agentCreateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentCreateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON object from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
-	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
+	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace (legacy; mapped to --permission-mode. private->private, workspace->public_to+workspace target)")
+	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
+	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
+	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -195,7 +198,10 @@ func init() {
 	agentUpdateCmd.Flags().String("mcp-config", "", "New MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{...}}'. Pass 'null' to clear. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
 	agentUpdateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentUpdateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
-	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
+	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace (legacy; mapped to --permission-mode)")
+	agentUpdateCmd.Flags().String("permission-mode", "", "New invocation permission mode: private or public_to. Authoritative over --visibility. Owner-only.")
+	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
+	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -471,6 +477,38 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// applyAgentPermissionFlags translates the invocation-permission flags
+// (--permission-mode / --public-to-workspace / --public-to-member) into the
+// permission_mode + invocation_targets request fields (MUL-3963). When none of
+// the flags are set it is a no-op, so the legacy --visibility handling still
+// drives the request. When any public-to-* flag is present without an explicit
+// --permission-mode, the mode defaults to public_to.
+func applyAgentPermissionFlags(cmd *cobra.Command, body map[string]any) {
+	hasMode := cmd.Flags().Changed("permission-mode")
+	hasWorkspace := cmd.Flags().Changed("public-to-workspace")
+	hasMembers := cmd.Flags().Changed("public-to-member")
+	if !hasMode && !hasWorkspace && !hasMembers {
+		return
+	}
+
+	mode := "public_to"
+	if hasMode {
+		mode, _ = cmd.Flags().GetString("permission-mode")
+	}
+	body["permission_mode"] = mode
+
+	targets := []map[string]any{}
+	if on, _ := cmd.Flags().GetBool("public-to-workspace"); on {
+		targets = append(targets, map[string]any{"target_type": "workspace"})
+	}
+	if members, _ := cmd.Flags().GetStringSlice("public-to-member"); len(members) > 0 {
+		for _, m := range members {
+			targets = append(targets, map[string]any{"target_type": "member", "target_id": m})
+		}
+	}
+	body["invocation_targets"] = targets
+}
+
 func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -538,6 +576,7 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
 	}
+	applyAgentPermissionFlags(cmd, body)
 	if cmd.Flags().Changed("max-concurrent-tasks") {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
@@ -614,6 +653,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
 	}
+	applyAgentPermissionFlags(cmd, body)
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
 		body["status"] = v

@@ -44,6 +44,8 @@ const agent: Agent = {
   runtime_config: {},
   custom_args: [],
   visibility: "workspace",
+  permission_mode: "public_to",
+  invocation_targets: [{ target_type: "workspace", target_id: null }],
   status: "idle",
   max_concurrent_tasks: 1,
   model: "",

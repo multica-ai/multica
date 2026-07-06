@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -105,6 +108,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
 	}
 
+	if err := syncCodexModelCatalog(codexHome, sharedHome); err != nil {
+		return fmt.Errorf("sync codex model_catalog_json: %w", err)
+	}
+
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
@@ -150,6 +157,76 @@ func resolveSharedCodexHome() string {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func syncCodexModelCatalog(codexHome, sharedHome string) error {
+	configPath := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	var cfg struct {
+		ModelCatalogJSON string `toml:"model_catalog_json"`
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	catalogPath := strings.TrimSpace(cfg.ModelCatalogJSON)
+	if catalogPath == "" {
+		return nil
+	}
+
+	src, err := resolveCodexConfigPath(catalogPath, sharedHome)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("model_catalog_json %q resolved to missing file %s: %w", catalogPath, src, err)
+	}
+
+	if filepath.IsAbs(catalogPath) || strings.HasPrefix(catalogPath, "~") {
+		return nil
+	}
+	cleanCatalogPath := filepath.Clean(catalogPath)
+	if !filepath.IsLocal(cleanCatalogPath) {
+		return fmt.Errorf("model_catalog_json %q must be a local relative path or an absolute path", catalogPath)
+	}
+	dst := filepath.Join(codexHome, cleanCatalogPath)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create model catalog directory %s: %w", filepath.Dir(dst), err)
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove stale model catalog %s: %w", dst, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat model catalog %s: %w", dst, err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		return fmt.Errorf("copy model_catalog_json %s to %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
+	if filepath.IsAbs(configPath) {
+		return filepath.Clean(configPath), nil
+	}
+	if strings.HasPrefix(configPath, "~/") || strings.HasPrefix(configPath, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve model_catalog_json %q: user home: %w", configPath, err)
+		}
+		return filepath.Join(home, configPath[2:]), nil
+	}
+	if strings.HasPrefix(configPath, "~") {
+		return "", fmt.Errorf("model_catalog_json %q uses unsupported ~user expansion", configPath)
+	}
+	return filepath.Join(sharedHome, filepath.Clean(configPath)), nil
 }
 
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
