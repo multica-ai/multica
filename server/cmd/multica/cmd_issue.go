@@ -492,6 +492,7 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().String("team", "", "Move the issue to this Team (UUID or key); it is renumbered and the old identifier keeps resolving")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1276,6 +1277,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
+	}
+	if cmd.Flags().Changed("team") {
+		v, _ := cmd.Flags().GetString("team")
+		if v == "" {
+			return fmt.Errorf("--team requires a Team UUID or key")
+		}
+		teamID, err := resolveTeamRef(ctx, client, v)
+		if err != nil {
+			return err
+		}
+		body["team_id"] = teamID
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")

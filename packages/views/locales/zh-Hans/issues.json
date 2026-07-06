@@ -199,7 +199,7 @@
     "pull_request_card_files_count_other": "{{count}} 个文件",
     "pull_request_card_show_more": "展开剩余 {{count}} 个",
     "pull_request_card_show_less": "收起",
-    "prop_team": "团队",
+    "prop_team": "Team",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_stage": "阶段",
@@ -430,7 +430,7 @@
     "updated_ago": "更新于 {{time}}"
   },
   "actions": {
-    "team": "团队",
+    "team": "Team",
     "status": "状态",
     "priority": "优先级",
     "assignee": "负责人",

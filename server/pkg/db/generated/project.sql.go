@@ -376,28 +376,6 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 	return items, nil
 }
 
-const projectHasTeam = `-- name: ProjectHasTeam :one
-SELECT EXISTS (
-  SELECT 1 FROM project_team
-  WHERE workspace_id = $1
-    AND project_id = $2
-    AND team_id = $3
-)::boolean
-`
-
-type ProjectHasTeamParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ProjectID   pgtype.UUID `json:"project_id"`
-	TeamID      pgtype.UUID `json:"team_id"`
-}
-
-func (q *Queries) ProjectHasTeam(ctx context.Context, arg ProjectHasTeamParams) (bool, error) {
-	row := q.db.QueryRow(ctx, projectHasTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const replaceProjectTeams = `-- name: ReplaceProjectTeams :exec
 WITH deleted AS (
   DELETE FROM project_team
