@@ -235,13 +235,20 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
 
+  // A project always keeps at least one team (server rule) — otherwise it
+  // would vanish from every team's Projects page. Single source for the
+  // inline hint, the disabled submit button, and the submit guard; moot
+  // while the workspace has no teams loaded yet.
+  const teamSelectionMissing = useMemo(
+    () => teams.length > 0 && teamIds.length === 0,
+    [teams.length, teamIds.length],
+  );
+
   const createProject = useCreateProject();
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
-    // A project always keeps at least one team (matches the server rule) —
-    // otherwise it would vanish from every team's Projects page.
-    if (teams.length > 0 && teamIds.length === 0) {
+    if (teamSelectionMissing) {
       toast.error(t(($) => $.create_project.team_required));
       return;
     }
@@ -342,9 +349,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               triggerRender={<PillButton />}
               align="start"
             />
-            {/* Inline nudge for the at-least-one-team rule; submit also
-                enforces it with a toast. */}
-            {teamIds.length === 0 && (
+            {/* Inline nudge for the at-least-one-team rule; the submit
+                button disables on the same condition. */}
+            {teamSelectionMissing && (
               <span className="text-[11px] text-destructive/80">
                 {t(($) => $.create_project.team_min_hint)}
               </span>
@@ -881,7 +888,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!title.trim() || submitting || (teams.length > 0 && teamIds.length === 0)}
+            disabled={!title.trim() || submitting || teamSelectionMissing}
             className="shrink-0"
           >
             {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
