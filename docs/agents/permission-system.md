@@ -152,6 +152,39 @@ Keep these apart. This doc answers question 2 honestly.
 > `arg_allowlist` WHEN condition on `group_id` on the capability's Allow row
 > limits it to the listed group(s) (`EnforcedConditionKinds` offers the arg
 > term on this key). An unconditioned row keeps the any-shared-group reach.
+>
+> **FIR-2351 follow-up ("Disable" — a per-permission hard floor, product
+> decision 2026-07-06):** after the openable default above, Jesper asked for
+> the mirror image — a way to still make ONE specific permission a hard,
+> unopenable floor for everyone but an owner/admin, rather than the workspace
+> Deny always being loosen-able. A third workspace-only setting,
+> `SettingDisable` ("Disable" in the UI), does exactly that: when a workspace
+> row is Disable rather than Deny, **no Group/User/Agent Allow can loosen it**
+> — it behaves exactly like the existing credential/sandbox/repo floors, but
+> choosable per permission instead of hardcoded. Mechanics:
+> - `chain.go`: `resolveOpenable`'s Stage A (member specificity) and the
+>   Agent-opening exception both short-circuit when
+>   `Settings[LayerWorkspace] == SettingDisable` (`workspaceDisabled`); Runtime /
+>   Agent / on_behalf_of / System can still TIGHTEN further, same as any Deny.
+>   `SettingDisable` is normalized to `SettingDeny` (`normalizeDisable`) before
+>   it ever reaches `rank()`'s fold, so `Effective.Setting` never leaks anything
+>   but Allow/Ask/Deny — Disable is an authoring-only value, never a verdict.
+> - `table_connection.go` (`ConnectionEndpointEffective`): a workspace Disable
+>   returns Deny immediately, before any per-actor row is considered and
+>   regardless of the `cerebro_member_override` flag state — unlike an ordinary
+>   workspace Deny, which that path defers so a per-actor Allow can open it.
+> - Write path: `SettingDisable` is only valid at `LayerWorkspace`
+>   (`toolpolicy.validSetting` + a same-name DB CHECK,
+>   `cerebro_tool_policy_disable_workspace_only`, migration 9122) — authoring it
+>   anywhere else is rejected before the DB. Workspace-layer writes already fall
+>   through to `requireWorkspaceOwnerAdmin` in `RequireToolPolicyWritePolicy`,
+>   so setting or clearing Disable is already owner/admin-only with no new gate
+>   needed.
+> - UI: the workspace-layer decision control (`WORKSPACE_SETTING_CHOICES` in
+>   `tool-policy-table.tsx`) is the only picker that offers "Disable"; every
+>   other layer's picker (agent/group/user) and the repo/credential group
+>   controls (already hard floors, so Disable adds nothing there) are
+>   unchanged.
 
 ---
 

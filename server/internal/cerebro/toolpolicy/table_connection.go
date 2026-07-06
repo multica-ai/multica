@@ -464,6 +464,8 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // ever tightens below its Base and refuses to loosen, so a Deny base could never
 // be lifted by an Allow grant. The rule, over all of the above rows/layers:
 //
+//   - an explicit workspace Disable wins immediately (FIR-2351 follow-up,
+//     2026-07-06) — a hard, unopenable floor, unlike an ordinary workspace Deny;
 //   - an explicit Deny at any layer wins (revokes) — fail-safe;
 //   - else an explicit Allow at any layer grants the call;
 //   - else an explicit Ask at any layer gates the call (human approval);
@@ -533,6 +535,16 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// opening the secrets box to whoever drives the agent, while still letting a
 		// member-level Deny hold across every agent that member delegates work to.
 		for layer, set := range r.Layers {
+			if layer == LayerWorkspace && set == SettingDisable {
+				// FIR-2351 follow-up (product decision 2026-07-06): a workspace row
+				// explicitly Disabled is a hard, unopenable floor for this connection —
+				// unlike an ordinary workspace Deny (which openableWS defers below so a
+				// per-actor Allow can open it), nothing overrides Disable. Return
+				// immediately regardless of any per-actor Allow already collected from
+				// an earlier row in this loop, and regardless of openableWS/flag state,
+				// so Disable works the same whether or not cerebro_member_override is on.
+				return SettingDeny, connName, nil
+			}
 			if layer == LayerOnBehalfOf {
 				// Deny-only: honour a revoke, ignore any Allow/Ask so the initiator can
 				// never grant or gate a call the owner's own layers did not.

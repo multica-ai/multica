@@ -98,8 +98,11 @@ var permLayerNames = map[string]bool{
 
 // permDecisions are the authorable settings. "inherit" means "no rule at this
 // layer" — set writes it (clearing the explicit choice), clear removes the row.
+// "disable" (FIR-2351 follow-up, product decision 2026-07-06) is workspace-only:
+// a hard, unopenable floor for one permission — see the workspace-layer check
+// in runPermSet below, which mirrors toolpolicy.validSetting/Store.Set server-side.
 var permDecisions = map[string]bool{
-	"allow": true, "ask": true, "deny": true, "inherit": true,
+	"allow": true, "ask": true, "deny": true, "inherit": true, "disable": true,
 }
 
 // --- commands -----------------------------------------------------------------
@@ -148,7 +151,7 @@ func init() {
 	set.Flags().String("tool", "", "Tool key, e.g. Bash or firtal_registry (required)")
 	set.Flags().String("layer", "", "Layer: workspace|runtime|agent|group|user|system (required)")
 	set.Flags().String("subject", "", "Subject UUID the rule applies to at that layer (required)")
-	set.Flags().String("decision", "", "Decision: allow|ask|deny|inherit (required)")
+	set.Flags().String("decision", "", "Decision: allow|ask|deny|inherit|disable (required; disable is workspace-layer only)")
 	set.Flags().String("resource", "", "Resource pattern the rule is scoped to (optional)")
 	set.Flags().StringSlice("when-host", nil, "WHEN condition: host allowlist (repeatable)")
 	set.Flags().StringSlice("when-action", nil, "WHEN condition: allowed actions (repeatable)")
@@ -370,7 +373,10 @@ func runPermSet(ctx context.Context, client *cli.APIClient, req permSetRequest) 
 		return fmt.Errorf("invalid layer %q: want one of workspace|runtime|agent|group|user|system", req.Layer)
 	}
 	if !permDecisions[req.Setting] {
-		return fmt.Errorf("invalid decision %q: want one of allow|ask|deny|inherit", req.Setting)
+		return fmt.Errorf("invalid decision %q: want one of allow|ask|deny|inherit|disable", req.Setting)
+	}
+	if req.Setting == "disable" && req.Layer != "workspace" {
+		return fmt.Errorf("disable is only valid at the workspace layer (got layer %q)", req.Layer)
 	}
 	base, err := permBasePath(client)
 	if err != nil {

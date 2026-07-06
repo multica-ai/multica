@@ -79,10 +79,12 @@ func validLayer(l Layer) bool {
 	}
 }
 
-// validSetting reports whether s is one of the four stored settings.
+// validSetting reports whether s is one of the five stored settings. Whether
+// SettingDisable may be stored at the layer the caller is targeting is a
+// separate check — see Set, which rejects it outside LayerWorkspace.
 func validSetting(s Setting) bool {
 	switch s {
-	case SettingInherit, SettingAllow, SettingAsk, SettingDeny:
+	case SettingInherit, SettingAllow, SettingAsk, SettingDeny, SettingDisable:
 		return true
 	default:
 		return false
@@ -333,6 +335,16 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 	}
 	if !validSetting(p.Setting) {
 		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: %q", ErrUnknownSetting, p.Setting)
+	}
+	// SettingDisable is a workspace-only state (product decision 2026-07-06,
+	// FIR-2351 follow-up): it makes a workspace Deny an unopenable floor for one
+	// permission. Authoring it at any other layer would be meaningless (Disable
+	// is normalized away by resolveOpenable/resolveHardFloor unless it sits at
+	// LayerWorkspace) and would silently behave like an ordinary Deny instead —
+	// reject it outright so the write path fails loudly rather than the row
+	// quietly doing nothing.
+	if p.Setting == SettingDisable && p.Layer != LayerWorkspace {
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: disable is only valid at the workspace layer, got %q", ErrUnknownSetting, p.Layer)
 	}
 	conditions, err := encodeCondition(p.Conditions)
 	if err != nil {

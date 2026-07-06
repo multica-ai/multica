@@ -53,11 +53,17 @@ import {
 import { CatalogDecisionControl, ConditionControl } from "./tool-policy-table";
 
 const CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
+// "disable" (FIR-2351 follow-up, product decision 2026-07-06) only ever makes
+// sense authored at the workspace layer — see settingChoicesFor in
+// tool-policy-table.tsx for the rationale. EndpointDecisionControl below picks
+// between CHOICES and this list the same way.
+const WORKSPACE_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "disable", "inherit"];
 const CHOICE_LABEL: Record<ToolSetting, string> = {
   allow: "Allow",
   ask: "Ask",
   deny: "Deny",
   inherit: "Inherit",
+  disable: "Disable",
 };
 
 // Restrictiveness rank — a per-tool choice can only TIGHTEN the connection-wide
@@ -553,9 +559,14 @@ function EndpointDecisionControl({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
-        {CHOICES.map((choice) => {
+        {(editLayer === "workspace" ? WORKSPACE_CHOICES : CHOICES).map((choice) => {
+          // "disable" is never futile — it is always at least as restrictive as
+          // the tightest connection floor (Deny), so the below-floor-rank futile
+          // check only applies to allow/ask/deny (FIR-2351 follow-up).
           const futile =
-            choice !== "inherit" && SETTING_RANK[choice] < floorRank;
+            choice !== "inherit" &&
+            choice !== "disable" &&
+            SETTING_RANK[choice] < floorRank;
           return (
             <DropdownMenuItem
               key={choice}

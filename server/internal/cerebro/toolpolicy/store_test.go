@@ -504,6 +504,23 @@ func TestStore_RejectsBadInput(t *testing.T) {
 	}
 }
 
+// TestStore_DisableOnlyValidAtWorkspaceLayer pins the FIR-2351 follow-up write
+// guard: SettingDisable is a workspace-only state (a hard, unopenable floor —
+// see chain_disable_test.go), so authoring it at any other layer is rejected
+// before it ever reaches the DB, rather than silently behaving like an
+// ordinary Deny (which is what resolveOpenable/resolveHardFloor would do with
+// a stray Disable row outside LayerWorkspace).
+func TestStore_DisableOnlyValidAtWorkspaceLayer(t *testing.T) {
+	s := &Store{} // intentionally no pool: validation must reject before any query.
+	ctx := context.Background()
+
+	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerGroup, LayerUser} {
+		if _, err := s.Set(ctx, SetParams{Layer: layer, Setting: SettingDisable}); err == nil {
+			t.Fatalf("Set(Disable) at layer %q should error before hitting the DB", layer)
+		}
+	}
+}
+
 // TestStore_ResourcePatternIsolatesRowsByResource proves the FIR-2505 slice 1
 // dimension: two rows on the same (tool, layer, subject) that disagree on
 // resource_pattern coexist, and Resolve sees only the one whose pattern matches

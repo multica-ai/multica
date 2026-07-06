@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 // TestDeniedConnectionTools_AgentDenyProducesToken seeds an MCP connection with
@@ -711,6 +713,80 @@ func TestConnectionEndpointEffective(t *testing.T) {
 		t.Fatalf("workspace-deny beats agent-allow: %v", err)
 	} else if got != SettingDeny {
 		t.Fatalf("workspace-deny beats agent-allow: got %s want deny (workspace-Deny must cap an agent-Allow on a secrets connection)", got)
+	}
+}
+
+// TestConnectionEndpointEffective_DisableCannotBeOverridden pins the FIR-2351
+// follow-up product decision (2026-07-06) on the connection grant path: with
+// cerebro_member_override ON, an ordinary workspace Deny on a connection
+// endpoint is openable by a per-actor Allow (see the "Lone #2" case above run
+// with the flag off, and resolveOpenable's agent-opening exception when it is
+// on) — but a workspace Disable must NOT be openable the same way, on OR off.
+func TestConnectionEndpointEffective_DisableCannotBeOverridden(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(34)
+	const conn = "infisical-admin"
+	const toolKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, endpoint_permissions, enabled)
+		VALUES ($1, $2, $3, 'api', 'http://internal:8080',
+		        '[{"path":"/secrets","methods":["GET"]}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Infisical (admin)"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping endpoint resolver test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+		_ = s.q.DeleteCerebroWorkspaceFeatureFlag(context.Background(), cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
+			WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride,
+		})
+	})
+
+	// Agent holds an explicit per-endpoint Allow — this is the row that opens an
+	// ordinary workspace Deny under member-override.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: LayerAgent,
+		SubjectID: agent, Setting: SettingAllow, ResourcePattern: "GET /secrets",
+	}); err != nil {
+		t.Fatalf("set agent allow: %v", err)
+	}
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: LayerWorkspace,
+		SubjectID: tpTestWorkspaceID, Setting: SettingDisable, ResourcePattern: "GET /secrets",
+	}); err != nil {
+		t.Fatalf("set workspace disable: %v", err)
+	}
+
+	var zero pgtype.UUID
+
+	// Flag OFF: Disable must still deny (a plain Deny already would too, so this
+	// alone isn't the interesting case, but it must not regress).
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("flag off: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("flag off: got %s want deny", got)
+	}
+
+	// Flag ON: an ordinary workspace Deny here WOULD be opened by the agent's
+	// Allow (that is the whole point of FIR-2351). Disable must refuse to open.
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member-override flag: %v", err)
+	}
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("flag on: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("flag on: agent Allow must NOT open a workspace Disable, got %s want deny", got)
 	}
 }
 

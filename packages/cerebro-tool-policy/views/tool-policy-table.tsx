@@ -202,11 +202,21 @@ const CREDENTIAL_CAP_ORDER = [
 ];
 
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
+// "disable" (FIR-2351 follow-up, product decision 2026-07-06) only ever makes
+// sense authored at the workspace layer — it turns a workspace Deny into a
+// hard, unopenable floor for one permission, the opposite of what Group/User/
+// Agent rows do. Only the workspace-layer decision control offers it; every
+// other layer keeps SETTING_CHOICES unchanged. See settingChoicesFor below.
+const WORKSPACE_SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "disable", "inherit"];
+function settingChoicesFor(editLayer: ToolLayer): ToolSetting[] {
+  return editLayer === "workspace" ? WORKSPACE_SETTING_CHOICES : SETTING_CHOICES;
+}
 const SETTING_LABEL: Record<ToolSetting, string> = {
   allow: "Allow",
   ask: "Ask",
   deny: "Deny",
   inherit: "Inherit",
+  disable: "Disable",
 };
 const DECISION_FILTERS: ToolEffectiveSetting[] = ["allow", "ask", "deny"];
 
@@ -1273,7 +1283,7 @@ export function DecisionControl({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
-        {SETTING_CHOICES.map((choice) => (
+        {settingChoicesFor(editLayer).map((choice) => (
           <DropdownMenuItem
             key={choice}
             onClick={() => onChange(choice)}
@@ -1377,10 +1387,14 @@ export function CatalogDecisionControl({
             <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Decision
             </span>
-            {SETTING_CHOICES.map((choice) => {
+            {settingChoicesFor(editLayer).map((choice) => {
+              // "disable" (FIR-2351 follow-up) is never futile: it is always at
+              // least as restrictive as the tightest connection floor (Deny), so
+              // the below-floor-rank futile check only applies to allow/ask/deny.
               const futile =
                 floorRank !== undefined &&
                 choice !== "inherit" &&
+                choice !== "disable" &&
                 SETTING_RANK[choice] < floorRank;
               return (
                 <button

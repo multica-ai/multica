@@ -57,6 +57,19 @@ The unified tool-policy chain is the model we want **everything** to converge on
   row as the connection's workspace-authored default, decided after per-actor rows and before
   `default_access` (per-actor explicit Deny still revokes instantly; on_behalf_of stays
   Deny-only). Floors never consult the flag and are unchanged.
+- **"Disable" — a per-permission hard floor (FIR-2351 follow-up, product decision
+  2026-07-06):** a third workspace-only setting, `SettingDisable`, is the mirror image of
+  the openable default above — a workspace row set to Disable (not Deny) is an unopenable
+  floor for that one permission: no Group/User/Agent Allow can loosen it, Runtime/Agent/
+  on_behalf_of/System can still tighten (no-op, it's already tightest). `resolveOpenable`
+  short-circuits Stage A specificity and the Agent-opening exception on
+  `workspaceDisabled`; `normalizeDisable` folds `SettingDisable` → `SettingDeny` before it
+  reaches `rank()`, so `Effective.Setting` never leaks anything but Allow/Ask/Deny.
+  `ConnectionEndpointEffective` returns Deny immediately on a workspace Disable, ahead of
+  any per-actor row and regardless of the flag. Only valid at `LayerWorkspace`
+  (`validSetting` + DB CHECK `cerebro_tool_policy_disable_workspace_only`, migration
+  `9122`); workspace-layer writes already require owner/admin, so Disable needs no new
+  write gate. UI: only the workspace-layer decision control offers it.
 - **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
@@ -72,7 +85,8 @@ The unified tool-policy chain is the model we want **everything** to converge on
   the repo-approval cap all keep calling `Resolve` directly and never reach `ResolveGeneral`.
 - **Backing table:** `cerebro_tool_policy` — `(workspace_id, tool_key, layer, subject_id,
   resource_pattern, setting)` (migrations `9042` + `9052` workspace layer + `9054`
-  resource_pattern). `setting ∈ inherit|allow|ask|deny`.
+  resource_pattern + `9122` `disable` setting). `setting ∈ inherit|allow|ask|deny|disable`,
+  with `disable` DB-constrained to `layer = 'workspace'` only.
 - **Read model for UI:** `toolpolicy/table.go:101` (`Store.Table`) — one row per capability
   with per-layer settings, `Effective`, and `CappedByGroups` blame.
 - **Write surface:** `PUT/DELETE /api/workspaces/{id}/tool-policy` (`toolpolicy/handler.go`),

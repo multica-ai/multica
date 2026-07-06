@@ -6,7 +6,8 @@
 //	         groups) is allowed / asked / denied a tool — the resolved verdict
 //	         plus which layer decided or capped it and the full layer stack.
 //	list     the same, as a one-row-per-tool table.
-//	set      one layer's choice for one tool (allow|ask|deny|inherit). Admin/owner.
+//	set      one layer's choice for one tool (allow|ask|deny|inherit|disable).
+//	         disable is workspace-layer only. Admin/owner.
 //	unset    clear one layer's choice for one tool. Admin/owner.
 //
 // Backs onto the same routes the Permissions screen uses:
@@ -75,8 +76,11 @@ var tpValidLayers = map[string]bool{
 	"group": true, "user": true, "system": true,
 }
 
+// "disable" (FIR-2351 follow-up, product decision 2026-07-06) is workspace-only
+// — a hard, unopenable floor for one permission. See the workspace-layer check
+// in runToolPolicySet, which mirrors toolpolicy.validSetting/Store.Set server-side.
 var tpValidSettings = map[string]bool{
-	"allow": true, "ask": true, "deny": true, "inherit": true,
+	"allow": true, "ask": true, "deny": true, "inherit": true, "disable": true,
 }
 
 func init() {
@@ -89,7 +93,7 @@ func init() {
 			"user and system.\n\n" +
 			"  explain  why an agent/member combination is allowed, asked or denied a tool\n" +
 			"  list     the resolved verdict for every tool, one row each\n" +
-			"  set      one layer's choice for one tool (allow|ask|deny|inherit) — admin/owner\n" +
+			"  set      one layer's choice for one tool (allow|ask|deny|inherit|disable) — admin/owner\n" +
 			"  unset    clear one layer's choice for one tool — admin/owner",
 	}
 	parent.GroupID = groupCore
@@ -305,7 +309,7 @@ func runToolPolicyList(cmd *cobra.Command, _ []string) error {
 func newToolPolicySetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set",
-		Short: "Set one layer's choice for one tool (allow|ask|deny|inherit) — admin/owner",
+		Short: "Set one layer's choice for one tool (allow|ask|deny|inherit|disable) — admin/owner",
 		Long: "Writes one rule into the unified policy: the chosen setting for one tool " +
 			"at one layer for one subject. The subject id matches the layer — the " +
 			"workspace id for the workspace layer, an agent id for the agent layer, a " +
@@ -316,7 +320,7 @@ func newToolPolicySetCmd() *cobra.Command {
 	cmd.Flags().String("tool", "", "Tool key (required), e.g. tools:Bash")
 	cmd.Flags().String("layer", "", "Layer: workspace|runtime|agent|group|user|system (required)")
 	cmd.Flags().String("subject", "", "Subject id for the layer (required)")
-	cmd.Flags().String("setting", "", "Setting: allow|ask|deny|inherit (required)")
+	cmd.Flags().String("setting", "", "Setting: allow|ask|deny|inherit|disable (required; disable is workspace-layer only)")
 	cmd.Flags().String("resource", "", "Resource pattern (optional; empty = capability-wide)")
 	cmd.Flags().String("output", "text", "Output format: text or json")
 	_ = cmd.MarkFlagRequired("tool")
@@ -339,7 +343,10 @@ func runToolPolicySet(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid layer %q (want workspace|runtime|agent|group|user|system)", layer)
 	}
 	if !tpValidSettings[setting] {
-		return fmt.Errorf("invalid setting %q (want allow|ask|deny|inherit)", setting)
+		return fmt.Errorf("invalid setting %q (want allow|ask|deny|inherit|disable)", setting)
+	}
+	if setting == "disable" && layer != "workspace" {
+		return fmt.Errorf("disable is only valid at the workspace layer (got layer %q)", layer)
 	}
 
 	client, err := newAPIClient(cmd)
