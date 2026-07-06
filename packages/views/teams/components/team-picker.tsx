@@ -71,10 +71,14 @@ export function TeamPicker({
         }
         render={triggerRender}
       >
-        {/* Trigger shows icon + key only — the key IS the team's compact
-            identity; the full name lives in the menu items. */}
+        {/* Trigger shows icon + name — the key alone reads as an opaque
+            identifier out of context (e.g. an auto-normalized "T2323");
+            key + name live together in the menu items. */}
         {current ? (
-          <TeamBadge team={current} />
+          <>
+            <TeamIcon team={current} />
+            <span className="truncate">{current.name}</span>
+          </>
         ) : (
           <>
             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -136,7 +140,7 @@ export function TeamMultiPicker({
         }
         render={triggerRender}
       >
-        {/* Mirror the single picker's icon+key trigger when exactly one team
+        {/* Mirror the single picker's icon+name trigger when exactly one team
             is selected; degrade to icons+count for multiple. */}
         {selected.length === 0 ? (
           <>
@@ -144,7 +148,10 @@ export function TeamMultiPicker({
             <span className="truncate">{t(($) => $.picker.placeholder)}</span>
           </>
         ) : selected.length === 1 ? (
-          <TeamBadge team={selected[0]!} />
+          <>
+            <TeamIcon team={selected[0]!} />
+            <span className="truncate">{selected[0]!.name}</span>
+          </>
         ) : (
           <>
             <span className="flex shrink-0 items-center gap-0.5">

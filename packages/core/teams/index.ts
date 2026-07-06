@@ -4,6 +4,7 @@ export {
   activeTeamListOptions,
   myTeamListOptions,
   teamMembersOptions,
+  sortTeamsForDisplay,
 } from "./queries";
 export {
   useCreateTeam,

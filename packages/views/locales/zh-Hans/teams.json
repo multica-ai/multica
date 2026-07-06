@@ -32,6 +32,7 @@
     "tab_main": "主要信息",
     "tab_members": "成员 ({{count}})",
     "member_search": "搜索成员…",
+    "member_search_empty": "没有匹配的成员",
     "creator_row": "创建人 · 负责人",
     "name_required": "需要填写名称",
     "members_entry": "成员",
@@ -56,7 +57,7 @@
   },
   "picker": {
     "placeholder": "Team",
-    "empty": "没有启用的 Team",
+    "empty": "没有可用的 Team",
     "selected_count_other": "已选 {{count}} 个 Team"
   },
   "toast_created": "Team 已创建",
@@ -75,6 +76,7 @@
     "danger_title": "危险区",
     "archive_hint": "归档后停止接收新工作;已有 issue 仍可查看。",
     "members": "成员",
+    "members_empty": "暂无成员",
     "archive_confirm_title": "归档团队？",
     "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
     "default_cannot_archive": "默认团队不能归档",

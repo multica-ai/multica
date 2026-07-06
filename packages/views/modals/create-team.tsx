@@ -127,7 +127,7 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
               <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
                 <div className="space-y-1.5">
                   <Label htmlFor="team-name">{t(($) => $.form.icon_name)}</Label>
-                  <div className="flex items-end gap-3">
+                  <div className="flex items-start gap-3">
                     {/* Icon is emoji-only — picked, never typed. */}
                     <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
                       <PopoverTrigger
@@ -150,21 +150,23 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
                         />
                       </PopoverContent>
                     </Popover>
-                    <Input
-                      id="team-name"
-                      autoFocus
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                      onBlur={() => setNameTouched(true)}
-                      placeholder={t(($) => $.form.name_placeholder)}
-                      className={cn(underline, nameError && "border-destructive")}
-                    />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <Input
+                        id="team-name"
+                        autoFocus
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        onBlur={() => setNameTouched(true)}
+                        placeholder={t(($) => $.form.name_placeholder)}
+                        className={cn(underline, nameError && "border-destructive")}
+                      />
+                      {nameError && (
+                        <p className="text-xs text-destructive">
+                          {t(($) => $.dialog.name_required)}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  {nameError && (
-                    <p className="text-xs text-destructive">
-                      {t(($) => $.dialog.name_required)}
-                    </p>
-                  )}
                 </div>
 
                 <div className="space-y-1.5">
@@ -270,7 +272,7 @@ export function CreateTeamModal({ onClose }: { onClose: () => void }) {
                 ))}
                 {invitableMembers.length === 0 && (
                   <div className="px-1 py-4 text-center text-sm text-muted-foreground">
-                    {t(($) => $.picker.empty)}
+                    {t(($) => $.dialog.member_search_empty)}
                   </div>
                 )}
               </div>

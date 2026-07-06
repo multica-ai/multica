@@ -1,5 +1,20 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { Team } from "../types";
+
+// Canonical presentation order for team lists shown to a user: joined teams
+// first in the personal drag order (mirroring the sidebar's Teams section),
+// then non-joined teams alphabetically. Pickers and filters share this so
+// every team list a user sees is ordered the same way.
+export function sortTeamsForDisplay(teams: Team[]): Team[] {
+  const mine = teams
+    .filter((team) => team.is_member)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  const others = teams
+    .filter((team) => !team.is_member)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [...mine, ...others];
+}
 
 export const teamKeys = {
   all: (wsId: string) => ["teams", wsId] as const,
@@ -19,11 +34,13 @@ export function teamListOptions(wsId: string) {
 export function activeTeamListOptions(wsId: string) {
   // Shares teamListOptions' query key (and fetch/cache) — the active/archived
   // distinction is a per-observer `select`, not a separate cache entry, so
-  // mutation cache patches on the base key are reflected here too.
+  // mutation cache patches on the base key are reflected here too. Sorted
+  // with sortTeamsForDisplay so pickers match the sidebar's personal order.
   return queryOptions({
     queryKey: teamKeys.list(wsId),
     queryFn: () => api.listTeams(),
-    select: (data) => data.teams.filter((team) => !team.archived_at),
+    select: (data) =>
+      sortTeamsForDisplay(data.teams.filter((team) => !team.archived_at)),
   });
 }
 
