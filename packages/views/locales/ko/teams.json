@@ -82,5 +82,12 @@
     "default_cannot_archive": "기본 팀은 보관할 수 없습니다",
     "archive_admin_only": "관리자만 팀을 보관할 수 있습니다",
     "goto": "이동"
+  },
+  "conflict": {
+    "title": "{{team}}은(는) 프로젝트에 속해 있지 않습니다",
+    "body": "{{team}} 팀은 아직 {{project}} 프로젝트에 속해 있지 않습니다. 팀을 프로젝트에 추가하거나 이슈를 프로젝트의 팀으로 이동할 수 있습니다.",
+    "add_team": "{{team}}을(를) 프로젝트에 추가",
+    "project_teams": "프로젝트 팀",
+    "move_issue": "이슈를 {{team}}(으)로 이동"
   }
 }

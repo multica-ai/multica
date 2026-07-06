@@ -2783,6 +2783,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "project not found in this workspace")
 				return
 			}
+			// Invariant: the issue's team joins the project's team set. The
+			// UI confirms this with a dialog before sending; headless and
+			// dialog-confirmed paths both land here.
+			if err := service.EnsureProjectHasTeam(r.Context(), h.Queries, prevIssue.WorkspaceID, projectUUID, prevIssue.TeamID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update project teams")
+				return
+			}
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
@@ -2887,6 +2894,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
+			}
+			// The moved issue keeps its project — the target team joins the
+			// project's team set to uphold the team∈project invariant.
+			if err := service.EnsureProjectHasTeam(r.Context(), qtx, prevIssue.WorkspaceID, prevIssue.ProjectID, newTeamID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update project teams")
+				return
 			}
 			if err := tx.Commit(r.Context()); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to move issue to team")

@@ -82,5 +82,12 @@
     "default_cannot_archive": "默认 Team 不能归档",
     "archive_admin_only": "只有管理员可以归档 Team",
     "goto": "前往"
+  },
+  "conflict": {
+    "title": "{{team}} 不在该项目中",
+    "body": "Team {{team}} 尚未加入项目 {{project}}。可以把 Team 加入项目，或把 issue 改到项目已有的 Team。",
+    "add_team": "把 {{team}} 加入项目",
+    "project_teams": "项目的 Team",
+    "move_issue": "把 issue 改到 {{team}}"
   }
 }

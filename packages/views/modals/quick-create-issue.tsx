@@ -34,6 +34,7 @@ import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { TeamPicker } from "../teams/components/team-picker";
+import { TeamProjectConflictDialog } from "../teams/components/team-project-conflict-dialog";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -312,7 +313,27 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
+  // Linear-style interception: team ∉ project's team set pauses the submit
+  // behind a resolution dialog (see TeamProjectConflictDialog).
+  const teamProjectConflict = useMemo(() => {
+    if (!selectedProject || !effectiveTeamId) return null;
+    const ids = selectedProject.team_ids ?? [];
+    if (ids.length === 0 || ids.includes(effectiveTeamId)) return null;
+    const team = teams.find((tm) => tm.id === effectiveTeamId);
+    if (!team) return null;
+    return { team, projectTeams: teams.filter((tm) => ids.includes(tm.id)) };
+  }, [selectedProject, effectiveTeamId, teams]);
+  const [conflictOpen, setConflictOpen] = useState(false);
+
   const submit = async () => {
+    if (teamProjectConflict) {
+      setConflictOpen(true);
+      return;
+    }
+    await doSubmit(effectiveTeamId);
+  };
+
+  const doSubmit = async (finalTeamId: string | null) => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
     // Belt-and-suspenders against the multi-file upload race fixed in
@@ -334,7 +355,7 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
-        team_id: effectiveTeamId ?? undefined,
+        team_id: finalTeamId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
@@ -633,6 +654,24 @@ export function AgentCreatePanel({
             </Button>
           </div>
         </div>
+      {teamProjectConflict && (
+        <TeamProjectConflictDialog
+          open={conflictOpen}
+          teamName={teamProjectConflict.team.name}
+          projectName={selectedProject?.title ?? ""}
+          projectTeams={teamProjectConflict.projectTeams}
+          onAddTeam={() => {
+            setConflictOpen(false);
+            void doSubmit(effectiveTeamId);
+          }}
+          onMoveToTeam={(tid) => {
+            setConflictOpen(false);
+            setTeamId(tid);
+            void doSubmit(tid);
+          }}
+          onCancel={() => setConflictOpen(false)}
+        />
+      )}
     </>
   );
 }

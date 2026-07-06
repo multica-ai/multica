@@ -82,5 +82,12 @@
     "default_cannot_archive": "デフォルトチームはアーカイブできません",
     "archive_admin_only": "チームをアーカイブできるのは管理者のみです",
     "goto": "移動"
+  },
+  "conflict": {
+    "title": "{{team}} はプロジェクトに含まれていません",
+    "body": "{{team}} チームはプロジェクト {{project}} にまだ含まれていません。チームをプロジェクトに追加するか、Issue をプロジェクトのチームに移動できます。",
+    "add_team": "{{team}} をプロジェクトに追加",
+    "project_teams": "プロジェクトのチーム",
+    "move_issue": "Issue を {{team}} に移動"
   }
 }

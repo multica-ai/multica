@@ -654,19 +654,20 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	)
 	if _, ok := rawFields["team_ids"]; ok {
 		replaceTeams = true
-		// An explicit empty list clears every association: project↔team is a
-		// creation-time default, not an invariant, so a project with no teams
-		// is legal (issue creation under it falls back to the default team).
-		if len(req.TeamIDs) > 0 {
-			var msg string
-			var valid bool
-			nextTeamIDs, valid, msg = h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
-			if !valid {
-				writeError(w, http.StatusBadRequest, msg)
-				return
-			}
-		} else {
-			nextTeamIDs = []pgtype.UUID{}
+		// A project always keeps at least one team. The association is still
+		// only a creation-time default for issues, but an unanchored project
+		// would vanish from every team's Projects page — the invariant is
+		// about navigability, not ownership.
+		if len(req.TeamIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "team_ids must not be empty")
+			return
+		}
+		var msg string
+		var valid bool
+		nextTeamIDs, valid, msg = h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
+		if !valid {
+			writeError(w, http.StatusBadRequest, msg)
+			return
 		}
 	}
 
