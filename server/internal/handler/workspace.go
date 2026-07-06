@@ -263,8 +263,8 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		// A fresh default team gets a random emoji so team rows read as
 		// teams from the first render instead of the bare fallback glyph;
 		// owners change it on the team detail page.
-		Icon:        pgtype.Text{String: randomTeamIcon(), Valid: true},
-		CreatedBy:   parseUUID(userID),
+		Icon:      pgtype.Text{String: randomTeamIcon(), Valid: true},
+		CreatedBy: parseUUID(userID),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create default team: "+err.Error())
