@@ -9,6 +9,8 @@ config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = resolveRemoteApiUrl(process.env);
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
+const docsBasePath = process.env.DOCS_BASE_PATH || "/docs";
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
@@ -26,6 +28,7 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
+  ...(basePath ? { basePath, trailingSlash: true, skipTrailingSlashRedirect: true } : {}),
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
@@ -34,6 +37,22 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
   },
+  async redirects() {
+    if (!basePath) return [];
+    return [
+      {
+        source: "/",
+        destination: `${basePath}/`,
+        permanent: true,
+        basePath: false,
+      },
+      {
+        source: basePath,
+        destination: `${basePath}/`,
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     return {
       // Run before file-system routes so /docs isn't shadowed by the
@@ -41,29 +60,29 @@ const nextConfig: NextConfig = {
       beforeFiles: [
         {
           source: "/docs",
-          destination: `${docsUrl}/docs`,
+          destination: `${docsUrl}${docsBasePath}`,
         },
         {
           source: "/docs/:path*",
-          destination: `${docsUrl}/docs/:path*`,
+          destination: `${docsUrl}${docsBasePath}/:path*`,
         },
       ],
       afterFiles: [
         {
           source: "/api/:path*",
-          destination: `${remoteApiUrl}/api/:path*`,
+          destination: `${remoteApiUrl}${basePath}/api/:path*`,
         },
         {
           source: "/ws",
-          destination: `${remoteApiUrl}/ws`,
+          destination: `${remoteApiUrl}${basePath}/ws`,
         },
         {
           source: "/auth/:path*",
-          destination: `${remoteApiUrl}/auth/:path*`,
+          destination: `${remoteApiUrl}${basePath}/auth/:path*`,
         },
         {
           source: "/uploads/:path*",
-          destination: `${remoteApiUrl}/uploads/:path*`,
+          destination: `${remoteApiUrl}${basePath}/uploads/:path*`,
         },
       ],
       fallback: [],
