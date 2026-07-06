@@ -62,6 +62,7 @@ type AgentResponse struct {
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string              `json:"thinking_level"`
 	Mode          string              `json:"mode"`
+	AllowedTools  json.RawMessage     `json:"allowed_tools"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -118,6 +119,11 @@ func agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
+	var allowedTools json.RawMessage
+	if a.AllowedTools != nil {
+		allowedTools = json.RawMessage(a.AllowedTools)
+	}
+
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
@@ -130,6 +136,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		RuntimeConfig:      rc,
 		CustomArgs:         customArgs,
 		McpConfig:          mcpConfig,
+		AllowedTools:       allowedTools,
 		HasCustomEnv:       envKeyCount > 0,
 		CustomEnvKeyCount:  envKeyCount,
 		Visibility:         a.Visibility,
@@ -365,6 +372,7 @@ type TaskAgentData struct {
 	// raw so the daemon can evolve its schema without a server roundtrip.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 	Mode          string          `json:"mode,omitempty"`
+	AllowedTools  json.RawMessage `json:"allowed_tools,omitempty"`
 }
 
 // taskToResponse maps a queue row to its wire shape. workspaceID is threaded
@@ -824,6 +832,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
+	var allowedRaw []byte
+	if rawAllowed, ok := rawFields["allowed_tools"]; ok && !bytes.Equal(bytes.TrimSpace(rawAllowed), []byte("null")) {
+		allowedRaw = append([]byte(nil), rawAllowed...)
+	}
+
 	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               req.Name,
@@ -842,6 +855,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		Mode:               req.Mode,
+		AllowedTools:       allowedRaw,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1076,6 +1090,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
+	}
+	rawAllowed, hasAllowed := rawFields["allowed_tools"]
+	shouldClearAllowed := hasAllowed && bytes.Equal(bytes.TrimSpace(rawAllowed), []byte("null"))
+	if hasAllowed && !shouldClearAllowed {
+		params.AllowedTools = append([]byte(nil), rawAllowed...)
 	}
 
 	// Resolve the runtime that will be in force after this update so the
