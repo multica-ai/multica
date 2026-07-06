@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WSClient } from "./ws-client";
+import type { WSMessage } from "../types/events";
 
 // Capture URL passed to WebSocket so we can assert the connect-time
 // query string.  We don't simulate the full WS lifecycle here — only the
@@ -125,6 +126,57 @@ describe("WSClient", () => {
       { id: "issue-1" },
       undefined,
       undefined,
+    );
+  });
+
+  it("drops frames without a string type without throwing, and keeps dispatching", () => {
+    // Regression for MUL-3418: a frame whose parsed JSON lacks a string `type`
+    // (an out-of-protocol frame, or a bare JSON primitive) used to throw an
+    // uncaught TypeError out of onmessage via `msg.type.split(...)` in a
+    // downstream onAny handler, flooding `$exception` telemetry.
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const ws = new WSClient("ws://example.test/ws", { logger });
+
+    // A downstream consumer that assumes a string type, exactly like the
+    // realtime sync's onAny dispatcher.
+    const anyHandler = vi.fn((msg: WSMessage) => msg.type.split(":")[0]);
+    ws.onAny(anyHandler);
+    const issueHandler = vi.fn();
+    ws.on("issue:updated", issueHandler);
+    ws.connect();
+
+    const badFrames = [
+      JSON.stringify({ payload: {} }), // object, no type
+      "42", // bare number
+      "true", // bare bool
+      "[]", // array
+    ];
+    for (const data of badFrames) {
+      expect(() => {
+        FakeWebSocket.lastInstance!.onmessage?.({ data });
+      }).not.toThrow();
+    }
+
+    // Bad frames never reached any handler.
+    expect(anyHandler).not.toHaveBeenCalled();
+    expect(issueHandler).not.toHaveBeenCalled();
+
+    // A valid frame after the bad ones still dispatches normally.
+    FakeWebSocket.lastInstance!.onmessage?.({
+      data: JSON.stringify({ type: "issue:updated", payload: { id: "i-1" } }),
+    });
+    expect(issueHandler).toHaveBeenCalledWith({ id: "i-1" }, undefined, undefined);
+    expect(anyHandler).toHaveBeenCalledTimes(1);
+
+    // The drop is logged at most once per connection despite four bad frames.
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]?.[0]).toBe(
+      "ws: dropping frame without a string type",
     );
   });
 

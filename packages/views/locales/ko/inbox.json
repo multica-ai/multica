@@ -29,6 +29,7 @@
   },
   "types": {
     "issue_assigned": "할당됨",
+    "issue_subscribed": "구독됨",
     "unassigned": "할당 해제됨",
     "assignee_changed": "담당자 변경됨",
     "status_changed": "상태 변경됨",

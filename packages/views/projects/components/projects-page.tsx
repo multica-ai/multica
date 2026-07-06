@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type MouseEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -39,7 +39,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink } from "../../navigation";
+import { AppLink, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -130,10 +130,8 @@ function leadFilterValue(p: Project): string | null {
 // ---------------------------------------------------------------------------
 // Table (compact) view — ListGrid. Name + status are the core columns;
 // priority/progress/lead/issues/created collapse below @2xl, with min-width
-// + the wrapper's overflow as the escape valve. Rows are NOT whole-row
-// links: the name is the navigation target and the rest of the row is
-// inline-editable (status/priority/lead pickers), matching the prior
-// behaviour and avoiding navigate-vs-edit conflicts.
+// + the wrapper's overflow as the escape valve. Rows use whole-row mouse
+// navigation; inline controls stop propagation so edit/menu clicks stay local.
 // ---------------------------------------------------------------------------
 
 const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
@@ -157,6 +155,8 @@ const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
 const GRID_COLS =
   "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_116px_1.75rem_0.75rem] " +
   "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
+
+const stopRowNavigation = (e: MouseEvent) => e.stopPropagation();
 
 function columnTrackVars(
   isVisible: (key: ProjectColumnKey) => boolean,
@@ -209,8 +209,8 @@ function ProgressRing({ project }: { project: Project }) {
   );
 }
 
-// Interactive cell wrapper: the inline pickers live in a non-navigating row,
-// so they need no stopPropagation, but keep edits from bubbling oddly.
+// Compact rows own whole-row navigation; callers stop propagation around this
+// menu so action clicks do not bubble into the rowLink handler.
 function ProjectRowActions({
   project,
   pinned,
@@ -321,7 +321,11 @@ function CheckboxCell({
       <button
         type="button"
         aria-pressed={checked}
-        onClick={onToggle}
+        onClick={(e) => {
+          stopRowNavigation(e);
+          onToggle();
+        }}
+        onAuxClick={stopRowNavigation}
         className={`-m-1.5 flex items-center p-1.5 ${
           checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
         }`}
@@ -339,6 +343,8 @@ function ProjectTableRow({
   isColVisible,
   selected,
   onToggleSelect,
+  rowHref,
+  rowLink,
 }: {
   project: Project;
   pinned: boolean;
@@ -346,8 +352,9 @@ function ProjectTableRow({
   isColVisible: (key: ProjectColumnKey) => boolean;
   selected: boolean;
   onToggleSelect: () => void;
+  rowHref: string;
+  rowLink: ReturnType<typeof useRowLink>;
 }) {
-  const wsPaths = useWorkspacePaths();
   const formatRelativeDate = useFormatRelativeDate();
   const updateProject = useUpdateProject();
   const handleUpdate = useCallback(
@@ -356,25 +363,25 @@ function ProjectTableRow({
   );
 
   return (
-    <ListGridRow className={`h-11 ${selected ? "bg-accent/30" : ""}`}>
+    <ListGridRow
+      className={`h-11 cursor-pointer ${selected ? "bg-accent/30" : ""}`}
+      {...rowLink(rowHref)}
+    >
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
       <ListGridCell className="gap-2">
         <ProjectIcon project={project} size="sm" />
-        <AppLink
-          href={wsPaths.projectDetail(project.id)}
-          className="min-w-0 truncate text-sm font-medium hover:underline"
-        >
+        <span className="min-w-0 truncate text-sm font-medium">
           {project.title}
-        </AppLink>
+        </span>
       </ListGridCell>
 
       {/* status — core column, always visible */}
-      <ListGridCell>
+      <ListGridCell onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
         <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
       </ListGridCell>
 
       {isColVisible("priority") ? (
-        <ListGridCell className="hidden @2xl:flex">
+        <ListGridCell className="hidden @2xl:flex" onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
         </ListGridCell>
       ) : (
@@ -390,7 +397,7 @@ function ProjectTableRow({
       )}
 
       {isColVisible("lead") ? (
-        <ListGridCell className="hidden @2xl:flex">
+        <ListGridCell className="hidden @2xl:flex" onClick={stopRowNavigation} onAuxClick={stopRowNavigation}>
           <ProjectLeadPicker
             project={project}
             handleUpdate={handleUpdate}
@@ -433,7 +440,9 @@ function ProjectTableRow({
       )}
 
       <ListGridCell className="justify-end px-0">
-        <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
+        <span onClick={stopRowNavigation} onAuxClick={stopRowNavigation} className="flex items-center">
+          <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
+        </span>
       </ListGridCell>
     </ListGridRow>
   );
@@ -762,6 +771,8 @@ function ProjectBatchToolbar({
 export function ProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
   const { getActorName } = useActorName();
 
@@ -1205,6 +1216,8 @@ export function ProjectsPage() {
                     isColVisible={isColVisible}
                     selected={selectedIds.has(project.id)}
                     onToggleSelect={() => toggleSelected(project.id)}
+                    rowHref={wsPaths.projectDetail(project.id)}
+                    rowLink={rowLink}
                   />
                 ))}
               </ListGrid>

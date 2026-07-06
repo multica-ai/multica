@@ -343,6 +343,51 @@ func TestScanDiskUsage_RejectsPatternsWithSeparators(t *testing.T) {
 	}
 }
 
+// TestScanDiskUsageRoots_SumsAcrossRoots verifies the cross-root aggregate:
+// each root keeps its own labeled report and the grand totals are the sum of
+// every root's full scan. A missing root contributes an empty report, not an
+// error, so a never-used profile root doesn't break the aggregate.
+func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
+	t.Parallel()
+
+	rootA := t.TempDir()
+	writeFile(t, filepath.Join(rootA, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "t1", "workdir/main.go"), 100)
+
+	rootB := t.TempDir()
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t1", "workdir/big"), 300)
+	writeFile(t, filepath.Join(rootB, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "t2", "workdir/main.go"), 50)
+
+	missing := filepath.Join(t.TempDir(), "never-ran")
+
+	agg, err := ScanDiskUsageRoots([]DiskUsageRoot{
+		{Profile: "", Root: rootA},
+		{Profile: "desktop-host", Root: rootB},
+		{Profile: "never-ran", Root: missing},
+	}, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsageRoots: %v", err)
+	}
+
+	if len(agg.Roots) != 3 {
+		t.Fatalf("Roots len = %d, want 3 (missing root still listed, empty)", len(agg.Roots))
+	}
+	if agg.Roots[0].Profile != "" || agg.Roots[1].Profile != "desktop-host" {
+		t.Fatalf("root profiles not preserved in order: %+v", agg.Roots)
+	}
+	if agg.Roots[2].Report.TotalTaskCount != 0 {
+		t.Fatalf("missing root TotalTaskCount = %d, want 0", agg.Roots[2].Report.TotalTaskCount)
+	}
+	if agg.TotalTaskCount != 3 {
+		t.Fatalf("TotalTaskCount = %d, want 3 across roots", agg.TotalTaskCount)
+	}
+	if agg.TotalSizeBytes != 450 {
+		t.Fatalf("TotalSizeBytes = %d, want 450 (100 + 300 + 50)", agg.TotalSizeBytes)
+	}
+	if agg.TotalWorkspaceCount != 2 {
+		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
+	}
+}
+
 func mustWriteMeta(t *testing.T, taskDir string, meta execenv.GCMeta) {
 	t.Helper()
 	data, err := json.Marshal(meta)

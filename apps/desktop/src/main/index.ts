@@ -23,6 +23,11 @@ import {
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import {
+  writeFreezeBreadcrumb,
+  readAndClearFreezeBreadcrumb,
+  clearFreezeBreadcrumb,
+} from "./freeze-breadcrumb";
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
@@ -65,6 +70,13 @@ if (process.platform !== "win32") {
 }
 
 const PROTOCOL = "multica";
+
+// Where the main process parks a freeze/crash breadcrumb until the next
+// renderer boot flushes it to telemetry. Lives in userData so it survives a
+// force-quit. Resolved lazily — app.getPath is only valid after `ready`.
+function freezeBreadcrumbPath(): string {
+  return join(app.getPath("userData"), "last-client-failure.json");
+}
 
 let mainWindow: BrowserWindow | null = null;
 let latestRendererRouteContext: RendererRouteContext | null = null;
@@ -132,7 +144,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 13 },
+    trafficLightPosition: { x: 16, y: 17 },
     show: false,
     autoHideMenuBar: true,
     // Windows/Linux pick up the window/taskbar icon from this option.
@@ -275,6 +287,21 @@ function createWindow(): void {
         ? { desktopRoute: latestRendererRouteContext }
         : {}),
     }),
+    // Only persist in production: a true hang/crash can't report itself, so we
+    // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
+    // is excluded to keep field telemetry clean.
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
   });
 
   installContextMenu(window.webContents);
@@ -411,6 +438,14 @@ if (!gotTheLock) {
       const p = process.platform;
       const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
       event.returnValue = { version: getAppVersion(), os };
+    });
+
+    // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
+    // session. The renderer flushes it to telemetry on boot (it couldn't be
+    // reported when it happened — the renderer was hung or gone). Read-and-
+    // clear so a failure reports exactly once.
+    ipcMain.on("freeze:get-last", (event) => {
+      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer

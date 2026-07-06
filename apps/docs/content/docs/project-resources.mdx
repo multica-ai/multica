@@ -28,12 +28,15 @@ The default resource type — checked out per task into an isolated worktree:
   "resource_type": "github_repo",
   "resource_ref": {
     "url": "https://github.com/owner/repo",
+    "ref": "release/v2",
     "default_branch_hint": "main"
   }
 }
 ```
 
-`default_branch_hint` is optional — if present, the daemon surfaces it in the meta-skill so the agent knows which branch to base its work on.
+`ref` is optional — if present, `multica repo checkout <url>` uses it as the default branch, tag, or commit for tasks in this project. An explicit `multica repo checkout <url> --ref <other-ref>` still wins for that one checkout.
+
+`default_branch_hint` is optional prompt context. It is not used for checkout; use `ref` when the project should pin a branch, tag, or SHA.
 
 ## Resource type: `local_directory`
 
@@ -168,6 +171,7 @@ multica project create \
 # Manage resources later
 multica project resource list <project-id>
 multica project resource add  <project-id> --type github_repo --url <url>
+multica project resource add  <project-id> --type github_repo --url <url> --ref <branch-or-sha>
 multica project resource remove <project-id> <resource-id>
 
 # Generic escape hatch for any resource_type the server understands —
@@ -251,7 +255,7 @@ The repo list shown to the agent (`## Repositories` block in `CLAUDE.md` / `AGEN
 
 This keeps the agent's working set tight: when a project is explicit about its repos, that's the authoritative answer. The structured resource list at `.multica/project/resources.json` always carries the full set, so a skill that wants to inspect everything still can.
 
-The daemon mirrors this on the checkout side: when a task arrives with project-scoped `github_repo` URLs, those URLs are merged into the per-workspace allowlist *and* synced into the local repo cache before the agent spawns. So a project repo URL that isn't bound at the workspace level is still a valid argument to `multica repo checkout` — the daemon won't reject it as "not configured." The allowlist split is internal: workspace-bound URLs and task-scoped URLs are tracked separately, so a workspace-repos refresh doesn't accidentally revoke a project URL mid-run.
+The daemon mirrors this on the checkout side: when a task arrives with project-scoped `github_repo` URLs, those URLs are merged into the per-workspace allowlist *and* synced into the local repo cache before the agent spawns. So a project repo URL that isn't bound at the workspace level is still a valid argument to `multica repo checkout` — the daemon won't reject it as "not configured." If the project resource includes `ref`, that ref becomes the default for `multica repo checkout <url>` during that task; passing `--ref` to the checkout command overrides it. The allowlist split is internal: workspace-bound URLs and task-scoped URLs are tracked separately, so a workspace-repos refresh doesn't accidentally revoke a project URL mid-run.
 
 ## What's intentionally **not** in scope here
 

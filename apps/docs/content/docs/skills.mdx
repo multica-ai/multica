@@ -12,9 +12,15 @@ A Skill is a **knowledge pack** for an [agent](/agents) — a `SKILL.md` plus op
 Multica supports two skill sources:
 
 - **Workspace skill** — stored in Multica's cloud. Once attached to an agent, it's synced down to your daemon at task execution time. This is the **standard way to share skills across a team**.
-- **Local skill** — lives in a directory on your machine (each AI coding tool has a conventional default path, e.g. Claude Code's `~/.claude/skills/`). On your request, the [daemon](/daemon-runtimes) scans your machine, and you manually pick which ones to bring into the workspace.
+- **Local skill** — lives in a directory on your machine. On your request, the [daemon](/daemon-runtimes) scans your machine, and you manually pick which ones to bring into the workspace. The daemon checks **two roots, in priority order**: first the runtime's own skill directory (each AI coding tool has a conventional default path, e.g. Claude Code's `~/.claude/skills/`), then the cross-tool universal directory `~/.agents/skills/` — a shared location used by ecosystems like Codex and Gemini CLI. When the same skill name exists in both, the **provider-specific directory wins**, so the universal root only ever surfaces *additional* skills and never changes what an existing skill resolves to.
 
 Most of the time you want **workspace skills**: import once, every teammate's agent can use it. Local skills are a fit when you want to test locally first, or when the content involves sensitive local material.
+
+## Repository-scoped skills
+
+Repo-scoped skills are expected behavior. Some AI coding tools discover **project-level skills committed inside a repository**, such as `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. When a Multica task checks out that repository, those files remain in the workdir and the underlying tool can load them through its native discovery rules. You do **not** need to import those repo skills into Multica just to use them in that repo; Multica does **not** import them into the workspace skill registry automatically.
+
+Workspace skills still sync into the same provider-native location for tools that support project-level discovery. If a workspace skill would collide with an existing repo skill directory, Multica writes the workspace copy to a sibling name such as `review-helper-multica` instead of overwriting the repo's files. The tool may then see both skills, with the workspace copy carrying the adjusted name.
 
 ## Importing a skill
 
@@ -64,4 +70,4 @@ By now you know what an agent is, how to create one, and how to attach skills. T
 
 - [Daemon and runtimes](/daemon-runtimes) — where agents actually run, and how to tell online from offline
 - [Executing tasks](/tasks) — the full lifecycle of one "agent work session"
-- [AI coding tools comparison](/providers) — full comparison of all 12 tools (including each one's skill injection path)
+- [AI coding tools comparison](/providers) — full comparison of all 14 tools (including each one's skill injection path)

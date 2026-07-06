@@ -164,6 +164,40 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+### Stages: order sub-issues into barrier groups
+
+`--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
+stages. The parent assignee is woken **once, when a whole stage finishes** —
+i.e. every sub-issue in the lowest unfinished stage has reached a terminal
+status (`done`/`cancelled`). A completion that does not close a stage is silent
+(no comment, no wake). A sibling set with **no** stages is one implicit stage,
+so the parent is woken once when the *last* sub-issue finishes — not on every
+child.
+
+Advancement is agent-driven: the server only detects the closed barrier and
+wakes the parent assignee, who then decides whether to promote the next stage's
+`backlog` sub-issues to `todo`.
+
+```bash
+# Stage 1 runs now; later stages parked until promoted
+multica issue create --title "Research A" --parent <id> --assignee <agent> --stage 1 --status todo
+multica issue create --title "Research B" --parent <id> --assignee <agent> --stage 1 --status todo
+multica issue create --title "Build"      --parent <id> --assignee <agent> --stage 2 --status backlog
+multica issue create --title "Ship"       --parent <id> --assignee <agent> --stage 3 --status backlog
+```
+
+When both Stage 1 sub-issues finish you (the parent assignee) are woken with a
+"Stage 1 complete" comment. Inspect the layout, then promote the next stage:
+
+```bash
+multica issue children <parent-id>             # sub-issues grouped by stage
+multica issue status <stage-2-child-id> todo   # promote when its deps are met
+```
+
+Read each sub-issue's description before promoting and only promote items whose
+stated dependencies are met; if a description conflicts with the parent's
+breakdown, leave it `backlog` and comment to confirm first.
+
 ## Incorrect → correct
 
 PR title (link the issue):
@@ -173,16 +207,18 @@ Fix login redirect                  # incorrect — no issue key, won't link
 MUL-2759: fix login redirect        # correct — links the PR
 ```
 
-Serial sub-issues (don't start the whole chain):
+Serial / phased sub-issues (don't start the whole chain at once):
 
 ```bash
-# incorrect — both fire immediately
+# incorrect — all fire immediately, no ordering
 multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --status todo
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --status todo
 
-# correct — parked, promote in turn
-multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --status backlog
-multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --status backlog
+# correct — stage them; Stage 1 runs, later stages park and are promoted as
+# each stage's barrier closes
+multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --stage 1 --status todo
+multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
+multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
 
 ## References
@@ -191,4 +227,6 @@ multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --s
 contract above: the `pull-requests` CLI and route, the PR response field list,
 `derivePRState`, the two-path link (`extractIdentifiers`) vs close-intent
 (`extractClosingIdentifiers`) proof, the backlog enqueue lines, child-done
-notify, and the metadata CLI. Re-derive before depending on an exact line.
+notify, the stage column / `stageBarrierClosed` barrier and the `--stage` /
+`issue children` CLI, and the metadata CLI. Re-derive before depending on an
+exact line.

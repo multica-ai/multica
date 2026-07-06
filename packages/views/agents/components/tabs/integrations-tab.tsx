@@ -1,13 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Webhook } from "lucide-react";
+import { MessagesSquare, Webhook } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { slackInstallationsOptions } from "@multica/core/slack";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
+import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -37,6 +39,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...larkInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: slackListing } = useQuery({
+    ...slackInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -51,6 +57,30 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
+
+  const slackConfigured = slackListing?.configured === true;
+  const slackInstallSupported = slackListing?.install_supported === true;
+  const slackHasActiveInstall =
+    slackListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+
+  // Install / manage is gated on workspace owner/admin for every platform, so
+  // the role notice is hoisted above the per-platform sections — one note
+  // instead of repeating it under each integration. Members can still view
+  // connected bots in the (member-visible) Settings → Integrations listing.
+  if (!canManage) {
+    return (
+      <div className="space-y-6">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.integrations.intro)}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.integrations.members_note)}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -78,14 +108,6 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             <p className="text-xs text-muted-foreground">
               {ts(($) => $.lark.not_enabled_title)}
             </p>
-          ) : !canManage ? (
-            // The backend gates install / manage on workspace owner/admin.
-            // Members can still view connected bots in the (member-visible)
-            // Settings listing, so point them there rather than show a dead
-            // button.
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
-            </p>
           ) : !installSupported && !hasActiveInstall ? (
             // Key is set but the device-flow transport isn't wired in this
             // build — a fresh scan would fail at the post-poll bot-info step,
@@ -104,6 +126,39 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // bot: the shared button renders the scan-to-bind CTA or the
             // already-connected "Manage in Lark" badge.
             <LarkAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.slack.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.slack.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!slackConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.slack.not_enabled_title)}
+            </p>
+          ) : !slackInstallSupported && !slackHasActiveInstall ? (
+            // Secret key is set but the OAuth client credentials aren't, so a
+            // fresh "Connect Slack" would 503. Surface the "coming soon" notice
+            // instead of a broken CTA; an already-bound agent still renders.
+            <div className="space-y-1">
+              <p className="text-xs font-medium">{ts(($) => $.slack.preview_title)}</p>
+              <p className="text-xs text-muted-foreground">
+                {ts(($) => $.slack.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <SlackAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>

@@ -258,6 +258,11 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 
 // DeleteJSON performs a DELETE request.
 func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
+	return c.DeleteJSONResponse(ctx, path, nil)
+}
+
+// DeleteJSONResponse performs a DELETE request and optionally decodes the JSON response.
+func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
@@ -273,6 +278,9 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodDelete, path, resp)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
 }
@@ -519,6 +527,64 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	// S3 upload succeeded but the attachment DB record failed. The file
 	// is still usable via its URL.
 	return result.ID, result.URL, nil
+}
+
+// ImportSkillFile imports a skill from a local archive (.skill / .zip) by
+// POSTing it as multipart/form-data to /api/skills/import, alongside the
+// on_conflict strategy. The structured import result is decoded into out.
+func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filename, onConflict string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return fmt.Errorf("write file data: %w", err)
+	}
+	if onConflict != "" {
+		if err := writer.WriteField("on_conflict", onConflict); err != nil {
+			return fmt.Errorf("write on_conflict field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/skills/import", &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	// Respect a longer context deadline for slow uploads, mirroring
+	// UploadFileWithURL: the default client timeout would otherwise shadow it.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, "/api/skills/import", resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 // DownloadFile downloads a file from the given URL and returns the response body.

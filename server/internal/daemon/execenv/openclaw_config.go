@@ -130,9 +130,10 @@ type OpenclawConfigResult struct {
 // resolution to the openclaw CLI itself rather than re-implementing the
 // spec. We:
 //
-//  1. Run `openclaw config file` to find the user's active config path
-//     (handles OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, OPENCLAW_HOME, and
-//     the default location).
+//  1. Run `openclaw config file` to find the user's active config path.
+//     For OpenClaw releases whose `config` command rejects the `file`
+//     subcommand shape, fall back to resolving OpenClaw's active-config
+//     candidates, including legacy Clawdbot/Moltbot/Moldbot locations.
 //  2. Run `openclaw config get agents.list --json` to enumerate every
 //     registered agent ID with its resolved fields. The CLI parses JSON5,
 //     follows $include, and substitutes ${VAR} for us.
@@ -190,8 +191,9 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	}
 
 	var resolvedList []any
+	var agentsFromRegistry bool
 	if exists {
-		resolvedList, err = openclawResolvedAgentsList(bin, timeout)
+		resolvedList, agentsFromRegistry, err = openclawResolvedAgentsList(bin, timeout)
 		if err != nil {
 			return OpenclawConfigResult{}, fmt.Errorf("read openclaw agents.list: %w", err)
 		}
@@ -248,7 +250,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		}
 	}
 
-	cfg := buildPerTaskOpenclawConfig(activePath, exists, snapshotPath, resolvedList, workDir, managedMcp, hasManagedMcp, opts.Gateway)
+	cfg := buildPerTaskOpenclawConfig(activePath, exists, snapshotPath, resolvedList, agentsFromRegistry, workDir, managedMcp, hasManagedMcp, opts.Gateway)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -304,12 +306,22 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 // snapshot $include has already dropped the user's `mcp` block, the
 // resulting view of `mcp.servers` is exactly the managed set — including
 // `{}` for "admin saved no servers" (mirrors `hasManagedCodexMcpConfig`).
-func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath string, resolvedList []any, workDir string, managedMcp map[string]any, hasManagedMcp bool, gateway OpenclawGatewayPin) map[string]any {
+func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath string, resolvedList []any, agentsFromRegistry bool, workDir string, managedMcp map[string]any, hasManagedMcp bool, gateway OpenclawGatewayPin) map[string]any {
 	agents := map[string]any{
 		"defaults": map[string]any{"workspace": workDir},
 	}
-	if rewritten := rewriteAgentsListWorkspaces(resolvedList, workDir); rewritten != nil {
-		agents["list"] = rewritten
+	// Only write per-agent overrides back to the wrapper when they came from
+	// the config-schema `agents.list` path (pre-2026.6). A registry-sourced
+	// list (OpenClaw 2026.6.x+) is NOT valid `agents.list[]` config — the
+	// schema validator rejects it ("agents.list.0: Invalid input") and fails
+	// closed before the agent runs. 2026.6.x has no in-config path for per-
+	// agent workspace pinning, so `agents.defaults.workspace` (set above) is
+	// the only knob, and it is sufficient: OpenClaw applies it to the agent it
+	// selects from the registry (see upstream #3028, write-side half).
+	if !agentsFromRegistry {
+		if rewritten := rewriteAgentsListWorkspaces(resolvedList, workDir); rewritten != nil {
+			agents["list"] = rewritten
+		}
 	}
 	cfg := map[string]any{
 		"agents": agents,
@@ -433,9 +445,14 @@ func stripUserMcpServers(resolved map[string]any) {
 // openclawActiveConfigPath runs `openclaw config file` to discover the path
 // the openclaw CLI considers active. Returns (absolutePath, exists, error).
 //
-// The CLI handles the full resolution chain — OPENCLAW_CONFIG_PATH, the
-// state directory (OPENCLAW_STATE_DIR / OPENCLAW_HOME / default), legacy
-// migration, and `~` expansion — so we don't re-implement it here.
+// The CLI handles the full resolution chain — explicit config path, state
+// directory, OPENCLAW_HOME / default home, legacy locations, migration, and `~`
+// expansion — so we prefer it when the installed CLI supports the command.
+//
+// OpenClaw 2026.2.x briefly rejected `openclaw config file` with the generic
+// "too many arguments for 'config'" error. For that command-shape failure only,
+// fall back to the same active-config candidate shape so task prep can still
+// continue without losing upgraded users' legacy config files.
 //
 // The reported path uses `~` shorthand for the user's home; we expand it
 // so the $include reference we write is unambiguous absolute.
@@ -444,8 +461,19 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	defer cancel()
 	out, err := openclawExec(ctx, bin, "config", "file")
 	if err != nil {
+		if isOpenclawConfigFileUnsupported(err) {
+			path, exists, ferr := openclawFallbackActiveConfigPath()
+			if ferr != nil {
+				return "", false, fmt.Errorf("fallback after unsupported `openclaw config file` (%v): %w", err, ferr)
+			}
+			return path, exists, nil
+		}
 		return "", false, err
 	}
+	return openclawParseActiveConfigPath(out)
+}
+
+func openclawParseActiveConfigPath(out string) (string, bool, error) {
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
 	// the actual path. The path is always the last non-empty line.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -460,10 +488,103 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
+	var err error
+	path, err = expandOpenclawPath(path)
+	if err != nil {
+		return "", false, err
+	}
+	return openclawStatConfigPath(path)
+}
+
+func openclawFallbackActiveConfigPath() (string, bool, error) {
+	if explicitPath := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); explicitPath != "" {
+		path, err := expandOpenclawPath(explicitPath)
+		if err != nil {
+			return "", false, err
+		}
+		return openclawStatConfigPath(path)
+	}
+
+	candidates, canonicalPath, err := openclawFallbackConfigCandidates()
+	if err != nil {
+		return "", false, err
+	}
+	for _, candidate := range candidates {
+		path, err := expandOpenclawPath(candidate)
+		if err != nil {
+			return "", false, err
+		}
+		exists, err := openclawConfigPathExists(path)
+		if err != nil {
+			return "", false, err
+		}
+		if exists {
+			return path, true, nil
+		}
+	}
+	return openclawStatConfigPath(canonicalPath)
+}
+
+var openclawFallbackConfigFileNames = []string{
+	"openclaw.json",
+	"clawdbot.json",
+	"moltbot.json",
+	"moldbot.json",
+}
+
+var openclawFallbackConfigDirNames = []string{
+	".openclaw",
+	".clawdbot",
+	".moltbot",
+	".moldbot",
+}
+
+func openclawFallbackConfigCandidates() ([]string, string, error) {
+	candidates := make([]string, 0, 1+2*len(openclawFallbackConfigFileNames)+len(openclawFallbackConfigDirNames)*len(openclawFallbackConfigFileNames))
+	for _, env := range []string{"CLAWDBOT_CONFIG_PATH"} {
+		if path := strings.TrimSpace(os.Getenv(env)); path != "" {
+			candidates = append(candidates, path)
+		}
+	}
+
+	for _, env := range []string{"OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR"} {
+		if dir := strings.TrimSpace(os.Getenv(env)); dir != "" {
+			candidates = appendOpenclawConfigFileCandidates(candidates, dir)
+		}
+	}
+
+	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+	var err error
+	if home == "" {
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve openclaw home: %w", err)
+		}
+	} else {
+		home, err = expandOpenclawPath(home)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve OPENCLAW_HOME: %w", err)
+		}
+	}
+
+	for _, dirName := range openclawFallbackConfigDirNames {
+		candidates = appendOpenclawConfigFileCandidates(candidates, filepath.Join(home, dirName))
+	}
+	return candidates, filepath.Join(home, ".openclaw", "openclaw.json"), nil
+}
+
+func appendOpenclawConfigFileCandidates(candidates []string, dir string) []string {
+	for _, name := range openclawFallbackConfigFileNames {
+		candidates = append(candidates, filepath.Join(dir, name))
+	}
+	return candidates
+}
+
+func expandOpenclawPath(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, herr := os.UserHomeDir()
 		if herr != nil {
-			return "", false, fmt.Errorf("expand `~` in openclaw config path: %w", herr)
+			return "", fmt.Errorf("expand `~` in openclaw config path: %w", herr)
 		}
 		if path == "~" {
 			path = home
@@ -472,19 +593,45 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		}
 	}
 	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve openclaw config path %q: %w", path, err)
+		}
+		path = abs
+	}
+	return path, nil
+}
+
+func openclawStatConfigPath(path string) (string, bool, error) {
+	if !filepath.IsAbs(path) {
 		return "", false, fmt.Errorf("openclaw reported non-absolute config path %q", path)
 	}
+	exists, err := openclawConfigPathExists(path)
+	if err != nil {
+		return "", false, err
+	}
+	return path, exists, nil
+}
+
+func openclawConfigPathExists(path string) (bool, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return path, false, nil
+		return false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("stat openclaw config %s: %w", path, err)
+		return false, fmt.Errorf("stat openclaw config %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return "", false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
+		return false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
 	}
-	return path, true, nil
+	return true, nil
+}
+
+func isOpenclawConfigFileUnsupported(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too many arguments for 'config'") ||
+		strings.Contains(msg, "expected 0 arguments but got 1") ||
+		(strings.Contains(msg, "unknown") && strings.Contains(msg, "config") && strings.Contains(msg, "file"))
 }
 
 // openclawResolvedFullConfig fetches the user's fully resolved openclaw
@@ -516,18 +663,76 @@ func openclawResolvedFullConfig(bin string, timeout time.Duration) (map[string]a
 	return cfg, nil
 }
 
-// openclawResolvedAgentsList fetches the user's resolved agents.list via
-// `openclaw config get agents.list --json`. The CLI returns the post-
-// include, post-env-substitution view of the array, which is exactly the
-// shape we need to rewrite each entry's workspace.
+// openclawResolvedAgentsList fetches the user's resolved per-agent list and
+// reports which schema produced it. The schema matters downstream: a config-
+// sourced list is itself valid `agents.list[]` config and may be written back
+// into the wrapper to pin per-agent workspaces, whereas a registry-sourced
+// list MUST NOT be written back — see openclawRegistryAgentsList.
 //
-// Returns nil (not an error) when agents.list is unset.
-func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, error) {
+// Two schemas are supported:
+//
+//   - Pre-2026.6: agents live in the config under `agents.list`. We read them
+//     via `openclaw config get agents.list --json`, which returns the post-
+//     include, post-env-substitution array. fromRegistry=false.
+//   - 2026.6.x and later: `agents.list` is no longer a config path — agents
+//     live in a sqlite registry. `config get agents.list` exits non-zero with
+//     "Config path not found: agents.list". We fall back to the
+//     `openclaw agents list --json` *subcommand*. fromRegistry=true.
+//
+// Returns (nil, false, nil) when neither source yields any agents.
+func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := openclawExec(ctx, bin, "config", "get", "agents.list", "--json")
 	if err != nil {
 		if isOpenclawKeyMissing(err) {
+			// New schema: the config path is gone; the agents live in the
+			// sqlite registry. Resolve them via the subcommand instead.
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, true, rerr
+		}
+		return nil, false, err
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" || trimmed == "null" {
+		return nil, false, nil
+	}
+	var list []any
+	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
+		return nil, false, fmt.Errorf("parse `openclaw config get agents.list --json` output: %w", err)
+	}
+	return list, false, nil
+}
+
+// openclawRegistryAgentsList resolves agents from the sqlite-backed registry
+// via `openclaw agents list --json` (OpenClaw 2026.6.x+).
+//
+// **The result is for read-side use only — it must never be written back into
+// the wrapper as `agents.list`.** The registry entries carry CLI-only fields
+// (identityName, identitySource, agentDir, bindings, isDefault) that are NOT
+// part of the 2026.6.x config schema's `agents.list[]` shape; OpenClaw's
+// validator rejects them ("agents.list.0: Invalid input") and fails closed
+// before the agent runs. Worse, `agents.list` is no longer a valid config
+// path at all in 2026.6.x — there is no in-config way to pin a per-agent
+// workspace. The per-task workspace is instead pinned via
+// `agents.defaults.workspace` alone, which the wrapper always sets and which
+// OpenClaw applies to the agent it selects from the registry (verified on
+// 2026.6.8). Callers gate the write-back on fromRegistry from
+// openclawResolvedAgentsList.
+//
+// Returns nil (not an error) when the registry is empty or the subcommand
+// reports no agents.
+func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := openclawExec(ctx, bin, "agents", "list", "--json")
+	if err != nil {
+		// Older OpenClaw builds may lack the subcommand entirely; treat an
+		// unrecognized/missing subcommand the same as "no agents to pin"
+		// rather than failing closed, since the defaults.workspace override
+		// alone still gives correct per-task skill discovery for the common
+		// single-agent case.
+		if isOpenclawKeyMissing(err) || isOpenclawUnknownSubcommand(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -538,7 +743,7 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, error
 	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
-		return nil, fmt.Errorf("parse `openclaw config get agents.list --json` output: %w", err)
+		return nil, fmt.Errorf("parse `openclaw agents list --json` output: %w", err)
 	}
 	return list, nil
 }
@@ -635,9 +840,32 @@ func isOpenclawKeyMissing(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "No value at ") ||
+	// Match case-insensitively: the CLI's "key not found" wording has drifted
+	// across versions and capitalization is not stable. Pre-2026.6 emitted
+	// "Path not found"; OpenClaw 2026.6.x emits "Config path not found:
+	// agents.list" (lowercase "path", "Config" prefix). A case-sensitive
+	// strings.Contains on "Path not found" silently stopped matching the
+	// 2026.6.x string, turning the intended graceful-skip into a fail-closed
+	// error that broke every OpenClaw 2026.6.x runtime (see upstream #3028).
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no value at ") ||
 		strings.Contains(msg, "not set") ||
 		strings.Contains(msg, "missing key") ||
-		strings.Contains(msg, "Path not found")
+		strings.Contains(msg, "path not found")
+}
+
+// isOpenclawUnknownSubcommand returns true when the CLI error indicates the
+// invoked subcommand/option does not exist on this OpenClaw build (e.g. an
+// older release predating `openclaw agents list --json`). Used so the
+// registry fallback degrades to "no agents to pin" rather than failing
+// closed on builds that never had the subcommand.
+func isOpenclawUnknownSubcommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unknown command") ||
+		strings.Contains(msg, "unknown option") ||
+		strings.Contains(msg, "does not recognize") ||
+		strings.Contains(msg, "unknown argument")
 }

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { onInboxIssueDeleted, onInboxIssueStatusChanged } from "./ws-updaters";
+import { onInboxIssueDeleted, onInboxIssueStatusChanged, onInboxSummaryInvalidate } from "./ws-updaters";
 import { inboxKeys } from "./queries";
 import type { InboxItem } from "../types";
 
@@ -53,6 +53,28 @@ describe("onInboxIssueDeleted", () => {
     const qc = new QueryClient();
     expect(() => onInboxIssueDeleted(qc, wsId, "issue-a")).not.toThrow();
     expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
+  });
+});
+
+describe("onInboxSummaryInvalidate", () => {
+  it("invalidates the account-level summary key regardless of active workspace", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    onInboxSummaryInvalidate(qc);
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
+  });
+
+  it("does not disturb a workspace-scoped inbox list cache", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [makeItem("i1", "issue-a")]);
+
+    onInboxSummaryInvalidate(qc);
+
+    // The list cache entry is untouched (different key); only the summary
+    // query is marked stale.
+    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.id).toBe("i1");
   });
 });
 

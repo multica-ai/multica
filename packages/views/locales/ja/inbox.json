@@ -29,6 +29,7 @@
   },
   "types": {
     "issue_assigned": "割り当て済み",
+    "issue_subscribed": "購読済み",
     "unassigned": "割り当て解除",
     "assignee_changed": "担当者を変更",
     "status_changed": "ステータスを変更",

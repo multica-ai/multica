@@ -186,12 +186,51 @@ RETURNING *;
 -- parent autopilot has assignee_type='squad', NULL otherwise. The executing
 -- agent_id on agent_task_queue still records who actually ran the work
 -- (the squad leader); squad_id lets reports group by squad without a join.
+--
+-- planned_at carries the canonical UTC fire time for scheduled triggers
+-- (source='schedule'); it stays NULL for manual / webhook / api sources
+-- which have no canonical occurrence. Combined with the partial unique
+-- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
+-- idempotency: a stale-steal retry at the same plan_time cannot create
+-- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id')
+    sqlc.narg('squad_id'), sqlc.narg('planned_at')
 ) RETURNING *;
+
+-- name: GetAutopilotRunByTriggerAndPlanned :one
+-- Idempotent lookup used by DispatchAutopilotForPlan to detect a
+-- crash-during-dispatch retry: if a row already exists for this
+-- (trigger_id, planned_at), the caller reuses it instead of creating a
+-- duplicate. The partial unique index covers the same key, so a race
+-- between "look up then insert" still resolves to a single row — this
+-- query is just the fast path that lets us skip the INSERT when we
+-- can see the prior row clearly. Returns no rows for the (much more
+-- common) first-time dispatch.
+SELECT * FROM autopilot_run
+WHERE trigger_id = $1
+  AND planned_at = $2
+LIMIT 1;
+
+-- name: RecoverPartialAutopilotRun :exec
+-- Recovers a partial-state autopilot_run from a crashed first attempt
+-- (the runner wrote the run row but died before creating the downstream
+-- issue/task) so that a subsequent DispatchAutopilotForPlan call can
+-- create a fresh run at the same (trigger_id, planned_at).
+--
+-- Setting planned_at = NULL clears the partial-unique slot held by
+-- uq_autopilot_run_trigger_planned, letting the new INSERT proceed.
+-- The row stays in autopilot_run as a FAILED record (with a recovery
+-- reason) so ops still see the abandoned attempt in the run history —
+-- it is not silently deleted.
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1;
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run
@@ -252,19 +291,36 @@ RETURNING *;
 -- Scheduler Queries
 -- =====================
 
--- name: ClaimDueScheduleTriggers :many
--- Atomically claim all due schedule triggers to prevent concurrent execution.
--- Joins the autopilot table to ensure only active autopilots are fired.
-UPDATE autopilot_trigger t
-SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NOT NULL
-  AND t.next_run_at <= now()
+-- name: ListSchedulableAutopilotTriggers :many
+-- Lists every schedule trigger the autopilot_schedule_dispatch JobSpec
+-- should consider this tick. Returns just the columns the scheduler's
+-- scope provider + PlansForScope hook need; the full trigger row is
+-- re-loaded by the handler so a trigger update between scope-list and
+-- handler-run sees the latest enabled / cron values.
+--
+-- last_fired_at is read so the planner hook can anchor cold-start
+-- enumeration on the most recent successful fire (set by either the
+-- legacy goroutine before the new scheduler took over, or the new
+-- scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+-- back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
+-- a trigger that was created days ago and fired by the legacy code
+-- looks like a brand-new trigger to the new scheduler on first tick
+-- and the half-open `(created_at, now]` enumeration replays the most
+-- recent already-fired occurrence — exactly the post-deploy
+-- spurious-fire reported on MUL-3551 dev.
+--
+-- Filters out webhook / api triggers, disabled triggers, paused/archived
+-- autopilots, and any trigger missing its cron expression. ORDER BY id
+-- keeps the per-tick scope list stable across replicas.
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at, t.last_fired_at
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'schedule'
+  AND t.enabled = TRUE
   AND a.status = 'active'
-RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
+  AND t.cron_expression IS NOT NULL
+  AND t.cron_expression <> ''
+ORDER BY t.id;
 
 -- =====================
 -- Task Queue (run_only mode)
@@ -291,23 +347,6 @@ UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
 WHERE issue_id = $1
   AND status IN ('issue_created', 'running');
-
--- =====================
--- Scheduler Recovery
--- =====================
-
--- name: RecoverLostTriggers :many
--- Finds schedule triggers that were claimed (next_run_at = NULL) but never
--- advanced — typically due to a scheduler crash. Returns them so the scheduler
--- can recompute next_run_at.
-SELECT t.*, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON t.autopilot_id = a.id
-WHERE t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NULL
-  AND t.cron_expression IS NOT NULL
-  AND a.status = 'active';
 
 -- =====================
 -- Failure-rate auto-pause
@@ -353,3 +392,63 @@ UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING *;
+
+-- =====================
+-- Autopilot Subscribers
+-- =====================
+
+-- name: ListAutopilotSubscribers :many
+-- ORDER BY created_at keeps chip rendering stable across refreshes.
+SELECT * FROM autopilot_subscriber
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC;
+
+-- name: AddAutopilotSubscriber :exec
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
+
+-- name: DeleteAutopilotSubscribersForAutopilot :exec
+-- Paired with a re-insert loop to implement full-replace PATCH semantics.
+DELETE FROM autopilot_subscriber
+WHERE autopilot_id = $1;
+
+-- =====================
+-- Autopilot Collaborators
+-- =====================
+
+-- name: ListAutopilotCollaborators :many
+-- ORDER BY created_at keeps row rendering stable across refreshes.
+SELECT * FROM autopilot_collaborator
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC;
+
+-- name: AddAutopilotCollaborator :one
+-- Re-granting an existing collaborator is a no-op that refreshes granted_by,
+-- so the call is idempotent from the API boundary.
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (autopilot_id, user_type, user_id)
+    DO UPDATE SET granted_by = EXCLUDED.granted_by
+RETURNING *;
+
+-- name: DeleteAutopilotCollaborator :exec
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1 AND user_type = $2 AND user_id = $3;
+
+-- name: DeleteAutopilotCollaboratorsForAutopilot :exec
+-- Application-layer cleanup run inside the autopilot delete transaction.
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1;
+
+-- name: IsAutopilotCollaborator :one
+SELECT EXISTS (
+    SELECT 1 FROM autopilot_collaborator
+    WHERE autopilot_id = $1 AND user_type = 'member' AND user_id = $2
+) AS is_collaborator;
+
+-- name: ListAutopilotIDsForCollaborator :many
+-- Powers the per-row can_write flag on the list endpoint without an N+1.
+SELECT autopilot_id FROM autopilot_collaborator
+WHERE user_type = 'member' AND user_id = $1;
+

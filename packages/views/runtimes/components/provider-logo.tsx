@@ -10,6 +10,52 @@ function ClaudeLogo({ className }: { className: string }) {
   );
 }
 
+// Tencent CodeBuddy — official mark from the @tencent-ai/codebuddy-code CLI
+// package (dist/web-ui/logo.svg), the same CLI this runtime spawns. Dark
+// rounded tile + white "claw" glyph. The artwork overflows the 24×24 box and
+// is cropped by a clipPath; the clip id is per-instance (useId) so multiple
+// logos on one page don't collide on a shared id.
+function CodeBuddyLogo({ className }: { className: string }) {
+  const clipId = `codebuddy-logo-clip-${useId().replace(/:/g, "")}`;
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <g clipPath={`url(#${clipId})`}>
+        <rect width="24" height="24" rx="5.17895" fill="#191A23" />
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M18.3558 1.87667C18.5907 1.666 18.6047 1.65742 18.7769 1.64707C19.0564 1.62665 19.3132 1.76029 19.749 2.15706C20.7674 3.08246 22.1851 4.98576 23.0667 6.61049L23.4069 7.24066L23.8889 7.47992C24.3535 7.71467 25.1155 8.19627 25.4337 8.45431C25.5772 8.57302 25.5976 8.57504 25.7472 8.51687C26.4225 8.25409 27.3897 8.60307 28.2428 9.42149C29.011 10.1577 29.7468 11.4159 30.0286 12.4657C30.0698 12.6348 30.1247 12.9979 30.1446 13.2682C30.2089 14.2179 29.904 14.9765 29.3175 15.3199C29.1976 15.3891 29.189 15.4079 29.1924 15.7068C29.2194 17.1293 28.8365 18.5491 28.0662 19.9338C27.1967 21.4886 25.6481 23.097 23.5527 24.6123C22.4273 25.4312 19.7654 26.982 18.5618 27.5265C15.6785 28.8246 13.367 29.3226 11.3592 29.0767C10.1618 28.9316 8.80631 28.4643 8.00415 27.9217C7.79297 27.7758 7.75862 27.7666 7.59727 27.8127C6.73865 28.0591 5.61445 27.5518 4.65922 26.4914C4.27824 26.0674 3.66368 25.0274 3.46425 24.4705C3.00307 23.167 3.09427 21.9907 3.70857 21.2882C3.86727 21.1073 3.87248 21.0995 3.8378 20.7953C3.78057 20.2973 3.75451 19.5606 3.78064 19.0849L3.80119 18.6401L3.13361 17.4603C2.10069 15.6224 1.44471 14.0785 1.19159 12.8994C1.05803 12.253 1.06635 11.966 1.23046 11.7538C1.33035 11.6257 1.6579 11.493 2.05265 11.4201C3.04693 11.2455 5.2159 11.4037 7.62846 11.8296L7.87915 11.8732L8.43005 11.386C9.34424 10.5762 9.95159 10.1217 11.0713 9.42358C12.2382 8.69349 13.5553 8.09254 15.0383 7.61696L15.5144 7.465L15.7755 6.77862C16.7121 4.30622 17.6719 2.48301 18.3558 1.87667ZM10.5102 14.5456C9.4521 15.1565 8.92313 15.4625 8.53428 15.8048C6.95941 17.1916 6.37074 19.3885 7.04122 21.377C7.20679 21.8679 7.5119 22.3973 8.12283 23.4554C8.73397 24.514 9.04008 25.0433 9.38253 25.4322C10.7693 27.0071 12.9663 27.5958 14.9547 26.9253C15.4456 26.7597 15.9746 26.4537 17.0327 25.8428L23.1219 22.3272C24.1804 21.7161 24.7103 21.4108 25.0992 21.0683C26.674 19.6816 27.2627 17.4846 26.5922 15.4962C26.4267 15.0052 26.1204 14.4758 25.5093 13.4173C24.8984 12.3593 24.5933 11.8298 24.2509 11.4409C22.8642 9.86609 20.6672 9.27746 18.6788 9.94787C18.1878 10.1134 17.658 10.4188 16.5995 11.03L10.5102 14.5456Z"
+          fill="white"
+        />
+        <rect
+          x="11.0972"
+          y="18.8006"
+          width="2.40542"
+          height="4.99588"
+          rx="1.20271"
+          transform="rotate(-30 11.0972 18.8006)"
+          fill="white"
+        />
+        <rect
+          x="17.5869"
+          y="15.0537"
+          width="2.40542"
+          height="4.99588"
+          rx="1.20271"
+          transform="rotate(-30 17.5869 15.0537)"
+          fill="white"
+        />
+      </g>
+      <defs>
+        <clipPath id={clipId}>
+          <rect width="24" height="24" rx="5.17895" fill="white" />
+        </clipPath>
+      </defs>
+    </svg>
+  );
+}
+
 // Codex (OpenAI) — official mark, sourced from Bootstrap Icons (bi-openai)
 function CodexLogo({ className }: { className: string }) {
   return (
@@ -126,14 +172,23 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
-// Gemini (Google) — official "Google Gemini" mark from Simple Icons
-// (simpleicons.org/icons/googlegemini.svg, CC0 1.0). Rendered in the
-// Simple Icons brand color (#8E75B2), matching the pattern used by the
-// other provider marks in this file.
-function GeminiLogo({ className }: { className: string }) {
+// Qoder (QoderCLI) — official logo from qoder-color.svg
+function QoderLogo({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="#8E75B2" className={className}>
-      <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <path
+        d="M23.376 14.458v-4.056c0-2.304-1.003-4.154-2.748-5.075L11.612.574l-.046.086-.045.086c1.68.886 2.644 2.673 2.644 4.902v4.056a7.928 7.928 0 01-.014.454l-.005.061c-.005.081-.01.164-.018.245a4.897 4.897 0 01-.011.1l-.01.076c-.008.068-.015.135-.025.203l-.018.113-.01.058a9.99 9.99 0 01-.098.513l-.007.03a7.209 7.209 0 01-.074.294l-.024.086c-.027.099-.056.197-.087.296l-.027.085a9.592 9.592 0 01-.111.323l-.033.085-.018.046c-.032.082-.064.166-.098.248-.019.048-.04.096-.061.145l-.007.017a6 6 0 01-.084.187c-.024.056-.05.11-.077.165-.03.061-.058.122-.089.182a9.423 9.423 0 01-.176.332c-.03.056-.062.111-.094.167-.031.053-.062.108-.095.16-.033.055-.066.11-.101.164-.033.053-.065.104-.1.155-.034.055-.07.107-.111.169l-.099.144a15.193 15.193 0 01-.34.457c-.04.05-.08.102-.121.151l-.107.128-.007.008a6.987 6.987 0 01-.262.298l-.149.16-.116.12a9.562 9.562 0 01-.204.198l-.03.03-.072.069a9.05 9.05 0 01-.263.235l-.025.022-.029.026-.042.035a11.7 11.7 0 01-.22.18l-.07.055-.018.013a8.904 8.904 0 01-.194.146c-.029.02-.057.042-.086.063a7.7 7.7 0 01-.22.152l-.057.04a8.865 8.865 0 01-.293.185l-.062.037a10.424 10.424 0 01-.307.173l-.037.02-.196.103-.108.052-.012.006a6.196 6.196 0 01-.315.143c-.065.028-.13.054-.196.08l-.035.014-.086.034c-.07.026-.143.05-.215.075l-.039.014-.064.023a8.056 8.056 0 01-.323.097l-.63.173a7.285 7.285 0 01-.33.08l-.07.015c-.053.012-.104.023-.157.032l-.065.011-.085.015a2.332 2.332 0 01-.194.027l-.085.01a4.715 4.715 0 01-.16.018l-.034.003a4.861 4.861 0 01-.246.016h-.033a2.714 2.714 0 01-.155.005h-.106a3.384 3.384 0 01-.225-.007H4.86l-.15-.012-.066-.006a5.586 5.586 0 01-.187-.02l-.04-.005a5.14 5.14 0 01-.219-.035l-.054-.01a6.943 6.943 0 01-.347-.082l-.03-.008-.038-.01a5.034 5.034 0 01-.269-.086l-.063-.023a4.216 4.216 0 01-.188-.073l-.071-.031-.016-.007a4.959 4.959 0 01-.16-.074l-.026-.013a.164.164 0 00-.014-.007l-.671-.351.486.486h.016l8.995 4.742.093.048.03.014.02.01c.056.026.111.052.169.076l.016.008.073.032.195.076.022.008a.718.718 0 01.03.012l.014.004a4.693 4.693 0 00.323.1l.027.007c.073.02.147.038.22.055l.018.004.027.006.066.013.088.016c.075.014.15.026.226.038l.042.004c.064.009.128.016.193.022l.126.012.06.003.05.002.098.005c.046.002.094.002.14.003h.12c.05 0 .1-.002.161-.005h.033l.07-.004a6.17 6.17 0 00.184-.014l.033-.003a.753.753 0 00.058-.005l.108-.012.081-.01.08-.01.129-.021.082-.014.071-.012c.054-.01.107-.021.16-.033l.066-.013.059-.013c.096-.022.192-.046.287-.073l.63-.172a7.354 7.354 0 00.397-.122l.04-.015c.075-.025.149-.051.222-.078.032-.011.062-.024.093-.037l.03-.012c.067-.027.135-.054.2-.082l.128-.056.195-.09.021-.01.102-.05c.068-.034.135-.069.202-.105l.037-.02.073-.038c.08-.044.16-.092.24-.139l.026-.015a8.086 8.086 0 00.322-.2l.065-.045 1.98.902a1.748 1.748 0 002.472-1.59v-7.33l.004.004z"
+        fill="#2ADB5C"
+      />
+      <path
+        d="M11.617.576a3.904 3.904 0 00-.093-.047c-.016-.009-.033-.016-.05-.024a5.854 5.854 0 00-.166-.077l-.09-.04a4.094 4.094 0 00-.194-.074c-.017-.006-.035-.015-.053-.02l-.013-.005a5.18 5.18 0 00-.277-.088l-.07-.019a4.034 4.034 0 00-.219-.053c-.015-.003-.03-.008-.044-.012L10.253.1l-.057-.011a5.177 5.177 0 00-.225-.036L9.928.047a5.972 5.972 0 00-.191-.022L9.669.02a1.33 1.33 0 00-.058-.005L9.515.009a4.058 4.058 0 00-.111-.005C9.354 0 9.304 0 9.254 0h-.109c-.052 0-.106.004-.16.004L8.884.01A5.32 5.32 0 008.7.022l-.083.006h-.008c-.05.005-.1.013-.15.019l-.12.014c-.056.008-.112.018-.169.028-.037.006-.074.011-.11.018a7.054 7.054 0 00-.572.133l-.63.172c-.111.031-.22.064-.33.1-.037.011-.072.025-.108.037a12.91 12.91 0 00-.345.126c-.067.027-.133.054-.2.083l-.128.055a11.916 11.916 0 00-.318.15 7.376 7.376 0 00-.311.163c-.082.045-.16.092-.24.14a9.424 9.424 0 00-.35.218l-.016.01-.06.04a9.242 9.242 0 00-.51.37 12.54 12.54 0 00-.315.254l-.043.034-.01.007-.045.041c-.09.078-.18.158-.268.24l-.106.101c-.07.067-.139.135-.207.204l-.056.054-.063.067-.153.164-.12.133-.148.17c-.024.03-.049.057-.073.086l-.043.053a5.96 5.96 0 00-.123.155l-.118.151c-.04.053-.08.106-.118.16l-.075.101-.038.056-.107.155-.11.164a9.91 9.91 0 00-.168.265c-.012.02-.023.043-.037.063a12.43 12.43 0 00-.192.335l-.09.168c-.019.034-.04.07-.057.105-.011.022-.02.043-.032.065l-.092.188-.08.167a19.15 19.15 0 00-.083.192c-.017.038-.035.076-.05.115-.008.016-.014.034-.021.051-.035.083-.067.167-.1.253l-.051.134c-.04.11-.077.22-.113.33l-.02.057c0 .002 0 .005-.002.007l-.008.026c-.032.1-.06.2-.09.301l-.023.089c-.027.1-.052.2-.075.301l-.007.03a7.63 7.63 0 00-.057.267l-.008.048c-.015.074-.026.148-.038.223L.082 8.4c-.011.078-.02.156-.029.234-.006.051-.013.103-.017.154a6.57 6.57 0 00-.02.26c-.003.044-.007.086-.009.13-.004.128-.007.257-.007.386v4.056c0 1.478.42 2.741 1.138 3.692A4.75 4.75 0 002.73 18.67l9.015 4.753c-1.656-.874-2.728-2.685-2.73-5.051v-4.056c0-.13.004-.26.01-.39.002-.043.006-.085.01-.128.005-.088.01-.174.019-.261l.017-.155c.01-.077.018-.155.029-.234l.026-.164c.013-.074.025-.15.039-.223.02-.105.04-.21.064-.313l.008-.031c.023-.1.048-.201.075-.301l.023-.088c.028-.1.058-.202.09-.302l.008-.025.021-.063c.036-.11.073-.22.113-.33l.052-.134c.031-.085.065-.169.1-.253.022-.056.047-.111.07-.166a13.856 13.856 0 01.164-.358c.03-.063.06-.126.092-.188l.088-.172a9.22 9.22 0 01.187-.338l.096-.164c.034-.057.069-.112.104-.168l.1-.159a10.49 10.49 0 01.567-.786l.123-.155.116-.139c.05-.057.098-.115.148-.171a14.092 14.092 0 01.272-.297 9.706 9.706 0 01.432-.425c.088-.083.177-.163.268-.241l.054-.048a10.08 10.08 0 01.553-.435l.092-.068c.075-.053.15-.105.226-.156.019-.013.038-.028.06-.04a9.18 9.18 0 01.362-.227c.08-.047.16-.094.241-.139l.11-.058a7.643 7.643 0 01.521-.256l.126-.056a7.509 7.509 0 01.546-.208l.107-.037c.11-.036.22-.069.33-.1l.63-.172c.095-.026.191-.05.287-.072l.097-.02c.062-.014.125-.029.187-.04l.114-.018c.055-.01.11-.02.166-.028.04-.006.08-.01.12-.014.053-.007.105-.014.157-.019l.083-.006c.061-.005.123-.01.184-.013.034-.003.067-.003.101-.004l.16-.006h.11a3.187 3.187 0 01.261.008l.153.01.067.007c.064.006.128.013.192.022l.043.005a5.232 5.232 0 01.281.047l.141.03c.073.016.146.035.218.053l.07.019c.094.026.187.055.278.087l.067.025a4.326 4.326 0 01.449.19l.143.072L11.617.576z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -192,6 +247,17 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Trae (ByteDance) — official mark, recreated from the official Trae icon and
+// recolored to brand green on transparent. Embedded as a data URI (same
+// approach as the Hermes logo) so the exact official artwork is used rather
+// than a hand-drawn approximation.
+const TRAE_ICON =
+  "data:image/png;base64,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";
+
+function TraeLogo({ className }: { className: string }) {
+  return <img src={TRAE_ICON} alt="Trae" className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -203,7 +269,7 @@ export function ProviderLogo({
     case "claude":
       return <ClaudeLogo className={className} />;
     case "codebuddy":
-      return <ClaudeLogo className={className} />;
+      return <CodeBuddyLogo className={className} />;
     case "codex":
       return <CodexLogo className={className} />;
     case "opencode":
@@ -222,10 +288,12 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
-    case "gemini":
-      return <GeminiLogo className={className} />;
+    case "qoder":
+      return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "traecli":
+      return <TraeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

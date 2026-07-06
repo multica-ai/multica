@@ -28,19 +28,40 @@ grep -n "func IsReservedContentPath"    server/internal/skill/reserved.go
 | Legacy success: `201 Created` with bare `SkillWithFilesResponse` when `on_conflict` was omitted | `server/internal/handler/skill.go:1990` |
 | Route registration `r.Post("/import", h.ImportSkill)` | `server/cmd/server/router.go:874` |
 
-## CLI: `multica skill import --url`
+Note: `ImportSkill` now branches on content type. A multipart body routes to the
+archive path (below); a JSON body keeps the URL flow. Both converge on the shared
+`finishSkillImport` tail. Line numbers in this table predate that split — re-grep
+`func (h *Handler) ImportSkill` / `finishSkillImport` to re-derive.
+
+## Local archive import (`.skill` / `.zip`)
 
 | Behavior | File:line |
 |---|---|
-| `skill import` command def | `server/cmd/multica/cmd_skill.go:60-64` |
-| `--url` flag | `server/cmd/multica/cmd_skill.go:142` |
-| `--on-conflict` flag (default `fail`) | `server/cmd/multica/cmd_skill.go:143` |
-| `--output` flag (default `json`) | `server/cmd/multica/cmd_skill.go:144` |
+| `ImportSkill` branches to the archive path on multipart bodies | `server/internal/handler/skill.go:1924` (`if isMultipartForm(r)`) |
+| Shared create + conflict tail `finishSkillImport` (URL and archive) | `server/internal/handler/skill.go:1974` |
+| `isMultipartForm` content-type check | `server/internal/handler/skill_import_archive.go:26` |
+| `importSkillFromArchive` (multipart parse + `MaxBytesReader` + `on_conflict` + `file`) | `server/internal/handler/skill_import_archive.go:36` |
+| Upload cap `maxImportArchiveUploadSize` (16 MiB compressed) | `server/internal/handler/skill_import_archive.go:22` |
+| `parseSkillArchive` (zip decode, shallowest-`SKILL.md` root, frontmatter name, zip-slip + reserved + ignore filters) | `server/internal/handler/skill_import_archive.go:95` |
+| Reuses per-file / per-bundle / count caps via `importedSkill.addFile` | `server/internal/handler/skill.go:618` (`maxImportFileSize`/`maxImportTotalSize`/`maxImportFileCount` at `:579-583`) |
+| Name fallback (wrapper dir, then filename) | `server/internal/handler/skill_import_archive.go:201` |
+| Ignore filter (dotfiles, `__MACOSX`, license) | `server/internal/handler/skill_import_archive.go:218` |
+| Per-entry size-capped read | `server/internal/handler/skill_import_archive.go:234` |
+| Tests (parser units + handler multipart create/skip/reject) | `server/internal/handler/skill_import_archive_test.go` |
+
+## CLI: `multica skill import --url` / `--file`
+
+| Behavior | File:line |
+|---|---|
+| `skill import` command def | `server/cmd/multica/cmd_skill.go:59-63` |
+| `--url` flag | `server/cmd/multica/cmd_skill.go:143` |
+| `--file` flag (local `.skill` / `.zip`; mutually exclusive with `--url`) | `server/cmd/multica/cmd_skill.go:144` |
+| `--on-conflict` flag (default `fail`) | `server/cmd/multica/cmd_skill.go:145` |
+| `--output` flag (default `json`) | `server/cmd/multica/cmd_skill.go:146` |
 | `runSkillImport` | `server/cmd/multica/cmd_skill.go:412` |
-| Requires `--url` | `server/cmd/multica/cmd_skill.go:418-421` |
-| Reads and validates `--on-conflict` | `server/cmd/multica/cmd_skill.go:422-425` |
-| Sends `on_conflict` in the request body | `server/cmd/multica/cmd_skill.go:428-431` |
-| `POST /api/skills/import` | `server/cmd/multica/cmd_skill.go:436` |
+| Requires exactly one of `--url` / `--file` | `server/cmd/multica/cmd_skill.go:420-427` |
+| `--file` reads the archive and posts multipart via `ImportSkillFile` | `server/cmd/multica/cmd_skill.go:436-447`, client method `server/internal/cli/client.go:535` |
+| `POST /api/skills/import` (URL, JSON body) | `server/cmd/multica/cmd_skill.go:455` |
 | Structured HTTP error body handling | `server/cmd/multica/cmd_skill.go:437-440`, `handleSkillImportError` at `:454` |
 | Prints structured result (`json` or table) | `server/cmd/multica/cmd_skill.go:443`, helper at `:497` |
 

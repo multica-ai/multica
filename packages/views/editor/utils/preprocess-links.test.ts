@@ -93,3 +93,46 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
     );
   });
 });
+
+// The bug (#4222): an agent mentions a project file like `plan.md` in a comment.
+// linkify-it fuzzy-matches it as the domain `plan.md` (md is Moldova's ccTLD) and
+// turns it into a clickable https://plan.md link that goes nowhere. Bare filename
+// tokens must stay plain text — only an explicit scheme makes them a link.
+describe("preprocessLinks — bare filenames are not auto-linked as URLs", () => {
+  it("leaves a bare .md filename in CJK prose as plain text", () => {
+    const out = preprocessLinks("决策已锁定，plan.md 已更新");
+    expect(out).toBe("决策已锁定，plan.md 已更新");
+  });
+
+  it("leaves README.md as plain text", () => {
+    expect(preprocessLinks("see README.md for details")).toBe("see README.md for details");
+  });
+
+  it("leaves other extensions that collide with TLDs (sh, rs, py) as plain text", () => {
+    expect(preprocessLinks("run build.sh then main.rs and app.py")).toBe(
+      "run build.sh then main.rs and app.py",
+    );
+  });
+
+  it("honors an explicit scheme on a filename-shaped host", () => {
+    expect(preprocessLinks("open https://plan.md now")).toBe(
+      "open [https://plan.md](https://plan.md) now",
+    );
+  });
+
+  it("still linkifies real fuzzy domains whose TLD is not a file extension", () => {
+    expect(preprocessLinks("官网 NBA.com")).toBe("官网 [NBA.com](http://NBA.com)");
+  });
+
+  it("suppresses the bare filename but still linkifies a real domain after it", () => {
+    expect(preprocessLinks("plan.md，example.com")).toBe(
+      "plan.md，[example.com](http://example.com)",
+    );
+  });
+
+  it("still detects explicit ./ file paths (FILE_PATH_REGEX regression)", () => {
+    expect(preprocessLinks("see ./src/main.go here")).toBe(
+      "see [./src/main.go](./src/main.go) here",
+    );
+  });
+});

@@ -11,6 +11,7 @@ import type { Metadata } from "next";
 import { docsAlternates } from "@/lib/site";
 import { i18n, type Lang } from "@/lib/i18n";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
+import { VideoEmbed } from "@/components/video-embed";
 import { docsSlugStaticParams } from "@/lib/static-params";
 
 function asLang(lang: string): Lang {
@@ -35,7 +36,9 @@ export default async function Page(props: {
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
         <DocsLocaleProvider lang={lang}>
-          <MDX components={{ ...defaultMdxComponents, a: LocaleLink }} />
+          <MDX
+            components={{ ...defaultMdxComponents, a: LocaleLink, VideoEmbed }}
+          />
         </DocsLocaleProvider>
       </DocsBody>
     </DocsPage>

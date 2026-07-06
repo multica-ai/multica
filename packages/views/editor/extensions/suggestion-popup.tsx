@@ -6,6 +6,32 @@ import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
 
+/**
+ * Keys that accept the currently highlighted suggestion row.
+ *
+ * `Enter` is the canonical accept (WAI-ARIA combobox guidance). Plain `Tab` is
+ * an additive convenience that matches terminal / CLI / editor completion
+ * muscle memory (MUL-3685). `Shift+Tab` and any `Ctrl/Cmd/Alt + Tab` are
+ * deliberately NOT accept keys: they stay reverse focus navigation / OS window
+ * switching, so standard keyboard accessibility is preserved.
+ *
+ * Centralizing the rule here keeps every picker built on
+ * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
+ * future suggestion list) consistent instead of each list re-deciding what
+ * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
+ * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.
+ */
+export function isPickerAcceptKey(event: KeyboardEvent): boolean {
+  if (event.key === "Enter") return true;
+  return (
+    event.key === "Tab" &&
+    !event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey
+  );
+}
+
 interface SuggestionPopupRenderOptions<
   TItem,
   TSelected = TItem,

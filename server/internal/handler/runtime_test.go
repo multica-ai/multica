@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
@@ -199,6 +200,86 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	// when ?days=N is interpreted as a rolling window instead of calendar days.
 	if byDate[yesterdayKey] != 2000 {
 		t.Errorf("yesterday morning task: yesterday bucket expected 2000 input tokens, got %d (full map: %v)", byDate[yesterdayKey], byDate)
+	}
+}
+
+// TestListRuntimeUsageByAgent_MergesMixedCaseProvider proves the by-agent
+// query folds historical mixed-case provider rows (written before the handler
+// lowercased provider on write) into a single lowercased bucket via the
+// query's LOWER(provider) normalization, instead of splitting them.
+func TestListRuntimeUsageByAgent_MergesMixedCaseProvider(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		VALUES ($1, 'mixed-case provider test', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	now := time.Now().UTC()
+	// Two tasks for the same agent/model under this runtime, reporting the
+	// same provider in different casing — 'Cursor' (legacy) and 'cursor' (new).
+	insert := func(provider string, input int64) {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+			VALUES ($1, $2, $3, 'completed', $4)
+			RETURNING id
+		`, agentID, issueID, runtimeID, now).Scan(&taskID); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+			VALUES ($1, $2, 'mixed-case-model', $3, 0, $4)
+		`, taskID, provider, input, now); err != nil {
+			t.Fatalf("insert task_usage: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	}
+	insert("Cursor", 1000)
+	insert("cursor", 500)
+
+	rows, err := testHandler.Queries.ListRuntimeUsageByAgent(ctx, db.ListRuntimeUsageByAgentParams{
+		RuntimeID: parseUUID(runtimeID),
+		Since:     pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("ListRuntimeUsageByAgent: %v", err)
+	}
+
+	var got []db.ListRuntimeUsageByAgentRow
+	for _, r := range rows {
+		if r.Model == "mixed-case-model" {
+			got = append(got, r)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected mixed-case providers to merge into 1 row, got %d: %+v", len(got), got)
+	}
+	if got[0].Provider != "cursor" {
+		t.Errorf("expected merged provider 'cursor', got %q", got[0].Provider)
+	}
+	if got[0].InputTokens != 1500 {
+		t.Errorf("expected merged input_tokens 1500, got %d", got[0].InputTokens)
 	}
 }
 

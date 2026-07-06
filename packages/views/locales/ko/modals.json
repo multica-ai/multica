@@ -50,8 +50,26 @@
     "toast_failed": "하위 이슈를 추가하지 못했습니다",
     "toast_success": "{{identifier}}을(를) 하위 이슈로 추가했습니다"
   },
-  "backlog_hint": {
-    "toast_status_failed": "상태를 업데이트하지 못했습니다"
+  "run_confirm": {
+    "title_assign": "할당하고 시작할까요?",
+    "title_status": "지금 작업을 시작할까요?",
+    "checking": "확인 중…",
+    "will_start_named": "할당하면 {{name}}이(가) 이 이슈 작업을 바로 시작합니다.",
+    "will_start_named_squad": "할당하면 {{name}}의 리더가 내용을 평가한 뒤 작업 배분을 시작합니다.",
+    "will_start": "{{count}}개 이슈의 작업을 바로 시작합니다.",
+    "will_start_squad": "{{count}}개 이슈를 스쿼드 리더에게 넘겨 평가하고 배분합니다.",
+    "nothing_assign": "할당됨 — 백로그에서는 작업을 시작하지 않습니다.",
+    "nothing_status": "작업을 시작하지 않습니다.",
+    "note_label": "인계 메모 (선택)",
+    "note_placeholder": "범위·핵심·건드리지 말 것 등을 한마디로…",
+    "note_unsupported": "상대 런타임이 오래되어 이 인계 메모를 읽지 못할 수 있습니다.",
+    "start": "시작",
+    "dont_start": "아직 시작 안 함",
+    "apply": "적용",
+    "toast_failed": "작업에 실패했습니다",
+    "create_will_start": "생성 후 {{name}}이(가) 바로 작업을 시작합니다.",
+    "create_will_start_squad": "생성 후 {{name}}의 리더가 내용을 평가한 뒤 작업 배분을 시작합니다.",
+    "create_parked": "할당됨 — 백로그에서는 작업을 시작하지 않습니다."
   },
   "create_squad": {
     "title": "스쿼드 만들기",
@@ -67,7 +85,6 @@
     "members_optional": "(선택 사항)",
     "members_hint": "리더가 하위 작업을 위임할 수 있는 멤버입니다. 나중에 추가할 수 있습니다.",
     "members_placeholder": "에이전트 또는 워크스페이스 멤버 추가",
-    "members_selected_count_one": "{{count}}개 선택됨",
     "members_selected_count_other": "{{count}}개 선택됨",
     "members_more_count": "+{{count}}",
     "members_remove_aria": "{{name}} 제거",
@@ -90,6 +107,7 @@
     "icon_tooltip": "아이콘 선택",
     "title_placeholder": "프로젝트 제목",
     "description_placeholder": "설명 추가...",
+    "description_hint": "이 프로젝트의 모든 작업에서 컨텍스트로 에이전트에게 공유됩니다.",
     "lead": "리드",
     "no_lead": "리드 없음",
     "lead_placeholder": "리드 지정...",
@@ -101,7 +119,6 @@
     "toast_created": "프로젝트를 만들었습니다",
     "toast_failed": "프로젝트를 만들지 못했습니다",
     "repos_pill": "저장소",
-    "repos_pill_count_one": "저장소 {{count}}개",
     "repos_pill_count_other": "저장소 {{count}}개",
     "repos_heading": "이 프로젝트에 GitHub 저장소 연결",
     "repos_empty": "아직 워크스페이스 수준 저장소가 없습니다. 아래에 URL을 붙여 넣어 임시로 연결하세요.",

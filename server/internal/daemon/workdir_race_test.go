@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -95,9 +96,9 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	expectedWorkDir := filepath.Join(expectedEnvRoot, "workdir")
 
 	var (
-		startCalled    atomic.Bool
-		workdirOnDisk  atomic.Bool
-		envRootOnDisk  atomic.Bool
+		startCalled   atomic.Bool
+		workdirOnDisk atomic.Bool
+		envRootOnDisk atomic.Bool
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +157,81 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	}
 }
 
+func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
+	oldRefresh := taskPrepareLeaseRefresh
+	oldTimeout := taskPrepareLeaseTimeout
+	taskPrepareLeaseRefresh = 10 * time.Millisecond
+	taskPrepareLeaseTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		taskPrepareLeaseRefresh = oldRefresh
+		taskPrepareLeaseTimeout = oldTimeout
+	})
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-runtask-start-lease"
+	taskID := "task-runtask-start-lease"
+	var (
+		startEntered     atomic.Bool
+		leaseDuringStart atomic.Bool
+		closeLeaseOnce   sync.Once
+	)
+	leaseSeenDuringStart := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-lease"):
+			if startEntered.Load() {
+				leaseDuringStart.Store(true)
+				closeLeaseOnce.Do(func() { close(leaseSeenDuringStart) })
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			startEntered.Store(true)
+			select {
+			case <-leaseSeenDuringStart:
+			case <-time.After(2 * time.Second):
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	missingBin := filepath.Join(t.TempDir(), "definitely-not-claude")
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: missingBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-runtask-start-lease",
+		Agent:       &AgentData{Name: "test-agent"},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, _ = d.runTask(context.Background(), task, "claude", 0, taskLog)
+
+	if !startEntered.Load() {
+		t.Fatal("runTask did not call /start")
+	}
+	if !leaseDuringStart.Load() {
+		t.Fatal("prepare lease was not extended while /start was still in flight")
+	}
+}
+
 // TestHandleTask_KeepsEnvRootActiveAcrossCompletion is the regression guard
 // for issue #3999 race B. After runner.run returns, the in-process active
 // guard installed inside runTask (defer unmarkActiveEnvRoot at the
@@ -178,7 +254,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	expectedEnvRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
 
 	var (
-		completeCalled atomic.Bool
+		completeCalled   atomic.Bool
 		activeAtComplete atomic.Bool
 	)
 

@@ -85,6 +85,8 @@
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
+    "field_subscribers": "Subscribers",
+    "field_subscribers_none": "None",
     "add_trigger": "Add trigger",
     "no_triggers": "No triggers configured. Add a schedule to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
@@ -98,6 +100,20 @@
       "confirm": "Delete",
       "deleting": "Deleting..."
     }
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
   },
   "run_status": {
     "issue_created": "Issue Created",
@@ -255,6 +271,13 @@
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",
+    "section_subscribers": "Subscribers",
+    "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
+    "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
+    "subscribers_add": "Add subscriber",
+    "subscribers_search_placeholder": "Search members by name…",
+    "subscribers_no_results": "No matching members",
+    "subscribers_remove_tooltip": "Remove",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",
     "trigger_kind_schedule": "Schedule",

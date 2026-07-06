@@ -81,7 +81,7 @@ Contracts:
 Source:
 
 ```text
-server/internal/handler/squad_briefing.go         # buildSquadLeaderBriefing ~104, buildSquadRoster ~121, renderMemberRow ~169
+server/internal/handler/squad_briefing.go         # buildSquadLeaderBriefing ~104, buildSquadRoster ~121, renderMemberRow ~169, agentSkillsRosterSegment, formatRosterRow
 server/internal/handler/daemon.go                  # briefing injection ~1187, ~1530
 ```
 
@@ -93,6 +93,11 @@ Contracts:
   (squad_briefing.go:104-117);
 - `instructions` section appears only when non-empty (squad_briefing.go:110-112);
 - archived agent members are skipped from roster (squad_briefing.go:178-179);
+- agent member roster rows list assigned workspace skills via
+  `loadSquadMemberSkillNames` (ListAgentSkillNamesByAgentIDs) and
+  `agentSkillsRosterSegment` — "skills: a, b" or
+  "no skills assigned"; builtin multica-* skills are excluded and human
+  members carry no skills segment (squad_briefing.go renderMemberRow);
 - no traced behavior injects `instructions` into every squad member.
 
 ## Issue Assignment

@@ -157,6 +157,7 @@ Public auth endpoints — `/auth/send-code`, `/auth/verify-code`, `/auth/google`
 | Variable | Default | Description |
 |---|---|---|
 | `REDIS_URL` | empty | Redis connection URL (for example `redis://localhost:6379/0`). When unset, rate limiting on auth endpoints is disabled. The same Redis is also used by the realtime hub fan-out, the PAT cache, and the daemon-token cache — they all fall back to in-memory / direct-DB mode when unset |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | Set to `true` to skip the `CLIENT SETNAME` handshake on every Redis connection. **Required** for managed Redis providers that block the `CLIENT` command, such as GCP Memorystore or AWS ElastiCache with restricted ACLs. When enabled, connections lose their descriptive name in `CLIENT LIST` output but gain compatibility with restricted providers |
 | `RATE_LIMIT_AUTH` | `5` | Max requests per IP per minute against `/auth/send-code` and `/auth/google` |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Max requests per IP per minute against `/auth/verify-code` |
 | `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated CIDRs whose `X-Forwarded-For` header the limiter is allowed to trust. Empty (the default) means **never trust XFF** — the limiter only uses the direct connection's `RemoteAddr` |
@@ -181,8 +182,18 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
 | `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
+| `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
 
 For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+
+### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
+
+These set a **fleet-wide default** layer of CLI flags for a backend — a convenient way to apply a default cost or resource baseline (for example `--max-turns`) across every agent on a daemon without editing each agent's `custom_args` individually. This is a default layer, not a hard ceiling: per-agent `custom_args` are appended afterward and can override it (see **Precedence** below).
+
+- **Precedence:** the default args are applied first, then each agent's own `custom_args` are appended after. For flags that take a value, the downstream CLI's own argument parser decides the winner (last occurrence wins for most tools), so an individual agent can raise a daemon default but the default still applies wherever the agent doesn't override it.
+- **Parsing:** the value is split with POSIX shell-word rules, so quoting works — `MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` parses into two tokens.
+- **Safety:** both the default-args and per-agent `custom_args` layers pass through the same blocked-flags filter, so protocol-critical flags (such as `-p`, `--output-format`, `--input-format`, `--permission-mode`, `--mcp-config` for Claude, and `--listen` for Codex) cannot be injected through either layer.
+- **Unset/empty** means no change to behavior.
 
 ## Frontend access control
 

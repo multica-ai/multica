@@ -15,7 +15,6 @@
     "unpin": "ピン留め解除",
     "delete": "削除",
     "no_matches": "該当するプロジェクトはありません",
-    "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"
   },
@@ -69,6 +68,7 @@
     "section_progress": "進捗",
     "section_description": "説明",
     "description_placeholder": "説明を追加...",
+    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
     "empty_issues_title": "リンクされたイシューはありません",
     "empty_issues_hint": "新しいイシューを作成するか、既存のイシューをこのプロジェクトに割り当ててください。",
     "empty_issues_new_button": "新規イシュー",
@@ -131,7 +131,6 @@
   "toolbar": {
     "result_count_title": "該当プロジェクト / すべてのプロジェクト",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_status": "ステータス",

@@ -6,10 +6,11 @@ import { ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
+import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilter } from "@multica/core/issues/stores/view-store";
+import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../utils/filter";
+import { filterIssues, filterAssigneeGroups } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
@@ -27,12 +28,33 @@ import { useT } from "../../i18n";
 
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 
+function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
+  if (!filter) return {};
+
+  const from = dateOnlyToLocalDate(filter.from);
+  const to = dateOnlyToLocalDate(filter.to);
+  if (!from || !to) return {};
+
+  const start = from <= to ? from : to;
+  const endSource = from <= to ? to : from;
+  const end = new Date(endSource);
+  end.setDate(end.getDate() + 1);
+
+  return {
+    date_field: filter.field,
+    date_start: start.toISOString(),
+    date_end: end.toISOString(),
+  };
+}
+
 export function IssuesPage() {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
 
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
+  const dateFilter = useIssueViewStore((s) => s.dateFilter);
+  const setDateFilter = useIssueViewStore((s) => s.setDateFilter);
   const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
@@ -45,6 +67,7 @@ export function IssuesPage() {
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
+  const showSubIssues = useIssueViewStore((s) => s.showSubIssues);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const sort = useMemo(
@@ -53,6 +76,14 @@ export function IssuesPage() {
       sort_direction: sortBy !== "position" ? sortDirection : undefined,
     } as const),
     [sortBy, sortDirection],
+  );
+  const dateParams = useMemo(
+    () => issueDateFilterToApiParams(dateFilter),
+    [dateFilter],
+  );
+  const queryParams = useMemo(
+    () => ({ ...sort, ...dateParams }),
+    [dateParams, sort],
   );
 
   // Derive the set of issue ids that currently have at least one
@@ -86,9 +117,9 @@ export function IssuesPage() {
     return filter;
   }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
 
-  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
+  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, sort),
+    ...issueListOptions(wsId, queryParams),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -102,6 +133,17 @@ export function IssuesPage() {
   const assigneeIssues = useMemo(
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
     [assigneeGroupsQuery.data],
+  );
+  // Assignee-grouped board renders from `groups`, bypassing the flat
+  // `filterIssues` output, so re-apply the client-only "Show sub-issues"
+  // toggle here (see filterAssigneeGroups).
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, { showSubIssues }),
+    [assigneeGroupsQuery.data, showSubIssues],
+  );
+  const filteredAssigneeIssues = useMemo(
+    () => filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [filteredAssigneeGroups],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
@@ -126,15 +168,15 @@ export function IssuesPage() {
   const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues],
   );
 
   // Status-unfiltered companion for Swimlane — same narrowing as `issues`
   // minus the status filter.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues }),
+    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues],
   );
 
   const activeFilters = useMemo(() => ({
@@ -146,6 +188,7 @@ export function IssuesPage() {
     includeNoProject,
     labelFilters,
     agentRunningFilter,
+    showSubIssues,
   }), [
     priorityFilters,
     assigneeFilters,
@@ -155,6 +198,7 @@ export function IssuesPage() {
     includeNoProject,
     labelFilters,
     agentRunningFilter,
+    showSubIssues,
   ]);
 
   // Fetch sub-issue progress from the backend so counts are accurate
@@ -216,7 +260,11 @@ export function IssuesPage() {
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
-        <IssuesHeader scopedIssues={headerIssues} />
+        <IssuesHeader
+          scopedIssues={headerIssues}
+          dateFilter={dateFilter}
+          onDateFilterChange={setDateFilter}
+        />
 
         {loading ? contentSkeleton : headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -228,15 +276,15 @@ export function IssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? assigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                issues={usesAssigneeBoard ? filteredAssigneeIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
-                sort={sort}
+                sort={queryParams}
               />
             ) : viewMode === "swimlane" ? (
               <SwimLaneView
@@ -247,14 +295,14 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
-                sort={sort}
+                sort={queryParams}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={sort} onMoveIssue={handleMoveIssue} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={queryParams} onMoveIssue={handleMoveIssue} />
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {viewMode === "list" && <BatchActionToolbar issues={issues} />}
       </ViewStoreProvider>
     </div>
   );

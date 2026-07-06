@@ -198,6 +198,39 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 	return i, err
 }
 
+const listAgentSkillNamesByAgentIDs = `-- name: ListAgentSkillNamesByAgentIDs :many
+SELECT ask.agent_id, s.name
+FROM agent_skill ask
+JOIN skill s ON s.id = ask.skill_id
+WHERE ask.agent_id = ANY($1::uuid[])
+ORDER BY ask.agent_id, s.name ASC
+`
+
+type ListAgentSkillNamesByAgentIDsRow struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	Name    string      `json:"name"`
+}
+
+func (q *Queries) ListAgentSkillNamesByAgentIDs(ctx context.Context, agentIds []pgtype.UUID) ([]ListAgentSkillNamesByAgentIDsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillNamesByAgentIDs, agentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentSkillNamesByAgentIDsRow{}
+	for rows.Next() {
+		var i ListAgentSkillNamesByAgentIDsRow
+		if err := rows.Scan(&i.AgentID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
 SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
 FROM skill s

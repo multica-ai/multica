@@ -66,12 +66,35 @@ WHERE issue_id = $2
     OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
   );
 
--- name: LinkAttachmentsToChatMessage :exec
+-- name: LinkAttachmentsToChatMessage :many
 UPDATE attachment
-SET chat_message_id = $1
-WHERE chat_session_id = $2
+SET chat_message_id = sqlc.arg(chat_message_id),
+    chat_session_id = sqlc.arg(chat_session_id)
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id IS NULL
+  AND comment_id IS NULL
   AND chat_message_id IS NULL
-  AND id = ANY($3::uuid[]);
+  AND (
+    chat_session_id IS NULL
+    OR chat_session_id = sqlc.arg(chat_session_id)
+  )
+  AND uploader_type = sqlc.arg(uploader_type)
+  AND uploader_id = sqlc.arg(uploader_id)
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+RETURNING id;
+
+-- name: DetachAttachmentsFromUserChatMessageByTask :many
+-- When an empty chat task is cancelled, its user message is deleted. The
+-- attachment FK is ON DELETE CASCADE, so without this the bound rows would be
+-- destroyed and a restored draft could never re-bind them. Detach first
+-- (chat_message_id -> NULL, keep chat_session_id) so the rows survive as
+-- workspace/session-scoped unattached attachments and re-send can re-link them.
+UPDATE attachment
+SET chat_message_id = NULL
+WHERE chat_message_id IN (
+  SELECT id FROM chat_message WHERE task_id = $1 AND role = 'user'
+)
+RETURNING *;
 
 -- name: ListAttachmentsByChatMessage :many
 SELECT * FROM attachment

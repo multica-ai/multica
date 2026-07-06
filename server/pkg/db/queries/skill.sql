@@ -92,6 +92,13 @@ JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC;
 
+-- name: ListAgentSkillNamesByAgentIDs :many
+SELECT ask.agent_id, s.name
+FROM agent_skill ask
+JOIN skill s ON s.id = ask.skill_id
+WHERE ask.agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+ORDER BY ask.agent_id, s.name ASC;
+
 -- name: AddAgentSkill :exec
 INSERT INTO agent_skill (agent_id, skill_id)
 VALUES ($1, $2)

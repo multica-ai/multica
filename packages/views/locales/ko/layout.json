@@ -16,6 +16,7 @@
     "trigger": "도움말",
     "docs": "문서",
     "changelog": "변경 로그",
+    "discord": "Discord",
     "feedback": "피드백"
   },
   "workspace_loader": {
@@ -36,6 +37,11 @@
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",
     "configure_group": "설정",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Discord 참여하기",
+      "description": "팀과 다른 사용자들과 교류해 보세요.",
+      "dismiss": "닫기"
+    }
   }
 }

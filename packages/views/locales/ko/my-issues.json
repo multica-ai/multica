@@ -19,7 +19,6 @@
     "filter_button": "필터",
     "filter_status": "상태",
     "filter_priority": "우선순위",
-    "issue_count_one": "이슈 {{count}}개",
     "issue_count_other": "이슈 {{count}}개",
     "reset_filters": "필터 모두 초기화",
     "display_settings": "보기 설정",

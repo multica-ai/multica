@@ -22,18 +22,25 @@ Every claim below is traced to source in
 
 A skill is installed for Multica only when it exists in the current workspace's
 skill database. The single supported path that puts it there is the workspace
-import endpoint, driven by this CLI:
+import endpoint. It accepts either a hosted URL or an uploaded local archive
+(`.skill` / `.zip`), driven by this CLI:
 
 ```bash
-multica skill import --url <url> --output json
+multica skill import --url <url> --output json              # hosted source
+multica skill import --file <path-to.skill> --output json   # local archive
 ```
 
-The CLI defaults to `--on-conflict fail`. Current CLIs send:
+The CLI defaults to `--on-conflict fail`. A URL import sends:
 
 ```text
 POST /api/skills/import
+Content-Type: application/json
 body: { "url": "<url>", "on_conflict": "fail" }
 ```
+
+A `--file` import hits the same route as `multipart/form-data` with a `file`
+part (the `.skill` / `.zip` bytes) and an `on_conflict` field. `--url` and
+`--file` are mutually exclusive; exactly one is required.
 
 Do not finish with `npx skills add`. That installs into an external/local skill
 environment, not the Multica workspace DB, so Multica cannot manage or bind it.
@@ -56,6 +63,29 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
   `/blob/{ref}/.../SKILL.md` file.
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
+
+## Local archive import (`.skill` / `.zip`)
+
+`multica skill import --file <path> --output json` imports a skill from a local
+archive instead of a hosted URL. A `.skill` file is a standard zip — the format
+Anthropic's skill-creator `package_skill` produces — and a plain `.zip` of a
+skill folder works too. The server:
+
+- accepts the upload as `multipart/form-data` (a `file` part plus an optional
+  `on_conflict` field) on the same `POST /api/skills/import` route;
+- decompresses it and roots on the shallowest `SKILL.md`, so both a root-level
+  `SKILL.md` and the nested `my-skill/SKILL.md` wrapper layout are accepted;
+- takes the name/description from `SKILL.md` frontmatter, falling back to the
+  wrapper directory name and then the uploaded filename;
+- carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
+  license files, and binary assets — under the same per-file (1 MiB),
+  per-bundle (8 MiB), and file-count (128) caps as URL imports, and rejects path
+  traversal (zip-slip);
+- returns the same structured result envelope and honors the same
+  `--on-conflict` strategies as URL imports.
+
+The upload itself is capped at 16 MiB (compressed). Any source that is not a
+local archive still goes through `--url`.
 
 ## Direct URL flow
 

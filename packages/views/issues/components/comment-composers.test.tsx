@@ -88,16 +88,16 @@ function renderWithProviders(ui: ReactNode) {
   );
 }
 
-function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(undefined)) {
+function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
   const view = renderWithProviders(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
   return { ...view, onSubmit };
 }
 
 function renderReplyInput({
-  onSubmit = vi.fn().mockResolvedValue(undefined),
+  onSubmit = vi.fn().mockResolvedValue(true),
   size = "sm",
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
   size?: "sm" | "default";
 } = {}) {
   const view = renderWithProviders(
@@ -183,5 +183,43 @@ describe("comment composers", () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
     });
+  });
+
+  it("locks the editor while the send is in flight, then clears on success", async () => {
+    let resolveSubmit: (ok: boolean) => void = () => {};
+    const onSubmit = vi.fn(
+      () => new Promise<boolean>((resolve) => { resolveSubmit = resolve; }),
+    );
+    const { container } = renderCommentInput(onSubmit);
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "sending" } });
+    fireEvent.click(getSubmitButton(container));
+
+    // In flight: text kept, editor wrapper locked (aria-busy), not cleared yet.
+    await waitFor(() =>
+      expect(screen.getByTestId("editor").closest("[aria-busy]")).toHaveAttribute(
+        "aria-busy",
+        "true",
+      ),
+    );
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined);
+
+    resolveSubmit(true);
+
+    // Success: the composer clears (now empty → submit disabled, lock released).
+    await waitFor(() => expect(getSubmitButton(container)).toBeDisabled());
+    expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
+  });
+
+  it("keeps the draft when the send fails (no optimistic clear)", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    const { container } = renderCommentInput(onSubmit);
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
+    fireEvent.click(getSubmitButton(container));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // Failed send must NOT clear — the box still has content, submit stays live.
+    await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
   });
 });

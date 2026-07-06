@@ -84,7 +84,20 @@ export function useFileUpload(
   api: ApiClient,
   onError?: (error: Error) => void,
 ) {
-  const [uploading, setUploading] = useState(false);
+  // In-flight counter, NOT a single boolean. Callers fire multiple uploads
+  // concurrently (drag-drop of N files, paste with multiple images) and the
+  // boolean shape would flip false as soon as the FIRST upload's finally ran
+  // — even though N-1 are still mid-request. Surfaces consuming `uploading`
+  // (the quick-create submit gate, the editor's "Uploading…" button label)
+  // would then unblock submit while uploads are still in flight, causing
+  // `stripBlobUrls` to erase the still-pending images from the markdown and
+  // their attachment ids never to be bound (MUL-3339).
+  //
+  // The exposed `uploading: boolean` keeps the existing call-site contract
+  // (`{ uploading } = useFileUpload(api)` everywhere); only the internal
+  // tracking shape changes.
+  const [inFlight, setInFlight] = useState(0);
+  const uploading = inFlight > 0;
 
   const upload = useCallback(
     async (file: File, ctx?: UploadContext): Promise<UploadResult | null> => {
@@ -92,7 +105,7 @@ export function useFileUpload(
         throw new Error("File exceeds 100 MB limit");
       }
 
-      setUploading(true);
+      setInFlight((n) => n + 1);
       try {
         const att: Attachment = await api.uploadFile(file, {
           issueId: ctx?.issueId,
@@ -101,7 +114,7 @@ export function useFileUpload(
         });
         return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
       } finally {
-        setUploading(false);
+        setInFlight((n) => n - 1);
       }
     },
     [api],

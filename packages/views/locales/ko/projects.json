@@ -15,7 +15,6 @@
     "unpin": "고정 해제",
     "delete": "삭제",
     "no_matches": "일치하는 프로젝트가 없습니다",
-    "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제"
   },
@@ -69,6 +68,7 @@
     "section_progress": "진행률",
     "section_description": "설명",
     "description_placeholder": "설명 추가...",
+    "description_hint": "이 프로젝트의 모든 작업에서 컨텍스트로 에이전트에게 공유됩니다.",
     "empty_issues_title": "연결된 이슈가 없습니다",
     "empty_issues_hint": "새 이슈를 만들거나 기존 이슈를 이 프로젝트에 할당하세요.",
     "empty_issues_new_button": "새 이슈",
@@ -131,7 +131,6 @@
   "toolbar": {
     "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_status": "상태",

@@ -18,17 +18,17 @@ import (
 
 type fakePatcherQueries struct {
 	mu              sync.Mutex
-	binding         db.LarkChatSessionBinding
+	binding         ChatSessionBinding
 	bindingErr      error
-	installation    db.LarkInstallation
+	installation    Installation
 	installationErr error
 	agent           db.Agent
 	agentErr        error
-	card            db.LarkOutboundCardMessage
+	card            OutboundCardMessage
 	cardErr         error
-	created         []db.CreateLarkOutboundCardMessageParams
-	createReturn    db.LarkOutboundCardMessage
-	statusUpdates   []db.UpdateLarkOutboundCardStatusParams
+	created         []CreateOutboundCardMessageParams
+	createReturn    OutboundCardMessage
+	statusUpdates   []UpdateOutboundCardStatusParams
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -40,22 +40,22 @@ func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID)
 func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
 	return f.agent, f.agentErr
 }
-func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (db.LarkInstallation, error) {
+func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error) {
 	return f.installation, f.installationErr
 }
-func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (db.LarkChatSessionBinding, error) {
+func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (ChatSessionBinding, error) {
 	return f.binding, f.bindingErr
 }
-func (f *fakePatcherQueries) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (db.LarkOutboundCardMessage, error) {
+func (f *fakePatcherQueries) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error) {
 	return f.card, f.cardErr
 }
-func (f *fakePatcherQueries) CreateLarkOutboundCardMessage(ctx context.Context, arg db.CreateLarkOutboundCardMessageParams) (db.LarkOutboundCardMessage, error) {
+func (f *fakePatcherQueries) CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.created = append(f.created, arg)
 	return f.createReturn, nil
 }
-func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, arg db.UpdateLarkOutboundCardStatusParams) error {
+func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusUpdates = append(f.statusUpdates, arg)
@@ -64,7 +64,7 @@ func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, a
 
 type fakeCredentials struct{ secret string }
 
-func (f fakeCredentials) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (f fakeCredentials) DecryptAppSecret(inst Installation) (string, error) {
 	return f.secret, nil
 }
 
@@ -82,7 +82,22 @@ type fakeAPIClient struct {
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
+	// threadReplyErr, when non-nil, is returned by the three send
+	// methods whenever the call carries a thread ReplyTarget, while the
+	// attempt is still recorded. Tests inject either a classified
+	// *APIError (to exercise the chat-level fallback) or an ambiguous
+	// transport error (to assert no fallback happens).
+	threadReplyErr error
 }
+
+// errThreadReplyClassified is a Lark business error the fallback path
+// recognizes (230071 = group does not support reply in thread), so a
+// thread send that returns it triggers the chat-level retry.
+var errThreadReplyClassified = &APIError{Op: "send text message", Code: 230071, Msg: "group does not support reply in thread"}
+
+// errThreadReplyTransport is an ambiguous, non-classified failure: the
+// fallback path must NOT retry it at chat level.
+var errThreadReplyTransport = errors.New("fake: transport failure")
 
 func (f *fakeAPIClient) IsConfigured() bool { return true }
 
@@ -90,6 +105,9 @@ func (f *fakeAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, p)
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
+	}
 	return f.sendReturn, f.sendErr
 }
 func (f *fakeAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardParams) error {
@@ -102,12 +120,18 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.textSent = append(f.textSent, p)
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
+	}
 	return f.textSendReturn, f.textSendErr
 }
 func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mdCardSent = append(f.mdCardSent, p)
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
+	}
 	return f.mdCardReturn, f.mdCardErr
 }
 func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
@@ -138,13 +162,13 @@ func (f *fakeAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReact
 func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient) {
 	t.Helper()
 	q := &fakePatcherQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			ChatSessionID:  uuidFromString(t, "cccccccc-cccc-cccc-cccc-cccccccccccc"),
 			InstallationID: uuidFromString(t, "1111aaaa-1111-1111-1111-111111111111"),
-			LarkChatID:     "oc_test_chat",
-			LarkChatType:   "p2p",
+			ChannelChatID:  "oc_test_chat",
+			ChatType:       "p2p",
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:                 uuidFromString(t, "1111aaaa-1111-1111-1111-111111111111"),
 			AppID:              "cli_test_app",
 			AppSecretEncrypted: []byte("ciphertext"),
@@ -191,8 +215,8 @@ func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	if got.Text != "Hello! I'm cc, a coding agent…" {
 		t.Errorf("text mismatch: got %q", got.Text)
 	}
-	if got.ChatID != ChatID(q.binding.LarkChatID) {
-		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.LarkChatID)
+	if got.ChatID != ChatID(q.binding.ChannelChatID) {
+		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.ChannelChatID)
 	}
 	if got.InstallationID.AppID != "cli_test_app" {
 		t.Errorf("expected installation app_id propagated; got %q", got.InstallationID.AppID)
@@ -234,8 +258,8 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	if got.Markdown != body {
 		t.Errorf("markdown body must be forwarded verbatim; got %q", got.Markdown)
 	}
-	if got.ChatID != ChatID(q.binding.LarkChatID) {
-		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.LarkChatID)
+	if got.ChatID != ChatID(q.binding.ChannelChatID) {
+		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.ChannelChatID)
 	}
 	if len(api.textSent) != 0 {
 		t.Errorf("markdown body must NOT also fire SendTextMessage; got %d", len(api.textSent))
@@ -461,5 +485,149 @@ func TestDefaultRendererConfigCarriesUpdateMulti(t *testing.T) {
 				t.Errorf("config.wide_screen_mode regression: %v", cfg)
 			}
 		})
+	}
+}
+
+// TestPatcherRepliesInThreadWhenTriggerWasInThread pins the core
+// behavior of this feature: when the chat binding's most-recent trigger
+// lived inside a Lark topic (last_lark_thread_id set), the agent reply
+// is routed through the reply endpoint targeting that message with
+// reply_in_thread=true, so it lands inside the 话题 instead of the group.
+func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee666666-ee66-ee66-ee66-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "in-thread reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	got := api.textSent[0].ReplyTarget
+	if got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got)
+	}
+}
+
+// TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
+// (no last_lark_thread_id on the binding) keeps the historical
+// chat-level send: ReplyTarget stays empty so SendTextMessage targets
+// the chat by chat_id. This is the no-behavior-change guarantee for
+// normal group / p2p chats.
+func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	// binding has a message id but NO thread id → must not thread.
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("non-thread trigger must NOT route through the reply endpoint; got %+v",
+			api.textSent[0].ReplyTarget)
+	}
+}
+
+// TestPatcherThreadReplyMarkdownRoutesToThread verifies the markdown
+// card path also threads when the trigger was in a topic.
+func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "# heading\n- bullet"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("expected one markdown card send; got %d", len(api.mdCardSent))
+	}
+	got := api.mdCardSent[0].ReplyTarget
+	if got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected markdown thread reply target {om_trigger, InThread:true}; got %+v", got)
+	}
+}
+
+// TestPatcherThreadReplyFallsBackToChatLevel verifies that when a
+// threaded send fails with a classified "topic cannot receive this
+// reply" Lark error (e.g. the trigger message was recalled or the topic
+// was aggregated), the patcher retries once at the chat level so the
+// agent's reply is never silently lost.
+func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	api.threadReplyErr = errThreadReplyClassified
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "reply that must survive"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("expected two text sends (thread attempt + chat-level fallback); got %d", len(api.textSent))
+	}
+	if !api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("first attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
+	}
+	if api.textSent[1].ReplyTarget.IsSet() {
+		t.Errorf("fallback attempt must be chat-level (empty ReplyTarget); got %+v", api.textSent[1].ReplyTarget)
+	}
+}
+
+// TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError verifies that a
+// non-classified failure (transport error, 5xx, timeout, rate limit)
+// from the threaded send is NOT retried at chat level: a blind retry
+// could duplicate the reply or leak a thread-only reply into the group.
+func TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	api.threadReplyErr = errThreadReplyTransport
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "reply that must not duplicate"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected a single thread attempt with no chat-level fallback; got %d sends", len(api.textSent))
+	}
+	if !api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("the single attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
 	}
 }

@@ -135,6 +135,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
@@ -162,7 +163,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				b.handleAssistant(msg, msgCh, &output, usage)
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh) {
+					sawAsyncLaunch = true
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -221,6 +224,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		}
+		if finalStatus == "completed" && sawAsyncLaunch {
+			finalStatus = "failed"
+			finalError = "claude launched an async background task; Multica-managed runs require foreground execution"
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
@@ -297,17 +304,21 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
+				if claudeToolResultHasAsyncLaunch(block.Content) {
+					sawAsyncLaunch = true
+				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -316,6 +327,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 			})
 		}
 	}
+	return sawAsyncLaunch
 }
 
 func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -331,6 +343,12 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	}
 	if inputMap == nil {
 		inputMap = map[string]any{}
+	}
+	if forceClaudeToolInputForeground(inputMap) {
+		b.cfg.Logger.Info("claude: forced foreground tool execution",
+			"request_id", msg.RequestID,
+			"tool", req.ToolName,
+		)
 	}
 
 	response := map[string]any{
@@ -354,6 +372,50 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if _, err := stdin.Write(data); err != nil {
 		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
 	}
+}
+
+func forceClaudeToolInputForeground(input map[string]any) bool {
+	if runInBackground, ok := input["run_in_background"].(bool); ok && runInBackground {
+		input["run_in_background"] = false
+		return true
+	}
+	return false
+}
+
+func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if claudeMapHasAsyncLaunchStatus(v) {
+			return true
+		}
+		if content, ok := v["content"].([]any); ok {
+			return claudeArrayHasAsyncLaunchStatus(content)
+		}
+	case []any:
+		return claudeArrayHasAsyncLaunchStatus(v)
+	}
+	return false
+}
+
+func claudeArrayHasAsyncLaunchStatus(values []any) bool {
+	for _, value := range values {
+		if item, ok := value.(map[string]any); ok && claudeMapHasAsyncLaunchStatus(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
+	status, ok := value["status"].(string)
+	return ok && status == "async_launched"
 }
 
 // ── Claude SDK JSON types ──
@@ -742,9 +804,30 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 	return f.Name(), nil
 }
 
+// detectVersionTimeout bounds a single `<cli> --version` probe. Version
+// detection runs inside the daemon's blocking preflight (registerRuntimesForWorkspace),
+// so a CLI that never returns from `--version` — e.g. a brew-installed claude
+// wedged by a bun regression (MUL-3812) — would otherwise stall the whole
+// registration loop, the daemon would never flip /health from "starting" to
+// "running", and *every* runtime on the host would appear disconnected. A real
+// `--version` returns well under this bound even on a cold cache or with
+// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
+// in isolation so the remaining runtimes still register. A var (not const) so
+// tests can shrink it without waiting out the real bound.
+var detectVersionTimeout = 10 * time.Second
+
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, execPath, "--version")
 	hideAgentWindow(cmd)
+	// exec.CommandContext only kills the direct child on timeout. A broken CLI
+	// (node/bun shim) can leave grandchildren that inherited and still hold our
+	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
+	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
+	// reaps shortly after the context fires so this call always returns.
+	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

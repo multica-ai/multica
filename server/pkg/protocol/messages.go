@@ -2,6 +2,10 @@ package protocol
 
 import "encoding/json"
 
+const (
+	DaemonCapabilitySkillBundlesV1 = "skill-bundles-v1"
+)
+
 // Message is the envelope for all WebSocket messages.
 type Message struct {
 	Type    string          `json:"type"`
@@ -21,6 +25,15 @@ type TaskDispatchPayload struct {
 type TaskAvailablePayload struct {
 	RuntimeID string `json:"runtime_id"`
 	TaskID    string `json:"task_id,omitempty"`
+}
+
+// RuntimeProfilesChangedPayload is sent from server to daemon as a wakeup hint
+// when a workspace custom runtime profile is created, edited, disabled, or
+// deleted. The daemon still fetches profiles and registers runtimes through the
+// existing HTTP endpoints.
+type RuntimeProfilesChangedPayload struct {
+	WorkspaceID      string `json:"workspace_id"`
+	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
 }
 
 // TaskProgressPayload is sent from daemon to server during task execution.
@@ -139,11 +152,20 @@ type DaemonHeartbeatAckPayload struct {
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	FeatureFlags            *DaemonFeatureFlagSnapshot              `json:"feature_flags,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
 	// heartbeat so the daemon can process them concurrently. Old daemons
 	// that don't know this field silently ignore it (standard JSON behavior)
 	// and fall back to the singular PendingLocalSkillImport above.
 	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+}
+
+// DaemonFeatureFlagSnapshot carries the full server-evaluated decision set for
+// daemon-bound feature flags. It is sent on every heartbeat ack so the daemon
+// can atomically replace its local server snapshot without negotiating deltas.
+type DaemonFeatureFlagSnapshot struct {
+	Version uint64            `json:"version"`
+	Flags   map[string]string `json:"flags"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

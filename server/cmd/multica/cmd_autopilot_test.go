@@ -22,6 +22,7 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("priority", "none", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
+	cmd.Flags().StringArray("subscriber", nil, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -36,6 +37,8 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
+	cmd.Flags().StringArray("subscriber", nil, "")
+	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -172,6 +175,53 @@ func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
 	}
 }
 
+func TestRunAutopilotCreateSendsSubscribers(t *testing.T) {
+	const (
+		agentID = "11111111-1111-1111-1111-111111111111"
+		userID  = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": userID, "name": "Alice"},
+			})
+		case "/api/autopilots":
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "autopilot-1",
+				"title":       "Daily planner",
+				"subscribers": body["subscribers"],
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Daily planner")
+	_ = cmd.Flags().Set("agent", agentID)
+	_ = cmd.Flags().Set("mode", "create_issue")
+	_ = cmd.Flags().Set("subscriber", "Alice")
+
+	if err := runAutopilotCreate(cmd, nil); err != nil {
+		t.Fatalf("runAutopilotCreate: %v", err)
+	}
+	assertAutopilotSubscriberBody(t, body, userID)
+}
+
 func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 	const (
 		autopilotID = "33333333-3333-3333-3333-333333333333"
@@ -229,6 +279,129 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 			t.Fatalf("project_id = %#v, want nil", got)
 		}
 	})
+}
+
+func TestRunAutopilotUpdateSendsSubscriberReplacement(t *testing.T) {
+	const (
+		autopilotID = "33333333-3333-3333-3333-333333333333"
+		userID      = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": userID, "name": "Alice"},
+			})
+		case "/api/autopilots/" + autopilotID:
+			if r.Method != http.MethodPatch {
+				t.Errorf("method = %s, want PATCH", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          autopilotID,
+				"title":       "Daily planner",
+				"subscribers": body["subscribers"],
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotUpdateTestCmd()
+	_ = cmd.Flags().Set("subscriber", "Alice")
+	if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
+		t.Fatalf("runAutopilotUpdate: %v", err)
+	}
+	assertAutopilotSubscriberBody(t, body, userID)
+}
+
+func TestRunAutopilotUpdateCanClearSubscribers(t *testing.T) {
+	const autopilotID = "33333333-3333-3333-3333-333333333333"
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPatch {
+			t.Errorf("method = %s, want PATCH", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":          autopilotID,
+			"title":       "Daily planner",
+			"subscribers": body["subscribers"],
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotUpdateTestCmd()
+	_ = cmd.Flags().Set("clear-subscribers", "true")
+	if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
+		t.Fatalf("runAutopilotUpdate: %v", err)
+	}
+	subscribers, ok := body["subscribers"].([]any)
+	if !ok {
+		t.Fatalf("subscribers = %#v, want array", body["subscribers"])
+	}
+	if len(subscribers) != 0 {
+		t.Fatalf("subscribers length = %d, want 0", len(subscribers))
+	}
+}
+
+func TestRunAutopilotUpdateRejectsSubscriberAndClear(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotUpdateTestCmd()
+	_ = cmd.Flags().Set("subscriber", "Alice")
+	_ = cmd.Flags().Set("clear-subscribers", "true")
+
+	err := runAutopilotUpdate(cmd, []string{"33333333-3333-3333-3333-333333333333"})
+	if err == nil {
+		t.Fatal("expected mutually exclusive subscriber flags error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %v, want mutually exclusive", err)
+	}
+}
+
+func assertAutopilotSubscriberBody(t *testing.T, body map[string]any, userID string) {
+	t.Helper()
+	subscribers, ok := body["subscribers"].([]any)
+	if !ok {
+		t.Fatalf("subscribers = %#v, want array", body["subscribers"])
+	}
+	if len(subscribers) != 1 {
+		t.Fatalf("subscribers length = %d, want 1", len(subscribers))
+	}
+	sub, ok := subscribers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("subscriber = %#v, want object", subscribers[0])
+	}
+	if sub["user_type"] != "member" {
+		t.Fatalf("user_type = %#v, want member", sub["user_type"])
+	}
+	if sub["user_id"] != userID {
+		t.Fatalf("user_id = %#v, want %q", sub["user_id"], userID)
+	}
 }
 
 func TestUUIDRegexp(t *testing.T) {

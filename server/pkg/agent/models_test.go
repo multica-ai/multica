@@ -11,7 +11,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"claude", "codex", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -80,34 +80,26 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 }
 
-func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// Gemini CLI has no `models list` subcommand, so we expose the
-	// CLI's own aliases (auto / pro / flash / flash-lite) plus
-	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
-	models := geminiStaticModels()
+func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
+	models := claudeStaticModels()
 	ids := map[string]Model{}
+	defaults := 0
 	for _, m := range models {
 		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
-		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
-		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
+		if m.Default {
+			defaults++
 		}
 	}
-	auto, ok := ids["auto"]
-	if !ok || !auto.Default {
-		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
+
+	sonnet, ok := ids["claude-sonnet-5"]
+	if !ok {
+		t.Fatalf("missing Claude Sonnet 5 in: %+v", models)
 	}
-	for _, m := range models {
-		if m.Provider != "google" {
-			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
-		}
+	if sonnet.Label != "Claude Sonnet 5" || sonnet.Provider != "anthropic" || sonnet.Default {
+		t.Errorf("unexpected Sonnet 5 entry: %+v", sonnet)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
 	}
 }
 
@@ -146,6 +138,78 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+}
+
+func TestModelKnownIncompatibleWithProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+		want     bool
+	}{
+		{
+			name:     "claude model is incompatible with codex",
+			provider: "codex",
+			model:    "claude-sonnet-4-6",
+			want:     true,
+		},
+		{
+			name:     "codex model is compatible with codex",
+			provider: "codex",
+			model:    "gpt-5.5",
+			want:     false,
+		},
+		{
+			name:     "codex model is incompatible with claude",
+			provider: "claude",
+			model:    "o3",
+			want:     true,
+		},
+		{
+			name:     "exact claude model is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-4-7",
+			want:     false,
+		},
+		{
+			name:     "provider-prefixed openai model is incompatible with codex",
+			provider: "codex",
+			model:    "openai/gpt-4o",
+			want:     true,
+		},
+		{
+			name:     "provider-prefixed anthropic model is incompatible with claude",
+			provider: "claude",
+			model:    "anthropic/claude-opus-4.7",
+			want:     true,
+		},
+		{
+			name:     "known openai-looking model outside codex catalog is incompatible",
+			provider: "codex",
+			model:    "gpt-99",
+			want:     true,
+		},
+		{
+			name:     "unknown custom model is not classified",
+			provider: "codex",
+			model:    "private-lab-model",
+			want:     false,
+		},
+		{
+			name:     "unknown target provider does not clear",
+			provider: "opencode",
+			model:    "claude-sonnet-4-6",
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelKnownIncompatibleWithProvider(tc.provider, tc.model); got != tc.want {
+				t.Fatalf("ModelKnownIncompatibleWithProvider(%q, %q) = %v, want %v", tc.provider, tc.model, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -259,6 +323,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsQoderWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoder")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	if err != nil {
+		t.Fatalf("ListModels(qoder) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
@@ -274,7 +353,6 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	catalogs := map[string][]Model{
 		"claude":  claudeStaticModels(),
 		"codex":   codexStaticModels(),
-		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),
 	}
@@ -805,6 +883,31 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 	if models[1].ID != "nous:anthropic/claude-opus-4.7" {
 		t.Errorf("expected current model second: %+v", models[1])
+	}
+}
+
+func TestParseHermesSessionNewModelsPreservesCustomModelIDsWithColons(t *testing.T) {
+	raw := []byte(`{
+      "sessionId": "ses_123",
+      "models": {
+        "availableModels": [
+          {"modelId": "custom:lfm2.5:8b", "name": "lfm2.5:8b", "description": "Provider: Custom"}
+        ],
+        "currentModelId": "custom:lfm2.5:8b"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "custom:lfm2.5:8b" {
+		t.Errorf("model id must be preserved verbatim, got %+v", models[0])
+	}
+	if models[0].Provider != "custom" {
+		t.Errorf("provider should be derived from the first colon only, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("current custom model should be marked default: %+v", models[0])
 	}
 }
 

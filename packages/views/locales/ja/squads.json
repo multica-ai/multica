@@ -93,7 +93,6 @@
     "section_columns": "列",
     "result_count_title": "該当スカッド / すべてのスカッド",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア"
   }

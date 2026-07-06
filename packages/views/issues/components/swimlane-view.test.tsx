@@ -272,6 +272,7 @@ const mockIssues: Issue[] = [
     parent_issue_id: null,
     project_id: null,
     position: 100,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
@@ -294,6 +295,7 @@ const mockIssues: Issue[] = [
     parent_issue_id: "parent-1",
     project_id: null,
     position: 200,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
@@ -316,6 +318,7 @@ const mockIssues: Issue[] = [
     parent_issue_id: null,
     project_id: null,
     position: 300,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
@@ -456,6 +459,7 @@ describe("SwimLaneView", () => {
     parent_issue_id: "missing-parent",
     project_id: null,
     position: 400,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
@@ -612,11 +616,34 @@ describe("SwimLaneView", () => {
       });
     });
 
-    expect(mockOnMoveIssue).toHaveBeenCalledWith("orphan-1", {
-      parent_issue_id: null,
-      status: "in_progress",
-      position: 300,
+    expect(mockOnMoveIssue).toHaveBeenCalledWith(
+      "orphan-1",
+      { parent_issue_id: null, status: "in_progress", position: 300 },
+      expect.any(Function),
+    );
+  });
+
+  it("passes a settle callback that releases the lock without error", () => {
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
+    );
+
+    const targetCellId = "swim:parent:none:in_progress";
+    act(() => {
+      lastOnDragOver({ active: { id: "orphan-1" }, over: { id: targetCellId } });
     });
+    act(() => {
+      lastOnDragEnd({ active: { id: "orphan-1" }, over: { id: targetCellId } });
+    });
+
+    // The move carries a settle callback (held from drop until the mutation
+    // settles); invoking it releases the lock and re-syncs from the cache.
+    const onSettled = mockOnMoveIssue.mock.calls[0]?.[2] as
+      | (() => void)
+      | undefined;
+    expect(typeof onSettled).toBe("function");
+    expect(() => act(() => onSettled?.())).not.toThrow();
   });
 
   it("does not call onMoveIssue when drop target equals source cell (no-op)", () => {
@@ -661,6 +688,7 @@ describe("SwimLaneView", () => {
         parent_issue_id: "parent-1",
         status: "todo",
       }),
+      expect.any(Function),
     );
   });
 
@@ -728,6 +756,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 100,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -750,6 +779,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 200,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -772,6 +802,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: "parent-1",
       project_id: null,
       position: 300,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -794,6 +825,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: "parent-2",
       project_id: null,
       position: 400,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -1060,6 +1092,7 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-c",
       expect.objectContaining({ project_id: "proj-1", status: "todo" }),
+      expect.any(Function),
     );
   });
 
@@ -1082,6 +1115,7 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-a",
       expect.objectContaining({ project_id: null, status: "in_review" }),
+      expect.any(Function),
     );
   });
 
@@ -1164,6 +1198,7 @@ describe("SwimLaneView", () => {
         assignee_id: "user-1",
         status: "in_review",
       }),
+      expect.any(Function),
     );
   });
 
@@ -1190,6 +1225,7 @@ describe("SwimLaneView", () => {
         assignee_id: null,
         status: "done",
       }),
+      expect.any(Function),
     );
   });
 
@@ -1246,6 +1282,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 10,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -1319,6 +1356,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 50,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -1399,6 +1437,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 10,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -1492,6 +1531,7 @@ describe("SwimLaneView", () => {
       parent_issue_id: null,
       project_id: null,
       position: 10,
+      stage: null,
       start_date: null,
       due_date: null,
       metadata: {},
@@ -1566,5 +1606,91 @@ describe("SwimLaneView", () => {
       expect(screen.getByText("Running Child")).toBeInTheDocument();
       expect(screen.queryByText("Non-running Child")).toBeNull();
     });
+  });
+
+  it("hides batch-fetched children when 'Show sub-issues' is off", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+
+    const grandparent: Issue = {
+      id: "gp-4",
+      workspace_id: "ws-1",
+      number: 40,
+      identifier: "PROJ-40",
+      title: "Grandparent 4",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      stage: null,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-4",
+      number: 41,
+      identifier: "PROJ-41",
+      title: "Parent 4",
+      parent_issue_id: "gp-4",
+      position: 11,
+    };
+    // Returned only by the batch fetch (not in the initial `issues` set). It is
+    // a sub-issue, so with showSubIssues off it must not be merged back in.
+    const batchOnlyChild: Issue = {
+      ...grandparent,
+      id: "gc-hidden",
+      number: 42,
+      identifier: "PROJ-42",
+      title: "Batch Sub-issue",
+      status: "in_progress",
+      parent_issue_id: "p-4",
+      position: 12,
+    };
+
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [batchOnlyChild] });
+
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-4", { done: 0, total: 1 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+          agentRunningFilter: false,
+          showSubIssues: false,
+        }}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+
+    // Guard against a false pass: the batch request must have targeted p-4.
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-4"]));
+
+    // Give the merge effect a chance to run, then assert the sub-issue stays hidden.
+    await act(async () => {});
+    expect(screen.queryByText("Batch Sub-issue")).toBeNull();
   });
 });

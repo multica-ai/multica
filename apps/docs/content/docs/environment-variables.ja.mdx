@@ -157,6 +157,7 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `REDIS_URL` | 空 | Redis 接続 URL（例: `redis://localhost:6379/0`）。設定しないと auth エンドポイントのレート制限が無効になります。同じ Redis はリアルタイムハブの fan-out、PAT キャッシュ、デーモントークンキャッシュでも使われます — 設定しない場合はすべてインメモリ / 直接 DB モードにフォールバックします |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | `true` に設定すると、すべての Redis 接続で `CLIENT SETNAME` ハンドシェイクをスキップします。`CLIENT` コマンドをブロックするマネージド Redis プロバイダー（GCP Memorystore や ACL 制限付きの AWS ElastiCache など）を使用する場合に**必須**です。有効にすると `CLIENT LIST` 出力で接続の説明的な名前が失われますが、制限付きプロバイダーとの互換性が得られます |
 | `RATE_LIMIT_AUTH` | `5` | `/auth/send-code` および `/auth/google` に対する IP あたり毎分の最大リクエスト数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | `/auth/verify-code` に対する IP あたり毎分の最大リクエスト数 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 空 | リミッターがその `X-Forwarded-For` ヘッダーを信頼することを許可する、カンマ区切りの CIDR。空（デフォルト）は **XFF を決して信頼しない**ことを意味します — リミッターは直接接続の `RemoteAddr` のみを使用します |
@@ -181,8 +182,18 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 最大同時タスク数 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 名に一致 | 各 AI コーディングツールの実行ファイルへのパス（例: `MULTICA_CLAUDE_PATH`） |
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI コーディングツールのデフォルトモデル |
+| `MULTICA_<PROVIDER>_ARGS` | 空 | バックエンドごとのデーモン全体のデフォルト CLI 引数。各タスクに対し、各エージェント自身の `custom_args` より前に適用される。`MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` をサポート |
 
 各パラメータがデーモンの動作にどう影響するかの完全な説明は、[デーモンとランタイム](/daemon-runtimes)を参照してください。
+
+### デフォルトのエージェント引数（`MULTICA_<PROVIDER>_ARGS`）
+
+バックエンドに対して**フリート全体のデフォルト**となる CLI フラグの層を設定します。各エージェントの `custom_args` を個別に編集することなく、デーモン上のすべてのエージェントにデフォルトのコスト・リソースのベースライン（例: `--max-turns`）を適用できる便利な手段です。これはデフォルトの層であり、超えられない上限ではありません。各エージェント自身の `custom_args` が後から追加され、これを上書きできます（下記の**優先順位**を参照）。
+
+- **優先順位：** デフォルト引数が先に適用され、その後に各エージェント自身の `custom_args` が追加されます。値を取るフラグについては、下流 CLI 自身の引数パーサーが最終的な勝者を決めます（多くのツールでは最後の出現が優先）。そのため個々のエージェントはデーモンのデフォルトを引き上げられますが、エージェントが上書きしない箇所ではデフォルトが引き続き有効です。
+- **パース：** 値は POSIX シェルワード規則で分割されるため、クォートが使えます——`MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` は 2 つのトークンに解析されます。
+- **安全性：** デフォルト引数の層と各エージェントの `custom_args` の層は、いずれも同じ blocked-flags フィルターを通過します。そのためプロトコル上重要なフラグ（Claude の `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--mcp-config`、および Codex の `--listen` など）はどちらの層からも注入できません。
+- **未設定・空** の場合は動作に変化はありません。
 
 ## フロントエンドのアクセス制御
 

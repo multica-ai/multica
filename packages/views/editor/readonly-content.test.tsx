@@ -276,6 +276,24 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("copies the whole fenced code block from the readonly toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = ["pnpm install", "pnpm test"].join("\n");
+    const { getByRole } = render(
+      <ReadonlyContent content={["```bash", source, "```"].join("\n")} />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source);
+    });
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 
@@ -375,6 +393,28 @@ describe("ReadonlyContent Mermaid rendering", () => {
     await waitFor(() => {
       expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
     });
+  });
+
+  it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {
+    // With suppressErrorRendering enabled, invalid syntax makes render() reject
+    // instead of emitting Mermaid's built-in error graphic.
+    vi.mocked(mermaid.render).mockRejectedValueOnce(
+      new Error("Parse error on line 3"),
+    );
+
+    const chart = "graph LR\n  A -->";
+    const { container } = render(
+      <ReadonlyContent content={["```mermaid", chart, "```"].join("\n")} />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-error")).not.toBeNull();
+    });
+
+    expect(container.querySelector(".mermaid-diagram-frame")).toBeNull();
+    expect(container.querySelector(".mermaid-diagram-error code")?.textContent).toBe(
+      chart,
+    );
   });
 });
 

@@ -63,8 +63,142 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+}
+
+// DispatchAutopilotForPlan is the entry point for scheduled triggers that
+// already know the canonical UTC plan_time of the occurrence they are
+// firing. The plan_time is persisted on autopilot_run.planned_at, and the
+// (trigger_id, planned_at) partial unique index — combined with this
+// method's idempotent lookup — guarantees that the SAME planned occurrence
+// cannot produce two SUCCESSFUL runs even if a stale-steal in
+// sys_cron_executions re-enters this method after a prior attempt.
+//
+// Semantics for an already-existing run at (trigger_id, planned_at):
+//
+//   - If the existing run is COMPLETE (terminal status, or in-flight
+//     with the appropriate downstream linkage — issue_id for
+//     create_issue, task_id for run_only), it is returned unchanged.
+//     The handler then writes SUCCESS in sys_cron_executions; no
+//     duplicate issue/task is produced.
+//   - If the existing run is in a PARTIAL state (a prior attempt
+//     wrote the run row but crashed before creating its downstream
+//     issue/task), it is marked FAILED with a recovery reason and
+//     its planned_at is cleared, releasing the partial-unique slot.
+//     Dispatch then proceeds normally and creates a fresh run at the
+//     same plan_time. Without this branch, a crash-during-dispatch
+//     would let a subsequent retry see the in-flight run, return it
+//     unchanged, and let the scheduler mark the occurrence SUCCESS
+//     without an actual issue/task ever being created (#4443 review).
+//
+// triggerID and plannedAt MUST both be valid; passing zero values
+// would silently disable the idempotency guard. Manual / webhook /
+// api callers should use DispatchAutopilot instead.
+func (s *AutopilotService) DispatchAutopilotForPlan(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt time.Time,
+) (*db.AutopilotRun, error) {
+	if !triggerID.Valid {
+		return nil, fmt.Errorf("dispatch for plan: trigger_id is required")
+	}
+	if plannedAt.IsZero() {
+		return nil, fmt.Errorf("dispatch for plan: planned_at is required")
+	}
+	plannedTS := pgtype.Timestamptz{Time: plannedAt.UTC(), Valid: true}
+
+	// Fast path: prior attempt already created a run for this exact
+	// occurrence. The partial unique index uq_autopilot_run_trigger_planned
+	// would also reject a duplicate INSERT, but doing the lookup up
+	// front lets us short-circuit on a complete run and gives us a
+	// chance to recover a partial run before retrying.
+	existing, err := s.Queries.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+		TriggerID: triggerID,
+		PlannedAt: plannedTS,
+	})
+	switch {
+	case err == nil && isAutopilotRunComplete(existing):
+		// A prior attempt produced a complete run. Hand it back so the
+		// handler can record SUCCESS in sys_cron_executions without
+		// duplicating any downstream side effect.
+		return &existing, nil
+
+	case err == nil:
+		// Partial-state run from a crashed attempt. Mark it failed
+		// (with a recovery reason) and release its partial-unique
+		// slot so the fresh dispatch below can create a new row.
+		slog.Warn("autopilot dispatch for plan: recovering partial run",
+			"run_id", util.UUIDToString(existing.ID),
+			"trigger_id", util.UUIDToString(triggerID),
+			"planned_at", plannedAt.UTC().Format(time.RFC3339),
+			"status", existing.Status,
+			"issue_set", existing.IssueID.Valid,
+			"task_set", existing.TaskID.Valid,
+		)
+		if err := s.Queries.RecoverPartialAutopilotRun(ctx, existing.ID); err != nil {
+			return nil, fmt.Errorf("dispatch for plan: recover partial run: %w", err)
+		}
+		// Fall through to a fresh dispatch below.
+
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
+	}
+
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS)
+}
+
+// isAutopilotRunComplete decides whether an existing autopilot_run row
+// for (trigger_id, planned_at) is safe to reuse on a stale-steal retry.
+//
+// A run is "complete" if either:
+//
+//   - It is in a terminal state (completed / failed / skipped). Nothing
+//     more to do downstream; the caller can return it as-is.
+//
+//   - It is in-flight in a state whose downstream side effect is
+//     observable:
+//
+//     * issue_created with a valid issue_id — the issue exists and
+//       the issue-event listener owns task creation from here.
+//
+//     * running with a valid task_id — the task is queued, the
+//       listener will close the run when the task terminates.
+//
+// Anything else — most importantly issue_created/running with NULL
+// issue_id/task_id, or the brief 'pending' state — is a partial run:
+// the run row was inserted before the dispatch path could create the
+// downstream resource, and a stale-steal retry MUST NOT treat it as
+// complete (#4443 review).
+func isAutopilotRunComplete(run db.AutopilotRun) bool {
+	switch run.Status {
+	case "completed", "failed", "skipped":
+		return true
+	case "issue_created":
+		return run.IssueID.Valid
+	case "running":
+		return run.TaskID.Valid
+	default:
+		return false
+	}
+}
+
+// dispatchAutopilot is the shared core of the two public Dispatch entry
+// points. plannedAt is the canonical UTC plan_time for scheduled triggers;
+// for manual / webhook / api dispatch it is the zero pgtype.Timestamptz and
+// the resulting autopilot_run row has planned_at IS NULL.
+func (s *AutopilotService) dispatchAutopilot(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt pgtype.Timestamptz,
+) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
-		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
+		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
 	}
 
 	// Determine initial status based on execution mode.
@@ -80,6 +214,7 @@ func (s *AutopilotService) DispatchAutopilot(
 		Status:         initialStatus,
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadAttribution(autopilot),
+		PlannedAt:      plannedAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
@@ -197,6 +332,25 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("create issue: %w", err)
 	}
 
+	// Fan out the default subscriber template inside the same tx as the
+	// issue insert, before EventIssueCreated fires — so notification
+	// listeners see the full subscriber set on the first event instead of
+	// racing the listener that would otherwise hydrate the template.
+	templateSubs, err := qtx.ListAutopilotSubscribers(ctx, ap.ID)
+	if err != nil {
+		return fmt.Errorf("list autopilot subscribers: %w", err)
+	}
+	for _, sub := range templateSubs {
+		if err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: sub.UserType,
+			UserID:   sub.UserID,
+			Reason:   "autopilot",
+		}); err != nil {
+			return fmt.Errorf("add autopilot subscriber to issue: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
@@ -227,6 +381,17 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
 
+	// The issue:created notification listener only handles handler.IssueResponse
+	// payloads and only direct-notifies the assignee + @mentions; subscribers
+	// don't get an inbox at creation time on the manual path because there are
+	// none yet. The autopilot path is different: the template subscribers were
+	// fanned out into issue_subscriber inside the tx above, so they exist at the
+	// moment of creation and OQ3 says they should receive the same subscription
+	// events as reason='manual'. Issue creation is one such event — so write
+	// the inbox rows directly here. Done after commit so a failure here doesn't
+	// roll back the issue itself.
+	s.notifyAutopilotSubscribersOnCreate(ctx, ap, issue, leader.ID, templateSubs)
+
 	// Enqueue agent task via the existing flow. Squad-assigned autopilots
 	// route to the resolved leader as the executing agent (Path A from
 	// MUL-2429); agent-assigned autopilots go through the standard issue
@@ -238,7 +403,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		if leader.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, leader) {
 			return fmt.Errorf("autopilot creator cannot access private squad leader")
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
+		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
 	} else {
@@ -255,6 +420,85 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+// notifyAutopilotSubscribersOnCreate writes an inbox_item for each template
+// subscriber of an autopilot-created issue and broadcasts an inbox:new event
+// so the recipient's inbox updates in real time. Mirrors the inbox payload
+// shape from notification_listeners.go so the WS consumer sees the same fields
+// the listener-driven path produces. Failures are logged, not propagated:
+// the issue and its subscriber rows are already committed, and an inbox-write
+// hiccup must not bubble up as a dispatch failure.
+func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
+	ctx context.Context,
+	ap db.Autopilot,
+	issue db.Issue,
+	leaderID pgtype.UUID,
+	subscribers []db.AutopilotSubscriber,
+) {
+	if len(subscribers) == 0 {
+		return
+	}
+	details, _ := json.Marshal(map[string]string{
+		"autopilot_id": util.UUIDToString(ap.ID),
+		"reason":       "autopilot",
+	})
+	for _, sub := range subscribers {
+		// Autopilot subscribers are restricted to user_type='member' at the
+		// handler boundary; defend in case that constraint is ever relaxed
+		// (agents don't have inbox).
+		if sub.UserType != "member" {
+			continue
+		}
+		item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   ap.WorkspaceID,
+			RecipientType: "member",
+			RecipientID:   sub.UserID,
+			Type:          "issue_subscribed",
+			Severity:      "info",
+			IssueID:       issue.ID,
+			Title:         issue.Title,
+			Body:          pgtype.Text{},
+			ActorType:     pgtype.Text{String: "agent", Valid: true},
+			ActorID:       leaderID,
+			Details:       details,
+		})
+		if err != nil {
+			slog.Error("autopilot subscriber inbox write failed",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"recipient_id", util.UUIDToString(sub.UserID),
+				"error", err,
+			)
+			continue
+		}
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(leaderID),
+			Payload: map[string]any{
+				"item": map[string]any{
+					"id":             util.UUIDToString(item.ID),
+					"workspace_id":   util.UUIDToString(item.WorkspaceID),
+					"recipient_type": item.RecipientType,
+					"recipient_id":   util.UUIDToString(item.RecipientID),
+					"type":           item.Type,
+					"severity":       item.Severity,
+					"issue_id":       util.UUIDToPtr(item.IssueID),
+					"issue_status":   issue.Status,
+					"title":          item.Title,
+					"body":           util.TextToPtr(item.Body),
+					"read":           item.Read,
+					"archived":       item.Archived,
+					"created_at":     util.TimestampToString(item.CreatedAt),
+					"actor_type":     util.TextToPtr(item.ActorType),
+					"actor_id":       util.UUIDToPtr(item.ActorID),
+					"details":        json.RawMessage(item.Details),
+				},
+			},
+		})
+	}
 }
 
 // errDispatchSkipped wraps a readiness failure encountered after the
@@ -749,6 +993,7 @@ func (s *AutopilotService) recordSkippedRun(
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
+	plannedAt pgtype.Timestamptz,
 	reason string,
 ) (*db.AutopilotRun, error) {
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
@@ -758,6 +1003,7 @@ func (s *AutopilotService) recordSkippedRun(
 		Status:         "skipped",
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadAttribution(autopilot),
+		PlannedAt:      plannedAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create skipped run: %w", err)

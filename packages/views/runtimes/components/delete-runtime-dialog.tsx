@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Globe, Lock } from "lucide-react";
+import { AlertTriangle, Globe, Info, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -48,10 +48,11 @@ import { isSelfHealingRuntime } from "../utils";
 //      server snapshot and force the user to re-confirm the checkbox.
 //
 // Self-healing local runtimes (online local daemons that re-register
-// themselves seconds after deletion — see isSelfHealingRuntime) are
-// gated at the affordance level by the row-menu and Diagnostics card,
-// so this dialog never opens for them. We re-check at confirm time as
-// defence in depth in case the runtime flips while the dialog is open.
+// themselves seconds after deletion — see isSelfHealingRuntime) are NOT
+// blocked at this layer (MUL-3352). The trigger affordances let the
+// owner click through, and this dialog raises a self_heal warning banner
+// so the user knows the daemon will re-register a fresh runtime row
+// unless they stop the daemon process first. Confirm proceeds.
 export interface DeleteRuntimeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -116,16 +117,6 @@ export function DeleteRuntimeDialog({
   const cascadeMutation = useArchiveAgentsAndDeleteRuntime(wsId);
 
   const handleConfirm = async () => {
-    // Defensive re-check of the self-healing rule — the affordance is
-    // gated upstream, but a local daemon that came online while the
-    // dialog was open should still block the action.
-    if (isSelfHealingRuntime(runtime)) {
-      toast.error(
-        t(($) => $.detail.delete_dialog.cascade.self_healing_blocked_toast),
-      );
-      return;
-    }
-
     setSubmitting(true);
     setPlanChangedNotice(null);
 
@@ -236,6 +227,38 @@ export function DeleteRuntimeDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Persistence notice — informational banner shown when deleting the runtime
+// row may not permanently remove the runnable backend. Profile-backed custom
+// runtimes win over the generic local-daemon warning: stopping the daemon is
+// not sufficient when the workspace-level profile still exists.
+// ---------------------------------------------------------------------------
+
+function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  if (runtime.profile_id) {
+    return (
+      <div
+        role="status"
+        className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+      >
+        <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
+        <span>{t(($) => $.detail.delete_dialog.profile_backed_notice)}</span>
+      </div>
+    );
+  }
+  if (!isSelfHealingRuntime(runtime)) return null;
+  return (
+    <div
+      role="status"
+      className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+    >
+      <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
+      <span>{t(($) => $.detail.delete_dialog.self_heal_notice)}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Light mode — no active agents, classic "are you sure" prompt. Title and
 // description match the legacy AlertDialog so existing screenshots / muscle
 // memory still apply.
@@ -264,6 +287,7 @@ function LightBody({
             name: runtime.name,
           })}
         </p>
+        <DeletePersistenceNotice runtime={runtime} />
       </div>
       <div className="border-t bg-muted/25 px-5 py-3">
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -338,6 +362,8 @@ function CascadeBody({
             name: runtime.name,
           })}
         </p>
+
+        <DeletePersistenceNotice runtime={runtime} />
 
         {/* Destructive banner — keep the user's eye on the irreversible
             half before they scan the agent table. */}

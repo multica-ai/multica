@@ -198,7 +198,29 @@ type SendCardParams struct {
 	// through opaque so the card-template package can evolve without
 	// dragging this transport interface along.
 	CardJSON string
+	// ReplyTarget, when set, routes the send through Lark's reply
+	// endpoint (POST /im/v1/messages/{id}/reply) instead of the
+	// chat-level send endpoint, so the card lands inside the originating
+	// 话题 (thread). Empty ReplyTarget keeps the legacy chat-level send.
+	ReplyTarget ReplyTarget
 }
+
+// ReplyTarget describes how an outbound message should be threaded back
+// to an inbound message. When MessageID is non-empty the transport uses
+// Lark's reply endpoint targeting that message; InThread maps to the
+// reply_in_thread flag so the reply stays inside the message's topic.
+// The zero value (empty MessageID) means "send at the chat level" — the
+// historical behavior — so callers that don't care about threading just
+// leave it unset.
+type ReplyTarget struct {
+	MessageID string
+	InThread  bool
+}
+
+// IsSet reports whether this target should route through the reply
+// endpoint. A reply needs a parent message_id; without one there is
+// nothing to reply to and the caller falls back to a chat-level send.
+func (r ReplyTarget) IsSet() bool { return r.MessageID != "" }
 
 // PatchCardParams is the input shape for updating an existing card.
 type PatchCardParams struct {
@@ -214,6 +236,9 @@ type SendTextParams struct {
 	InstallationID InstallationCredentials
 	ChatID         ChatID
 	Text           string
+	// ReplyTarget threads the text reply back into a Lark topic; see
+	// ReplyTarget. Empty keeps the chat-level send.
+	ReplyTarget ReplyTarget
 }
 
 // SendMarkdownCardParams is the input shape for posting an agent
@@ -231,6 +256,9 @@ type SendMarkdownCardParams struct {
 	// Lark shows in the chat list / desktop notification. Empty falls
 	// back to whatever Lark derives from the body.
 	Summary string
+	// ReplyTarget threads the card reply back into a Lark topic; see
+	// ReplyTarget. Empty keeps the chat-level send.
+	ReplyTarget ReplyTarget
 }
 
 // BindingPromptParams carries the data needed to render and send the

@@ -34,6 +34,10 @@ export class WSClient {
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private hasConnectedBefore = false;
+  // One-shot per connection. A non-conforming frame can repeat hundreds of
+  // times per session, so we log the first drop and suppress the rest. Reset
+  // on each connect() so a fresh connection logs once again.
+  private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
@@ -58,6 +62,7 @@ export class WSClient {
   }
 
   connect() {
+    this.badFrameLogged = false;
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
     // proxies, CDNs, and browser history.  In cookie mode the HttpOnly cookie
@@ -94,6 +99,25 @@ export class WSClient {
           "ws: received unparseable message",
           summarizeUnparseable(event.data),
         );
+        return;
+      }
+      // Trust boundary: a frame must be an object carrying a string `type`.
+      // The server protocol guarantees this for every frame, but a
+      // non-conforming frame — an out-of-protocol frame injected by a proxy /
+      // browser extension, or a bare JSON primitive — must degrade to a no-op
+      // here. Without this guard every downstream consumer (the onAny
+      // dispatcher and every ws.on subscriber) runs against a bad shape;
+      // `msg.type.split(...)` in the realtime sync threw an uncaught TypeError
+      // out of onmessage and surfaced as a flood of global `$exception` events
+      // (MUL-3418). Validate once at the boundary, trust the shape downstream.
+      if (!msg || typeof (msg as { type?: unknown }).type !== "string") {
+        if (!this.badFrameLogged) {
+          this.badFrameLogged = true;
+          this.logger.warn(
+            "ws: dropping frame without a string type",
+            summarizeUnparseable(event.data),
+          );
+        }
         return;
       }
       if ((msg as any).type === "auth_ack") {

@@ -1,0 +1,93 @@
+---
+title: Chat integrations (channels)
+description: How Multica connects agents to chat platforms — one channel engine, per-platform adapters for Lark (飞书) and Slack — covering the inbound pipeline, sessions, and authorization.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+A **channel** connects a Multica [agent](/agents) to a chat platform so your team can work with it where they already talk. Today there are two channels — [Lark (飞书)](/lark-bot-integration) and [Slack](/slack-bot-integration) — and both run on the **same engine**: a platform-neutral core plus a thin per-platform adapter. Adding a platform is "implement the adapter," not "rebuild the pipeline."
+
+An **installation** is the unit that ties it together: one bot bound to one `(workspace, agent)`. Inbound messages are routed to an installation, then through a shared pipeline; the agent's reply is sent back to the same chat.
+
+## Architecture
+
+<Mermaid chart={`
+flowchart LR
+  subgraph P["Chat platforms"]
+    LK["Lark / 飞书"]
+    SL["Slack"]
+  end
+  subgraph ENG["Channel engine (platform-neutral)"]
+    direction TB
+    SUP["Supervisor<br/>one live connection per installation"]
+    ROU["Router pipeline:<br/>route → dedup → auth → session → trigger"]
+  end
+  LK -->|long connection| SUP
+  SL -->|Socket Mode| SUP
+  SUP -->|raw event| ADP["Per-platform adapter<br/>translate + ResolverSet"]
+  ADP --> ROU
+  ROU -->|agent task| RUN["Daemon runs the agent"]
+  RUN -->|reply| OUT["Per-platform outbound<br/>(bot token → platform API)"]
+  OUT --> P
+`} />
+
+## The inbound pipeline (generic)
+
+Every inbound message — Lark or Slack — runs through the same ordered steps in the engine `Router`. A platform adapter only supplies the per-platform pieces (the `ResolverSet`); the policy lives in the engine.
+
+1. **Route to installation** — map the event to a `channel_installation` (→ workspace + agent). Lark routes by `app_id`; Slack routes by the app id carried on the event.
+2. **Addressing filter** — in a group/channel, only messages that **@-mention the bot** continue; idle group chatter is dropped (not read).
+3. **Dedup** — a two-phase `(installation, message_id)` claim guarantees exactly-once processing, even across server replicas.
+4. **Identity + authorization** — resolve the sender's platform user id to a Multica user (the [account binding](#authorization)), then re-check workspace membership. Unbound senders get a "link your account" prompt; non-members are dropped.
+5. **Session** — find or create a [chat session](/chat) for this conversation and append the message (see [Sessions](#sessions-and-context)).
+6. **Trigger** — enqueue an agent [task](/tasks); a [daemon](/daemon-runtimes) runs the agent and the reply is sent back into the chat.
+
+## Sessions and context
+
+The agent's context is the **chat-session transcript** — the messages that have been ingested into that session over time. This transcript model is generic (shared by every channel). What differs per platform is the **session-isolation key** the adapter composes:
+
+| Platform | Isolation key | Effect |
+|---|---|---|
+| **Lark / 飞书** | the chat id | One session per chat/group — consecutive turns in the same chat accumulate into one transcript (multi-turn memory). |
+| **Slack** | DM: the channel; channel: `channel + thread root` | Each DM is one session; **each @bot thread is its own session**, so two threads in one channel don't mix. |
+
+<Callout type="info">
+In a group, only messages that **@-mention the bot** are ingested. Neither channel reads the channel's other (un-@'d) messages or scrollback today, so the agent won't see messages it wasn't addressed in. Fetching surrounding history as context is a planned enhancement.
+</Callout>
+
+## Authorization
+
+Two independent gates protect a bot in a shared group — both enforced in the engine for every message, identically for Lark and Slack:
+
+- **Account binding (authentication)** — the sender's platform user id must be linked to a Multica user. The first time someone messages the bot they get a one-time link to bind their identity to **their own** Multica account; until then no agent runs.
+- **Workspace membership (authorization)** — the bound Multica user must be a member of the installation's workspace, re-checked on every message. Non-members are silently dropped.
+
+So adding a bot to a public channel is safe: only workspace members who have bound their identity can drive the agent, and each sender is checked independently. See the per-platform pages for the user-facing prompts.
+
+## The two channels
+
+<Callout type="info">
+**Lark (飞书) — scan to install.** A workspace admin binds an agent by scanning a QR with the Lark app; no developer console steps. One Bot per agent. See [Lark Bot integration](/lark-bot-integration).
+</Callout>
+
+<Callout type="info">
+**Slack — bring your own app.** A workspace admin creates a Slack app, installs it to their Slack workspace, and pastes its bot token + app-level token into Multica. Each agent gets its own Slack app, so several agents can each have a distinct bot in one Slack workspace. See [Slack Bot integration](/slack-bot-integration) for the manifest and step-by-step setup.
+</Callout>
+
+## Self-host
+
+Each channel is **off until you set its at-rest encryption key** (the key encrypts each bot's tokens before they touch the database):
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+On Multica Cloud both are already configured. See [Environment variables](/environment-variables) for the full reference.
+
+## Next
+
+- [Lark Bot integration](/lark-bot-integration) — scan-to-install, DM / @-mention / `/issue`
+- [Slack Bot integration](/slack-bot-integration) — bring-your-own-app setup (manifest + tokens), per-agent bots
+- [Agents](/agents) · [Chat](/chat) · [Tasks](/tasks)

@@ -16,6 +16,8 @@ import {
 } from "./slug";
 import { useT } from "../i18n";
 import { isReservedSlug } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
+import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
 
 export interface CreateWorkspaceFormProps {
   onSuccess: (workspace: Workspace) => void | Promise<void>;
@@ -24,6 +26,7 @@ export interface CreateWorkspaceFormProps {
 export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const { t } = useT("workspace");
   const createWorkspace = useCreateWorkspace();
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
@@ -98,9 +101,8 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
         <div className="space-y-1.5">
           <Label htmlFor="ws-slug">{t(($) => $.create_form.url_label)}</Label>
           <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
-            {/* eslint-disable-next-line i18next/no-literal-string -- brand URL prefix, not translatable */}
             <span className="pl-3 text-sm text-muted-foreground select-none">
-              multica.ai/
+              {`${urlHost}/`}
             </span>
             <Input
               id="ws-slug"

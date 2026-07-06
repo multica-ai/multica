@@ -52,7 +52,7 @@ func init() {
 	// while `--token mul_...` / `--token mcn_...` and the `=value` form
 	// consume the value normally.
 	loginCmd.Flags().Lookup("token").NoOptDefVal = tokenPromptSentinel
-	loginCmd.Flags().String(callbackHostFlag, "", "Host the OAuth callback URL points at (auto-detected from the server's route when empty). Use this for reverse-proxy / FQDN setups where auto-detection picks the wrong interface.")
+	loginCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {

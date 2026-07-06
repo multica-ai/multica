@@ -39,11 +39,22 @@ export function useUpdateAutopilot() {
       qc.cancelQueries({ queryKey: autopilotKeys.list(wsId) });
       const prevList = qc.getQueryData<ListAutopilotsResponse>(autopilotKeys.list(wsId));
       const prevDetail = qc.getQueryData<GetAutopilotResponse>(autopilotKeys.detail(wsId, id));
+      // Request shape (AutopilotSubscriberInput) lacks `created_at`, so it's
+      // not assignable to the response shape. onSettled invalidates the
+      // detail query and refetches the authoritative server payload.
+      const { subscribers: _omitSubs, ...optimistic } = data;
       qc.setQueryData<ListAutopilotsResponse>(autopilotKeys.list(wsId), (old) =>
-        old ? { ...old, autopilots: old.autopilots.map((a) => (a.id === id ? { ...a, ...data } : a)) } : old,
+        old
+          ? {
+              ...old,
+              autopilots: old.autopilots.map((a) =>
+                a.id === id ? { ...a, ...optimistic } : a,
+              ),
+            }
+          : old,
       );
       qc.setQueryData<GetAutopilotResponse>(autopilotKeys.detail(wsId, id), (old) =>
-        old ? { ...old, autopilot: { ...old.autopilot, ...data } } : old,
+        old ? { ...old, autopilot: { ...old.autopilot, ...optimistic } } : old,
       );
       return { prevList, prevDetail, id };
     },
@@ -89,6 +100,30 @@ export function useTriggerAutopilot() {
     onSettled: (_data, _err, id) => {
       qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, id) });
       qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, id) });
+    },
+  });
+}
+
+export function useGrantAutopilotAccess() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, userId }: { autopilotId: string; userId: string }) =>
+      api.grantAutopilotAccess(autopilotId, userId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
+
+export function useRevokeAutopilotAccess() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, userId }: { autopilotId: string; userId: string }) =>
+      api.revokeAutopilotAccess(autopilotId, userId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
     },
   });
 }

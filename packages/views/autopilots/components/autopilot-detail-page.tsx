@@ -52,7 +52,12 @@ import {
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type {
+  AutopilotExecutionMode,
+  AutopilotRun,
+  AutopilotSubscriber,
+  AutopilotTrigger,
+} from "@multica/core/types";
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
@@ -251,7 +256,7 @@ function SkippedRunsGroup({
   );
 }
 
-function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
+function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t } = useT("autopilots");
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
@@ -324,7 +329,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
   // — keep it pinned to the row's top-right corner. Without this the
   // trash icon visually floats above the URL action buttons because the
   // outer flex uses `items-start`.
-  const deleteButton = (
+  const deleteButton = canWrite ? (
     <Button
       size="icon"
       variant="ghost"
@@ -334,7 +339,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
     >
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
     </Button>
-  );
+  ) : null;
 
   return (
     <div className="flex items-start gap-3 rounded-md border px-3 py-2">
@@ -381,16 +386,18 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
             </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0"
-              onClick={() => setRotateOpen(true)}
-              title={t(($) => $.trigger_row.rotate_url)}
-              disabled={rotateToken.isPending}
-            >
-              <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
-            </Button>
+            {canWrite && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0"
+                onClick={() => setRotateOpen(true)}
+                title={t(($) => $.trigger_row.rotate_url)}
+                disabled={rotateToken.isPending}
+              >
+                <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
+              </Button>
+            )}
             {deleteButton}
           </div>
         )}
@@ -573,6 +580,40 @@ function AddTriggerDialog({
   );
 }
 
+// Read-only chip row; edits flow through AutopilotDialog → SubscriberMultiSelect
+// so the detail page never holds in-flight selection state.
+function SubscriberChips({
+  subscribers,
+}: {
+  subscribers: AutopilotSubscriber[] | undefined;
+}) {
+  const { t } = useT("autopilots");
+  const { getActorName } = useActorName();
+  const members = (subscribers ?? []).filter((s) => s.user_type === "member");
+  if (members.length === 0) {
+    return (
+      <div className="mt-1 text-sm text-muted-foreground">
+        {t(($) => $.detail.field_subscribers_none)}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {members.map((s) => (
+        <span
+          key={`${s.user_type}:${s.user_id}`}
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+        >
+          <ActorAvatar actorType="member" actorId={s.user_id} size={14} />
+          <span className="max-w-[14rem] truncate">
+            {getActorName("member", s.user_id)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -644,6 +685,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   }
 
   const { autopilot, triggers } = data;
+  const collaborators = data.collaborators ?? [];
+  // Treat an absent can_write (older server) as "allowed" — the backend is the
+  // real gate, so the UI only hides controls when the server explicitly says
+  // the caller cannot write.
+  const canWrite = autopilot.can_write !== false;
+  // Managing the access list is narrower than write: granted collaborators can
+  // edit/run but cannot grant/revoke. Fall back to canWrite when the server
+  // doesn't send the field (older backend).
+  const canManageAccess = autopilot.can_manage_access ?? canWrite;
 
   const handleRunNow = async () => {
     try {
@@ -706,30 +756,32 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </>
         }
         actions={
-          <>
-            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
-              <Pencil className="h-3.5 w-3.5 sm:mr-1" />
-              <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleRunNow}
-              disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
-              className="px-2 sm:px-2.5"
-              aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
-            >
-              {triggerAutopilot.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5 sm:mr-1" />
-              )}
-              <span className="hidden sm:inline">
-                {triggerAutopilot.isPending
-                  ? t(($) => $.detail.running)
-                  : t(($) => $.detail.run_now)}
-              </span>
-            </Button>
-          </>
+          canWrite ? (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
+                <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+                <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleRunNow}
+                disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+                className="px-2 sm:px-2.5"
+                aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+              >
+                {triggerAutopilot.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 sm:mr-1" />
+                )}
+                <span className="hidden sm:inline">
+                  {triggerAutopilot.isPending
+                    ? t(($) => $.detail.running)
+                    : t(($) => $.detail.run_now)}
+                </span>
+              </Button>
+            </>
+          ) : null
         }
       />
 
@@ -802,6 +854,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   </div>
                 </div>
               )}
+              {autopilot.execution_mode === "create_issue" && (
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground">
+                    {t(($) => $.detail.field_subscribers)}
+                  </label>
+                  <SubscriberChips
+                    subscribers={autopilot.subscribers}
+                  />
+                </div>
+              )}
               {autopilot.description && (
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_prompt)}</label>
@@ -819,10 +881,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 {t(($) => $.detail.section_triggers)}
               </h2>
-              <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                {t(($) => $.detail.add_trigger)}
-              </Button>
+              {canWrite && (
+                <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  {t(($) => $.detail.add_trigger)}
+                </Button>
+              )}
             </div>
             {triggers.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
@@ -831,7 +895,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             ) : (
               <div className="space-y-2">
                 {triggers.map((trig) => (
-                  <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} />
+                  <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} canWrite={canWrite} />
                 ))}
               </div>
             )}
@@ -870,15 +934,17 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           </section>
 
           {/* Danger zone */}
-          <section className="space-y-3 pt-4 border-t">
-            <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">
-              {t(($) => $.detail.section_danger)}
-            </h2>
-            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
-              <Trash2 className="h-3.5 w-3.5 mr-1" />
-              {t(($) => $.detail.delete_button)}
-            </Button>
-          </section>
+          {canWrite && (
+            <section className="space-y-3 pt-4 border-t">
+              <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">
+                {t(($) => $.detail.section_danger)}
+              </h2>
+              <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                {t(($) => $.detail.delete_button)}
+              </Button>
+            </section>
+          )}
         </div>
       </div>
 
@@ -900,8 +966,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            subscriber_user_ids:
+              autopilot.subscribers
+                ?.filter((s) => s.user_type === "member")
+                .map((s) => s.user_id) ?? [],
           }}
           triggers={triggers}
+          collaborators={collaborators}
+          canManageAccess={canManageAccess}
         />
       )}
       <AlertDialog

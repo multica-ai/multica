@@ -26,7 +26,7 @@ export interface TimelineEntry {
   resolved_at?: string | null;
   resolved_by_type?: CommentAuthorType | null;
   resolved_by_id?: string | null;
+  source_task_id?: string | null;
   /** Set by frontend coalescing when consecutive identical activities are merged. */
   coalesced_count?: number;
 }
-

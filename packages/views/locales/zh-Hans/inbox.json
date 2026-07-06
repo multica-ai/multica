@@ -29,6 +29,7 @@
   },
   "types": {
     "issue_assigned": "已分配",
+    "issue_subscribed": "已订阅",
     "unassigned": "已取消分配",
     "assignee_changed": "分配人已更改",
     "status_changed": "状态已更改",

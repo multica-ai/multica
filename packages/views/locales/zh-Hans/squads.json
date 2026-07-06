@@ -52,7 +52,6 @@
   },
   "members_tab": {
     "section_title": "成员",
-    "section_count_one": "该小队有 {{count}} 名成员",
     "section_count_other": "该小队有 {{count}} 名成员",
     "add_member_button": "添加成员",
     "create_agent_button": "创建智能体",
@@ -73,10 +72,8 @@
     "unavailable": "小队不可用",
     "detail_link": "详情 →",
     "archived": "已归档",
-    "member_count_one": "{{count}} 名成员",
     "member_count_other": "{{count}} 名成员",
     "members_section": "成员",
-    "more_members_one": "还有 {{count}} 人",
     "more_members_other": "还有 {{count}} 人"
   },
   "instructions_tab": {
@@ -96,7 +93,6 @@
     "section_columns": "列",
     "result_count_title": "当前结果 / 全部小队",
     "filter_label": "筛选",
-    "filter_active_count_one": "{{count}} 项筛选",
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选"
   }

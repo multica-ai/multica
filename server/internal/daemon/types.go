@@ -14,12 +14,19 @@ type Runtime struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
+	// ProfileID is non-empty when this runtime was registered from a
+	// workspace custom runtime profile (MUL-3284). It links the runtime row
+	// back to the profile so the daemon can resolve the profile's
+	// command_name to the executable to launch. Built-in (provider-detected)
+	// runtimes leave this empty.
+	ProfileID string `json:"profile_id,omitempty"`
 }
 
 // RepoData holds repository information from the workspace.
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	Ref         string `json:"ref,omitempty"`
 }
 
 // ProjectResourceData mirrors handler.ProjectResourceData — a single project
@@ -49,6 +56,7 @@ type Task struct {
 	Repos                    []RepoData            `json:"repos,omitempty"`
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
+	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief
 	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
@@ -60,6 +68,8 @@ type Task struct {
 	NewCommentCount          int                   `json:"new_comment_count,omitempty"`           // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince         string                `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
+	ChatInThread             bool                  `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
@@ -70,10 +80,12 @@ type Task struct {
 	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
 	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
-	SquadID                  string                `json:"squad_id,omitempty"`                    // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName                string                `json:"squad_name,omitempty"`                  // display name for the picker squad, used in prompt text
-	ParentIssueID            string                `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string                `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
+	HandoffNote              string                `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+
+	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
+	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
+	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -121,7 +133,8 @@ type AgentData struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
 	Instructions  string            `json:"instructions"`
-	Skills        []SkillData       `json:"skills"`
+	Skills        []SkillData       `json:"skills,omitempty"`
+	SkillRefs     []SkillRefData    `json:"skill_refs,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
@@ -137,16 +150,38 @@ type AgentData struct {
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
 	ID          string          `json:"id"`
+	Source      string          `json:"source,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
+	Hash        string          `json:"hash,omitempty"`
+	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	Content     string          `json:"content"`
 	Files       []SkillFileData `json:"files,omitempty"`
 }
 
 // SkillFileData represents a supporting file within a skill.
 type SkillFileData struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+type SkillRefData struct {
+	ID          string             `json:"id"`
+	Source      string             `json:"source"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Hash        string             `json:"hash"`
+	SizeBytes   int64              `json:"size_bytes"`
+	FileCount   int                `json:"file_count"`
+	Files       []SkillFileRefData `json:"files,omitempty"`
+}
+
+type SkillFileRefData struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // TaskUsageEntry represents token usage for a single model during a task execution.

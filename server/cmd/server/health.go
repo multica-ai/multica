@@ -14,7 +14,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
-const readinessQuery = `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)`
+// readinessQuery counts how many of the binary's required migration versions
+// are recorded as applied. We compare the count to the number of required
+// versions rather than checking a single "latest" row, so a missing
+// out-of-order migration (numbered below an already-applied later one) is
+// detected instead of being masked by the later version's presence.
+const readinessQuery = `SELECT COUNT(*) FROM schema_migrations WHERE version = ANY($1)`
 
 const readinessCacheTTL = 3 * time.Second
 
@@ -24,12 +29,12 @@ type readinessDB interface {
 }
 
 type serverHealth struct {
-	db              readinessDB
-	latestMigration string
-	initErr         error
-	cacheTTL        time.Duration
-	refreshMu       sync.Mutex
-	cache           atomic.Pointer[cachedReadiness]
+	db                 readinessDB
+	requiredMigrations []string
+	initErr            error
+	cacheTTL           time.Duration
+	refreshMu          sync.Mutex
+	cache              atomic.Pointer[cachedReadiness]
 }
 
 type cachedReadiness struct {
@@ -53,12 +58,12 @@ type readinessChecks struct {
 }
 
 func newServerHealth(pool *pgxpool.Pool) *serverHealth {
-	latestMigration, err := migrations.LatestVersion()
+	requiredMigrations, err := migrations.AllVersions()
 	return &serverHealth{
-		db:              pool,
-		latestMigration: latestMigration,
-		initErr:         err,
-		cacheTTL:        readinessCacheTTL,
+		db:                 pool,
+		requiredMigrations: requiredMigrations,
+		initErr:            err,
+		cacheTTL:           readinessCacheTTL,
 	}
 }
 
@@ -132,20 +137,23 @@ func (h *serverHealth) computeReadiness(parent context.Context) (readinessRespon
 		return resp, http.StatusServiceUnavailable
 	}
 
-	if h.initErr != nil || h.latestMigration == "" {
+	if h.initErr != nil || len(h.requiredMigrations) == 0 {
 		resp.Status = "not_ready"
 		resp.Checks.Migrations = "error"
 		return resp, http.StatusServiceUnavailable
 	}
 
-	var applied bool
-	if err := h.db.QueryRow(ctx, readinessQuery, h.latestMigration).Scan(&applied); err != nil {
+	var appliedCount int
+	if err := h.db.QueryRow(ctx, readinessQuery, h.requiredMigrations).Scan(&appliedCount); err != nil {
 		resp.Status = "not_ready"
 		resp.Checks.Migrations = "error"
 		return resp, http.StatusServiceUnavailable
 	}
 
-	if !applied {
+	// version is the schema_migrations PK, so each required version matches at
+	// most one row; a count below the required total means at least one
+	// migration this binary needs has not been applied.
+	if appliedCount < len(h.requiredMigrations) {
 		resp.Status = "not_ready"
 		resp.Checks.Migrations = "out_of_date"
 		return resp, http.StatusServiceUnavailable

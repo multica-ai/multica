@@ -66,6 +66,27 @@ export function computePosition(ids: string[], activeId: string, issueMap: Map<s
   return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
 }
 
+/**
+ * Insert `id` into `ids` at the slot implied by `position ASC`, reading each
+ * id's position from `issueMap`. Mirrors `insertByPosition` in
+ * `@multica/core/issues/cache-helpers` so the board's optimistic placement on
+ * drop matches the cache the settle reconcile rebuilds from — otherwise the
+ * card would land in one slot, then jump when local columns re-derive from TQ.
+ */
+export function insertIdByPosition(
+  ids: string[],
+  id: string,
+  position: number,
+  issueMap: Map<string, Issue>,
+): string[] {
+  const idx = ids.findIndex((existing) => {
+    const p = issueMap.get(existing)?.position;
+    return p !== undefined && p > position;
+  });
+  if (idx === -1) return [...ids, id];
+  return [...ids.slice(0, idx), id, ...ids.slice(idx)];
+}
+
 export function findColumn(
   columns: Record<string, string[]>,
   id: string,

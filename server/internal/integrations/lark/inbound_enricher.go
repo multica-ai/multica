@@ -126,6 +126,15 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // context attached to a turn a workspace member explicitly directed at
 // the Bot.
 func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+	freshSource := msg.CommandBody
+	if freshSource == "" {
+		freshSource = msg.Body
+	}
+	if cmd, ok := parseFreshSessionCommand(freshSource); ok {
+		msg.ForceFreshSession = true
+		msg.Body = cmd.Body
+	}
+
 	isForward := msg.MessageType == larkMsgTypeMergeForward
 	wantRecent := e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
 	if msg.ParentID == "" && !isForward && !wantRecent {

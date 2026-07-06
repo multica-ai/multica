@@ -35,15 +35,17 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
-import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
@@ -55,6 +57,7 @@ import {
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
+import { ActorAvatar } from "../common/actor-avatar";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -77,14 +80,102 @@ function toDraftAttachment(attachment: Attachment): Attachment {
 // shell's local mode state.
 // ---------------------------------------------------------------------------
 
+// CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
+// whether saving will start a run, driven by the unified backend predicate
+// (preview, isCreate) — never a frontend guess. No dialog, no blocking.
+//
+// Visually it borrows the comment header's avatar+text line, minus the
+// interactivity — purely a caption, never a link/hover-card. It renders its own
+// reveal band (a grid 0fr→1fr collapse) so it sits on a dedicated row above the
+// property toolbar without reflowing anything: collapsed it is 0px (the flex-1
+// editor absorbs the delta), and it expands only once the predicate resolves,
+// animating straight to the correct copy.
+function CreateRunHint({
+  assigneeType,
+  assigneeId,
+  status,
+}: {
+  assigneeType?: IssueAssigneeType;
+  assigneeId?: string;
+  status: IssueStatus;
+}) {
+  const { t } = useT("modals");
+  const { getActorName } = useActorName();
+  const isAgentLike = assigneeType === "agent" || assigneeType === "squad";
+  const preview = useIssueTriggerPreview({
+    isCreate: true,
+    assigneeType: assigneeType ?? null,
+    assigneeId: assigneeId ?? null,
+    status,
+    enabled: isAgentLike && !!assigneeId,
+  });
+
+  // Reveal only after the predicate resolves so the band animates to the final
+  // copy instead of flashing "parked" before the run preview lands.
+  const ready = isAgentLike && !!assigneeId && !preview.isLoading;
+  const willStart = preview.totalCount > 0;
+  const isSquad = assigneeType === "squad";
+  const triggerAgentId = preview.triggers[0]?.agent_id ?? assigneeId;
+
+  // Avatar + copy mirror the flow. A squad doesn't "work" — its leader
+  // evaluates and delegates — so the squad path keeps the squad as the subject
+  // (avatar + name) and uses the leader-delegates copy. A single agent picks
+  // the issue up directly; a parked issue shows whoever it was assigned to.
+  let avatarType: string;
+  let avatarId: string | undefined;
+  let text: string;
+  if (!willStart) {
+    avatarType = assigneeType ?? "agent";
+    avatarId = assigneeId;
+    text = t(($) => $.run_confirm.create_parked);
+  } else if (isSquad) {
+    avatarType = "squad";
+    avatarId = assigneeId;
+    text = t(($) => $.run_confirm.create_will_start_squad, {
+      name: getActorName("squad", assigneeId ?? ""),
+    });
+  } else {
+    avatarType = "agent";
+    avatarId = triggerAgentId;
+    text = t(($) => $.run_confirm.create_will_start, {
+      name: getActorName("agent", triggerAgentId ?? assigneeId ?? ""),
+    });
+  }
+
+  return (
+    <div
+      className={cn(
+        "grid shrink-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+        ready ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+      aria-hidden={!ready}
+    >
+      <div className="overflow-hidden">
+        <div
+          aria-live="polite"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+        >
+          {avatarId && (
+            <ActorAvatar
+              actorType={avatarType}
+              actorId={avatarId}
+              size={16}
+              profileLink={false}
+            />
+          )}
+          <span className="truncate">{text}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ManualCreatePanel({
   onClose,
   onSwitchMode,
   data,
   isExpanded,
   setIsExpanded,
-  backlogHintIssueId,
-  setBacklogHintIssueId,
 }: {
   onClose: () => void;
   /** Called with the carry payload to seed the agent panel after switch. */
@@ -95,8 +186,6 @@ export function ManualCreatePanel({
    *  re-mount the Portal on mode swap and replay the open animation). */
   isExpanded: boolean;
   setIsExpanded: (v: boolean) => void;
-  backlogHintIssueId: string | null;
-  setBacklogHintIssueId: (id: string | null) => void;
 }) {
   const { t } = useT("modals");
   const router = useNavigation();
@@ -140,6 +229,11 @@ export function ManualCreatePanel({
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
+  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
+  // since it's a per-creation choice tied to the chosen parent.
+  const [stage, setStage] = useState<number | null>(
+    typeof data?.stage === "number" ? (data.stage as number) : null,
+  );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
@@ -155,6 +249,12 @@ export function ManualCreatePanel({
   const wsId = useWorkspaceId();
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  // Sibling stages under the chosen parent, so the Stage picker can offer the
+  // already-used max stage (and one beyond) instead of flooring at Stage 1–3.
+  const { data: parentChildren = [] } = useQuery({
+    ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
 
@@ -211,6 +311,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
+    setStage(null);
     setChildIssues([]);
     setDraft({
       title: "",
@@ -246,6 +347,8 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        // Stage is only meaningful for a sub-issue (relative to its siblings).
+        stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
 
@@ -286,19 +389,16 @@ export function ManualCreatePanel({
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       clearDraft();
-      const shouldShowBacklogHint =
-        status === "backlog" && assigneeType === "agent" && assigneeId &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true";
-
-      if (shouldShowBacklogHint) {
-        setBacklogHintIssueId(issue.id);
-      } else if (keepOpen) {
+      // The old post-create "agent paused in Backlog" blocking panel is gone —
+      // a passive inline hint now warns before submit (MUL-3375). Just close or
+      // reset and confirm the create.
+      if (keepOpen) {
         resetForNextIssue();
       } else {
         onClose();
       }
 
-      if (!shouldShowBacklogHint) {
+      {
         toast.custom((toastId) => (
           <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
             <div className="flex items-center gap-2 mb-2">
@@ -425,33 +525,6 @@ export function ManualCreatePanel({
 
   return (
     <>
-        {backlogHintIssueId ? (
-          <BacklogAgentHintContent
-            onKeepInBacklog={() => {
-              setBacklogHintIssueId(null);
-              onClose();
-            }}
-            onDismissPermanently={() => {
-              localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
-            }}
-            onMoveToTodo={() => {
-              updateIssueMutation.mutate(
-                { id: backlogHintIssueId, status: "todo" },
-                {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error && err.message
-                        ? err.message
-                        : t(($) => $.backlog_hint.toast_status_failed),
-                    ),
-                },
-              );
-              setBacklogHintIssueId(null);
-              onClose();
-            }}
-          />
-        ) : (
-          <>
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
             {/* Header */}
@@ -524,6 +597,10 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
+            {/* Pre-trigger preview — a passive caption above the toolbar; reveals
+                when an agent assignee will pick the issue up. */}
+            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+
             {/* Property toolbar */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
               {/* Status */}
@@ -569,6 +646,17 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {/* Stage — only relevant when creating a sub-issue under a parent */}
+              {parentIssueId && (
+                <StagePicker
+                  stage={stage}
+                  onUpdate={(u) => setStage(u.stage ?? null)}
+                  maxStage={maxSiblingStage(parentChildren)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field
@@ -754,30 +842,21 @@ export function ManualCreatePanel({
                 )}
               </div>
             </div>
-          </>
-        )}
     </>
   );
 }
 
-/** className for DialogContent in manual mode — depends on isExpanded and the
- *  backlog-hint sub-state. Exported so the shell (which now owns the
- *  DialogContent) can apply the same visual treatment without duplicating it. */
-export function manualDialogContentClass(
-  isExpanded: boolean,
-  backlogHintIssueId: string | null,
-) {
+/** className for DialogContent in manual mode — depends on isExpanded.
+ *  Exported so the shell (which now owns the DialogContent) can apply the same
+ *  visual treatment without duplicating it. */
+export function manualDialogContentClass(isExpanded: boolean) {
   return cn(
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
-    backlogHintIssueId
-      ? "!max-w-[480px] !w-[calc(100vw-2rem)] !h-auto !-translate-y-1/2 !transition-none !duration-0"
-      : "!transition-all !duration-300 !ease-out",
-    !backlogHintIssueId && isExpanded
+    "!transition-all !duration-300 !ease-out",
+    isExpanded
       ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-      : !backlogHintIssueId
-        ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
-        : "",
+      : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
   );
 }
 
@@ -791,20 +870,17 @@ export function CreateIssueModal(props: {
   data?: Record<string, unknown> | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
   return (
     <DialogRoot open onOpenChange={(v) => { if (!v) props.onClose(); }}>
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
-        className={manualDialogContentClass(isExpanded, backlogHintIssueId)}
+        className={manualDialogContentClass(isExpanded)}
       >
         <ManualCreatePanel
           {...props}
           isExpanded={isExpanded}
           setIsExpanded={setIsExpanded}
-          backlogHintIssueId={backlogHintIssueId}
-          setBacklogHintIssueId={setBacklogHintIssueId}
         />
       </DialogContent>
     </DialogRoot>

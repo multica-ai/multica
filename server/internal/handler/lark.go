@@ -37,7 +37,7 @@ type LarkInstallationResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func larkInstallationToResponse(row db.LarkInstallation) LarkInstallationResponse {
+func larkInstallationToResponse(row lark.Installation) LarkInstallationResponse {
 	resp := LarkInstallationResponse{
 		ID:              uuidToString(row.ID),
 		WorkspaceID:     uuidToString(row.WorkspaceID),

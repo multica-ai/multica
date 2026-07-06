@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -442,6 +445,62 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	return req, httptest.NewRecorder()
 }
 
+func requireAttachmentPreviewCSP(t *testing.T, header http.Header, extraAncestors ...string) {
+	t.Helper()
+	csp := header.Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header is missing")
+	}
+	for _, directive := range []string{
+		"default-src 'none'",
+		"frame-ancestors 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", directive, csp)
+		}
+	}
+	for _, ancestor := range extraAncestors {
+		if !strings.Contains(csp, ancestor) {
+			t.Fatalf("Content-Security-Policy missing frame ancestor %q; got %q", ancestor, csp)
+		}
+	}
+	if strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("Content-Security-Policy still blocks same-origin previews: %q", csp)
+	}
+}
+
+func TestAttachmentPreviewCSPHeader_AllowsConfiguredFrontendOrigins(t *testing.T) {
+	csp := attachmentPreviewCSPHeader([]string{
+		"https://app.example.test",
+		" https://App.Example.Test/some/path ",
+		"http://localhost:3000",
+		"*",
+		"javascript:alert(1)",
+		"not a url",
+	})
+
+	for _, want := range []string{
+		"frame-ancestors 'self' https://app.example.test http://localhost:3000",
+		"default-src 'none'",
+		"object-src 'none'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", want, csp)
+		}
+	}
+	for _, reject := range []string{"*", "javascript:", "not a url", "some/path"} {
+		if strings.Contains(csp, reject) {
+			t.Fatalf("Content-Security-Policy includes rejected source %q; got %q", reject, csp)
+		}
+	}
+	if strings.Count(csp, "https://app.example.test") != 1 {
+		t.Fatalf("Content-Security-Policy should dedupe origins; got %q", csp)
+	}
+}
+
 func newDownloadRouter() http.Handler {
 	// Mirrors the production router after MUL-3130: the download
 	// route is registered under Auth-only with no
@@ -505,6 +564,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = &mockStorage{}
 	testHandler.cfg.AttachmentDownloadMode = "cloudfront"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = testCloudFrontSigner(t)
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -515,6 +575,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	id := seedAttachmentURL(t, "https://static.example.test/downloads/cloudfront.md", "cloud front.md", "text/markdown", 10)
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusFound {
@@ -531,6 +592,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	if got := parsed.Query().Get("Key-Pair-Id"); got != "KTEST" {
 		t.Fatalf("Key-Pair-Id = %q", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 }
 
 func TestDownloadAttachment_BareNavigationWithWorkspaceSlugQueryPassesMiddleware(t *testing.T) {
@@ -684,6 +746,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = store
 	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = nil
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -697,6 +760,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	id := seedAttachmentURL(t, "http://rustfs:9000/test-bucket/"+key, "report.txt", "text/plain", int64(len(body)))
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusOK {
@@ -717,6 +781,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("internal endpoint should not presign, calls=%v", store.presignCalls)
 	}
@@ -729,6 +794,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = store
 	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = nil
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -740,6 +806,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "public.txt", "text/plain", 10)
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusFound {
@@ -762,6 +829,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	if len(store.presignDispositions) != 1 || store.presignDispositions[0] != `attachment; filename="public.txt"` {
 		t.Fatalf("presign dispositions = %v", store.presignDispositions)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 }
 
 func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
@@ -795,6 +863,7 @@ func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
 	if got := w.Header().Get("Content-Disposition"); got != `inline; filename="image.png"` {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("forced proxy should not presign, calls=%v", store.presignCalls)
 	}
@@ -833,6 +902,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	id := seedPreviewAttachment(t, store, "preview-md-key.md", "preview.md", "text/markdown", body)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.GetAttachmentContent(w, req)
 
 	if w.Code != http.StatusOK {
@@ -850,6 +920,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 }
 
 // Even when http.DetectContentType returned "text/plain" instead of "text/markdown"
@@ -1194,5 +1265,65 @@ func TestIsDurablePublicURL(t *testing.T) {
 				t.Errorf("isDurablePublicURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestServeLocalUpload_RelaxesFrameAncestorsForPreview covers the self-hosted
+// local-disk case where document previews (PDF/HTML) are fetched straight from
+// the public /uploads/* static route. That route inherits the global
+// "frame-ancestors 'none'" CSP from the middleware, which blocks iframe
+// previews; ServeLocalUpload must overwrite it with the same relaxed preview
+// policy the /api/attachments download endpoint uses. See MUL-3821 / #4477.
+func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
+	dir := t.TempDir()
+	key := "workspaces/ws-1/preview.pdf"
+	full := filepath.Join(dir, filepath.FromSlash(key))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const body = "%PDF-1.7 local-disk preview"
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	t.Setenv("LOCAL_UPLOAD_DIR", dir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	h := &Handler{
+		Storage: local,
+		cfg:     Config{AttachmentFrameAncestors: []string{"https://app.example.test"}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	w := httptest.NewRecorder()
+	// Simulate the global CSP middleware having already stamped the strict
+	// policy on the response before the static route runs.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+
+	h.ServeLocalUpload(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != body {
+		t.Fatalf("body = %q, want %q", got, body)
+	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
+}
+
+// TestServeLocalUpload_NonLocalStorage404 guards the defensive branch: the
+// /uploads/* route is only registered under local storage, but the handler
+// must not serve anything when the backing store is not local disk.
+func TestServeLocalUpload_NonLocalStorage404(t *testing.T) {
+	h := &Handler{Storage: &mockStorage{}}
+	req := httptest.NewRequest(http.MethodGet, "/uploads/workspaces/ws-1/x.png", nil)
+	w := httptest.NewRecorder()
+	h.ServeLocalUpload(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }

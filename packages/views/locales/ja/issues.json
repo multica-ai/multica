@@ -22,6 +22,10 @@
     "low": "低",
     "none": "優先度なし"
   },
+  "stage": {
+    "none": "ステージなし",
+    "value": "ステージ {{n}}"
+  },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのイシュー",
@@ -43,6 +47,16 @@
     "section_creator": "作成者",
     "section_project": "プロジェクト",
     "section_label": "ラベル",
+    "section_date": "日付",
+    "date_field": "項目",
+    "date_field_created": "作成",
+    "date_field_updated": "更新",
+    "date_today": "今日",
+    "date_last_3_days": "過去 3 日",
+    "date_last_7_days": "過去 7 日",
+    "date_custom_range": "日付または範囲を指定",
+    "date_apply": "適用",
+    "date_clear": "日付フィルターをクリア",
     "members_group": "メンバー",
     "agents_group": "エージェント",
     "squads_group": "スクワッド",
@@ -74,7 +88,8 @@
     "card_due_date": "期限",
     "card_project": "プロジェクト",
     "card_labels": "ラベル",
-    "card_child_progress": "サブイシューの進捗"
+    "card_child_progress": "サブイシューの進捗",
+    "show_sub_issues": "サブイシューを表示"
   },
   "view": {
     "tooltip_board": "ボード表示",
@@ -183,6 +198,7 @@
     "pull_request_card_show_less": "折りたたむ",
     "prop_status": "ステータス",
     "prop_priority": "優先度",
+    "prop_stage": "ステージ",
     "prop_assignee": "担当者",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
@@ -272,20 +288,18 @@
     "trigger_source_mention_squad_leader": "Squad",
     "trigger_source_unknown": "トリガー",
     "trigger_skipped_label": "スキップ",
-    "trigger_wont_trigger": "トリガーされません",
-    "trigger_none_will_trigger": "いずれもトリガーされません",
-    "trigger_reason_issue_assignee": "{{name}} はこのイシューの担当で、このコメントで通知されます。",
-    "trigger_reason_mention_agent": "このコメントで {{name}} がメンションされています。",
-    "trigger_reason_mention_squad_leader": "{{name}} はメンションされた Squad のリーダーです。",
-    "trigger_reason_unknown": "このコメントで {{name}} がトリガーされます。",
+    "trigger_wont_trigger": "今回は開始しません",
+    "trigger_none_will_trigger": "いずれも開始しません",
+    "trigger_reason_mention_squad_leader": "メンションされた Squad のリーダー。",
+    "trigger_reason_unknown": "このコメントで開始します。",
     "trigger_will_start": "送信後に作業を開始します",
     "trigger_will_start_count_other": "送信後に {{count}} 体のエージェントが作業を開始します",
-    "trigger_starts_now": "すぐに作業を開始します。",
-    "trigger_starts_when_online": "現在オフラインのため、オンラインになり次第開始します。",
-    "trigger_click_to_skip": "クリックすると今回はトリガーされません。",
-    "trigger_click_to_manage": "クリックして今回のトリガー対象を管理します。",
-    "trigger_click_to_restore": "今回はトリガーされません。クリックで元に戻せます。",
-    "trigger_preview_title": "このコメントでトリガーされる対象",
+    "trigger_starts_now": "すぐに開始します。",
+    "trigger_starts_when_online": "オフライン中。オンラインになり次第開始します。",
+    "trigger_click_to_skip": "クリックで今回はスキップ。",
+    "trigger_click_to_manage": "クリックして今回実行する対象を選択。",
+    "trigger_click_to_restore": "今回は開始しません。クリックで元に戻せます。",
+    "trigger_preview_title": "送信後に開始する対象",
     "trigger_chip_aria": "{{name}} のトリガー: {{state}}",
     "resolve": {
       "resolve_thread_action": "スレッドを解決",
@@ -306,6 +320,7 @@
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
+    "hover_header_tasks_other": "作業中のタスク {{count}} 件",
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",
@@ -343,6 +358,7 @@
     "trigger_autopilot": "オートパイロット実行",
     "trigger_comment": "コメントトリガー",
     "trigger_initial": "初回実行",
+    "trigger_handoff_prefix": "引き継ぎ：",
     "status_queued": "待機中",
     "status_dispatched": "開始中",
     "status_waiting_local_directory": "ローカルディレクトリ待機中",
@@ -399,6 +415,8 @@
     "more": "その他",
     "create_sub_issue": "サブイシューを作成",
     "set_parent_issue": "親イシューを設定...",
+    "remove_parent_issue": "親イシューを解除",
+    "remove_parent_issue_success": "親イシューを解除しました",
     "add_sub_issue": "サブイシューを追加...",
     "delete_issue": "イシューを削除"
   },
@@ -458,9 +476,6 @@
     "row_backlog_label": "バックログ",
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
-    "row_todo_hint": "エージェントを開始します",
-    "dont_show_again": "今後表示しない",
-    "keep_in_backlog": "バックログのままにする",
-    "move_to_todo": "未着手に移動"
+    "row_todo_hint": "エージェントを開始します"
   }
 }

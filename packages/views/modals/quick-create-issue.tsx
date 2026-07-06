@@ -287,6 +287,14 @@ export function AgentCreatePanel({
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
+    // Belt-and-suspenders against the multi-file upload race fixed in
+    // useFileUpload (MUL-3339): `uploading` already tracks an in-flight
+    // counter now, but the editor's per-node `uploading` attr is the most
+    // direct truth — if any image node is still mid-upload, blocking submit
+    // here guarantees `getMarkdown()`'s blob-url strip never erases a
+    // pasted/dropped image whose attachment id hasn't reached
+    // `pendingAttachments` yet.
+    if (editorRef.current?.hasActiveUploads()) return;
     const activeAttachmentIds = pendingAttachments
       .filter((a) => contentReferencesAttachment(md, a))
       .map((a) => a.id);

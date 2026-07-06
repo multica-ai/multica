@@ -29,6 +29,7 @@
   },
   "types": {
     "issue_assigned": "Assigned",
+    "issue_subscribed": "Subscribed",
     "unassigned": "Unassigned",
     "assignee_changed": "Assignee changed",
     "status_changed": "Status changed",

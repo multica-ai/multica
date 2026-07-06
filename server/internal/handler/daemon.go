@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -181,7 +182,17 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// ProfileID, when non-empty, marks this as an instance of a custom
+		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
+		// Type carries the protocol family for both built-in and custom rows
+		// so task routing (agent.New) is unchanged.
+		ProfileID string `json:"profile_id"`
 	} `json:"runtimes"`
+	FailedProfiles []struct {
+		ProfileID   string `json:"profile_id"`
+		CommandName string `json:"command_name"`
+		Reason      string `json:"reason"`
+	} `json:"failed_profiles"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -250,6 +261,13 @@ func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) 
 	return resp
 }
 
+// normalizeProvider canonicalizes a provider string for storage: trimmed and
+// lowercased so client-side pricing lookups tolerate case drift. Returns "" for
+// a blank input.
+func normalizeProvider(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -269,8 +287,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	if len(req.Runtimes) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one runtime is required")
+	if len(req.Runtimes) == 0 && len(req.FailedProfiles) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
@@ -306,7 +324,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
-		provider := strings.TrimSpace(runtime.Type)
+		provider := normalizeProvider(runtime.Type)
 		if provider == "" {
 			provider = "unknown"
 		}
@@ -333,51 +351,125 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"launched_by": req.LaunchedBy,
 		})
 
-		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    provider,
-			Status:      status,
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-		})
-		if err != nil {
-			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				req.DaemonID,
-				provider,
-				"registration_failed",
-				"db_error",
-				true,
-			))
-			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
-			return
-		}
+		var registered db.AgentRuntime
+		var inserted bool
+		isCustom := strings.TrimSpace(runtime.ProfileID) != ""
 
-		registered := db.AgentRuntime{
-			ID:             row.ID,
-			WorkspaceID:    row.WorkspaceID,
-			DaemonID:       row.DaemonID,
-			Name:           row.Name,
-			RuntimeMode:    row.RuntimeMode,
-			Provider:       row.Provider,
-			Status:         row.Status,
-			DeviceInfo:     row.DeviceInfo,
-			Metadata:       row.Metadata,
-			LastSeenAt:     row.LastSeenAt,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
-			OwnerID:        row.OwnerID,
-			LegacyDaemonID: row.LegacyDaemonID,
+		if isCustom {
+			profileUUID, pok := parseUUIDOrBadRequest(w, strings.TrimSpace(runtime.ProfileID), "profile_id")
+			if !pok {
+				return
+			}
+			// The profile must exist in this workspace and be enabled. Trust
+			// the profile's stored protocol_family over the daemon-sent type so
+			// the provider used for task routing cannot drift from the profile.
+			profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+				ID:          profileUUID,
+				WorkspaceID: wsUUID,
+			})
+			if perr != nil {
+				writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
+				return
+			}
+			if !profile.Enabled {
+				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			provider = profile.ProtocolFamily
+
+			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+				ProfileID:   profileUUID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = prow.Inserted
+			registered = db.AgentRuntime{
+				ID:             prow.ID,
+				WorkspaceID:    prow.WorkspaceID,
+				DaemonID:       prow.DaemonID,
+				Name:           prow.Name,
+				RuntimeMode:    prow.RuntimeMode,
+				Provider:       prow.Provider,
+				Status:         prow.Status,
+				DeviceInfo:     prow.DeviceInfo,
+				Metadata:       prow.Metadata,
+				LastSeenAt:     prow.LastSeenAt,
+				CreatedAt:      prow.CreatedAt,
+				UpdatedAt:      prow.UpdatedAt,
+				OwnerID:        prow.OwnerID,
+				LegacyDaemonID: prow.LegacyDaemonID,
+				Visibility:     prow.Visibility,
+				ProfileID:      prow.ProfileID,
+			}
+		} else {
+			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = row.Inserted
+			registered = db.AgentRuntime{
+				ID:             row.ID,
+				WorkspaceID:    row.WorkspaceID,
+				DaemonID:       row.DaemonID,
+				Name:           row.Name,
+				RuntimeMode:    row.RuntimeMode,
+				Provider:       row.Provider,
+				Status:         row.Status,
+				DeviceInfo:     row.DeviceInfo,
+				Metadata:       row.Metadata,
+				LastSeenAt:     row.LastSeenAt,
+				CreatedAt:      row.CreatedAt,
+				UpdatedAt:      row.UpdatedAt,
+				OwnerID:        row.OwnerID,
+				LegacyDaemonID: row.LegacyDaemonID,
+				Visibility:     row.Visibility,
+				ProfileID:      row.ProfileID,
+			}
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
-		if row.Inserted {
+		if inserted {
 			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
@@ -404,9 +496,71 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// (e.g. "host.local", "host", "host-staging"); for each match we
 		// reassign agents + tasks onto the new UUID-keyed row, then delete
 		// the stale row so there's only ever one runtime per machine.
-		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		//
+		// Only built-in runtimes participate: legacy rows predate custom
+		// profiles, so a profile-keyed instance never has a hostname-derived
+		// ancestor to merge, and mergeLegacyRuntimes scopes by provider alone
+		// (no profile_id), which could otherwise fold a built-in row into a
+		// custom one of the same provider.
+		if !isCustom {
+			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		}
 
 		resp = append(resp, runtimeToResponse(registered))
+	}
+	for _, failed := range req.FailedProfiles {
+		profileID := strings.TrimSpace(failed.ProfileID)
+		if profileID == "" {
+			continue
+		}
+		profileUUID, pok := parseUUIDOrBadRequest(w, profileID, "profile_id")
+		if !pok {
+			return
+		}
+		profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+			ID:          profileUUID,
+			WorkspaceID: wsUUID,
+		})
+		if perr != nil || !profile.Enabled {
+			continue
+		}
+		name := profile.DisplayName
+		if req.DeviceName != "" {
+			name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
+		}
+		deviceInfo := strings.TrimSpace(req.DeviceName)
+		reason := strings.TrimSpace(failed.Reason)
+		if reason == "" {
+			reason = "custom runtime command could not be resolved"
+		}
+		commandName := strings.TrimSpace(failed.CommandName)
+		if commandName == "" {
+			commandName = profile.CommandName
+		}
+		metadata, _ := json.Marshal(map[string]any{
+			"version":                            "",
+			"cli_version":                        req.CLIVersion,
+			"launched_by":                        req.LaunchedBy,
+			"runtime_profile_registration_error": true,
+			"runtime_profile_failure_reason":     reason,
+			"command_name":                       commandName,
+		})
+		if _, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+			WorkspaceID: wsUUID,
+			DaemonID:    strToText(req.DaemonID),
+			Name:        name,
+			RuntimeMode: "local",
+			Provider:    profile.ProtocolFamily,
+			Status:      "offline",
+			DeviceInfo:  deviceInfo,
+			Metadata:    metadata,
+			OwnerID:     ownerID,
+			ProfileID:   profileUUID,
+		}); err != nil {
+			slog.Warn("failed to record runtime profile registration failure",
+				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,
+				"profile_id", profileID, "error", err)
+		}
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
@@ -754,6 +908,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if len(ack.PendingLocalSkillImports) > 0 {
 		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
 	}
+	if ack.FeatureFlags != nil {
+		resp["feature_flags"] = ack.FeatureFlags
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -787,7 +944,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, fmt.Errorf("get agent runtime: %w", err)
 	}
-	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
+	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
@@ -867,6 +1024,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	ack := &protocol.DaemonHeartbeatAckPayload{
 		RuntimeID: runtimeID,
 		Status:    "ok",
+	}
+	if h.DaemonFeatureFlags != nil {
+		ack.FeatureFlags = h.DaemonFeatureFlags.EvaluateForRuntime(ctx, rt)
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
@@ -1041,7 +1201,7 @@ func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Ti
 // logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
 // exceeds 500ms, splitting auth / claim / response-build phases so the prod
 // tail can be diagnosed without flooding logs at normal poll rates.
-func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64) {
+func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes int) {
 	totalMs := time.Since(start).Milliseconds()
 	if totalMs < 500 {
 		return
@@ -1053,7 +1213,20 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 		"auth_ms", authMs,
 		"claim_ms", claimMs,
 		"build_ms", buildMs,
+		"payload_bytes", payloadBytes,
+		"agent_skill_count", agentSkillCount,
+		"builtin_skill_count", builtinSkillCount,
+		"skill_payload_bytes", skillPayloadBytes,
 	)
+}
+
+func requestHasDaemonCapability(r *http.Request, capability string) bool {
+	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
+		if strings.TrimSpace(part) == capability {
+			return true
+		}
+	}
+	return false
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -1065,6 +1238,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	var (
 		outcome                  = "unauth"
 		authMs, claimMs, buildMs int64
+		payloadBytes             int
+		agentSkillCount          int
+		builtinSkillCount        int
+		skillPayloadBytes        int
 		buildStart               time.Time
 	)
 	defer func() {
@@ -1074,7 +1251,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if !buildStart.IsZero() {
 			buildMs = time.Since(buildStart).Milliseconds()
 		}
-		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs)
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
 	}()
 
 	// Verify the caller owns this runtime's workspace. The runtime's
@@ -1100,7 +1277,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 		outcome = "no_task"
 		return
 	}
@@ -1111,11 +1288,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
-		// Workspace-bound skills first, then platform built-in skills. Built-in
-		// names carry a "multica-" prefix so their on-disk slugs never collide
-		// with a user-authored workspace skill (see writeSkillFiles).
-		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		skills = append(skills, h.TaskService.BuiltinSkills()...)
+		useSkillRefs := requestHasDaemonCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -1144,13 +1317,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
 			Instructions:  agent.Instructions,
-			Skills:        skills,
 			CustomEnv:     customEnv,
 			CustomArgs:    customArgs,
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 			RuntimeConfig: runtimeConfig,
+		}
+		if useSkillRefs {
+			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+			agentSkillCount = len(skillRefs)
+			resp.Agent.SkillRefs = skillRefs
+		} else {
+			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+			agentSkillCount = len(skills)
+			builtinSkills := h.TaskService.BuiltinSkills()
+			builtinSkillCount = len(builtinSkills)
+			skills = append(skills, builtinSkills...)
+			resp.Agent.Skills = skills
 		}
 	}
 
@@ -1201,16 +1385,45 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
+			// Squad-leader briefing injection: keyed off the task being a
+			// leader-task (is_leader_task) carrying a squad_id — NOT off the
+			// issue being assigned to a squad. The task flag is stamped at
+			// enqueue time and is true for every ISSUE-BOUND path that routes
+			// work to a squad leader: direct assign-to-squad, comment
+			// @squad-mention (even when the issue itself is assigned to a
+			// plain agent — the MUL-3724 case), sub-issue done callback,
+			// autopilot squad-assignee, and retry-clone inheritance. The old
+			// issue.AssigneeType=="squad" gate missed the comment-mention
+			// path, so the leader booted with zero squad context and
+			// degraded into doing the work itself instead of orchestrating.
+			//
+			// NOTE: quick-create tasks do NOT reach this block — they have a
+			// NULL issue_id (so the enclosing `task.IssueID.Valid` is false)
+			// and do NOT carry is_leader_task / squad_id columns. They route
+			// their squad through the task CONTEXT JSON (QuickCreateContext.
+			// SquadID) and get their briefing from the separate quick-create
+			// branch further below (search `qc.SquadID`). Do not "unify" the
+			// two by deleting that branch: it also sets resp.SquadID /
+			// resp.SquadName so the new issue defaults to the squad assignee,
+			// and there is no issue row to hang this column-based path on.
+			//
+			// We resolve the squad directly from task.SquadID rather than
+			// reverse-looking-up "which squad is this agent the leader of",
+			// which is ambiguous when one agent leads multiple squads. The
+			// uuidToString(squad.LeaderID) == resp.Agent.ID re-check is kept
+			// as a defensive gate: if the squad's leader was swapped after the
+			// task was enqueued, we never feed a stale briefing to a
+			// non-leader. It also doubles as the dangling-squad_id guard: a
+			// squad hard-deleted after enqueue makes GetSquadInWorkspace
+			// return no row (err != nil) — we skip injection silently, which
+			// is exactly the same observable result as "condition not
+			// matched". Claim still succeeds; no stale briefing is emitted.
+			// (No FK on squad_id — see migration 127.) We append (not replace)
+			// so per-agent instructions stay authoritative; the squad briefing
 			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+			if resp.Agent != nil && task.IsLeaderTask && task.SquadID.Valid {
 				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
+					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
@@ -1232,6 +1445,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.ProjectID = uuidToString(issue.ProjectID)
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
+					resp.ProjectDescription = proj.Description.String
 				}
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
@@ -1256,9 +1470,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						if row.ResourceType == "github_repo" {
 							var payload struct {
 								URL string `json:"url"`
+								Ref string `json:"ref,omitempty"`
 							}
 							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+								projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
 							}
 						}
 					}
@@ -1380,6 +1595,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// Flag a channel-backed session so the daemon makes the agent aware
+			// it is operating inside Slack — read this conversation's history
+			// from the channel via `multica chat history` / `multica chat thread`,
+			// not from Multica (MUL-3871). Empty for a web-only chat session.
+			// ChatInThread tells the agent which command to start with: the
+			// latest trigger was a thread reply iff its reply-target thread
+			// (last_thread_id) differs from its own message id (a top-level
+			// @mention records its own ts as both).
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+				ChatSessionID: cs.ID,
+				ChannelType:   string(slack.TypeSlack),
+			}); berr == nil {
+				resp.ChatChannelType = string(slack.TypeSlack)
+				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+					binding.LastThreadID.String != binding.LastMessageID.String
+			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -1482,6 +1713,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handoff note (MUL-3375) is populated by taskToResponse (the shared mapper
+	// resp came from above), so the daemon's prompt + issue_context.md render the
+	// assignment-handoff branch. Empty for all other task kinds.
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
@@ -1507,6 +1742,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.ProjectID = qc.ProjectID
 					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
 						resp.ProjectTitle = proj.Title
+						resp.ProjectDescription = proj.Description.String
 					}
 					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
 						out := make([]ProjectResourceData, 0, len(rows))
@@ -1528,9 +1764,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							if row.ResourceType == "github_repo" {
 								var payload struct {
 									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
 								}
 								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
 								}
 							}
 						}
@@ -1706,7 +1943,88 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
+		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
+			skillPayloadBytes = len(skillPayload)
+		}
+	} else if resp.Agent != nil && len(resp.Agent.SkillRefs) > 0 {
+		if skillPayload, err := json.Marshal(resp.Agent.SkillRefs); err == nil {
+			skillPayloadBytes = len(skillPayload)
+		}
+	}
+	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+type resolveSkillBundlesRequest struct {
+	Skills []resolveSkillBundleRef `json:"skills"`
+}
+
+type resolveSkillBundleRef struct {
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	Hash   string `json:"hash"`
+}
+
+// ResolveTaskSkillBundles returns full skill content for refs from a slim
+// claim. The daemon calls this after claim and before execenv.Prepare so
+// runtimes still see complete local skill files at startup.
+//
+// If a requested hash no longer matches the agent's current skill bundle, the
+// endpoint returns the current bundle and hash. Stage 1 does not snapshot skill
+// content at claim time; the daemon validates the returned bundle before
+// writing it to cache and materializing it.
+func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	taskID := chi.URLParam(r, "taskId")
+
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	task, taskWorkspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+	if taskWorkspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.Status != "dispatched" && task.Status != "waiting_local_directory" {
+		writeError(w, http.StatusConflict, "task is not preparing")
+		return
+	}
+
+	var req resolveSkillBundlesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Skills) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"bundles": []service.AgentSkillData{}})
+		return
+	}
+
+	bundles, _ := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+	allowed := make(map[string]service.AgentSkillData, len(bundles))
+	for _, bundle := range bundles {
+		allowed[bundle.Source+"\x00"+bundle.ID] = bundle
+	}
+
+	resolved := make([]service.AgentSkillData, 0, len(req.Skills))
+	for _, ref := range req.Skills {
+		if ref.ID == "" || ref.Source == "" || ref.Hash == "" {
+			writeError(w, http.StatusBadRequest, "invalid skill ref")
+			return
+		}
+		bundle, ok := allowed[ref.Source+"\x00"+ref.ID]
+		if !ok {
+			writeError(w, http.StatusNotFound, "skill bundle not found")
+			return
+		}
+		resolved = append(resolved, bundle)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"bundles": resolved})
 }
 
 // trailingUserMessages returns the run of user messages after the last
@@ -1756,6 +2074,35 @@ func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Reque
 // ---------------------------------------------------------------------------
 // Task Lifecycle (called by daemon)
 // ---------------------------------------------------------------------------
+
+// ExtendTaskPrepareLease keeps a dispatched task protected while the daemon is
+// resolving startup inputs and preparing the execution environment.
+func (h *Handler) ExtendTaskPrepareLease(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	taskID := chi.URLParam(r, "taskId")
+
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	task, taskWorkspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+	if taskWorkspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	updated, err := h.TaskService.ExtendTaskPrepareLease(r.Context(), parseUUID(taskID), parseUUID(runtimeID))
+	if err != nil {
+		slog.Warn("extend task prepare lease failed", "task_id", taskID, "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, taskToResponse(*updated, taskWorkspaceID))
+}
 
 // StartTask marks a dispatched task as running.
 func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
@@ -1968,10 +2315,29 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Provider is lowercased on write so client-side pricing lookups tolerate
+	// case drift. An empty provider (an older daemon that omits the field) is
+	// stamped from the task's runtime, so generic model ids like `auto` still
+	// resolve to a provider instead of landing as '' and pricing $0.
+	var runtimeProvider string
+	runtimeProviderLoaded := false
 	for _, u := range req.Usage {
+		provider := normalizeProvider(u.Provider)
+		if provider == "" {
+			if !runtimeProviderLoaded {
+				if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+					runtimeProvider = normalizeProvider(rt.Provider)
+				} else {
+					slog.Warn("load runtime provider for usage backfill failed",
+						"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
+				}
+				runtimeProviderLoaded = true
+			}
+			provider = runtimeProvider
+		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
-			Provider:         u.Provider,
+			Provider:         provider,
 			Model:            u.Model,
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
@@ -1981,7 +2347,25 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
+		// Surface prompt-cache effectiveness per run so cache hit rates are
+		// observable in logs, not just queryable from runtime_usage. The ratio
+		// is cached input over total input-side tokens; a persistently low
+		// value flags a prompt prefix that is not being reused across runs
+		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
+		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+			slog.Info("task prompt-cache usage",
+				"task_id", taskID,
+				"provider", provider,
+				"model", u.Model,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+				"cache_read_tokens", u.CacheReadTokens,
+				"cache_write_tokens", u.CacheWriteTokens,
+				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+			)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -2395,9 +2779,10 @@ func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
-// run for the daemon GC loop. autopilot_run has no updated_at column; the
-// daemon uses completed_at as the TTL anchor for terminal runs, and treats
-// non-terminal status as a skip signal regardless of timestamp.
+// run for the daemon GC loop. The daemon decides purely on terminal status:
+// an autopilot run's workdir is never reused, so a terminal run is reclaimed on
+// sight while non-terminal status is a skip signal — completed_at is returned
+// for the API contract and diagnostics, not as a TTL anchor.
 //
 // Workspace ownership is resolved via the parent autopilot row.
 func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request) {

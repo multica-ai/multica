@@ -994,6 +994,7 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 			Type:   MessageToolResult,
 			CallID: msg.ToolCallID,
 			Output: output,
+			Status: msg.Status,
 		})
 	}
 }

@@ -10,10 +10,24 @@ import LinkifyIt from 'linkify-it'
 // Initialize linkify-it with default settings (fuzzy URLs, emails enabled)
 const linkify = new LinkifyIt()
 
+// Common source/config file extensions. Shared between the file-path detector
+// and the bare-filename guard below so the two never drift.
+const FILE_EXTENSIONS =
+  'ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma|dockerfile|makefile|gitignore'
+
 // File path regex - detects /path, ~/path, ./path with common extensions
 // Matches paths that start with /, ~/, or ./ followed by path chars and a file extension
-const FILE_PATH_REGEX =
-  /(?:^|[\s([{<])((\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma|dockerfile|makefile|gitignore))(?=[\s)\]}.,;:!?>]|$)/gi
+const FILE_PATH_REGEX = new RegExp(
+  `(?:^|[\\s([{<])((\\/|~\\/|\\.\\/)[\\w\\-./@]+\\.(?:${FILE_EXTENSIONS}))(?=[\\s)\\]}.,;:!?>]|$)`,
+  'gi'
+)
+
+// A bare filename token like "plan.md" or "vite.config.ts": a single path
+// segment ending in a known file extension, with no slash, scheme, or port.
+// linkify-it fuzzy-matches these as domains because several of the extensions
+// (md, sh, rs, py, …) are also valid TLDs. We use this to stop bare
+// filenames from being auto-linked to dead external sites like https://plan.md.
+const BARE_FILENAME_REGEX = new RegExp(`^[\\w.-]+\\.(?:${FILE_EXTENSIONS})$`, 'i')
 
 // CJK full-width punctuation that should terminate a URL.
 // linkify-it only treats ASCII punctuation as URL boundaries, so in Chinese /
@@ -223,19 +237,27 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
 
     const truncate = cjkIdx > 0
     const matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
-    // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
-    // while leaving text as the raw substring. Preserve that prefix.
-    const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
-    const matchUrl = truncate ? schemePrefix + matchText : match.url
     const matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
 
-    out.push({
-      type: match.schema === 'mailto:' ? 'email' : 'url',
-      text: matchText,
-      url: matchUrl,
-      start: match.index + offset,
-      end: matchEnd + offset
-    })
+    // Bare filenames such as "plan.md" or "README.md" are fuzzy-matched as
+    // domains because their extension is also a valid TLD. They are file
+    // references, not URLs — leave them as plain text rather than link to a
+    // dead external site. Only schemeless (fuzzy) matches are suppressed; an
+    // explicit "https://plan.md" the author typed is still honored.
+    if (!(match.schema === '' && BARE_FILENAME_REGEX.test(matchText))) {
+      // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
+      // while leaving text as the raw substring. Preserve that prefix.
+      const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
+      const matchUrl = truncate ? schemePrefix + matchText : match.url
+
+      out.push({
+        type: match.schema === 'mailto:' ? 'email' : 'url',
+        text: matchText,
+        url: matchUrl,
+        start: match.index + offset,
+        end: matchEnd + offset
+      })
+    }
 
     if (truncate) {
       // Rescan the tail after the CJK punct — linkify-it had greedily swallowed

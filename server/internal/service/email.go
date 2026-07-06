@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"mime"
@@ -32,6 +33,131 @@ type EmailService struct {
 	smtpTLSInsecure bool
 	smtpTLSImplicit bool
 	smtpEHLOName    string
+}
+
+type smtpAuthClient interface {
+	Auth(smtp.Auth) error
+	Extension(string) (bool, string)
+}
+
+type smtpClientAdapter struct {
+	client *smtp.Client
+}
+
+func (a smtpClientAdapter) Auth(auth smtp.Auth) error {
+	return a.client.Auth(auth)
+}
+
+func (a smtpClientAdapter) Extension(name string) (bool, string) {
+	return a.client.Extension(name)
+}
+
+func isLocalhost(name string) bool {
+	return name == "localhost" || name == "127.0.0.1" || name == "::1"
+}
+
+type loginAuth struct {
+	username string
+	password string
+	host     string
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, fmt.Errorf("unencrypted connection")
+	}
+	if server.Name != a.host {
+		return "", nil, fmt.Errorf("wrong host name: %q does not match expected %q", server.Name, a.host)
+	}
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+
+	raw := strings.TrimSpace(string(fromServer))
+	challenge := strings.ToLower(raw)
+	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		challenge = strings.ToLower(strings.TrimSpace(string(decoded)))
+	}
+
+	switch {
+	case strings.Contains(challenge, "username") || strings.Contains(challenge, "user name"):
+		return []byte(a.username), nil
+	case strings.Contains(challenge, "password"):
+		return []byte(a.password), nil
+	default:
+		return nil, fmt.Errorf("unexpected LOGIN challenge %q", raw)
+	}
+}
+
+func smtpAuthWithFallback(c smtpAuthClient, host, username, password string) (bool, error) {
+	plainErr := c.Auth(smtp.PlainAuth("", username, password, host))
+	if plainErr == nil {
+		return false, nil
+	}
+
+	msg := strings.ToLower(plainErr.Error())
+	if !strings.Contains(msg, "unrecognized authentication type") && !strings.Contains(msg, "504 5.7.4") {
+		return false, plainErr
+	}
+
+	ok, authLine := c.Extension("AUTH")
+	if !ok || !strings.Contains(strings.ToUpper(authLine), "LOGIN") {
+		return false, plainErr
+	}
+	return true, plainErr
+}
+
+func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
+	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
+
+	tlsCfg := &tls.Config{
+		ServerName:         s.smtpHost,
+		InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
+	}
+
+	var conn net.Conn
+	var err error
+	if s.smtpTLSImplicit {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("smtp dial %s: %w", addr, err)
+	}
+	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("smtp set deadline: %w", err)
+	}
+
+	c, err := smtp.NewClient(conn, s.smtpHost)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("smtp client: %w", err)
+	}
+
+	if s.smtpEHLOName != "" {
+		if err = c.Hello(s.smtpEHLOName); err != nil {
+			c.Close()
+			return nil, fmt.Errorf("smtp EHLO %s: %w", s.smtpEHLOName, err)
+		}
+	}
+
+	if !s.smtpTLSImplicit {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err = c.StartTLS(tlsCfg); err != nil {
+				c.Close()
+				return nil, fmt.Errorf("smtp starttls: %w", err)
+			}
+		}
+	}
+
+	return c, nil
 }
 
 func NewEmailService() *EmailService {
@@ -119,61 +245,29 @@ func NewEmailService() *EmailService {
 // Upgrades to STARTTLS when advertised by the server.
 // Set SMTP_TLS_INSECURE=true for self-signed or private CA certificates.
 func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
-	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
-
-	tlsCfg := &tls.Config{
-		ServerName:         s.smtpHost,
-		InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
-	}
-
-	// Bounded dial + whole-session deadline: prevents a blackholed SMTP server
-	// from hanging the auth handler (or a background goroutine) indefinitely.
-	var conn net.Conn
-	var err error
-	if s.smtpTLSImplicit {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
-	} else {
-		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
-	}
+	c, err := s.openSMTPClient()
 	if err != nil {
-		return fmt.Errorf("smtp dial %s: %w", addr, err)
-	}
-	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		conn.Close()
-		return fmt.Errorf("smtp set deadline: %w", err)
-	}
-
-	c, err := smtp.NewClient(conn, s.smtpHost)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("smtp client: %w", err)
+		return err
 	}
 	defer c.Close()
 
-	// Greet with a real hostname before any other command, else net/smtp lazily
-	// EHLOs "localhost" — which strict relays drop, surfacing as an opaque EOF on
-	// a later command rather than at the EHLO itself.
-	if s.smtpEHLOName != "" {
-		if err = c.Hello(s.smtpEHLOName); err != nil {
-			return fmt.Errorf("smtp EHLO %s: %w", s.smtpEHLOName, err)
-		}
-	}
-
-	// STARTTLS upgrade only makes sense when the underlying connection is still
-	// plaintext. Skip when we already dialed with implicit TLS.
-	if !s.smtpTLSImplicit {
-		if ok, _ := c.Extension("STARTTLS"); ok {
-			if err = c.StartTLS(tlsCfg); err != nil {
-				return fmt.Errorf("smtp starttls: %w", err)
-			}
-		}
-	}
-
 	if s.smtpUsername != "" {
-		auth := smtp.PlainAuth("", s.smtpUsername, s.smtpPassword, s.smtpHost)
-		if err = c.Auth(auth); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
+		fallbackToLogin, authErr := smtpAuthWithFallback(smtpClientAdapter{client: c}, s.smtpHost, s.smtpUsername, s.smtpPassword)
+		if authErr != nil {
+			if !fallbackToLogin {
+				return fmt.Errorf("smtp auth: %w", authErr)
+			}
+
+			c.Close()
+			c, err = s.openSMTPClient()
+			if err != nil {
+				return fmt.Errorf("smtp auth: plain auth failed (%v); login reconnect failed: %w", authErr, err)
+			}
+			defer c.Close()
+
+			if err = c.Auth(&loginAuth{username: s.smtpUsername, password: s.smtpPassword, host: s.smtpHost}); err != nil {
+				return fmt.Errorf("smtp auth: plain auth failed (%v); login auth fallback failed: %w", authErr, err)
+			}
 		}
 	}
 

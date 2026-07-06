@@ -144,3 +144,17 @@ func Int8ToPtr(v pgtype.Int8) *int64 {
 	}
 	return &v.Int64
 }
+
+func Int4ToPtr(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int32
+}
+
+func PtrToInt4(v *int32) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: *v, Valid: true}
+}

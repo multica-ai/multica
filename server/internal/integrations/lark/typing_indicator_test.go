@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // fakeTypingAPIClient records reaction calls and can be programmed to fail.
@@ -70,22 +69,22 @@ func (f *fakeTypingAPIClient) DeleteMessageReaction(_ context.Context, p DeleteR
 }
 
 type fakeTypingQueries struct {
-	binding      db.LarkChatSessionBinding
-	installation db.LarkInstallation
+	binding      ChatSessionBinding
+	installation Installation
 	bindingErr   error
 	installErr   error
 }
 
-func (f *fakeTypingQueries) GetLarkChatSessionBindingBySession(context.Context, pgtype.UUID) (db.LarkChatSessionBinding, error) {
+func (f *fakeTypingQueries) GetLarkChatSessionBindingBySession(context.Context, pgtype.UUID) (ChatSessionBinding, error) {
 	return f.binding, f.bindingErr
 }
-func (f *fakeTypingQueries) GetLarkInstallation(context.Context, pgtype.UUID) (db.LarkInstallation, error) {
+func (f *fakeTypingQueries) GetLarkInstallation(context.Context, pgtype.UUID) (Installation, error) {
 	return f.installation, f.installErr
 }
 
 type fakeTypingCreds struct{ secret string }
 
-func (f fakeTypingCreds) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (f fakeTypingCreds) DecryptAppSecret(inst Installation) (string, error) {
 	return f.secret, nil
 }
 
@@ -94,7 +93,7 @@ func TestTypingIndicatorAddRecordsState(t *testing.T) {
 	queries := &fakeTypingQueries{}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "msg-1", "")
@@ -119,7 +118,7 @@ func TestTypingIndicatorAddSkipsOnEmptyMessageID(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-123"}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "", "")
@@ -133,7 +132,7 @@ func TestTypingIndicatorAddSkipsOldMessages(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-123"}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 
 	oldTime := time.Now().Add(-3 * time.Minute).UnixMilli()
@@ -148,7 +147,7 @@ func TestTypingIndicatorAddLogsOnAPIError(t *testing.T) {
 	api := &fakeTypingAPIClient{addErr: errors.New("lark down")}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "msg-1", "")
@@ -169,10 +168,10 @@ func TestTypingIndicatorAddLogsOnAPIError(t *testing.T) {
 func TestTypingIndicatorClearDeletesReactions(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-abc"}
 	queries := &fakeTypingQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			InstallationID: pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9}, Valid: true},
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:     pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9}, Valid: true},
 			AppID:  "cli_test",
 			Region: "feishu",
@@ -180,7 +179,7 @@ func TestTypingIndicatorClearDeletesReactions(t *testing.T) {
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "msg-1", "")
@@ -209,10 +208,10 @@ func TestTypingIndicatorClearDeletesReactions(t *testing.T) {
 func TestTypingIndicatorClearNoOpWhenEmpty(t *testing.T) {
 	api := &fakeTypingAPIClient{}
 	queries := &fakeTypingQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			InstallationID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:     pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 			AppID:  "cli_test",
 			Region: "feishu",
@@ -231,10 +230,10 @@ func TestTypingIndicatorClearNoOpWhenEmpty(t *testing.T) {
 func TestTypingIndicatorClearLogsOnDeleteError(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-xyz", deleteErr: errors.New("delete failed")}
 	queries := &fakeTypingQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			InstallationID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:     pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 			AppID:  "cli_test",
 			Region: "feishu",
@@ -242,7 +241,7 @@ func TestTypingIndicatorClearLogsOnDeleteError(t *testing.T) {
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "msg-1", "")
@@ -256,10 +255,10 @@ func TestTypingIndicatorClearLogsOnDeleteError(t *testing.T) {
 func TestTypingIndicatorMultipleMessagesPerSession(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-n"}
 	queries := &fakeTypingQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			InstallationID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:     pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 			AppID:  "cli_test",
 			Region: "feishu",
@@ -267,7 +266,7 @@ func TestTypingIndicatorMultipleMessagesPerSession(t *testing.T) {
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}
 
 	mgr.Add(context.Background(), inst, session, "msg-a", "")
@@ -287,10 +286,10 @@ func TestTypingIndicatorMultipleMessagesPerSession(t *testing.T) {
 func TestTypingIndicatorConcurrentAddAndClear(t *testing.T) {
 	api := &fakeTypingAPIClient{addReturn: "reaction-concurrent"}
 	queries := &fakeTypingQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			InstallationID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:     pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 			AppID:  "cli_test",
 			Region: "feishu",
@@ -298,7 +297,7 @@ func TestTypingIndicatorConcurrentAddAndClear(t *testing.T) {
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, queries, newDiscardLogger())
 
-	inst := db.LarkInstallation{AppID: "cli_test", Region: "feishu"}
+	inst := Installation{AppID: "cli_test", Region: "feishu"}
 	session := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}
 
 	done := make(chan struct{})

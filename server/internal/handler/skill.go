@@ -1698,11 +1698,21 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 
 // --- Shared helpers ---
 
+// rawGitHubContentHost serves raw GitHub file content. fetchRawFile attaches the
+// GITHUB_TOKEN only for this host: the same function downloads files from
+// non-GitHub skill sources (clawhub.ai, skills.sh), and an unconditional auth
+// header would leak the token to those third-party hosts.
+const rawGitHubContentHost = "raw.githubusercontent.com"
+
 // fetchRawFile downloads a URL and returns the body bytes. Returns an error
 // if the response exceeds maxImportFileSize so we never silently truncate a
 // half-downloaded skill file into the workspace.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
-	resp, err := httpClient.Get(fileURL)
+	req, err := newRawFileRequest(fileURL)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1718,6 +1728,22 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
 	}
 	return body, nil
+}
+
+// newRawFileRequest builds the GET request for a raw skill file, attaching the
+// GitHub auth header only when the URL targets GitHub's raw content host. The
+// host gate lives here, separate from the round-trip, so it can be unit tested
+// without a live network call — GITHUB_TOKEN must never reach a non-GitHub
+// skill host.
+func newRawFileRequest(fileURL string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(req.URL.Hostname(), rawGitHubContentHost) {
+		addGitHubAuthHeader(req)
+	}
+	return req, nil
 }
 
 // escapeRefPath percent-encodes each segment of a git ref individually so
@@ -1892,6 +1918,14 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	creatorUUID := parseUUID(creatorID)
 
+	// An uploaded skill archive (.skill / .zip) arrives as multipart/form-data;
+	// a hosted-URL import arrives as JSON. Both converge on the same create +
+	// conflict tail via finishSkillImport.
+	if isMultipartForm(r) {
+		h.importSkillFromArchive(w, r, workspaceID, workspaceUUID, creatorUUID, creatorID)
+		return
+	}
+
 	var req ImportSkillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1929,6 +1963,15 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.finishSkillImport(w, r, workspaceID, workspaceUUID, creatorUUID, creatorID, strategy, structuredResult, imported)
+}
+
+// finishSkillImport runs the shared tail of every skill import — whether the
+// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
+// the extracted files onto CreateSkillFileRequest, records provenance into
+// config.origin, and creates the skill, routing same-name collisions through
+// the on_conflict strategy.
+func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
 		if !validateFilePath(f.path) {

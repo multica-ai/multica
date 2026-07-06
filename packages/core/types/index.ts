@@ -10,6 +10,11 @@ export type {
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
+  RuntimeProfile,
+  RuntimeProtocolFamily,
+  RuntimeProfileVisibility,
+  CreateRuntimeProfileRequest,
+  UpdateRuntimeProfileRequest,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -54,8 +59,9 @@ export type {
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
 } from "./agent";
+export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
-export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
+export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
@@ -114,10 +120,20 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  SlackInstallation,
+  ListSlackInstallationsResponse,
+  RegisterSlackBYORequest,
+  RedeemSlackBindingTokenResponse,
+} from "./slack";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
   AutopilotAssigneeType,
+  AutopilotSubscriber,
+  AutopilotSubscriberInput,
+  AutopilotCollaborator,
+  AutopilotCollaboratorsResponse,
   AutopilotTrigger,
   AutopilotTriggerKind,
   AutopilotRun,

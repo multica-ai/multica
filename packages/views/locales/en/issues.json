@@ -22,6 +22,10 @@
     "low": "Low",
     "none": "No priority"
   },
+  "stage": {
+    "none": "No stage",
+    "value": "Stage {{n}}"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -43,6 +47,16 @@
     "section_creator": "Creator",
     "section_project": "Project",
     "section_label": "Label",
+    "section_date": "Date",
+    "date_field": "Field",
+    "date_field_created": "Created",
+    "date_field_updated": "Updated",
+    "date_today": "Today",
+    "date_last_3_days": "Last 3 days",
+    "date_last_7_days": "Last 7 days",
+    "date_custom_range": "Custom date or range",
+    "date_apply": "Apply",
+    "date_clear": "Clear date filter",
     "members_group": "Members",
     "agents_group": "Agents",
     "squads_group": "Squads",
@@ -76,7 +90,8 @@
     "card_due_date": "Due date",
     "card_project": "Project",
     "card_labels": "Labels",
-    "card_child_progress": "Sub-issue progress"
+    "card_child_progress": "Sub-issue progress",
+    "show_sub_issues": "Show sub-issues"
   },
   "view": {
     "tooltip_board": "Board view",
@@ -186,6 +201,7 @@
     "pull_request_card_show_less": "Show less",
     "prop_status": "Status",
     "prop_priority": "Priority",
+    "prop_stage": "Stage",
     "prop_assignee": "Assignee",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
@@ -280,21 +296,19 @@
     "trigger_source_mention_squad_leader": "squad",
     "trigger_source_unknown": "trigger",
     "trigger_skipped_label": "Skipped",
-    "trigger_wont_trigger": "Won't be triggered",
-    "trigger_none_will_trigger": "No agents will be triggered",
-    "trigger_reason_issue_assignee": "{{name}} is assigned here and will be notified by this comment.",
-    "trigger_reason_mention_agent": "{{name}} is mentioned in this comment.",
-    "trigger_reason_mention_squad_leader": "{{name}} leads a squad mentioned in this comment.",
-    "trigger_reason_unknown": "{{name}} will be triggered by this comment.",
-    "trigger_will_start": "Starts working when sent",
-    "trigger_will_start_count_one": "{{count}} agent starts working when sent",
-    "trigger_will_start_count_other": "{{count}} agents start working when sent",
-    "trigger_starts_now": "It will start working right away.",
-    "trigger_starts_when_online": "It is offline now and will start once online.",
-    "trigger_click_to_skip": "Click to skip triggering this time.",
-    "trigger_click_to_manage": "Click to manage who gets triggered this time.",
-    "trigger_click_to_restore": "Won't be triggered this time. Click to restore.",
-    "trigger_preview_title": "This comment will trigger",
+    "trigger_wont_trigger": "Won't start this time",
+    "trigger_none_will_trigger": "No agents will start",
+    "trigger_reason_mention_squad_leader": "Leads a squad mentioned here.",
+    "trigger_reason_unknown": "Will start from this comment.",
+    "trigger_will_start": "Will start when sent",
+    "trigger_will_start_count_one": "{{count}} agent will start when sent",
+    "trigger_will_start_count_other": "{{count}} agents will start when sent",
+    "trigger_starts_now": "Starts right away.",
+    "trigger_starts_when_online": "Offline now — starts once online.",
+    "trigger_click_to_skip": "Click to skip this time.",
+    "trigger_click_to_manage": "Click to choose who runs this time.",
+    "trigger_click_to_restore": "Won't start this time. Click to restore.",
+    "trigger_preview_title": "Will start when sent",
     "trigger_chip_aria": "{{name}} trigger: {{state}}",
     "resolve": {
       "resolve_thread_action": "Resolve thread",
@@ -319,6 +333,8 @@
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",
     "hover_header_other": "{{count}} agents working",
+    "hover_header_tasks_one": "{{count}} task working",
+    "hover_header_tasks_other": "{{count}} tasks working",
     "hover_header_queued_one": "{{count}} agent queued",
     "hover_header_queued_other": "{{count}} agents queued",
     "status_running": "Working",
@@ -358,6 +374,7 @@
     "trigger_autopilot": "Autopilot run",
     "trigger_comment": "Comment trigger",
     "trigger_initial": "Initial run",
+    "trigger_handoff_prefix": "Handoff: ",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
     "status_waiting_local_directory": "Waiting for local directory",
@@ -418,6 +435,8 @@
     "more": "More",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
+    "remove_parent_issue": "Remove parent issue",
+    "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
     "delete_issue": "Delete issue"
   },
@@ -477,9 +496,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "keeps the agent paused",
     "row_todo_label": "Todo",
-    "row_todo_hint": "starts the agent",
-    "dont_show_again": "Don't show this again",
-    "keep_in_backlog": "Keep in Backlog",
-    "move_to_todo": "Move to Todo"
+    "row_todo_hint": "starts the agent"
   }
 }

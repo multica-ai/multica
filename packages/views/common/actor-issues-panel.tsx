@@ -53,6 +53,7 @@ export function ActorIssuesPanel({
   const projectFilters = useStore(actorIssuesViewStore, (s) => s.projectFilters);
   const includeNoProject = useStore(actorIssuesViewStore, (s) => s.includeNoProject);
   const labelFilters = useStore(actorIssuesViewStore, (s) => s.labelFilters);
+  const showSubIssues = useStore(actorIssuesViewStore, (s) => s.showSubIssues);
 
   const [search, setSearch] = useState("");
 
@@ -105,6 +106,7 @@ export function ActorIssuesPanel({
         projectFilters,
         includeNoProject,
         labelFilters,
+        showSubIssues,
       }),
     [
       actorIssues,
@@ -116,6 +118,7 @@ export function ActorIssuesPanel({
       projectFilters,
       includeNoProject,
       labelFilters,
+      showSubIssues,
     ],
   );
 
@@ -216,7 +219,7 @@ export function ActorIssuesPanel({
             />
           </div>
         )}
-        <BatchActionToolbar />
+        <BatchActionToolbar issues={issues} />
       </div>
     </ViewStoreProvider>
   );

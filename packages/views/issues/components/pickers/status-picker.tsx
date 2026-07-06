@@ -16,7 +16,13 @@ export function StatusPicker({
   onOpenChange: controlledOnOpenChange,
   align,
 }: {
-  status: IssueStatus;
+  /**
+   * The currently-selected status, used to check the matching row. `null`
+   * means "no single current value" (e.g. a batch selection spanning several
+   * statuses) — no row is checked. Single-issue callers always pass a concrete
+   * status.
+   */
+  status: IssueStatus | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
@@ -37,12 +43,13 @@ export function StatusPicker({
       align={align}
       triggerRender={triggerRender}
       trigger={
-        customTrigger ?? (
+        customTrigger ??
+        (status != null ? (
           <>
             <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{t(($) => $.status[status])}</span>
           </>
-        )
+        ) : null)
       }
     >
       {ALL_STATUSES.map((s) => {

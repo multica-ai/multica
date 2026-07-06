@@ -37,6 +37,7 @@
     "linkify-it": "^5.0.0",
     "katex": "catalog:",
     "lucide-react": "catalog:",
+    "motion": "^12.38.0",
     "next-themes": "^0.4.6",
     "react-day-picker": "^9.14.0",
     "react-markdown": "^10.1.0",

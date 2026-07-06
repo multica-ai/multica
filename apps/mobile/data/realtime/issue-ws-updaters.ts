@@ -366,5 +366,6 @@ export function commentToTimelineEntry(comment: Comment): TimelineEntry {
     resolved_at: comment.resolved_at,
     resolved_by_type: comment.resolved_by_type,
     resolved_by_id: comment.resolved_by_id,
+    source_task_id: comment.source_task_id,
   };
 }

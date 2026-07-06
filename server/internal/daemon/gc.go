@@ -366,24 +366,24 @@ func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, met
 	//                              dead weight from here on.
 	// Non-terminal: pending, running. Skip until they reach a terminal state
 	// rather than trying to bound them by mtime — long autopilots are real.
+	//
+	// An autopilot run's workdir is never reused: unlike issue/chat tasks there
+	// is no PriorWorkDir path that hands a later run the same directory, so every
+	// run gets a fresh one. Whatever the run produced already lives server-side
+	// (and an issue_created run handed its work to an issue task that owns its own
+	// envRoot). So the moment the run reaches a terminal state the directory is
+	// dead weight and we reclaim it immediately, without waiting out GCTTL — the
+	// same reasoning gcDecisionQuickCreate applies to quick-create dirs. The
+	// active-env-root short-circuit in shouldCleanTaskDir still protects a run
+	// that is mid-flight, so this can't pull the rug from under live work.
 	if isAutopilotRunTerminal(status.Status) {
-		anchor := status.CompletedAt
-		if anchor.IsZero() {
-			// Defensive: terminal status without completed_at means the
-			// run finished but the column wasn't stamped (older code path).
-			// Fall back to the meta's CompletedAt so we still GC eventually.
-			anchor = meta.CompletedAt
-		}
-		if !anchor.IsZero() && time.Since(anchor) > d.cfg.GCTTL {
-			d.logger.Info("gc: eligible for cleanup",
-				"dir", filepath.Base(taskDir),
-				"kind", "autopilot_run",
-				"autopilot_run", meta.AutopilotRunID,
-				"status", status.Status,
-				"completed_at", anchor.Format(time.RFC3339),
-			)
-			return gcActionClean
-		}
+		d.logger.Info("gc: eligible for cleanup",
+			"dir", filepath.Base(taskDir),
+			"kind", "autopilot_run",
+			"autopilot_run", meta.AutopilotRunID,
+			"status", status.Status,
+		)
+		return gcActionClean
 	}
 	return gcActionSkip
 }

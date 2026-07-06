@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
-// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
-// AgentBackend pattern, translated to idiomatic Go.
+// Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder). It mirrors the
+// happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -127,13 +127,47 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli".
+//
+// SupportedTypes is the canonical whitelist of agent types eligible to back a
+// custom runtime profile. It MUST stay in lockstep with the
+// runtime_profile.protocol_family CHECK constraint (migration 120): a custom
+// runtime profile may only be based on a backend Multica officially supports.
+// (qoder is a built-in provider New can construct, but it is not offered as a
+// custom-profile base, so it is intentionally absent from this list.)
+var SupportedTypes = []string{
+	"claude",
+	"codebuddy",
+	"codex",
+	"copilot",
+	"opencode",
+	"openclaw",
+	"hermes",
+	"pi",
+	"cursor",
+	"kimi",
+	"kiro",
+	"antigravity",
+}
+
+// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
+// Used to validate a custom runtime profile's protocol_family before it is
+// persisted or registered.
+func IsSupportedType(agentType string) bool {
+	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -154,8 +188,6 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
-	case "gemini":
-		return &geminiBackend{cfg: cfg}, nil
 	case "pi":
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
@@ -166,8 +198,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
+	case "qoder":
+		return &qoderBackend{cfg: cfg}, nil
+	case "traecli":
+		return &traecliBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli)", agentType)
 	}
 }
 
@@ -183,19 +219,20 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (print mode)",
+	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
 	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",
-	"gemini":      "gemini (stream-json)",
 	"hermes":      "hermes acp",
 	"kimi":        "kimi acp",
 	"kiro":        "kiro-cli acp",
 	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
+	"qoder":       "qodercli --acp",
+	"traecli":     "traecli acp serve",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

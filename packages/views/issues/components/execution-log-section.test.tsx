@@ -69,4 +69,21 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
+
+  it("does not make transcript actions depend on hover-only rendering", () => {
+    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+
+    const transcriptButton = screen.getByRole("button", { name: "View transcript" });
+    const status = screen.getByText("5m 04s");
+
+    expect(status.parentElement?.className).toContain("flex h-7");
+    expect(status.parentElement?.className).toContain(
+      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
+    );
+    expect(transcriptButton.parentElement?.className).toContain("flex h-7");
+    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
+    expect(transcriptButton.parentElement?.className).toContain(
+      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
+    );
+  });
 });

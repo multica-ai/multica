@@ -67,6 +67,9 @@ type IssueCreateParams struct {
 	OriginID       pgtype.UUID
 	AttachmentIDs  []pgtype.UUID
 	AllowDuplicate bool
+	// Stage groups this issue into an ordered barrier group under its parent
+	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
+	Stage pgtype.Int4
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -145,7 +148,7 @@ type IssueCreateResult struct {
 //  8. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
 //  9. Capture the IssueCreated analytics event.
 //  10. Enqueue an agent task or trigger the squad leader when the issue is
-//      assigned and not in `backlog`.
+//     assigned and not in `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so
@@ -239,6 +242,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			ProjectID:     projectID,
 			OriginType:    p.OriginType,
 			OriginID:      p.OriginID,
+			Stage:         p.Stage,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -257,6 +261,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			DueDate:       p.DueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			Stage:         p.Stage,
 		})
 	}
 	if err != nil {
@@ -463,7 +468,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 	if err != nil || hasPending {
 		return
 	}
-	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task on create failed",
 			"issue_id", util.UUIDToString(issue.ID),
 			"squad_id", util.UUIDToString(squad.ID),

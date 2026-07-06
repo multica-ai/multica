@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -138,8 +139,23 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
-	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
+	srv := &http.Server{Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		srv.Close()
+	}()
+
+	d.logger.Info("health server listening", "addr", ln.Addr().String())
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		d.logger.Warn("health server error", "error", err)
+	}
+}
+
+func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -150,6 +166,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		req.URL = strings.TrimSpace(req.URL)
 		if req.URL == "" {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
@@ -178,11 +195,16 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
+		checkoutRef := strings.TrimSpace(req.Ref)
+		if checkoutRef == "" {
+			checkoutRef = d.taskRepoDefaultRef(req.WorkspaceID, req.TaskID, req.URL)
+		}
+
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
 			WorkspaceID:         req.WorkspaceID,
 			RepoURL:             req.URL,
 			WorkDir:             req.WorkDir,
-			Ref:                 req.Ref,
+			Ref:                 checkoutRef,
 			AgentName:           req.AgentName,
 			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
@@ -195,17 +217,5 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
-	})
-
-	srv := &http.Server{Handler: mux}
-
-	go func() {
-		<-ctx.Done()
-		srv.Close()
-	}()
-
-	d.logger.Info("health server listening", "addr", ln.Addr().String())
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		d.logger.Warn("health server error", "error", err)
 	}
 }

@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -101,6 +102,34 @@ func (f *larkFakeServer) stubSend(resp map[string]any, verify func(r *http.Reque
 		}
 		if verify != nil {
 			verify(r, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
+// stubReply installs the IM-reply endpoint
+// (POST /open-apis/im/v1/messages/<id>/reply), used by the thread-reply
+// path. Body is decoded as map[string]any because reply_in_thread is a
+// bool. Register stubToken + stubReply (and not stubSend / stubPatch) in
+// a reply test, since they share the /messages/ prefix.
+func (f *larkFakeServer) stubReply(resp map[string]any, verify func(r *http.Request, id string, body map[string]any)) {
+	const prefix = "/open-apis/im/v1/messages/"
+	f.mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/reply") {
+			f.t.Errorf("reply: want POST .../reply, got %s %s", r.Method, r.URL.Path)
+			return
+		}
+		f.sendN.Add(1)
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/reply")
+		if id == "" {
+			f.t.Errorf("reply: missing message id")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			f.t.Errorf("reply: decode body: %v", err)
+		}
+		if verify != nil {
+			verify(r, id, body)
 		}
 		writeJSON(w, resp)
 	})
@@ -410,6 +439,62 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_SendTextMessage_ReplyInThread pins the wire shape of a
+// threaded reply: when ReplyTarget is set the client must POST to the
+// reply endpoint (/messages/<id>/reply), carry reply_in_thread=true, and
+// NOT include a chat-level receive_id — that's what lands the agent's
+// reply inside the originating 话题 (thread) instead of the group.
+func TestHTTPClient_SendTextMessage_ReplyInThread(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_reply", 7200)
+	fake.stubReply(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_reply_1"},
+		},
+		func(r *http.Request, id string, body map[string]any) {
+			if id != "om_trigger" {
+				t.Errorf("reply target id: got %q want om_trigger", id)
+			}
+			if body["msg_type"] != "text" {
+				t.Errorf("msg_type: got %v want text", body["msg_type"])
+			}
+			if v, _ := body["reply_in_thread"].(bool); !v {
+				t.Errorf("reply_in_thread: got %v want true", body["reply_in_thread"])
+			}
+			if _, hasRecv := body["receive_id"]; hasRecv {
+				t.Errorf("reply endpoint body must NOT carry receive_id; got %v", body)
+			}
+			content, ok := body["content"].(string)
+			if !ok {
+				t.Fatalf("content missing or not a string: %v", body["content"])
+			}
+			var inner map[string]string
+			if err := json.Unmarshal([]byte(content), &inner); err != nil {
+				t.Fatalf("content inner JSON: %v (raw=%q)", err, content)
+			}
+			if inner["text"] != "threaded hi" {
+				t.Errorf("inner content.text: got %q want threaded hi", inner["text"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendTextMessage(context.Background(), SendTextParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc_chat_42"),
+		Text:           "threaded hi",
+		ReplyTarget:    ReplyTarget{MessageID: "om_trigger", InThread: true},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if msgID != "om_reply_1" {
+		t.Errorf("message id: got %q want om_reply_1", msgID)
+	}
+}
+
 // TestHTTPClient_SendMarkdownCard_HappyPath pins the wire shape of the
 // schema-2.0 card we send for markdown chat replies. The MUST-haves:
 // msg_type=interactive (not text), content is a JSON-encoded card
@@ -636,6 +721,70 @@ func TestHTTPClient_SendInteractiveCard_LarkErrorCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "code=230001") {
 		t.Errorf("error should surface code: %v", err)
+	}
+}
+
+// TestHTTPClient_SendMethods_ReturnTypedAPIError pins that the three
+// send methods used for threaded replies surface a non-zero Lark code
+// as a structured *APIError, so the outbound fallback can classify
+// "topic cannot receive this reply" codes without string matching.
+func TestHTTPClient_SendMethods_ReturnTypedAPIError(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(c *httpAPIClient) error
+	}{
+		{"interactive", func(c *httpAPIClient) error {
+			_, err := c.SendInteractiveCard(context.Background(), SendCardParams{InstallationID: testCreds(), ChatID: "oc", CardJSON: `{}`})
+			return err
+		}},
+		{"text", func(c *httpAPIClient) error {
+			_, err := c.SendTextMessage(context.Background(), SendTextParams{InstallationID: testCreds(), ChatID: "oc", Text: "hi"})
+			return err
+		}},
+		{"markdown", func(c *httpAPIClient) error {
+			_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{InstallationID: testCreds(), ChatID: "oc", Markdown: "**hi**"})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newLarkFake(t)
+			fake.stubToken("tok_e", 7200)
+			fake.stubSend(map[string]any{"code": 230071, "msg": "group does not support reply in thread"}, nil)
+			c := newTestClient(fake, time.Now)
+			err := tc.call(c)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("want *APIError, got %T (%v)", err, err)
+			}
+			if apiErr.Code != 230071 {
+				t.Errorf("APIError.Code = %d; want 230071", apiErr.Code)
+			}
+			if !isThreadReplyUnsupported(err) {
+				t.Errorf("230071 should classify as thread-reply-unsupported")
+			}
+			if !strings.Contains(err.Error(), "code=230071") {
+				t.Errorf("error string should preserve code=230071: %v", err)
+			}
+		})
+	}
+}
+
+// TestIsThreadReplyUnsupported_ExcludesAmbiguous guards that ambiguous
+// and rate-limit failures are NOT treated as classified thread errors,
+// so they never trigger a chat-level fallback.
+func TestIsThreadReplyUnsupported_ExcludesAmbiguous(t *testing.T) {
+	if isThreadReplyUnsupported(errors.New("transport failure")) {
+		t.Error("plain transport error must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230020, Msg: "rate limit"}) {
+		t.Error("rate limit (230020) must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230049, Msg: "message is being sent"}) {
+		t.Error("ambiguous 'being sent' (230049) must not classify as thread-reply-unsupported")
+	}
+	if !isThreadReplyUnsupported(&APIError{Code: 230072, Msg: "aggregated"}) {
+		t.Error("aggregated message (230072) should classify as thread-reply-unsupported")
 	}
 }
 

@@ -7,6 +7,7 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   Collapsible,
   CollapsibleContent,
@@ -234,14 +236,31 @@ export function AddToAgentDialog({
     new Set(),
   );
   const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
 
   const skillIds = skills.map((s) => s.id);
   const { mine, others } = partitionAgents(ctx);
   const count = selectedIds.size;
 
+  // Search across both groups by agent name. Filtering is applied per group
+  // so the "My agents" / "Other agents" split is preserved; when a query is
+  // active both groups are force-expanded (via the remount key below) so
+  // matches in the normally-collapsed "Other agents" group stay visible.
+  const trimmedQuery = query.trim().toLowerCase();
+  const searching = trimmedQuery.length > 0;
+  const matchesQuery = (a: Agent) =>
+    !searching || a.name.toLowerCase().includes(trimmedQuery);
+  const filteredMine = mine.filter(matchesQuery);
+  const filteredOthers = others.filter(matchesQuery);
+  const hasAnyAgent = mine.length + others.length > 0;
+  const hasMatch = filteredMine.length + filteredOthers.length > 0;
+
   const handleOpenChange = (v: boolean) => {
     if (saving) return;
-    if (!v) setSelectedIds(new Set());
+    if (!v) {
+      setSelectedIds(new Set());
+      setQuery("");
+    }
     onOpenChange(v);
   };
 
@@ -303,25 +322,43 @@ export function AddToAgentDialog({
 
         <SkillChips skills={skills} />
 
+        {hasAnyAgent && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t(($) => $.actions.search_placeholder)}
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-card p-1.5">
-          {mine.length === 0 && others.length === 0 ? (
+          {!hasAnyAgent ? (
             <div className="py-6 text-center text-xs text-muted-foreground">
               {t(($) => $.actions.no_agents)}
+            </div>
+          ) : !hasMatch ? (
+            <div className="py-6 text-center text-xs text-muted-foreground">
+              {t(($) => $.actions.no_agents_match)}
             </div>
           ) : (
             <>
               <AgentGroup
+                key={`mine-${searching}`}
                 label={t(($) => $.actions.my_agents)}
-                agents={mine}
+                agents={filteredMine}
                 defaultOpen
                 skillIds={skillIds}
                 selectedIds={selectedIds}
                 onToggle={handleToggle}
               />
               <AgentGroup
+                key={`others-${searching}`}
                 label={t(($) => $.actions.other_agents)}
-                agents={others}
-                defaultOpen={false}
+                agents={filteredOthers}
+                defaultOpen={searching}
                 skillIds={skillIds}
                 selectedIds={selectedIds}
                 onToggle={handleToggle}

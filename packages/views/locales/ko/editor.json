@@ -7,6 +7,7 @@
     "highlight": "강조",
     "link": "링크",
     "list": "목록",
+    "task_list": "체크리스트",
     "quote": "인용",
     "url_aria_label": "URL",
     "heading_dropdown": {

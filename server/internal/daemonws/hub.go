@@ -21,11 +21,65 @@ const (
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
-	DaemonID      string
-	UserID        string
+	DaemonID string
+	UserID   string
+	// WorkspaceID is the legacy single-workspace scope used by older callers
+	// and daemon-token auth. New code should populate WorkspaceIDs from the
+	// runtime rows authorized for this connection.
 	WorkspaceID   string
+	WorkspaceIDs  []string
 	RuntimeIDs    []string
 	ClientVersion string
+}
+
+// AuthorizedWorkspaceIDs returns the connection's workspace scope in stable
+// order, preferring the multi-workspace field and falling back to WorkspaceID
+// for older tests/callers.
+func (i ClientIdentity) AuthorizedWorkspaceIDs() []string {
+	seen := make(map[string]struct{}, len(i.WorkspaceIDs)+1)
+	out := make([]string, 0, len(i.WorkspaceIDs)+1)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range i.WorkspaceIDs {
+		add(id)
+	}
+	if len(out) == 0 {
+		add(i.WorkspaceID)
+	}
+	return out
+}
+
+func (i ClientIdentity) PrimaryWorkspaceID() string {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
+}
+
+// AllowsWorkspace reports whether workspaceID is within the connection scope.
+// An empty scope remains permissive for legacy unit tests that construct
+// ClientIdentity directly without workspace data.
+func (i ClientIdentity) AllowsWorkspace(workspaceID string) bool {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return true
+	}
+	for _, id := range ids {
+		if id == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 type client struct {
@@ -85,9 +139,10 @@ type MessageKindRecorder interface {
 type Hub struct {
 	upgrader websocket.Upgrader
 
-	mu        sync.RWMutex
-	clients   map[*client]bool
-	byRuntime map[string]map[*client]bool
+	mu          sync.RWMutex
+	clients     map[*client]bool
+	byRuntime   map[string]map[*client]bool
+	byWorkspace map[string]map[*client]bool
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
@@ -106,8 +161,9 @@ func NewHub() *Hub {
 			// grows cookie fallback.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		clients:   make(map[*client]bool),
-		byRuntime: make(map[string]map[*client]bool),
+		clients:     make(map[*client]bool),
+		byRuntime:   make(map[string]map[*client]bool),
+		byWorkspace: make(map[string]map[*client]bool),
 	}
 }
 
@@ -194,6 +250,12 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	h.notifyTaskAvailable(runtimeID, taskID, "")
 }
 
+// NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
+// runtime profiles now instead of waiting for their periodic sync loop.
+func (h *Hub) NotifyRuntimeProfilesChanged(workspaceID, profileID string) {
+	h.notifyRuntimeProfilesChanged(workspaceID, profileID, "")
+}
+
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
@@ -210,6 +272,17 @@ func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	}
 }
 
+func (h *Hub) notifyRuntimeProfilesChanged(workspaceID, profileID, eventID string) {
+	if h == nil || workspaceID == "" {
+		return
+	}
+	data, err := runtimeProfilesChangedFrame(workspaceID, profileID)
+	if err != nil {
+		return
+	}
+	h.notifyWorkspaceFrame(workspaceID, data, eventID)
+}
+
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
 	if h == nil {
 		return
@@ -221,27 +294,70 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
+	switch msg.Type {
+	case protocol.EventDaemonTaskAvailable:
+		var payload protocol.TaskAvailablePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonRuntimeProfilesChanged:
+		var payload protocol.RuntimeProfilesChangedPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.WorkspaceID == "" {
+			slog.Debug("daemon websocket relay: invalid runtime_profiles_changed payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyWorkspaceFrame(payload.WorkspaceID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	default:
 		M.WakeupDeliveredMiss.Add(1)
 		return
-	}
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-		slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
-		M.WakeupDeliveredMiss.Add(1)
-		return
-	}
-	delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
-	if delivered {
-		M.WakeupDeliveredHit.Add(1)
-	} else if !deduped {
-		M.WakeupDeliveredMiss.Add(1)
 	}
 }
 
 func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delivered bool, deduped bool) {
 	h.mu.RLock()
 	clients := h.byRuntime[runtimeID]
+	slow := make([]*client, 0)
+	for c := range clients {
+		if !c.markSeen(eventID) {
+			deduped = true
+			continue
+		}
+		select {
+		case c.send <- data:
+			delivered = true
+		default:
+			slow = append(slow, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range slow {
+		h.unregister(c)
+		c.conn.Close()
+	}
+	if len(slow) > 0 {
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
+	}
+	return delivered, deduped
+}
+
+func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID string) (delivered bool, deduped bool) {
+	h.mu.RLock()
+	clients := h.byWorkspace[workspaceID]
 	slow := make([]*client, 0)
 	for c := range clients {
 		if !c.markSeen(eventID) {
@@ -277,6 +393,16 @@ func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
 	})
 }
 
+func runtimeProfilesChangedFrame(workspaceID, profileID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonRuntimeProfilesChanged,
+		Payload: mustMarshalRaw(protocol.RuntimeProfilesChangedPayload{
+			WorkspaceID:      workspaceID,
+			RuntimeProfileID: profileID,
+		}),
+	})
+}
+
 func mustMarshalRaw(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -291,6 +417,12 @@ func (h *Hub) RuntimeConnectionCount(runtimeID string) int {
 	return len(h.byRuntime[runtimeID])
 }
 
+func (h *Hub) WorkspaceConnectionCount(workspaceID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.byWorkspace[workspaceID])
+}
+
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
@@ -302,6 +434,15 @@ func (h *Hub) register(c *client) {
 		}
 		conns[c] = true
 	}
+	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
+	for _, workspaceID := range workspaceIDs {
+		conns := h.byWorkspace[workspaceID]
+		if conns == nil {
+			conns = make(map[*client]bool)
+			h.byWorkspace[workspaceID] = conns
+		}
+		conns[c] = true
+	}
 	total := len(h.clients)
 	h.mu.Unlock()
 
@@ -310,7 +451,8 @@ func (h *Hub) register(c *client) {
 	slog.Info("daemon websocket connected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,
-		"workspace_id", c.identity.WorkspaceID,
+		"workspace_id", c.identity.PrimaryWorkspaceID(),
+		"workspace_ids", workspaceIDs,
 		"runtimes", len(c.runtimes),
 		"client_version", c.identity.ClientVersion,
 		"total_clients", total,
@@ -332,6 +474,15 @@ func (h *Hub) unregister(c *client) {
 			}
 		}
 	}
+	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
+	for _, workspaceID := range workspaceIDs {
+		if conns := h.byWorkspace[workspaceID]; conns != nil {
+			delete(conns, c)
+			if len(conns) == 0 {
+				delete(h.byWorkspace, workspaceID)
+			}
+		}
+	}
 	close(c.send)
 	total := len(h.clients)
 	h.mu.Unlock()
@@ -341,7 +492,8 @@ func (h *Hub) unregister(c *client) {
 	slog.Info("daemon websocket disconnected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,
-		"workspace_id", c.identity.WorkspaceID,
+		"workspace_id", c.identity.PrimaryWorkspaceID(),
+		"workspace_ids", workspaceIDs,
 		"runtimes", len(c.runtimes),
 		"total_clients", total,
 	)

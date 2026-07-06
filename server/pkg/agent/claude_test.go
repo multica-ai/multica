@@ -105,7 +105,9 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	b.handleUser(msg, ch)
+	if b.handleUser(msg, ch) {
+		t.Fatal("did not expect async launch in ordinary tool result")
+	}
 
 	select {
 	case m := <-ch:
@@ -151,6 +153,112 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	innerResp := respInner["response"].(map[string]any)
 	if innerResp["behavior"] != "allow" {
 		t.Fatalf("expected behavior allow, got %v", innerResp["behavior"])
+	}
+	updatedInput := innerResp["updatedInput"].(map[string]any)
+	if _, ok := updatedInput["run_in_background"]; ok {
+		t.Fatal("did not expect run_in_background to be injected into ordinary tool input")
+	}
+}
+
+func TestClaudeHandleControlRequestForcesBackgroundToolsForeground(t *testing.T) {
+	t.Parallel()
+
+	for _, toolName := range []string{"Bash", "Agent"} {
+		t.Run(toolName, func(t *testing.T) {
+			t.Parallel()
+
+			b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+
+			var written bytes.Buffer
+
+			msg := claudeSDKMessage{
+				Type:      "control_request",
+				RequestID: "req-42",
+				Request: mustMarshal(t, claudeControlRequestPayload{
+					Subtype:  "tool_use",
+					ToolName: toolName,
+					Input: mustMarshal(t, map[string]any{
+						"command":           "sleep 60",
+						"run_in_background": true,
+					}),
+				}),
+			}
+
+			b.handleControlRequest(msg, &written)
+
+			var resp map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+				t.Fatalf("unmarshal response: %v", err)
+			}
+
+			respInner := resp["response"].(map[string]any)
+			innerResp := respInner["response"].(map[string]any)
+			if innerResp["behavior"] != "allow" {
+				t.Fatalf("expected behavior allow, got %v", innerResp["behavior"])
+			}
+			updatedInput := innerResp["updatedInput"].(map[string]any)
+			if updatedInput["run_in_background"] != false {
+				t.Fatalf("expected run_in_background=false, got %v", updatedInput["run_in_background"])
+			}
+			if updatedInput["command"] != "sleep 60" {
+				t.Fatalf("expected original command to be preserved, got %v", updatedInput["command"])
+			}
+		})
+	}
+}
+
+func TestClaudeHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-1",
+					Content: mustMarshal(t, map[string]any{
+						"status":  "async_launched",
+						"message": "background task launched",
+					}),
+				},
+			},
+		}),
+	}
+
+	if !b.handleUser(msg, ch) {
+		t.Fatal("expected async launch to be detected")
+	}
+}
+
+func TestClaudeHandleUserIgnoresAsyncLaunchedTextOutput(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-1",
+					Content: mustMarshal(t, map[string]any{
+						"stdout": `fixture contained {"status":"async_launched"} as plain text`,
+					}),
+				},
+			},
+		}),
+	}
+
+	if b.handleUser(msg, ch) {
+		t.Fatal("did not expect async launch to be detected in ordinary text output")
 	}
 }
 

@@ -43,8 +43,9 @@ describe("HighlightExtension — markdown serialization (cross-process protocol)
   });
 
   it("preserves inner formatting inside a highlight", () => {
-    // bold nested inside highlight must survive the round-trip
-    expect(roundTrip("==**bold**==")).toBe("==**bold**==");
+    // Tiptap 3.25+ serializes mark nesting by extension rank, so bold wraps
+    // highlight here. The formatting still survives the round-trip.
+    expect(roundTrip("==**bold**==")).toBe("**==bold==**");
   });
 
   it("serializes a highlight applied via the toggleHighlight command", () => {

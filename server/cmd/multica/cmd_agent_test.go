@@ -119,6 +119,7 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 
 		if got := resolveToken(testCmd()); got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token", got)
@@ -142,6 +143,59 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 
 		if got := resolveToken(testCmd()); got != "mat_task_token" {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
+		}
+	})
+
+	t.Run("daemon port set without agent context avoids config fallback", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "19514")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty (daemon port set, fail closed)", got)
+		}
+	})
+
+	t.Run("daemon port set with explicit task token uses task token", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+		t.Setenv("MULTICA_DAEMON_PORT", "19514")
+
+		if got := resolveToken(testCmd()); got != "mat_task_token" {
+			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN (task token wins over daemon signal)", got)
+		}
+	})
+
+	// MULTICA_SERVER_URL is a user-facing env var that may be set in a
+	// normal shell. It is NOT a daemon identity signal — only
+	// MULTICA_DAEMON_PORT is. The config fallback must still work when
+	// SERVER_URL is set but no daemon signal is present.
+	t.Run("MULTICA_SERVER_URL alone does not block config fallback", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "https://api.multica.ai")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (SERVER_URL is not a daemon identity signal)", got)
+		}
+	})
+
+	// Normal CLI usage: no daemon signals whatsoever. The user-global
+	// config token must be reachable. This is the most basic path and
+	// must not be broken by any daemon-signal guard expansion.
+	t.Run("no daemon signals, normal CLI reads config token", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (normal CLI flow)", got)
 		}
 	})
 }
@@ -1282,5 +1336,203 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "https://cdn.example.com/avatar.png") {
 		t.Fatalf("table output missing avatar_url value: %s", string(out))
+	}
+}
+
+// TestAgentCreateSendsThinkingLevel verifies `agent create --thinking-level`
+// puts the value on the top-level `thinking_level` key of the POST body —
+// the same field the web inspector and HTTP API already accept. The value is
+// passed through verbatim; provider-level validation is the server's job
+// (IsKnownThinkingValue), exactly as `--model` defers model validation.
+func TestAgentCreateSendsThinkingLevel(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent", "thinking_level": "high"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("name", "TestAgent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+	_ = cmd.Flags().Set("thinking-level", "high")
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/agents" {
+		t.Fatalf("path = %q, want /api/agents", gotPath)
+	}
+	if gotBody["thinking_level"] != "high" {
+		t.Fatalf("thinking_level body = %v, want high", gotBody["thinking_level"])
+	}
+}
+
+// TestAgentCreateOmitsThinkingLevelWhenUnset guards the Changed-gated send:
+// an unset --thinking-level must not appear in the body at all, so the server
+// applies its default instead of receiving an explicit empty string.
+func TestAgentCreateOmitsThinkingLevelWhenUnset(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("name", "TestAgent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	if _, ok := gotBody["thinking_level"]; ok {
+		t.Fatalf("unset --thinking-level must be omitted from the body; got %v", gotBody)
+	}
+}
+
+// TestAgentUpdateSendsThinkingLevel covers both update modes that mirror
+// --model: setting an explicit level, and passing an empty string to clear
+// back to the runtime default. In both cases the key must be present in the
+// PUT body — the server reads it as a tri-state pointer (omitted = no change,
+// "" = clear, value = set), so the CLI's only job is to send the key when the
+// flag was provided.
+func TestAgentUpdateSendsThinkingLevel(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"set explicit level", "xhigh"},
+		{"empty string clears", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Errorf("decode request body: %v", err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent", "thinking_level": tc.value})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			t.Setenv("MULTICA_AGENT_ID", "")
+			t.Setenv("MULTICA_TASK_ID", "")
+
+			cmd := &cobra.Command{Use: "update"}
+			cmd.Flags().String("thinking-level", "", "")
+			cmd.Flags().String("output", "json", "")
+			cmd.Flags().String("profile", "", "")
+			if err := cmd.Flags().Set("thinking-level", tc.value); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+				t.Fatalf("runAgentUpdate: %v", err)
+			}
+			if gotMethod != http.MethodPut {
+				t.Fatalf("method = %s, want PUT", gotMethod)
+			}
+			if gotPath != "/api/agents/agent-123" {
+				t.Fatalf("path = %q, want /api/agents/agent-123", gotPath)
+			}
+			v, ok := gotBody["thinking_level"]
+			if !ok {
+				t.Fatalf("body missing thinking_level key; got %v", gotBody)
+			}
+			if v != tc.value {
+				t.Fatalf("thinking_level body = %v, want %q", v, tc.value)
+			}
+		})
+	}
+}
+
+// TestAgentCreateAndUpdateExposeThinkingLevelFlag guarantees the flag stays
+// wired on both write surfaces. The read side (`agent get`) already exposes
+// thinking_level; this is the matching write surface (#4170).
+func TestAgentCreateAndUpdateExposeThinkingLevelFlag(t *testing.T) {
+	if agentCreateCmd.Flag("thinking-level") == nil {
+		t.Error("agent create must expose --thinking-level")
+	}
+	if agentUpdateCmd.Flag("thinking-level") == nil {
+		t.Error("agent update must expose --thinking-level")
+	}
+}
+
+// TestAgentCreateThinkingLevelServerRejectionSurfaces proves the CLI does not
+// own thinking-level validation: a runtime whose provider has no thinking
+// concept (or an unknown literal) is rejected server-side with a 400, and that
+// message must reach the user rather than being swallowed. This is why the CLI
+// can stay a thin pass-through — the server already owns the (provider, model)
+// catalog (server/pkg/agent/thinking.go).
+func TestAgentCreateThinkingLevelServerRejectionSurfaces(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":"thinking_level \"max\" is not a recognised value for runtime \"gemini\""}`)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	_ = cmd.Flags().Set("name", "TestAgent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-gemini")
+	_ = cmd.Flags().Set("thinking-level", "max")
+
+	err := runAgentCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when server rejects thinking_level, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a recognised value for runtime") {
+		t.Fatalf("server thinking_level rejection should surface to the user; got: %v", err)
 	}
 }

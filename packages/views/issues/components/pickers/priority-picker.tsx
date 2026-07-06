@@ -17,7 +17,13 @@ export function PriorityPicker({
   align,
   defaultOpen = false,
 }: {
-  priority: IssuePriority;
+  /**
+   * The currently-selected priority, used to check the matching row. `null`
+   * means "no single current value" (e.g. a batch selection spanning several
+   * priorities) — no row is checked. Single-issue callers always pass a
+   * concrete priority.
+   */
+  priority: IssuePriority | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
@@ -41,12 +47,13 @@ export function PriorityPicker({
       align={align}
       triggerRender={triggerRender}
       trigger={
-        customTrigger ?? (
+        customTrigger ??
+        (priority != null ? (
           <>
             <PriorityIcon priority={priority} className="shrink-0" />
             <span className="truncate">{t(($) => $.priority[priority])}</span>
           </>
-        )
+        ) : null)
       }
     >
       {PRIORITY_ORDER.map((p) => {

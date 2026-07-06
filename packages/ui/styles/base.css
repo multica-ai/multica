@@ -218,6 +218,26 @@
   color: var(--sidebar-accent-foreground);
 }
 
+/* Right detail sidebars use react-resizable-panels, which sizes panels by
+ * updating the outer panel's flex-grow. Animate that property for button
+ * toggles only; mount-time layout restoration and resize sync should snap
+ * directly to the final state. */
+[data-right-sidebar-panel][data-right-sidebar-motion="enabled"] {
+  transition-property: flex-grow;
+  transition-duration: 220ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-group]:has(> [data-separator="active"]) > [data-right-sidebar-panel] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-right-sidebar-panel] {
+    transition: none;
+  }
+}
+
 /* Sonner toast: align icon to first line of text, not vertically centered */
 [data-sonner-toast] {
   align-items: flex-start !important;

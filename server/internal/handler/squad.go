@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -938,62 +937,31 @@ func commentMentionsAnyone(content string) bool {
 	return false
 }
 
-// shouldEnqueueSquadLeaderOnAssign returns true when assigning an issue to a
-// squad (or creating an issue pre-assigned to a squad) should immediately
-// trigger the squad leader. Mirrors shouldEnqueueAgentTask: backlog issues
-// are skipped (parking lot), and the leader agent must have a runtime and
-// not be archived.
-func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
-		return false
-	}
-	return h.isSquadLeaderReady(ctx, issue)
-}
-
-// isSquadLeaderReady returns true when the issue is assigned to a squad whose
-// leader agent can accept work right now. Readiness criteria (archived,
-// runtime bound, runtime online) are shared with the autopilot admission
-// gate via service.AgentReadiness — both paths must move together or one
-// will start enqueueing tasks the other refuses (MUL-2429 RFC §4.b B4).
-func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		return false
-	}
-	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return false
-	}
-	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil {
-		return false
-	}
-	ready, _, err := service.AgentReadiness(ctx, h.Queries, agent)
-	if err != nil {
-		// Fail closed when we can't tell — same posture as the rest of
-		// this function (any error path returns false).
-		return false
-	}
-	return ready
-}
+// The squad-leader assign/promotion readiness decision now lives in the single
+// service.IssueService.WillEnqueueRun predicate (MUL-3375), shared by the issue
+// write paths and the preview endpoint. The former handler-local mirrors
+// (shouldEnqueueSquadLeaderOnAssign / isSquadLeaderReady) were removed to stop
+// the four-entry-point drift. The squad enqueue side effect still flows through
+// enqueueSquadLeaderTask below, which keeps the leader access gate and pending
+// dedup in one place.
 
 // enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned
 // to a squad. Assign and backlog-promotion paths use this directly; comment
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
+// enqueueSquadLeaderTask returns true when it actually enqueued a leader task
+// (so the caller can record a handoff trace only on a real run start).
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID, handoffNote string) bool {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return
+		return false
 	}
 
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
-		return
+		return false
 	}
 
 	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
@@ -1001,14 +969,19 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		AgentID: squad.LeaderID,
 	})
 	if err != nil || hasPending {
-		return
+		return false
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	// triggerCommentID is always empty on the assign/promote path; the handoff
+	// note rides its own task column, never trigger_comment_id.
+	_ = triggerCommentID
+	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID),
 			"error", err)
+		return false
 	}
+	return true
 }

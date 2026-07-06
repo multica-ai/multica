@@ -7,8 +7,9 @@
 //  2. InstallationService (encrypted app_secret, workspace-scoped lookups)
 //  3. BindingTokenService (15-minute single-use, transactional redeem
 //     that rejects cross-user rebinds in-DB)
-//  4. ChatSessionService (channel-aware chat_session ensure / append
-//     with /issue command parsing)
+//  4. Feishu ResolverSet (feishu_resolvers.go) feeding the shared,
+//     channel-agnostic engine.ChatSession (chat_session ensure / append,
+//     /issue parsing) — no Feishu-specific session service remains
 //  5. Dispatcher (inbound pipeline: installation route → top-level
 //     message_id dedup → group filter → identity check → ensure
 //     session → append → /issue → enqueue chat task; typed outcomes
@@ -28,14 +29,14 @@
 //     SDK — bootstrap via POST /callback/ws/endpoint, app-layer
 //     ping/pong, ACK responses on every data frame, ctx cancel breaks
 //     blocking ReadMessage via a watchdog goroutine for §4.4)
-// 10. Patcher (subscribes to task / chat-done events; keeps the
+//  10. Patcher (subscribes to task / chat-done events; keeps the
 //     per-task Lark interactive card in sync; throttled patches +
 //     final/error bypass)
-// 11. OutcomeReplier (outbound side of the EventEmitter contract:
+//  11. OutcomeReplier (outbound side of the EventEmitter contract:
 //     NeedsBinding mints a token + sends the binding prompt;
 //     AgentOffline / AgentArchived push status notice cards into the
 //     chat; Ingested is owned by the Patcher; Dropped is silent)
-// 12. RegistrationService (RFC 8628 device-flow scan-to-install: opens
+//  12. RegistrationService (RFC 8628 device-flow scan-to-install: opens
 //     a session against accounts.feishu.cn, polls in the background,
 //     and on success writes through InstallationService + auto-binds
 //     the installer via InstallerBinder so §2.1 "scan to bind, you're
@@ -45,8 +46,8 @@
 //
 //  1. Issue creation goes through internal/service.IssueService.Create —
 //     this package never calls qtx.CreateIssue directly.
-//  2. Inbound message ingestion uses ChatSessionService here, NOT the
-//     HTTP `SendChatMessage` handler. Group chat_sessions have multi-
+//  2. Inbound message ingestion uses the shared engine.ChatSession, NOT
+//     the HTTP `SendChatMessage` handler. Group chat_sessions have multi-
 //     member creator semantics that the HTTP handler's single-creator
 //     guard rejects on purpose.
 //  3. Outbound card-message mapping lives in `lark_outbound_card_message`

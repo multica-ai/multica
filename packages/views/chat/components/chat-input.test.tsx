@@ -39,6 +39,9 @@ const dropHandlers = vi.hoisted(() => ({
 const editorProps = vi.hoisted(() => ({
   last: null as null | Record<string, unknown>,
 }));
+// Records imperative editor calls so tests can assert whether a commit
+// scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
+const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0 }));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -69,9 +72,12 @@ vi.mock("../../editor", () => ({
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
+        editorState.cleared += 1;
         valueRef.current = "";
       },
-      blur: () => {},
+      blur: () => {
+        editorState.blurred += 1;
+      },
       focus: () => {},
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
@@ -116,11 +122,15 @@ vi.mock("@multica/core/chat", () => {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
     inputDrafts: {} as Record<string, string>,
+    inputDraftAttachments: {} as Record<string, UploadResult[]>,
     setInputDraft: vi.fn(),
+    setInputDraftAttachments: vi.fn(),
+    addInputDraftAttachment: vi.fn(),
     clearInputDraft: vi.fn(),
   };
   return {
     DRAFT_NEW_SESSION: "__draft_new__",
+    newSessionDraftKey: (agentId: string | null) => `__draft_new__:${agentId ?? ""}`,
     useChatStore: Object.assign(
       (selector?: (s: typeof state) => unknown) =>
         selector ? selector(state) : state,
@@ -132,21 +142,49 @@ vi.mock("@multica/core/chat", () => {
 import { ChatInput } from "./chat-input";
 import { useChatStore } from "@multica/core/chat";
 
+type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
+type ChatInputCommit = Parameters<ChatInputOnSend>[2];
+
 beforeEach(() => {
   dropHandlers.onDrop = null;
   editorProps.last = null;
+  editorState.cleared = 0;
+  editorState.blurred = 0;
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
     inputDrafts: Record<string, string>;
     setInputDraft: ReturnType<typeof vi.fn>;
     clearInputDraft: ReturnType<typeof vi.fn>;
+    inputDraftAttachments: Record<string, UploadResult[]>;
+    setInputDraftAttachments: ReturnType<typeof vi.fn>;
+    addInputDraftAttachment: ReturnType<typeof vi.fn>;
   };
   state.activeSessionId = null;
   state.selectedAgentId = "agent-1";
   state.inputDrafts = {};
+  state.inputDraftAttachments = {};
   state.setInputDraft.mockClear();
+  state.setInputDraft.mockImplementation((key: string, value: string) => {
+    state.inputDrafts[key] = value;
+  });
+  state.setInputDraftAttachments.mockClear();
+  state.setInputDraftAttachments.mockImplementation((key: string, attachments: UploadResult[]) => {
+    if (attachments.length > 0) state.inputDraftAttachments[key] = attachments;
+    else delete state.inputDraftAttachments[key];
+  });
+  state.addInputDraftAttachment.mockClear();
+  state.addInputDraftAttachment.mockImplementation((key: string, attachment: UploadResult) => {
+    const existing = state.inputDraftAttachments[key] ?? [];
+    state.inputDraftAttachments[key] = existing.some((a) => a.id === attachment.id)
+      ? existing.map((a) => (a.id === attachment.id ? attachment : a))
+      : [...existing, attachment];
+  });
   state.clearInputDraft.mockClear();
+  state.clearInputDraft.mockImplementation((key: string) => {
+    delete state.inputDrafts[key];
+    delete state.inputDraftAttachments[key];
+  });
 });
 
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
@@ -222,6 +260,10 @@ describe("ChatInput attachment wiring", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     const [, ids] = onSend.mock.calls[0]!;
     expect(ids).toEqual(["att-42"]);
+    expect(useChatStore.getState().addInputDraftAttachment).toHaveBeenCalledWith(
+      "__draft_new__:agent-1",
+      expect.objectContaining({ id: "att-42" }),
+    );
   });
 
   it("binds attachment_ids when the upload's markdownLink differs from its link (MUL-3130 regression)", async () => {
@@ -378,12 +420,12 @@ describe("ChatInput async send", () => {
     );
   });
 
-  it("keeps the draft while send is pending and clears after acceptance", async () => {
+  it("keeps the draft while send is pending until the owner commits the handoff", async () => {
     let resolveSend: (accepted: boolean) => void;
     const sendPromise = new Promise<boolean>((res) => {
       resolveSend = res;
     });
-    const onSend = vi.fn(() => sendPromise);
+    const onSend = vi.fn<ChatInputOnSend>(() => sendPromise);
     renderInput({ onSend });
 
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "slow network" } });
@@ -397,18 +439,29 @@ describe("ChatInput async send", () => {
 
     fireEvent.click(sendButton!);
 
-    expect(onSend).toHaveBeenCalledWith("slow network", undefined);
+    expect(onSend).toHaveBeenCalledWith(
+      "slow network",
+      undefined,
+      expect.any(Function),
+      [],
+    );
     expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
     await waitFor(() => expect(sendButton!).toBeDisabled());
+
+    const commitInput = onSend.mock.calls[0]![2] as ChatInputCommit;
+    act(() => {
+      commitInput({ extraDraftKeys: ["session-1"] });
+    });
+
+    expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__:agent-1");
+    expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("session-1");
 
     await act(async () => {
       resolveSend!(true);
       await sendPromise;
     });
 
-    await waitFor(() => {
-      expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__:agent-1");
-    });
+    expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the draft when send is rejected by the owner", async () => {
@@ -429,7 +482,148 @@ describe("ChatInput async send", () => {
       await Promise.resolve();
     });
 
-    expect(onSend).toHaveBeenCalledWith("retry me", undefined);
+    expect(onSend).toHaveBeenCalledWith("retry me", undefined, expect.any(Function), []);
     expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
+  });
+
+  it("sends attachment ids restored from persisted draft attachments", async () => {
+    const state = useChatStore.getState() as unknown as {
+      inputDrafts: Record<string, string>;
+      inputDraftAttachments: Record<string, UploadResult[]>;
+    };
+    const attachment = makeUpload({
+      id: "att-persisted",
+      link: "/api/attachments/att-persisted/download",
+      filename: "persisted.png",
+    });
+    state.inputDrafts["__draft_new__:agent-1"] = "see ![](/api/attachments/att-persisted/download)";
+    state.inputDraftAttachments["__draft_new__:agent-1"] = [attachment];
+
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledWith(
+      "see ![](/api/attachments/att-persisted/download)",
+      ["att-persisted"],
+      expect.any(Function),
+      [attachment],
+    );
+  });
+});
+
+// A failed fire-and-forget send must restore into the session it was sent
+// FROM, never into whatever session the user navigated to in the meantime.
+describe("ChatInput session-aware restore", () => {
+  function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
+    return (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} onUploadFile={vi.fn()} agentName="Multica" {...props} />
+      </I18nProvider>
+    );
+  }
+
+  it("holds a session-scoped restore until the user returns to the source session", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      setInputDraft: ReturnType<typeof vi.fn>;
+    };
+    // User is viewing session-b; the failed send belongs to session-a.
+    state.activeSessionId = "session-b";
+    const onRestoreDraftConsumed = vi.fn();
+    const props = {
+      restoreDraftRequest: { id: "r1", content: "from A", sessionId: "session-a" },
+      onRestoreDraftConsumed,
+    };
+    const { rerender } = render(element(props));
+
+    // Pending — must NOT dump A's content into session-b.
+    expect(onRestoreDraftConsumed).not.toHaveBeenCalled();
+    expect(state.setInputDraft).not.toHaveBeenCalledWith("session-b", "from A");
+
+    // User navigates back to the source session → the pending restore fires.
+    state.activeSessionId = "session-a";
+    rerender(element(props));
+
+    await waitFor(() => {
+      expect(state.setInputDraft).toHaveBeenCalledWith("session-a", "from A");
+      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("consumes a session-scoped restore when already on that session", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      setInputDraft: ReturnType<typeof vi.fn>;
+    };
+    state.activeSessionId = "session-a";
+    const onRestoreDraftConsumed = vi.fn();
+    render(
+      element({
+        restoreDraftRequest: { id: "r2", content: "hi A", sessionId: "session-a" },
+        onRestoreDraftConsumed,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(state.setInputDraft).toHaveBeenCalledWith("session-a", "hi A");
+      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+// commitInput is the handoff: the owner (ChatWindow) decides WHEN and HOW to
+// clear the input. clearEditor:false is the fire-and-forget case — the user
+// navigated away, so the shared editor now shows another session's draft and
+// must not be scrubbed, but the SENT draft's data is still cleared.
+describe("ChatInput commit handoff", () => {
+  async function typeAndSend(onSend: ChatInputOnSend) {
+    renderInput({ onSend });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "msg" } });
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+  }
+
+  it("scrubs the editor and clears the draft on a normal commit", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    await typeAndSend(onSend);
+
+    expect(editorState.cleared).toBeGreaterThan(0);
+    expect(editorState.blurred).toBeGreaterThan(0);
+    expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__:agent-1");
+  });
+
+  it("leaves the editor intact on a fire-and-forget commit but still clears the sent draft", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput({ clearEditor: false });
+      return true;
+    });
+    await typeAndSend(onSend);
+
+    // Editor untouched — it now shows the session the user navigated to.
+    expect(editorState.cleared).toBe(0);
+    expect(editorState.blurred).toBe(0);
+    // …but the sent session's persisted draft is cleared regardless.
+    expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__:agent-1");
   });
 });

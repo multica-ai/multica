@@ -67,6 +67,124 @@ func TestNotifyTaskAvailable(t *testing.T) {
 	}
 }
 
+func TestNotifyRuntimeProfilesChanged(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			WorkspaceID: "ws-1",
+			RuntimeIDs:  []string{"runtime-1"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.WorkspaceConnectionCount("ws-1") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("workspace connection was not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	hub.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonRuntimeProfilesChanged {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonRuntimeProfilesChanged)
+	}
+
+	var payload protocol.RuntimeProfilesChangedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.WorkspaceID != "ws-1" || payload.RuntimeProfileID != "profile-1" {
+		t.Fatalf("payload = %+v, want workspace/profile IDs", payload)
+	}
+}
+
+func TestNotifyRuntimeProfilesChangedIndexesAllAuthorizedWorkspaces(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			WorkspaceIDs: []string{"ws-1", "ws-2"},
+			RuntimeIDs:   []string{"runtime-1", "runtime-2"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.WorkspaceConnectionCount("ws-1") == 0 || hub.WorkspaceConnectionCount("ws-2") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("workspace connections not registered: ws-1=%d ws-2=%d",
+				hub.WorkspaceConnectionCount("ws-1"),
+				hub.WorkspaceConnectionCount("ws-2"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := hub.WorkspaceConnectionCount("ws-3"); got != 0 {
+		t.Fatalf("workspace ws-3 connection count = %d, want 0", got)
+	}
+
+	hub.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+	hub.NotifyRuntimeProfilesChanged("ws-2", "profile-2")
+
+	got := map[string]string{}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	for len(got) < 2 {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		var msg protocol.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("unmarshal message: %v", err)
+		}
+		if msg.Type != protocol.EventDaemonRuntimeProfilesChanged {
+			t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonRuntimeProfilesChanged)
+		}
+		var payload protocol.RuntimeProfilesChangedPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		got[payload.WorkspaceID] = payload.RuntimeProfileID
+	}
+	if got["ws-1"] != "profile-1" || got["ws-2"] != "profile-2" {
+		t.Fatalf("profile refresh payloads = %+v, want ws-1/profile-1 and ws-2/profile-2", got)
+	}
+}
+
 func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
 	M.Reset()
 	defer M.Reset()
@@ -105,6 +223,44 @@ func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
 	}
 }
 
+func TestRelayNotifierPublishesRuntimeProfilesChanged(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	relay := &recordingRelayPublisher{}
+	notifier := NewRelayNotifier(nil, relay)
+
+	notifier.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+
+	if relay.scopeType != realtime.ScopeDaemonRuntime {
+		t.Fatalf("scopeType = %q, want %q", relay.scopeType, realtime.ScopeDaemonRuntime)
+	}
+	if relay.scopeID != "ws-1" {
+		t.Fatalf("scopeID = %q, want workspace shard key", relay.scopeID)
+	}
+	if relay.eventID == "" {
+		t.Fatal("expected event id")
+	}
+	if M.WakeupPublishedTotal.Load() != 1 {
+		t.Fatalf("published metric = %d, want 1", M.WakeupPublishedTotal.Load())
+	}
+
+	var msg protocol.Message
+	if err := json.Unmarshal(relay.frame, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonRuntimeProfilesChanged {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonRuntimeProfilesChanged)
+	}
+	var payload protocol.RuntimeProfilesChangedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.WorkspaceID != "ws-1" || payload.RuntimeProfileID != "profile-1" {
+		t.Fatalf("payload = %+v, want workspace/profile IDs", payload)
+	}
+}
+
 func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
 	M.Reset()
 	defer M.Reset()
@@ -135,6 +291,42 @@ func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
 	}
 	if M.WakeupDeliveredHit.Load() != 1 {
 		t.Fatalf("delivered hit metric after loopback = %d, want 1", M.WakeupDeliveredHit.Load())
+	}
+	if M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func TestRelayNotifierDedupsRuntimeProfilesChangedLoopback(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonWorkspaceTestClient(hub, "ws-1")
+	relay := &localFirstDaemonRelayPublisher{t: t, client: client}
+	notifier := NewRelayNotifier(hub, relay)
+
+	notifier.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+
+	if !relay.called {
+		t.Fatal("expected relay publish to be invoked")
+	}
+	if relay.eventID == "" {
+		t.Fatal("expected event id")
+	}
+	if M.WakeupDeliveredHit.Load() != 0 {
+		t.Fatalf("delivered hit metric = %d, want 0 before redis relay delivery", M.WakeupDeliveredHit.Load())
+	}
+
+	hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+
+	select {
+	case duplicate := <-client.send:
+		t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if M.WakeupDeliveredHit.Load() != 0 {
+		t.Fatalf("delivered hit metric after loopback = %d, want 0", M.WakeupDeliveredHit.Load())
 	}
 	if M.WakeupDeliveredMiss.Load() != 0 {
 		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
@@ -341,6 +533,21 @@ func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 	hub.mu.Lock()
 	hub.clients[c] = true
 	hub.byRuntime[runtimeID] = map[*client]bool{c: true}
+	hub.mu.Unlock()
+
+	return c
+}
+
+func attachDaemonWorkspaceTestClient(hub *Hub, workspaceID string) *client {
+	c := &client{
+		send:     make(chan []byte, 2),
+		identity: ClientIdentity{WorkspaceIDs: []string{workspaceID}},
+		runtimes: map[string]struct{}{},
+	}
+
+	hub.mu.Lock()
+	hub.clients[c] = true
+	hub.byWorkspace[workspaceID] = map[*client]bool{c: true}
 	hub.mu.Unlock()
 
 	return c

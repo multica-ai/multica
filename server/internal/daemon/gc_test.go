@@ -968,13 +968,44 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 			want: gcActionSkip,
 		},
 		{
-			name: "autopilot completed within TTL — skip",
+			name: "autopilot pending — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "pending"},
+			}},
+			want: gcActionSkip,
+		},
+		{
+			// The directory is never reused, so a terminal run is reclaimed on
+			// sight — the recent completed_at no longer buys it a 24h reprieve.
+			name: "autopilot completed within TTL — clean immediately (no 24h gate)",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
 			servers: []serverResp{{
 				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
 				body: map[string]any{"status": "completed", "completed_at": withinTTL},
 			}},
-			want: gcActionSkip,
+			want: gcActionClean,
+		},
+		{
+			// Terminal status with no completed_at stamp at all still cleans —
+			// GC keys purely on the terminal status, not on any timestamp.
+			name: "autopilot skipped with no completed_at — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "skipped"},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "autopilot failed — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "failed"},
+			}},
+			want: gcActionClean,
 		},
 
 		// ---- quick-create -------------------------------------------------

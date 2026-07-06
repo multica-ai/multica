@@ -141,6 +141,18 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
   });
 
+  it("prices Claude Sonnet 5 at Anthropic's intro $2 / $10 tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2 + 10 + 0.2 + 2.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -264,9 +276,12 @@ describe("estimateCost", () => {
   });
 
   it("prices Cursor Composer rows at the published rates without cache-write spend", () => {
+    // Cursor's ids are unprefixed generic names, so they're provider-qualified
+    // (`cursor/auto`) and only resolve when the row carries provider "cursor".
     const costWithAllTokenTypes = (model: string) =>
       estimateCost({
         ...zeroUsage,
+        provider: "cursor",
         model,
         input_tokens: 1_000_000,
         output_tokens: 1_000_000,
@@ -293,7 +308,32 @@ describe("estimateCost", () => {
       1.25 + 10 + 0.125,
       5,
     );
+    // The legacy `cursor` fallback equals the provider name, so it stays
+    // unqualified and resolves regardless of the row's provider.
     expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
+  it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
+    const auto = (provider?: string) =>
+      estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });
+
+    // Cursor's `auto` is priced via the `cursor/auto` row.
+    expect(auto("cursor")).toBeCloseTo(1.25, 5);
+    // A different provider reporting `auto` has no row
+    // yet — it must NOT inherit Cursor's price; it stays unmapped ($0).
+    expect(auto("acme")).toBe(0);
+    // No provider at all → also unmapped, never silently Cursor's price.
+    expect(auto(undefined)).toBe(0);
+  });
+
+  it("reports provider-qualified keys for unmapped generic model ids", () => {
+    const unmapped = collectUnmappedModels([
+      { ...zeroUsage, provider: "acme", model: "auto" },
+      { ...zeroUsage, provider: "cursor", model: "auto" },
+    ]);
+    // Same bare id, two providers → two distinct, priceable-by-key entries.
+    // `cursor/auto` is priced, so only the genuinely-unmapped one surfaces.
+    expect(unmapped).toEqual(["acme/auto"]);
   });
 
   // The Chinese-model rates below are spot-checked against the literal
@@ -391,6 +431,7 @@ describe("estimateCost", () => {
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
@@ -404,6 +445,7 @@ describe("isModelPriced", () => {
     // while Anthropic's own CLIs use dashes (`claude-opus-4-7`). Both must
     // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
     // as "unmapped" and the user has to type the price in by hand.
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-haiku-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
@@ -415,6 +457,7 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-sonnet-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
@@ -494,6 +537,23 @@ describe("user-supplied custom pricing", () => {
     ).toBeCloseTo(2, 5);
   });
 
+  it("resolves a provider-qualified override only for the matching provider", () => {
+    // The dialog stores the override under the provider-qualified key that
+    // `collectUnmappedModels` surfaced, so it must price a provider-scoped
+    // `auto` row without leaking onto another provider's `auto`.
+    useCustomPricingStore.getState().setCustomPricing("acme/auto", {
+      input: 2,
+      output: 8,
+      cacheRead: 0.2,
+      cacheWrite: 2,
+    });
+    expect(
+      estimateCost({ ...zeroUsage, provider: "acme", model: "auto", input_tokens: 1_000_000 }),
+    ).toBeCloseTo(2, 5);
+    // A row with no provider must not pick up the provider-scoped override.
+    expect(isModelPriced("auto")).toBe(false);
+  });
+
   it("removeCustomPricing clears the override", () => {
     const store = useCustomPricingStore.getState();
     store.setCustomPricing("gpt-5.5-mini", {
@@ -532,12 +592,31 @@ describe("user-supplied custom pricing", () => {
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byModel = aggregateCostByModel(rows as any);
+    // Priced vendor-prefixed id stays bare; the unmapped generic id is
+    // provider-qualified so it matches the unmapped notice / pricing dialog.
     const sonnet = byModel.find((r) => r.key === "claude-sonnet-4-6");
-    const fictional = byModel.find((r) => r.key === "fictional-model-x");
+    const fictional = byModel.find((r) => r.key === "fictional/fictional-model-x");
     expect(sonnet?.cost).toBeCloseTo(3, 5);
     expect(fictional?.cost).toBe(0);
+    // The unmapped key is provider-qualified so a user can price this exact
+    // (provider, model) pair without affecting another provider's same id.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(collectUnmappedModels(rows as any)).toEqual(["fictional-model-x"]);
+    expect(collectUnmappedModels(rows as any)).toEqual(["fictional/fictional-model-x"]);
+  });
+
+  it("keeps the same generic model id from two providers as distinct by-model rows", () => {
+    // Two providers reporting the bare id `auto` must not collapse into one
+    // mislabelled `auto` row — each is provider-qualified so the priced
+    // (cursor) and unpriced (other) sides stay separable.
+    const rows = [
+      { ...zeroUsage, model: "auto", provider: "cursor", input_tokens: 1_000_000, date: "2026-01-01" },
+      { ...zeroUsage, model: "auto", provider: "acme", input_tokens: 1_000_000, date: "2026-01-01" },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const byModel = aggregateCostByModel(rows as any);
+    expect(byModel.map((r) => r.key).toSorted()).toEqual(["acme/auto", "cursor/auto"]);
+    expect(byModel.find((r) => r.key === "cursor/auto")?.cost).toBeCloseTo(1.25, 5);
+    expect(byModel.find((r) => r.key === "acme/auto")?.cost).toBe(0);
   });
 
   it("aggregateCostByModel reflects a newly-saved custom price on re-call with the same input", () => {

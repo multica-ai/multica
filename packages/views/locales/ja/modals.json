@@ -50,8 +50,26 @@
     "toast_failed": "サブイシューを追加できませんでした",
     "toast_success": "{{identifier}} をサブイシューとして追加しました"
   },
-  "backlog_hint": {
-    "toast_status_failed": "ステータスを更新できませんでした"
+  "run_confirm": {
+    "title_assign": "割り当てて開始しますか？",
+    "title_status": "今すぐ作業を開始しますか？",
+    "checking": "確認中…",
+    "will_start_named": "割り当てると、{{name}} がすぐにこのイシューの作業を開始します。",
+    "will_start_named_squad": "割り当てると、{{name}} のリーダーが内容を評価し、タスクの割り振りを開始します。",
+    "will_start": "{{count}} 件のイシューの作業をすぐに開始します。",
+    "will_start_squad": "{{count}} 件のイシューをスクワッドのリーダーに渡し、評価して割り振ります。",
+    "nothing_assign": "割り当て済み — バックログ中は作業を開始しません。",
+    "nothing_status": "作業を開始しません。",
+    "note_label": "引き継ぎメモ（任意）",
+    "note_placeholder": "範囲・重点・触れてほしくない点などを一言で…",
+    "note_unsupported": "相手の実行環境が古いため、この引き継ぎメモは読み取れない可能性があります。",
+    "start": "開始",
+    "dont_start": "まだ開始しない",
+    "apply": "適用",
+    "toast_failed": "操作に失敗しました",
+    "create_will_start": "作成後、{{name}} がすぐに作業を開始します。",
+    "create_will_start_squad": "作成後、{{name}} のリーダーが内容を評価し、タスクの割り振りを開始します。",
+    "create_parked": "割り当て済み — バックログでは作業を開始しません。"
   },
   "create_squad": {
     "title": "スクワッドを作成",
@@ -89,6 +107,7 @@
     "icon_tooltip": "アイコンを選択",
     "title_placeholder": "プロジェクトのタイトル",
     "description_placeholder": "説明を追加...",
+    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
     "lead": "リード",
     "no_lead": "リードなし",
     "lead_placeholder": "リードを指定...",

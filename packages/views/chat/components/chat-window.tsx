@@ -51,31 +51,12 @@ import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
-
-function seedChatMessagesPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messages: ChatMessage[],
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
-    chatKeys.messagesPage(sessionId),
-    (old) => old ?? {
-      pages: [{
-        messages,
-        limit: 50,
-        has_more: false,
-        next_cursor: null,
-      }],
-      pageParams: [null],
-    },
-  );
-}
 
 function appendChatMessageToLatestPageCache(
   qc: ReturnType<typeof useQueryClient>,
@@ -229,6 +210,8 @@ export function ChatWindow() {
   const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
     id: string;
     content: string;
+    attachments?: Attachment[];
+    sessionId?: string;
   } | null>(null);
   const handleRestoreDraftConsumed = useCallback(() => {
     setRestoreDraftRequest(null);
@@ -370,21 +353,14 @@ export function ChatWindow() {
 
   const handleUploadFile = useCallback(
     async (file: File) => {
-      const sessionId = await ensureSession("");
-      if (!sessionId) return null;
-      // Prime the messages cache as empty before flipping activeSessionId so
-      // ChatMessageList mounts directly (no Skeleton frame). Skip the write
-      // when an entry already exists — a concurrent handleSend may have
-      // seeded an optimistic message we must not clobber.
-      seedChatMessagesPageCache(qc, sessionId, []);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => old ?? [],
-      );
-      setActiveSession(sessionId);
-      return uploadWithToast(file, { chatSessionId: sessionId });
+      if (!activeAgent) return null;
+      // Uploads are workspace-scoped drafts. Sending the message is the point
+      // where we create a chat session (if needed) and bind attachment_ids to
+      // the persisted chat_message row. This keeps a paste/drop from creating
+      // an empty chat session the user never sends.
+      return uploadWithToast(file);
     },
-    [ensureSession, uploadWithToast, qc, setActiveSession],
+    [activeAgent, uploadWithToast],
   );
 
   const cancelChatTask = useCallback(
@@ -409,6 +385,8 @@ export function ChatWindow() {
             setRestoreDraftRequest({
               id: restored.message_id,
               content: restored.content,
+              attachments: restored.attachments,
+              sessionId: restored.chat_session_id,
             });
           }
         }
@@ -435,7 +413,12 @@ export function ChatWindow() {
   );
 
   const handleSend = useCallback(
-    async (content: string, attachmentIds?: string[]): Promise<boolean> => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
+      draftAttachments: Attachment[] = [],
+    ): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
@@ -479,6 +462,7 @@ export function ChatWindow() {
         content: finalContent,
         task_id: null,
         created_at: sentAt,
+        attachments: draftAttachments,
       };
       // Seed cache BEFORE flipping activeSessionId. If we set the active
       // session first, useQuery's first subscription to the new key sees no
@@ -501,9 +485,22 @@ export function ChatWindow() {
         status: "queued",
         created_at: sentAt,
       });
-      // Cache primed → safe to publish the new active session. Idempotent
-      // when the session was already active (existing-conversation send).
-      setActiveSession(sessionId);
+      // Cache primed → safe to publish the new active session. But only steal
+      // focus if the user is STILL on the compose target they sent from — if
+      // they navigated away mid-send, this is fire-and-forget: the reply
+      // surfaces via the unread dot on the sent session, we don't yank the
+      // view back. Compare the live store against the closure-captured target.
+      // For a brand-new chat (activeSessionId === null) the target is keyed by
+      // the selected agent, so switching agents to start a different new chat
+      // must also count as "navigated away" even though both sides are null.
+      const live = useChatStore.getState();
+      const stillOnSourceSession =
+        live.activeSessionId === activeSessionId &&
+        (activeSessionId !== null || live.selectedAgentId === selectedAgentId);
+      if (stillOnSourceSession) {
+        setActiveSession(sessionId);
+      }
+      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
       let result;
@@ -514,6 +511,15 @@ export function ChatWindow() {
         stopRequestedBeforeTaskRef.current = false;
         removeChatMessageFromCaches(qc, sessionId, optimistic.id);
         qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+        setRestoreDraftRequest({
+          id: `send-failed-${optimistic.id}`,
+          content: finalContent,
+          attachments: draftAttachments,
+          // Restore into the session this was sent from. If the user
+          // navigated away (fire-and-forget) the request waits until they
+          // return rather than dumping content into another session.
+          sessionId,
+        });
         toast.error(t(($) => $.input.send_failed_toast));
         return false;
       }
@@ -539,12 +545,29 @@ export function ChatWindow() {
         });
         return false;
       }
+      // The server reports which attachment ids it actually bound. Diff
+      // against what we requested so a silent bind failure surfaces to the
+      // user — no extra fetch. Skip the check on servers that predate the
+      // field (attachment_ids undefined) rather than false-alarm.
+      if (attachmentIds && attachmentIds.length > 0 && result.attachment_ids) {
+        const boundIds = new Set(result.attachment_ids);
+        const missing = attachmentIds.filter((id) => !boundIds.has(id));
+        if (missing.length > 0) {
+          apiLogger.warn("sendChatMessage.attachments missing after send", {
+            sessionId,
+            messageId: result.message_id,
+            missing,
+          });
+          toast.error(t(($) => $.input.attachment_bind_failed_toast));
+        }
+      }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
       return true;
     },
     [
       activeSessionId,
+      selectedAgentId,
       activeAgent,
       ensureSession,
       cancelChatTask,

@@ -1,7 +1,6 @@
 {
   "fab": {
     "running": "Multica가 작업 중입니다...",
-    "unread_one": "읽지 않은 채팅 {{count}}개",
     "unread_other": "읽지 않은 채팅 {{count}}개",
     "default": "Multica에 묻기"
   },
@@ -12,18 +11,17 @@
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
-    "send_failed_toast": "메시지를 보내지 못했습니다"
+    "send_failed_toast": "메시지를 보내지 못했습니다",
+    "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요."
   },
   "message_list": {
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",
     "task_failed_fallback": "작업 실패",
-    "tools_one": "도구 {{count}}개",
     "tools_other": "도구 {{count}}개",
     "tool_result_named": "{{tool}} 결과: ",
     "tool_result_unnamed": "결과: ",
-    "process_steps_one": "단계 {{count}}개",
     "process_steps_other": "단계 {{count}}개",
     "copy_action": "복사",
     "copied_toast": "복사했습니다",

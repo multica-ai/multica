@@ -435,6 +435,68 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	}
 }
 
+func newIssueUsageTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "usage"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI usage lookup",
+			})
+		case "/api/issues/issue-uuid/usage":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total_input_tokens":       float64(3800),
+				"total_output_tokens":      float64(11700),
+				"total_cache_read_tokens":  float64(537800),
+				"total_cache_write_tokens": float64(42400),
+				"task_count":               float64(1),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUsageTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueUsage(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/usage"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	if payload["total_input_tokens"] != float64(3800) || payload["total_output_tokens"] != float64(11700) ||
+		payload["total_cache_read_tokens"] != float64(537800) || payload["total_cache_write_tokens"] != float64(42400) ||
+		payload["task_count"] != float64(1) {
+		t.Fatalf("unexpected usage payload: %#v", payload)
+	}
+}
+
 func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	prs := []map[string]any{{
 		"url":    "https://github.com/multica-ai/multica/pull/42",
@@ -646,62 +708,121 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
-	t.Run("short UUID prefix resolves from workspace issue list", func(t *testing.T) {
+	t.Run("short UUID prefix is rejected without any HTTP call", func(t *testing.T) {
+		// Until commit 9a3a99c this called fetchIssueCandidates and paged
+		// /api/issues client-side, which timed out on large workspaces
+		// (GH #4701). The resolver now refuses short prefixes outright
+		// and the test pins that contract: any HTTP call here means the
+		// removal regressed.
+		var hits []string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/issues" {
-				http.NotFound(w, r)
-				return
-			}
-			if got := r.URL.Query().Get("workspace_id"); got != "ws-1" {
-				t.Errorf("workspace_id = %q, want ws-1", got)
-			}
-			if got := r.URL.Query().Get("include_closed"); got != "true" {
-				t.Errorf("include_closed = %q, want true", got)
-			}
-			if got := r.URL.Query().Get("limit"); got != strconv.Itoa(resolverListPageLimit) {
-				t.Errorf("limit = %q, want %d", got, resolverListPageLimit)
-			}
-			json.NewEncoder(w).Encode(map[string]any{
-				"issues": []map[string]any{issue},
-				"total":  1,
-			})
+			hits = append(hits, r.Method+" "+r.URL.Path)
+			http.NotFound(w, r)
 		}))
 		defer srv.Close()
 
 		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
-		got, err := resolveIssueRef(context.Background(), client, "1881")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		_, err := resolveIssueRef(context.Background(), client, "1881")
+		if err == nil {
+			t.Fatal("expected short UUID prefix to be rejected")
 		}
-		if got.ID != issue["id"] || got.Display != "MUL-1852" {
-			t.Fatalf("got %#v", got)
+		if msg := err.Error(); !strings.Contains(msg, "short UUID prefix") {
+			t.Fatalf("expected error to flag the short-prefix case, got: %s", msg)
+		}
+		if msg := err.Error(); !strings.Contains(msg, "MUL-") {
+			t.Fatalf("expected error to suggest the issue key form, got: %s", msg)
+		}
+		if len(hits) != 0 {
+			t.Fatalf("short prefix must not perform any HTTP call; got %#v", hits)
 		}
 	})
 
-	t.Run("bare issue number is not resolved as issue number", func(t *testing.T) {
+	t.Run("short UUID prefix with dashes is rejected", func(t *testing.T) {
+		// "1881-a167" used to be accepted as a dashed short prefix; make
+		// sure dashes do not slip past the new rejection.
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/issues" {
-				http.NotFound(w, r)
-				return
-			}
-			json.NewEncoder(w).Encode(map[string]any{
-				"issues": []map[string]any{{
-					"id":         "aaaaaaaa-4bb6-4602-944b-f40ce4192fe6",
-					"identifier": "MUL-1852",
-					"title":      "Should not resolve by number",
-				}},
-				"total": 1,
-			})
+			t.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		_, err := resolveIssueRef(context.Background(), client, "1881-a167")
+		if err == nil {
+			t.Fatal("expected dashed short prefix to be rejected")
+		}
+		if msg := err.Error(); !strings.Contains(msg, "short UUID prefix") {
+			t.Fatalf("expected short-prefix error, got: %s", msg)
+		}
+	})
+
+	t.Run("bare numeric input is rejected as a short prefix", func(t *testing.T) {
+		// A 4+ digit string is still pure hex, so the resolver classifies
+		// it as a short UUID prefix and returns the tailored hint. This
+		// pins that we never accidentally treat "1852" as the bare issue
+		// number 1852.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
 		}))
 		defer srv.Close()
 
 		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
 		_, err := resolveIssueRef(context.Background(), client, "1852")
 		if err == nil {
-			t.Fatal("expected bare number to be treated only as a UUID prefix")
+			t.Fatal("expected bare number to be rejected")
 		}
-		if got := err.Error(); !strings.Contains(got, "id prefix") {
-			t.Fatalf("expected prefix error, got: %s", got)
+		if msg := err.Error(); !strings.Contains(msg, "short UUID prefix") {
+			t.Fatalf("expected short-prefix error, got: %s", msg)
+		}
+	})
+
+	t.Run("non-hex gibberish is rejected with key/UUID guidance", func(t *testing.T) {
+		// Inputs that are neither MUL-key, full UUID, nor a hex prefix
+		// fall through to the generic guidance path and must not hit the
+		// network either.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		_, err := resolveIssueRef(context.Background(), client, "not-an-id")
+		if err == nil {
+			t.Fatal("expected gibberish input to be rejected")
+		}
+		if msg := err.Error(); strings.Contains(msg, "short UUID prefix") {
+			t.Fatalf("non-hex input should not be classified as a short prefix; got: %s", msg)
+		}
+		if msg := err.Error(); !strings.Contains(msg, "not a recognized issue reference") {
+			t.Fatalf("expected generic guidance error, got: %s", msg)
+		}
+	})
+
+	t.Run("full UUID still resolves via single GET", func(t *testing.T) {
+		// Sanity check: the canonical reference forms must still work.
+		var hits []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits = append(hits, r.Method+" "+r.URL.Path)
+			if r.URL.Path == "/api/issues/"+issue["id"].(string) {
+				json.NewEncoder(w).Encode(issue)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		got, err := resolveIssueRef(context.Background(), client, issue["id"].(string))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.ID != issue["id"] || got.Display != "MUL-1852" {
+			t.Fatalf("got %#v", got)
+		}
+		if len(hits) != 1 {
+			t.Fatalf("full UUID must resolve via a single request; got %#v", hits)
 		}
 	})
 }
@@ -1694,12 +1815,90 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("since", "", "")
 	cmd.Flags().Bool("roots-only", false, "")
 	cmd.Flags().Bool("summary", false, "")
+	cmd.Flags().Bool("full", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
 	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("before-id", "", "")
 	return cmd
+}
+
+func newIssueCommentResolutionTestCmd(use string) *cobra.Command {
+	cmd := &cobra.Command{Use: use}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueCommentResolution(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name       string
+		run        func(*cobra.Command, []string) error
+		cmdUse     string
+		wantMethod string
+	}{
+		{
+			name:       "resolve posts to resolve endpoint",
+			run:        runIssueCommentResolve,
+			cmdUse:     "resolve",
+			wantMethod: http.MethodPost,
+		},
+		{
+			name:       "unresolve deletes resolve endpoint",
+			run:        runIssueCommentUnresolve,
+			cmdUse:     "unresolve",
+			wantMethod: http.MethodDelete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				if gotMethod != tt.wantMethod {
+					t.Errorf("method = %s, want %s", gotMethod, tt.wantMethod)
+				}
+				if gotPath != "/api/comments/"+commentID+"/resolve" {
+					t.Errorf("path = %q, want /api/comments/%s/resolve", gotPath, commentID)
+				}
+				if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+					t.Errorf("X-Workspace-ID = %q, want ws-1", ws)
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"id":          commentID,
+					"content":     "done",
+					"resolved_at": "2026-06-22T08:00:00Z",
+				})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueCommentResolutionTestCmd(tt.cmdUse)
+			out, err := captureStdout(t, func() error {
+				return tt.run(cmd, []string{commentID})
+			})
+			if err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if gotMethod == "" || gotPath == "" {
+				t.Fatal("server did not receive request")
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("decode stdout JSON: %v\nstdout: %s", err, out)
+			}
+			if got["id"] != commentID {
+				t.Fatalf("stdout id = %v, want %s", got["id"], commentID)
+			}
+		})
+	}
 }
 
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
@@ -1948,6 +2147,82 @@ func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
 	}
 }
 
+// TestRunIssueCommentList_FoldDefaultAndFullEscape pins the CLI's resolve-aware
+// fold default and its --full escape hatch (MUL-3555):
+//
+//   - the complete-thread reads (default list, --recent, untailed --thread) send
+//     fold=true by default, so an agent skips settled discussion automatically;
+//   - --full suppresses fold so a caller can pull the whole discussion back;
+//   - the partial-thread reads (--since, --thread + --tail) and --roots-only
+//     never send fold — folding them would be unsafe, and the server rejects it,
+//     so the CLI must not add the param there in the first place.
+func TestRunIssueCommentList_FoldDefaultAndFullEscape(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name     string
+		setup    func(c *cobra.Command)
+		wantFold bool
+	}{
+		{name: "default list folds", setup: func(c *cobra.Command) {}, wantFold: true},
+		{name: "recent folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("recent", "10")
+		}, wantFold: true},
+		{name: "untailed thread folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+		}, wantFold: true},
+		{name: "full opts out", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("full", "true")
+		}, wantFold: false},
+		{name: "since never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("since", "2026-01-01T00:00:00Z")
+		}, wantFold: false},
+		{name: "thread+tail never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+			_ = c.Flags().Set("tail", "5")
+		}, wantFold: false},
+		{name: "roots-only never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("roots-only", "true")
+		}, wantFold: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotQuery = nil
+			cmd := newIssueCommentListTestCmd()
+			tc.setup(cmd)
+			if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+				t.Fatalf("runIssueCommentList: %v", err)
+			}
+			gotFold := gotQuery.Get("fold") == "true"
+			if gotFold != tc.wantFold {
+				t.Errorf("fold query = %q, want fold=%v", gotQuery.Get("fold"), tc.wantFold)
+			}
+		})
+	}
+}
+
 // TestRunIssueCommentList_ThreadTailPassesThroughAndPrintsReplyCursor pins
 // the positive path for --thread + --tail: the CLI forwards `thread` +
 // `tail` query params and, on response, prints "Next reply cursor" (not
@@ -2105,5 +2380,102 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 	if len(validIssueStatuses) != len(expected) {
 		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
+	}
+}
+
+func TestValidateIssueStatus(t *testing.T) {
+	for _, s := range validIssueStatuses {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("status %q should be valid, got: %v", s, err)
+		}
+	}
+	err := validateIssueStatus("active")
+	if err == nil {
+		t.Fatal("status \"active\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "backlog") {
+		t.Errorf("error should list valid statuses, got: %v", err)
+	}
+}
+
+func TestValidateIssuePriority(t *testing.T) {
+	expected := map[string]bool{
+		"urgent": true,
+		"high":   true,
+		"medium": true,
+		"low":    true,
+		"none":   true,
+	}
+	for _, p := range validIssuePriorities {
+		if !expected[p] {
+			t.Errorf("unexpected priority in validIssuePriorities: %q", p)
+		}
+		if err := validateIssuePriority(p); err != nil {
+			t.Errorf("priority %q should be valid, got: %v", p, err)
+		}
+	}
+	if len(validIssuePriorities) != len(expected) {
+		t.Errorf("validIssuePriorities has %d entries, expected %d", len(validIssuePriorities), len(expected))
+	}
+	err := validateIssuePriority("P1")
+	if err == nil {
+		t.Fatal("priority \"P1\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "urgent") {
+		t.Errorf("error should list valid priorities, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid status")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid priority")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
 	}
 }

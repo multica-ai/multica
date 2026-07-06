@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Issue } from "@multica/core/types";
-import { filterIssues, type IssueFilters } from "./filter";
+import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
+import { filterIssues, filterAssigneeGroups, type IssueFilters } from "./filter";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -30,6 +30,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: 0,
+    stage: null,
     start_date: null,
     due_date: null,
     metadata: {},
@@ -247,5 +248,115 @@ describe("filterIssues", () => {
     // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
     // in the running set → only "1" survives.
     expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  // --- Show sub-issues display toggle ---
+  const parentChildIssues: Issue[] = [
+    makeIssue({ id: "P1", parent_issue_id: null }),
+    makeIssue({ id: "C1", parent_issue_id: "P1" }),
+    makeIssue({ id: "P2", parent_issue_id: null }),
+    makeIssue({ id: "C2", parent_issue_id: "P2" }),
+  ];
+
+  it("hides sub-issues when showSubIssues is false", () => {
+    const result = filterIssues(parentChildIssues, {
+      ...NO_FILTER,
+      showSubIssues: false,
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("keeps sub-issues when showSubIssues is true or omitted", () => {
+    expect(
+      filterIssues(parentChildIssues, { ...NO_FILTER, showSubIssues: true }),
+    ).toHaveLength(4);
+    // Omitting the flag entirely must preserve the show-all default.
+    expect(filterIssues(parentChildIssues, NO_FILTER)).toHaveLength(4);
+  });
+
+  it("composes showSubIssues with other filters (AND semantics)", () => {
+    const mixed: Issue[] = [
+      makeIssue({ id: "P", status: "todo", parent_issue_id: null }),
+      makeIssue({ id: "C", status: "todo", parent_issue_id: "P" }),
+      makeIssue({ id: "PD", status: "done", parent_issue_id: null }),
+    ];
+    const result = filterIssues(mixed, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      showSubIssues: false,
+    });
+    // "C" is a sub-issue (dropped), "PD" is done (dropped) → only "P" survives.
+    expect(result.map((i) => i.id)).toEqual(["P"]);
+  });
+});
+
+describe("filterAssigneeGroups", () => {
+  const group = (id: string, groupIssues: Issue[]): IssueAssigneeGroup => ({
+    id,
+    assignee_type: id === "none" ? null : "agent",
+    assignee_id: id === "none" ? null : id,
+    issues: groupIssues,
+    total: groupIssues.length,
+  });
+
+  it("returns the same reference when no client-side filter is active", () => {
+    const groups = [group("a1", [makeIssue({ id: "1" })])];
+    expect(filterAssigneeGroups(groups, {})).toBe(groups);
+    expect(filterAssigneeGroups(groups, { showSubIssues: true })).toBe(groups);
+    expect(filterAssigneeGroups(groups, { agentRunningFilter: false })).toBe(groups);
+  });
+
+  it("passes undefined through untouched", () => {
+    expect(filterAssigneeGroups(undefined, { showSubIssues: false })).toBeUndefined();
+  });
+
+  it("hides sub-issues, recomputes total, and drops emptied groups", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P1", parent_issue_id: null }),
+        makeIssue({ id: "C1", parent_issue_id: "P1" }),
+      ]),
+      // Every issue in this group is a sub-issue → group is removed entirely.
+      group("a2", [makeIssue({ id: "C2", parent_issue_id: "P2" })]),
+    ];
+    const result = filterAssigneeGroups(groups, { showSubIssues: false });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([{ id: "a1", ids: ["P1"], total: 1 }]);
+  });
+
+  it("keeps only running issues when agentRunningFilter is on", () => {
+    const groups = [
+      group("a1", [makeIssue({ id: "1" }), makeIssue({ id: "2" })]),
+      group("a2", [makeIssue({ id: "3" })]),
+      group("none", [makeIssue({ id: "4" })]),
+    ];
+    const result = filterAssigneeGroups(groups, {
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["2", "4"]),
+    });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([
+      { id: "a1", ids: ["2"], total: 1 },
+      { id: "none", ids: ["4"], total: 1 },
+    ]);
+  });
+
+  it("composes showSubIssues and agentRunningFilter (AND semantics)", () => {
+    const groups = [
+      group("a1", [
+        makeIssue({ id: "P", parent_issue_id: null }),
+        makeIssue({ id: "C", parent_issue_id: "P" }),
+      ]),
+    ];
+    // "C" is running but is a sub-issue; "P" is a top-level issue but not
+    // running → both dropped, group removed.
+    const result = filterAssigneeGroups(groups, {
+      showSubIssues: false,
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["C"]),
+    });
+    expect(result).toEqual([]);
   });
 });

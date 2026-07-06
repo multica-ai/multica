@@ -441,6 +441,162 @@ func TestCancelTaskByUser_ChatTaskWithoutTranscript_RestoresUserDraft(t *testing
 	}
 }
 
+// TestCancelTaskByUser_ChatTaskWithBoundAttachment_SurvivesCancelAndRebinds
+// guards the data-loss path on the empty-chat cancel: the user message bound to
+// an attachment is deleted, and attachment.chat_message_id is ON DELETE CASCADE
+// (server/migrations/083_attachment_chat_columns.up.sql), so without the
+// detach-before-delete step the cancel would silently destroy the user's
+// attachment. The detach (chat_message_id -> NULL, chat_session_id retained) is
+// load-bearing, not an optimization; nothing else covered it. This pins:
+//
+//	(a) the attachment row survives the cascade — still present, chat_message_id
+//	    NULL, chat_session_id retained;
+//	(b) the cancel response returns it via cancelled_chat_message.attachments so
+//	    the restored draft can re-show it;
+//	(c) re-sending the restored draft re-binds the surviving attachment to the
+//	    new message in the same session.
+func TestCancelTaskByUser_ChatTaskWithBoundAttachment_SurvivesCancelAndRebinds(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatAttachAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, chat_session_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, NULL, $2)
+		RETURNING id
+	`, agentID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	var userMessageID string
+	const userContent = "look at this attachment"
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', $2, $3)
+		RETURNING id
+	`, sessionID, userContent, taskID).Scan(&userMessageID); err != nil {
+		t.Fatalf("create linked user chat message: %v", err)
+	}
+
+	// Bind an attachment to that user message, exactly as a real send does:
+	// workspace-scoped, uploaded by the session creator, pointing at both the
+	// session and the message.
+	var attachmentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, chat_session_id, chat_message_id)
+		VALUES ($1, 'member', $2, 'cancel-survive.png', 'https://cdn.example.com/cancel-survive.png', 'image/png', 9, $3, $4)
+		RETURNING id::text
+	`, testWorkspaceID, testUserID, sessionID, userMessageID).Scan(&attachmentID); err != nil {
+		t.Fatalf("seed bound attachment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID) })
+
+	// Cancel the empty chat task (no transcript) — this deletes the user message.
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage == nil {
+		t.Fatal("expected restore payload for empty transcript cancel")
+	}
+
+	// (b) The cancel response carries the detached attachment back.
+	var returned *AttachmentResponse
+	for i := range resp.CancelledChatMessage.Attachments {
+		if resp.CancelledChatMessage.Attachments[i].ID == attachmentID {
+			returned = &resp.CancelledChatMessage.Attachments[i]
+			break
+		}
+	}
+	if returned == nil {
+		t.Fatalf("cancel response did not return the detached attachment: %#v", resp.CancelledChatMessage.Attachments)
+	}
+
+	// (a) The row survived the ON DELETE CASCADE: still present, detached from
+	//     the deleted message, but still scoped to the session.
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM attachment WHERE id = $1`, attachmentID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count attachment: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("attachment was cascade-deleted on cancel: count = %d", count)
+	}
+	var dbMessageID, dbSessionID *string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT chat_message_id::text, chat_session_id::text FROM attachment WHERE id = $1`, attachmentID,
+	).Scan(&dbMessageID, &dbSessionID); err != nil {
+		t.Fatalf("read attachment after cancel: %v", err)
+	}
+	if dbMessageID != nil {
+		t.Fatalf("expected chat_message_id detached to NULL, got %q", *dbMessageID)
+	}
+	if dbSessionID == nil || *dbSessionID != sessionID {
+		t.Fatalf("expected chat_session_id retained as %q, got %v", sessionID, dbSessionID)
+	}
+
+	// Sanity: the empty-cancel still deleted the user message itself.
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_message WHERE id = $1`, userMessageID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count user message: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected linked user message to be deleted, got %d", count)
+	}
+
+	// (c) Re-sending the restored draft re-binds the surviving attachment to a
+	//     fresh message in the same session — the whole reason for detaching.
+	sendReq := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content":        userContent,
+		"attachment_ids": []string{attachmentID},
+	})
+	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
+	sendW := httptest.NewRecorder()
+	testHandler.SendChatMessage(sendW, sendReq)
+	if sendW.Code != http.StatusCreated {
+		t.Fatalf("resend: expected 201, got %d: %s", sendW.Code, sendW.Body.String())
+	}
+	var sendResp SendChatMessageResponse
+	if err := json.Unmarshal(sendW.Body.Bytes(), &sendResp); err != nil {
+		t.Fatalf("decode resend response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, sendResp.TaskID)
+	})
+
+	rebound := false
+	for _, id := range sendResp.AttachmentIDs {
+		if id == attachmentID {
+			rebound = true
+			break
+		}
+	}
+	if !rebound {
+		t.Fatalf("attachment not re-bound on resend: %#v", sendResp.AttachmentIDs)
+	}
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT chat_message_id::text FROM attachment WHERE id = $1`, attachmentID,
+	).Scan(&dbMessageID); err != nil {
+		t.Fatalf("read attachment after resend: %v", err)
+	}
+	if dbMessageID == nil || *dbMessageID != sendResp.MessageID {
+		t.Fatalf("expected attachment re-bound to new message %q, got %v", sendResp.MessageID, dbMessageID)
+	}
+}
+
 // TestCancelTaskByUser_PrivateAgent_PlainMember_Returns403 verifies the cancel
 // endpoint mirrors the agent Activity / snapshot visibility gate: a plain
 // member who cannot see a private agent's tasks cannot cancel them either.
