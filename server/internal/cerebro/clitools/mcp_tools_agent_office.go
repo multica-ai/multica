@@ -260,9 +260,11 @@ required version number; 'to' defaults to the live context when omitted.`,
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name: "agent_context_rollback",
-		Description: `Roll an agent's context back to a historical version. Restores that version's
-snapshot as a NEW version (history is append-only — nothing is deleted). Only
-the context owner/approvers (or a workspace admin) may roll back.`,
+		Description: `Propose rolling an agent's context back to a historical version. This does NOT
+apply directly: it opens a change request carrying that version's snapshot, which
+an approver must review and approve before it merges onto the live agent (history
+is append-only — nothing is deleted). Only the context owner/approvers (or a
+workspace admin) may propose a rollback.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"agent_id", "version"},

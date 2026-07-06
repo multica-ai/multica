@@ -56,6 +56,34 @@ func TestBumpPatch(t *testing.T) {
 	}
 }
 
+func TestBuildRollbackProposal(t *testing.T) {
+	// A rollback is a PROPOSED change: the derived proposed version must be
+	// strictly greater than current so it satisfies the propose-flow rule, and
+	// the title must name the target version for an auditable review.
+	p := BuildRollbackProposal("1.4.2", "1.2.0", "revert bad prompt")
+	if p.ProposedVersion != "1.4.3" {
+		t.Errorf("ProposedVersion = %q, want 1.4.3 (next patch above current)", p.ProposedVersion)
+	}
+	if !SemverGT(p.ProposedVersion, "1.4.2") {
+		t.Errorf("proposed %q must be > current 1.4.2", p.ProposedVersion)
+	}
+	if p.Title != "Rollback to 1.2.0" {
+		t.Errorf("Title = %q, want %q", p.Title, "Rollback to 1.2.0")
+	}
+	if p.Description != "revert bad prompt" {
+		t.Errorf("Description = %q, want the supplied comment", p.Description)
+	}
+
+	// An empty comment falls back to a descriptive default rather than blank.
+	d := BuildRollbackProposal("2.0.0", "1.9.0", "   ")
+	if d.Description != "Roll back to 1.9.0" {
+		t.Errorf("empty comment should default the description, got %q", d.Description)
+	}
+	if d.ProposedVersion != "2.0.1" {
+		t.Errorf("ProposedVersion = %q, want 2.0.1", d.ProposedVersion)
+	}
+}
+
 func TestEncodeDecodeSnapshotRoundTrip(t *testing.T) {
 	s := ContextSnapshot{
 		Instructions:  "be helpful\nfollow the gates",

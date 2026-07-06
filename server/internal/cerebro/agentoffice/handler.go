@@ -101,10 +101,38 @@ type ReviewChangeRequestRequest struct {
 	Comment string `json:"comment"`
 }
 
-// RollbackRequest restores a historical version as a new version.
+// RollbackRequest proposes rolling the context back to a historical version.
+// The rollback is submitted as a change request and reviewed before it applies.
 type RollbackRequest struct {
 	Version string `json:"version"`
 	Comment string `json:"comment"`
+}
+
+// RollbackProposal is the derived change-request shape of a rollback. Rolling an
+// agent back to a historical version is a *proposed* change that must be reviewed
+// before it applies (FIR-1775) — never a direct write. Keeping the derivation in
+// one pure helper lets the propose path and its tests share a single source of
+// truth.
+type RollbackProposal struct {
+	Title           string
+	Description     string
+	ProposedVersion string
+}
+
+// BuildRollbackProposal derives the change-request fields for rolling an agent
+// (currently at currentVersion) back to targetVersion. The proposed version is
+// the next patch above current so it satisfies the propose flow's strictly-
+// greater rule; the title/description keep the intent auditable in review.
+func BuildRollbackProposal(currentVersion, targetVersion, comment string) RollbackProposal {
+	desc := strings.TrimSpace(comment)
+	if desc == "" {
+		desc = "Roll back to " + targetVersion
+	}
+	return RollbackProposal{
+		Title:           "Rollback to " + targetVersion,
+		Description:     desc,
+		ProposedVersion: BumpPatch(currentVersion),
+	}
 }
 
 // --- HTTP helpers (cerebro-local, mirroring grants/handler.go) ---
@@ -565,8 +593,12 @@ func (h *Handler) Diff(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Rollback restores a historical version's snapshot as a new version. It is a
-// privileged manage action that applies directly (no review round-trip).
+// Rollback proposes rolling the agent's context back to a historical version.
+// Per FIR-1775 a rollback is no longer applied directly: it is submitted as a
+// change request carrying the target version's snapshot, so it passes through
+// the same review-before-apply gate (and inbox notification) as any other edit.
+// A manager may propose the rollback; an approver still has to approve it before
+// it merges onto the live agent.
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 	agent, member, ok := h.loadAgent(w, r)
 	if !ok {
@@ -585,6 +617,10 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "version is required")
 		return
 	}
+	if !ValidSemver(agent.ContextVersion) {
+		writeError(w, http.StatusConflict, "agent context version is not valid semver; cannot derive a rollback proposal")
+		return
+	}
 	target, err := h.Svc.Cerebro.GetAgentContextVersion(r.Context(), cerebrodb.GetAgentContextVersionParams{
 		AgentID: agent.ID,
 		Version: req.Version,
@@ -594,38 +630,23 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap := DecodeSnapshot(target.Snapshot)
-	newVersion := BumpPatch(agent.ContextVersion)
-	desc := req.Comment
-	if desc == "" {
-		desc = "Rollback to " + req.Version
-	}
+	proposal := BuildRollbackProposal(agent.ContextVersion, req.Version, req.Comment)
 
-	tx, err := h.Svc.Tx.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Svc.Cerebro.WithTx(tx)
-
-	if _, err := h.Svc.ApplySnapshotTx(r.Context(), qtx, agent.ID, snap, newVersion); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	version, err := qtx.CreateAgentContextVersion(r.Context(), cerebrodb.CreateAgentContextVersionParams{
-		AgentID:     agent.ID,
-		Version:     newVersion,
-		Snapshot:    EncodeSnapshot(snap),
-		Description: desc,
-		CreatedBy:   member.UserID,
+	cr, err := h.Svc.Cerebro.CreateAgentChangeRequest(r.Context(), cerebrodb.CreateAgentChangeRequestParams{
+		AgentID:          agent.ID,
+		Title:            proposal.Title,
+		Description:      proposal.Description,
+		BaseVersion:      agent.ContextVersion,
+		ProposedVersion:  proposal.ProposedVersion,
+		ProposedSnapshot: EncodeSnapshot(snap),
+		ProposedBy:       member.UserID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to snapshot rollback version: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to create rollback change request: "+err.Error())
 		return
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, versionToResponse(version))
+	// Notify reviewers that a rollback is waiting, mirroring the edit-propose flow.
+	// Best-effort: a failed notification must not fail the request.
+	h.notifyChangeRequestCreated(r.Context(), agent, cr, member.UserID)
+	writeJSON(w, http.StatusCreated, changeRequestToResponse(cr))
 }

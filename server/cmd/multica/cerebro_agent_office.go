@@ -75,7 +75,7 @@ var agentContextOwnershipCmd = &cobra.Command{
 
 var agentContextRollbackCmd = &cobra.Command{
 	Use:   "rollback <agent-id>",
-	Short: "Roll an agent's context back to a historical version (as a new version)",
+	Short: "Propose rolling an agent's context back to a historical version (reviewed before it applies)",
 	Args:  exactArgs(1),
 	RunE:  runAgentContextRollback,
 }
@@ -123,8 +123,8 @@ func init() {
 	agentContextOwnershipCmd.Flags().Bool("clear-approvers", false, "Set the approver list to empty")
 	agentContextOwnershipCmd.Flags().String("output", "json", "Output format: json")
 
-	agentContextRollbackCmd.Flags().String("version", "", "Historical version to restore, e.g. 1.0.0 (required)")
-	agentContextRollbackCmd.Flags().String("comment", "", "Optional note describing why")
+	agentContextRollbackCmd.Flags().String("version", "", "Historical version to roll back to, e.g. 1.0.0 (required)")
+	agentContextRollbackCmd.Flags().String("comment", "", "Optional note describing why (becomes the change request description)")
 	agentContextRollbackCmd.Flags().String("output", "json", "Output format: json")
 }
 
