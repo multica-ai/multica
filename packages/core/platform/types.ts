@@ -40,4 +40,9 @@ export interface CoreProviderProps {
   /** Locale adapter for persisting user choice (used by Settings switcher).
    *  Optional because some shells (e.g. CLI auth pages) don't need switching. */
   localeAdapter?: LocaleAdapter;
+  /** Route provider for freeze-watchdog diagnostics, called lazily at emit
+   *  time. Desktop passes its memory-router tab path (`location.pathname`
+   *  there is the loaded index.html file path); web omits it and keeps the
+   *  `location.pathname` default. */
+  diagnosticsPathProvider?: () => string | undefined;
 }

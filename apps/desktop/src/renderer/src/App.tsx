@@ -19,6 +19,7 @@ import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { getDiagnosticRoutePath } from "./diagnostics/diagnostic-route";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 
@@ -33,6 +34,19 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   ko: "ko-KR",
   ja: "ja-JP",
 };
+
+// Grace window between handing the breadcrumb event to posthog-js and acking
+// the file for deletion — posthog exposes no per-event delivery callback, so
+// this buys the `send_instantly` request its network round-trip. If the
+// renderer hangs or dies inside the window, the timer never fires, the file
+// survives, and the next boot retries.
+const FREEZE_ACK_DELAY_MS = 5_000;
+
+// Now that reading the breadcrumb no longer clears it, a re-mount of App
+// (HMR, remount) would re-capture the same failure within one session —
+// guard at module level so a breadcrumb is flushed at most once per renderer
+// lifetime.
+let freezeBreadcrumbFlushed = false;
 
 
 /**
@@ -338,19 +352,43 @@ export default function App() {
   // (the renderer is blocked or gone), so the main process persists it and we
   // emit it here on the next boot. The in-thread, recoverable freeze tier is
   // handled separately by the shared watchdog in CoreProvider.
+  //
+  // The read no longer deletes the file (MUL-4120): the event goes out with
+  // `sendInstantly` (bypassing posthog's batch timer, which a re-hang would
+  // kill), and only after the hand-off — plus a grace window for the network
+  // request — do we ack the breadcrumb's ts back so main deletes it. If this
+  // boot hangs or dies first, the file survives and the next boot retries.
+  // A rare duplicate report is dedupable by `breadcrumb_ts`.
   useEffect(() => {
+    if (freezeBreadcrumbFlushed) return;
     const last = window.desktopAPI.getLastFreeze();
     if (!last) return;
+    freezeBreadcrumbFlushed = true;
     const crashed = last.kind === "render-process-gone";
-    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
-      // Spread context FIRST so our explicit fields below always win — a
-      // future context key (e.g. its own `source`) must not silently override.
-      ...last.context,
-      source: crashed ? "render-process-gone" : "main-unresponsive",
-      recovered: false,
-      breadcrumb_ts: last.ts,
-      crashed_version: last.version,
-    });
+    captureEvent(
+      crashed ? "client_crash" : "client_unresponsive",
+      {
+        // Spread context FIRST so our explicit fields below always win — a
+        // future context key (e.g. its own `source`) must not silently override.
+        ...last.context,
+        source: crashed ? "render-process-gone" : "main-unresponsive",
+        recovered: false,
+        breadcrumb_ts: last.ts,
+        crashed_version: last.version,
+      },
+      {
+        sendInstantly: true,
+        // Fires when the event was handed to posthog.capture — never on
+        // analytics-disabled builds, where the 7d TTL in main is what
+        // eventually drops the file.
+        onCaptured: () => {
+          setTimeout(
+            () => window.desktopAPI.ackFreeze(last.ts),
+            FREEZE_ACK_DELAY_MS,
+          );
+        },
+      },
+    );
   }, []);
 
   // Stable identity reference so downstream effects (WS reconnect) don't
@@ -409,6 +447,7 @@ export default function App() {
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
+          diagnosticsPathProvider={getDiagnosticRoutePath}
         >
           <AppContent />
         </CoreProvider>

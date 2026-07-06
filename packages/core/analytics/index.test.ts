@@ -187,6 +187,100 @@ describe("capturePageview", () => {
   });
 });
 
+describe("captureEvent options", () => {
+  function captureMock(posthog: unknown) {
+    return (posthog as { capture: ReturnType<typeof vi.fn> }).capture;
+  }
+
+  it("passes send_instantly to posthog.capture when sendInstantly is set (post-init)", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    analytics.captureEvent("client_unresponsive", { source: "main-unresponsive" }, {
+      sendInstantly: true,
+    });
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith(
+      "client_unresponsive",
+      expect.objectContaining({ source: "main-unresponsive" }),
+      { send_instantly: true },
+    );
+  });
+
+  it("keeps the batched default (no capture options) when sendInstantly is absent", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    analytics.captureEvent("step_completed", { step: 3 });
+
+    expect(capture).toHaveBeenCalledWith(
+      "step_completed",
+      expect.objectContaining({ step: 3 }),
+      undefined,
+    );
+  });
+
+  it("fires onCaptured synchronously when already initialized", async () => {
+    const { analytics } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+
+    const onCaptured = vi.fn();
+    analytics.captureEvent("client_unresponsive", undefined, { onCaptured });
+
+    expect(onCaptured).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a pre-init event with its options intact and fires onCaptured at replay time", async () => {
+    const { analytics, posthog } = await loadModule();
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    const onCaptured = vi.fn();
+    analytics.captureEvent(
+      "client_unresponsive",
+      { breadcrumb_ts: 1700 },
+      { sendInstantly: true, onCaptured },
+    );
+
+    // Pre-init: buffered, no hand-off yet.
+    expect(capture).not.toHaveBeenCalled();
+    expect(onCaptured).not.toHaveBeenCalled();
+
+    analytics.initAnalytics({ key: "k", host: "" });
+
+    expect(capture).toHaveBeenCalledWith(
+      "client_unresponsive",
+      expect.objectContaining({ breadcrumb_ts: 1700 }),
+      { send_instantly: true },
+    );
+    expect(onCaptured).toHaveBeenCalledTimes(1);
+  });
+
+  it("never fires onCaptured when analytics stays disabled (no key) — callers converge via TTL", async () => {
+    const { analytics, posthog } = await loadModule();
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    const onCaptured = vi.fn();
+    analytics.captureEvent("client_unresponsive", undefined, {
+      sendInstantly: true,
+      onCaptured,
+    });
+
+    // Self-hosted / no-key config: init reports disabled and must not replay.
+    expect(analytics.initAnalytics({ key: "", host: "" })).toBe(false);
+    expect(analytics.initAnalytics(null)).toBe(false);
+
+    expect(capture).not.toHaveBeenCalled();
+    expect(onCaptured).not.toHaveBeenCalled();
+  });
+});
+
 describe("captureException", () => {
   it("buffers a pre-init exception and flushes it on init", async () => {
     const { analytics, posthog } = await loadModule();

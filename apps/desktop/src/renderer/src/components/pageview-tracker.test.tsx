@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({
   activeWorkspaceSlug: null as string | null,
   byWorkspace: {} as Record<
     string,
-    { activeTabId: string; tabs: { id: string; path: string }[] }
+    { activeTabId: string; tabs: { id: string; path: string; search?: string }[] }
   >,
   capturePageview: vi.fn<(path?: string) => void>(),
 }));
@@ -58,6 +58,10 @@ vi.mock("@/stores/tab-store", () => {
 });
 
 import { PageviewTracker } from "./pageview-tracker";
+import { getDiagnosticRoutePath } from "@/diagnostics/diagnostic-route";
+import type { RendererRouteContextInput } from "../../../shared/renderer-route-context";
+
+const setRendererRouteContext = vi.fn<(context: RendererRouteContextInput) => void>();
 
 function reset() {
   state.user = { id: "u1" };
@@ -65,6 +69,10 @@ function reset() {
   state.activeWorkspaceSlug = null;
   state.byWorkspace = {};
   state.capturePageview.mockClear();
+  setRendererRouteContext.mockClear();
+  (window as unknown as { desktopAPI: unknown }).desktopAPI = {
+    setRendererRouteContext,
+  };
 }
 
 beforeEach(() => {
@@ -242,6 +250,77 @@ describe("PageviewTracker", () => {
     render(<PageviewTracker />);
     // Restored tab — seeded, treated as a re-activation.
     expect(state.capturePageview).not.toHaveBeenCalled();
+  });
+
+  // MUL-4120: the diagnostic route context must carry the query string and
+  // stay current on query-only navigation, while the $pageview surface is
+  // strictly unchanged (pathname-based, unchanged early return).
+  describe("diagnostic route context", () => {
+    it("reports the tab's search alongside path, slug and tabId", () => {
+      state.byWorkspace = {
+        acme: {
+          activeTabId: "tA",
+          tabs: [{ id: "tA", path: "/acme/inbox", search: "?issue=a1" }],
+        },
+      };
+      state.activeWorkspaceSlug = "acme";
+
+      render(<PageviewTracker />);
+
+      expect(setRendererRouteContext).toHaveBeenLastCalledWith({
+        surface: "tab",
+        path: "/acme/inbox",
+        search: "?issue=a1",
+        workspaceSlug: "acme",
+        tabId: "tA",
+      });
+      expect(getDiagnosticRoutePath()).toBe("/acme/inbox");
+    });
+
+    it("query-only navigation re-reports route context but never fires a $pageview", () => {
+      state.byWorkspace = {
+        acme: {
+          activeTabId: "tA",
+          tabs: [{ id: "tA", path: "/acme/inbox", search: "?issue=a1" }],
+        },
+      };
+      state.activeWorkspaceSlug = "acme";
+
+      const { rerender } = render(<PageviewTracker />);
+      state.capturePageview.mockClear();
+      setRendererRouteContext.mockClear();
+
+      // User clicks the next issue in the inbox: same pathname, new query.
+      state.byWorkspace = {
+        acme: {
+          activeTabId: "tA",
+          tabs: [{ id: "tA", path: "/acme/inbox", search: "?issue=b2" }],
+        },
+      };
+      rerender(<PageviewTracker />);
+
+      expect(setRendererRouteContext).toHaveBeenCalledTimes(1);
+      expect(setRendererRouteContext).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/acme/inbox", search: "?issue=b2" }),
+      );
+      expect(state.capturePageview).not.toHaveBeenCalled();
+    });
+
+    it("omits search when the tab has none", () => {
+      state.byWorkspace = {
+        acme: {
+          activeTabId: "tA",
+          tabs: [{ id: "tA", path: "/acme/issues", search: "" }],
+        },
+      };
+      state.activeWorkspaceSlug = "acme";
+
+      render(<PageviewTracker />);
+
+      expect(setRendererRouteContext).toHaveBeenLastCalledWith(
+        expect.objectContaining({ surface: "tab", search: undefined }),
+      );
+    });
   });
 });
 

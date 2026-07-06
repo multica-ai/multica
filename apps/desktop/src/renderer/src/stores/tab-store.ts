@@ -15,6 +15,13 @@ export interface Tab {
   id: string;
   /** Every tab path is workspace-scoped: `/{workspaceSlug}/{route}/...`. */
   path: string;
+  /**
+   * The tab's current query string (`?issue=<id>` etc.), synced from its
+   * router alongside `path`. Runtime-only diagnostic state for the freeze
+   * route context (MUL-4120): persist's `partialize` strips it, rehydration
+   * resets it to "", and tab dedupe stays `path`-only.
+   */
+  search: string;
   title: string;
   icon: string;
   router: DataRouter;
@@ -83,7 +90,10 @@ interface TabStore {
    */
   setActiveTab: (tabId: string) => void;
   /** Patch metadata of a tab (router-sync, title-sync). Finds across groups. */
-  updateTab: (tabId: string, patch: Partial<Pick<Tab, "path" | "title" | "icon">>) => void;
+  updateTab: (
+    tabId: string,
+    patch: Partial<Pick<Tab, "path" | "search" | "title" | "icon">>,
+  ) => void;
   /** Patch history tracking of a tab. Finds across groups. */
   updateTabHistory: (tabId: string, historyIndex: number, historyLength: number) => void;
   /** Recreate the active tab's router at the same path after a route-level crash. */
@@ -215,6 +225,7 @@ function makeTab(path: string, title: string, icon: string): Tab {
   return {
     id: createId(),
     path,
+    search: "",
     title,
     icon,
     router: createTabRouter(path),
@@ -445,8 +456,12 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         const next: Tab = { ...current, ...patch };
+        // `search` participates in the no-op check: a query-only navigation
+        // (same pathname, new ?issue=) must still notify subscribers so the
+        // diagnostic route context stays current (MUL-4120).
         if (
           next.path === current.path &&
+          next.search === current.search &&
           next.title === current.title &&
           next.icon === current.icon
         ) {
@@ -659,6 +674,7 @@ export const useTabStore = create<TabStore>()(
               tabs: group.tabs.map(
                 ({
                   router: _router,
+                  search: _search,
                   historyIndex: _hi,
                   historyLength: _hl,
                   ...rest
@@ -691,6 +707,7 @@ export const useTabStore = create<TabStore>()(
             tabs.push({
               id: pTab.id,
               path: clean,
+              search: "",
               title: pTab.title,
               icon: pTab.icon,
               router: createTabRouter(clean),

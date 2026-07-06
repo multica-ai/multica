@@ -75,6 +75,7 @@ export function CoreProvider({
   locale,
   resources,
   localeAdapter,
+  diagnosticsPathProvider,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
@@ -82,10 +83,14 @@ export function CoreProvider({
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
   // Client-only freeze watchdog — shared by web and desktop. No-op on the
-  // server and idempotent, so mounting it here covers both apps in one place.
+  // server and idempotent (first install wins), so mounting it here covers
+  // both apps in one place. Desktop threads its tab-route provider through;
+  // web passes nothing and keeps the location.pathname default.
   useEffect(() => {
-    installFreezeWatchdog();
-  }, []);
+    installFreezeWatchdog(
+      diagnosticsPathProvider ? { getPath: diagnosticsPathProvider } : undefined,
+    );
+  }, [diagnosticsPathProvider]);
 
   // I18nProvider wraps everything else: server and client must use the same
   // (locale, resources) to avoid hydration mismatch. Language switching goes

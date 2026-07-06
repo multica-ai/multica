@@ -16,9 +16,12 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
-  /** Read + clear any freeze/crash breadcrumb from a previous session, so the
-   *  renderer can flush it to telemetry on boot. Null when nothing's pending. */
+  /** Read any freeze/crash breadcrumb from a previous session, so the
+   *  renderer can flush it to telemetry on boot. Null when nothing's pending.
+   *  Does NOT delete — pair with `ackFreeze(ts)` after reporting. */
   getLastFreeze: () => FreezeBreadcrumb | null;
+  /** Delete a reported breadcrumb; main only deletes on an exact `ts` match. */
+  ackFreeze: (ts: number) => void;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */

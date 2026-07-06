@@ -230,10 +230,36 @@ describe("useTabStore actions", () => {
     const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
     const before = useTabStore.getState().byWorkspace.acme;
 
-    store.updateTab(tab.id, { path: tab.path, icon: tab.icon, title: tab.title });
+    store.updateTab(tab.id, {
+      path: tab.path,
+      search: tab.search,
+      icon: tab.icon,
+      title: tab.title,
+    });
     store.updateTabHistory(tab.id, tab.historyIndex, tab.historyLength);
 
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+  });
+
+  // MUL-4120: `search` is runtime-only diagnostic state — reactive for
+  // query-only navigation, but never persisted.
+  it("a query-only updateTab (same path, new search) still notifies subscribers", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
+
+    store.updateTab(tab.id, { path: tab.path, search: "?issue=a1", icon: tab.icon });
+    const afterFirst = useTabStore.getState().byWorkspace.acme;
+    expect(afterFirst.tabs[0].search).toBe("?issue=a1");
+
+    store.updateTab(tab.id, { path: tab.path, search: "?issue=b2", icon: tab.icon });
+    const afterSecond = useTabStore.getState().byWorkspace.acme;
+    expect(afterSecond).not.toBe(afterFirst);
+    expect(afterSecond.tabs[0].search).toBe("?issue=b2");
+
+    // Identical path AND search — a true no-op, group reference preserved.
+    store.updateTab(tab.id, { path: tab.path, search: "?issue=b2", icon: tab.icon });
+    expect(useTabStore.getState().byWorkspace.acme).toBe(afterSecond);
   });
 
   it("validateWorkspaceSlugs drops groups for slugs not in the valid set and repoints active", () => {
@@ -469,5 +495,53 @@ describe("migrateV2ToV3", () => {
     const v3 = migrateV2ToV3({ activeWorkspaceSlug: null } as Parameters<typeof migrateV2ToV3>[0]);
     expect(v3.byWorkspace).toEqual({});
     expect(v3.activeWorkspaceSlug).toBeNull();
+  });
+});
+
+// MUL-4120: `search` must never reach localStorage (persist boundary) and
+// must come back as "" after rehydration.
+describe("search persistence boundary", () => {
+  it("partialize strips search (and the other runtime-only fields) from the persisted shape", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
+    store.updateTab(tab.id, { search: "?issue=a1" });
+
+    const partialize = useTabStore.persist.getOptions().partialize!;
+    const persisted = partialize(useTabStore.getState()) as {
+      byWorkspace: Record<string, { tabs: Record<string, unknown>[] }>;
+    };
+
+    const persistedTab = persisted.byWorkspace.acme.tabs[0];
+    expect(persistedTab.path).toBe(tab.path);
+    expect("search" in persistedTab).toBe(false);
+    expect("router" in persistedTab).toBe(false);
+    expect("historyIndex" in persistedTab).toBe(false);
+  });
+
+  it("rehydrated tabs default search to empty", () => {
+    const merge = useTabStore.persist.getOptions().merge!;
+    const merged = merge(
+      {
+        activeWorkspaceSlug: "acme",
+        byWorkspace: {
+          acme: {
+            activeTabId: "t1",
+            tabs: [
+              {
+                id: "t1",
+                path: "/acme/issues",
+                title: "Issues",
+                icon: "ListTodo",
+                pinned: false,
+              },
+            ],
+          },
+        },
+      },
+      useTabStore.getState(),
+    ) as ReturnType<typeof useTabStore.getState>;
+
+    expect(merged.byWorkspace.acme.tabs[0].search).toBe("");
   });
 });

@@ -14,13 +14,18 @@ export function useTabRouterSync(tabId: string, router: DataRouter) {
   const lengthRef = useRef(1);
 
   useEffect(() => {
-    // Sync initial state
+    // Sync initial state. `search` rides along for the diagnostic route
+    // context (MUL-4120) — see the Tab.search doc for its runtime-only scope.
     const initialPath = router.state.location.pathname;
     const store = useTabStore.getState();
-    store.updateTab(tabId, { path: initialPath, icon: resolveRouteIcon(initialPath) });
+    store.updateTab(tabId, {
+      path: initialPath,
+      search: router.state.location.search,
+      icon: resolveRouteIcon(initialPath),
+    });
 
     const unsubscribe = router.subscribe((state) => {
-      const { pathname } = state.location;
+      const { pathname, search } = state.location;
       const action = state.historyAction;
 
       if (action === "PUSH") {
@@ -40,7 +45,7 @@ export function useTabRouterSync(tabId: string, router: DataRouter) {
       // REPLACE: index and length stay the same
 
       const store = useTabStore.getState();
-      store.updateTab(tabId, { path: pathname, icon: resolveRouteIcon(pathname) });
+      store.updateTab(tabId, { path: pathname, search, icon: resolveRouteIcon(pathname) });
       store.updateTabHistory(tabId, indexRef.current, lengthRef.current);
     });
 

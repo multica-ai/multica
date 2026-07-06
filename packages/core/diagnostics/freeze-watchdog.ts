@@ -36,16 +36,41 @@ let lastEmitMs = 0;
 
 let installed = false;
 
+export interface FreezeWatchdogOptions {
+  /**
+   * Resolve the route to attach to the event, called lazily at emit time.
+   * Desktop injects its memory-router tab path here — `location.pathname`
+   * in an Electron renderer is the loaded `index.html` file path, useless
+   * for attribution (MUL-4120). When the provider is absent, returns a
+   * falsy value, or throws, the event falls back to `location.pathname`,
+   * so web behavior is unchanged.
+   */
+  getPath?: () => string | undefined;
+}
+
 /**
  * Install the long-task observer. Safe to call multiple times (idempotent) and
  * safe on the server (no-op when `window` / `PerformanceObserver` is absent).
  * Call once from a client-only effect.
  */
-export function installFreezeWatchdog(): void {
+export function installFreezeWatchdog(options?: FreezeWatchdogOptions): void {
   if (installed) return;
   if (typeof window === "undefined") return;
   if (typeof PerformanceObserver === "undefined") return;
   installed = true;
+
+  const getPath = options?.getPath;
+  const resolvePath = (): string | undefined => {
+    if (getPath) {
+      try {
+        const path = getPath();
+        if (path) return path;
+      } catch {
+        // Provider failure must never take the watchdog down with it.
+      }
+    }
+    return typeof location !== "undefined" ? location.pathname : undefined;
+  };
 
   try {
     const observer = new PerformanceObserver((list) => {
@@ -59,7 +84,7 @@ export function installFreezeWatchdog(): void {
         captureEvent("client_unresponsive", {
           source: "longtask",
           duration_ms: Math.round(entry.duration),
-          path: typeof location !== "undefined" ? location.pathname : undefined,
+          path: resolvePath(),
         });
       }
     });

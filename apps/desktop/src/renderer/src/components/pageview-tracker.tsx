@@ -7,6 +7,7 @@ import {
   useTabStore,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
+import { setDiagnosticRoute } from "@/diagnostics/diagnostic-route";
 import type { RendererRouteContextInput } from "../../../shared/renderer-route-context";
 
 /**
@@ -46,6 +47,12 @@ export function PageviewTracker() {
   const overlay = useWindowOverlayStore((s) => s.overlay);
   const { slug: activeWorkspaceSlug, tabId: activeTabId } = useActiveTabIdentity();
   const activeTabPath = useTabStore((s) => getActiveTab(s)?.path ?? null);
+  // Query string of the active tab, in the deps below so a query-only
+  // navigation (/x/inbox?issue=A → ?issue=B) re-reports the diagnostic route
+  // context. It must NOT influence the pageview logic — that stays
+  // pathname-based, so those navigations exit via the `unchanged` early
+  // return without a new $pageview (MUL-4120).
+  const activeTabSearch = useTabStore((s) => getActiveTab(s)?.search ?? "");
 
   // (slug:tabId) → last path observed while that tab was visible. Lets us
   // tell "re-activating a tab on a path we already saw" (suppress) apart
@@ -96,6 +103,7 @@ export function PageviewTracker() {
       path,
     };
     if (kind === "tab") {
+      routeContext.search = activeTabSearch || undefined;
       routeContext.workspaceSlug = activeWorkspaceSlug ?? undefined;
       routeContext.tabId = activeTabId ?? undefined;
     }
@@ -118,12 +126,16 @@ export function PageviewTracker() {
 
     capturePageview(path);
     lastSurfaceRef.current = next;
-  }, [user, overlay, activeWorkspaceSlug, activeTabId, activeTabPath]);
+  }, [user, overlay, activeWorkspaceSlug, activeTabId, activeTabPath, activeTabSearch]);
 
   return null;
 }
 
 function reportRendererRouteContext(context: RendererRouteContextInput) {
+  // Mirror for the renderer-side freeze watchdog before the IPC hop, so
+  // longtask events and main-process freeze breadcrumbs attribute a freeze
+  // to the same route.
+  setDiagnosticRoute(context);
   const desktopAPI = window.desktopAPI as
     | { setRendererRouteContext?: (context: RendererRouteContextInput) => void }
     | undefined;

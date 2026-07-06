@@ -5,6 +5,12 @@ export type RendererRouteSurface = "login" | "overlay" | "tab";
 export type RendererRouteContextInput = {
   surface: RendererRouteSurface;
   path: string;
+  /**
+   * Current query string (`?issue=<id>` etc.) so a freeze breadcrumb can be
+   * attributed to the specific resource, not just the page (MUL-4120). Only
+   * internal UUIDs / route state — never user-typed content.
+   */
+  search?: string;
   workspaceSlug?: string;
   tabId?: string;
 };
@@ -27,12 +33,14 @@ export function sanitizeRendererRouteContext(
   const path = sanitizeString(input.path);
   if (!path) return null;
 
+  const search = sanitizeString(input.search);
   const workspaceSlug = sanitizeString(input.workspaceSlug);
   const tabId = sanitizeString(input.tabId);
 
   return {
     surface: input.surface,
     path,
+    ...(search ? { search } : {}),
     ...(workspaceSlug ? { workspaceSlug } : {}),
     ...(tabId ? { tabId } : {}),
     reportedAt: reportedAt.toISOString(),

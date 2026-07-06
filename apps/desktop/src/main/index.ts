@@ -25,7 +25,8 @@ import {
 } from "./renderer-recovery";
 import {
   writeFreezeBreadcrumb,
-  readAndClearFreezeBreadcrumb,
+  readFreezeBreadcrumb,
+  ackFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
 
@@ -458,12 +459,23 @@ if (!gotTheLock) {
       event.returnValue = { version: getAppVersion(), os };
     });
 
-    // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
-    // session. The renderer flushes it to telemetry on boot (it couldn't be
-    // reported when it happened — the renderer was hung or gone). Read-and-
-    // clear so a failure reports exactly once.
+    // Sync IPC: read any freeze/crash breadcrumb left by a previous session.
+    // The renderer flushes it to telemetry on boot (it couldn't be reported
+    // when it happened — the renderer was hung or gone). Read does NOT clear:
+    // the renderer acks the breadcrumb's ts via `freeze:ack` after handing
+    // the event to posthog, so a boot that hangs again before the event
+    // leaves the process keeps the file and the next boot retries (MUL-4120).
     ipcMain.on("freeze:get-last", (event) => {
-      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+      event.returnValue = readFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
+    // Delete the breadcrumb the renderer just reported. Guarded by ts so a
+    // late ack can never delete a NEWER breadcrumb written after the read.
+    // Sender check mirrors the route-context handler below.
+    ipcMain.on("freeze:ack", (event, ts: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      if (typeof ts !== "number" || !Number.isFinite(ts)) return;
+      ackFreezeBreadcrumb(freezeBreadcrumbPath(), ts);
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer

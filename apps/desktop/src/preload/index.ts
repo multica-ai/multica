@@ -79,9 +79,11 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
-  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
-   *  the renderer can flush it to telemetry on boot. Returns null when there's
-   *  nothing pending (the normal case). */
+  /** Read any freeze/crash breadcrumb left by a previous session, so the
+   *  renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). Reading does NOT delete the file —
+   *  call `ackFreeze(ts)` once the event was handed to posthog, so a boot
+   *  that hangs again before reporting keeps the breadcrumb for retry. */
   getLastFreeze: (): FreezeBreadcrumb | null => {
     try {
       return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
@@ -89,6 +91,9 @@ const desktopAPI = {
       return null;
     }
   },
+  /** Acknowledge a reported breadcrumb by its `ts`; the main process deletes
+   *  the file only if the on-disk breadcrumb still carries that exact ts. */
+  ackFreeze: (ts: number) => ipcRenderer.send("freeze:ack", ts),
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>

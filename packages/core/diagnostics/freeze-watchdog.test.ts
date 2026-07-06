@@ -131,4 +131,104 @@ describe("installFreezeWatchdog", () => {
     fireLongTask(2500);
     expect(captureEvent).toHaveBeenCalledTimes(2);
   });
+
+  // Desktop injects its memory-router tab path (location.pathname there is
+  // the loaded index.html file path — MUL-4120). Web passes no provider and
+  // must keep the location.pathname behavior byte-for-byte.
+  describe("path provider", () => {
+    it("prefers the injected provider over location.pathname", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog({ getPath: () => "/acme/inbox" });
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledWith("client_unresponsive", {
+        source: "longtask",
+        duration_ms: 2300,
+        path: "/acme/inbox",
+      });
+    });
+
+    it("is called lazily at emit time, not at install time", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      let route = "/acme/issues";
+      installFreezeWatchdog({ getPath: () => route });
+      route = "/acme/inbox";
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledWith(
+        "client_unresponsive",
+        expect.objectContaining({ path: "/acme/inbox" }),
+      );
+    });
+
+    it("falls back to location.pathname when the provider returns undefined", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog({ getPath: () => undefined });
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledWith(
+        "client_unresponsive",
+        expect.objectContaining({ path: "/acme/issues" }),
+      );
+    });
+
+    it("falls back to location.pathname when the provider returns an empty string", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog({ getPath: () => "" });
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledWith(
+        "client_unresponsive",
+        expect.objectContaining({ path: "/acme/issues" }),
+      );
+    });
+
+    it("falls back to location.pathname when the provider throws", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog({
+        getPath: () => {
+          throw new Error("store not ready");
+        },
+      });
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+      expect(captureEvent).toHaveBeenCalledWith(
+        "client_unresponsive",
+        expect.objectContaining({ path: "/acme/issues" }),
+      );
+    });
+
+    it("no provider (web) keeps the location.pathname default", async () => {
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog();
+
+      fireLongTask(2300);
+
+      expect(captureEvent).toHaveBeenCalledWith(
+        "client_unresponsive",
+        expect.objectContaining({ path: "/acme/issues" }),
+      );
+    });
+
+    it("cooldown still applies with a provider", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const { installFreezeWatchdog, captureEvent } = await load();
+      installFreezeWatchdog({ getPath: () => "/acme/inbox" });
+
+      fireLongTask(2500);
+      fireLongTask(2500);
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(60_000);
+      fireLongTask(2500);
+      expect(captureEvent).toHaveBeenCalledTimes(2);
+    });
+  });
 });

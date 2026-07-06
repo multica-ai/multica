@@ -58,7 +58,12 @@ let lastCapturedPath: string | null = null;
 // only ever carry user-triggered signals on identified users, so the
 // buffer stays small (~one step-transition worth).
 type PendingOp =
-  | { kind: "event"; name: string; props?: Record<string, unknown> }
+  | {
+      kind: "event";
+      name: string;
+      props?: Record<string, unknown>;
+      options?: CaptureEventOptions;
+    }
   | { kind: "set"; props: Record<string, unknown> }
   | { kind: "exception"; error: unknown; props?: Record<string, unknown> };
 const pendingOps: PendingOp[] = [];
@@ -217,7 +222,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   while (pendingOps.length > 0) {
     const op = pendingOps.shift()!;
     if (op.kind === "event") {
-      posthog.capture(op.name, withClientEventProperties(op.props));
+      captureNow(op.name, op.props, op.options);
     } else if (op.kind === "exception") {
       posthog.captureException(op.error, withClientEventProperties(op.props));
     } else {
@@ -265,6 +270,25 @@ export function resetAnalytics(): void {
   }
 }
 
+export interface CaptureEventOptions {
+  /**
+   * Bypass posthog-js's batching queue (`send_instantly`) so the event's
+   * network request fires immediately. For failure-tier signals (freeze
+   * breadcrumb flush) whose sender may hang or die before a batch timer
+   * ever runs — regular product events should stay on the batched default.
+   */
+  sendInstantly?: boolean;
+  /**
+   * Called when the event was actually handed to `posthog.capture` —
+   * synchronously when analytics is initialized, or during the pending-ops
+   * replay inside initAnalytics otherwise. This is NOT a network-delivery
+   * ack (posthog-js exposes none); it only marks the hand-off. Never fires
+   * when analytics stays disabled (no key / SSR) — callers relying on it
+   * for cleanup need their own convergence path (e.g. the breadcrumb TTL).
+   */
+  onCaptured?: () => void;
+}
+
 /**
  * Capture a frontend-emitted event. Most funnel events fire server-side
  * (see `server/internal/analytics`); this wrapper is reserved for the
@@ -273,17 +297,32 @@ export function resetAnalytics(): void {
  * to a handler.
  *
  * Calls before initAnalytics() buffer in order so a late-arriving config
- * doesn't silently swallow a step transition.
+ * doesn't silently swallow a step transition. Buffered events keep their
+ * options, so `sendInstantly` / `onCaptured` semantics survive the replay.
  */
 export function captureEvent(
   name: string,
   props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
 ): void {
   if (!initialized) {
-    pendingOps.push({ kind: "event", name, props });
+    pendingOps.push({ kind: "event", name, props, options });
     return;
   }
-  posthog.capture(name, withClientEventProperties(props));
+  captureNow(name, props, options);
+}
+
+function captureNow(
+  name: string,
+  props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
+): void {
+  posthog.capture(
+    name,
+    withClientEventProperties(props),
+    options?.sendInstantly ? { send_instantly: true } : undefined,
+  );
+  options?.onCaptured?.();
 }
 
 /**
