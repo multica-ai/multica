@@ -154,16 +154,21 @@ export function useInPageFind(options: {
   // replaced even when the total match count is unchanged.
   const applyActive = useCallback(
     (ranges: Range[], index: number, scroll: boolean) => {
-      if (!supported) return;
       const range = index >= 0 ? ranges[index] : undefined;
-      if (!range) {
-        CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
-        return;
+      // Painting the active tint is the only highlight-API-only step. Active
+      // tracking and scroll-to-match must keep working on browsers without the
+      // CSS Custom Highlight API, otherwise prev/next would open the bar but
+      // never move the view.
+      if (supported) {
+        if (range) {
+          const active = new Highlight(range);
+          active.priority = 1;
+          CSS.highlights.set(ACTIVE_HIGHLIGHT_NAME, active);
+        } else {
+          CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
+        }
       }
-      const active = new Highlight(range);
-      active.priority = 1;
-      CSS.highlights.set(ACTIVE_HIGHLIGHT_NAME, active);
-      if (scroll) scrollRangeIntoView(containerRef.current, range);
+      if (range && scroll) scrollRangeIntoView(containerRef.current, range);
     },
     [supported],
   );
@@ -174,7 +179,7 @@ export function useInPageFind(options: {
   const recompute = useCallback(
     (resetActive: boolean) => {
       const root = containerRef.current;
-      if (!open || !root || query.trim().length === 0 || !supported) {
+      if (!open || !root || query.trim().length === 0) {
         rangesRef.current = [];
         clearHighlights();
         setMatchCount(0);
@@ -198,7 +203,9 @@ export function useInPageFind(options: {
         return;
       }
 
-      CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges));
+      if (supported) {
+        CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges));
+      }
       setMatchCount(ranges.length);
       const prev = activeIndexRef.current;
       const nextActive =
@@ -231,8 +238,10 @@ export function useInPageFind(options: {
 
   // Async DOM churn (markdown/code highlight settling, streamed replies)
   // invalidates the ranges; re-derive them, coalescing bursts into one frame.
+  // Runs regardless of highlight support so fallback counting/navigation stay
+  // in sync with the live DOM.
   useEffect(() => {
-    if (!open || !container || !supported) return;
+    if (!open || !container) return;
     let raf = 0;
     const observer = new MutationObserver(() => {
       cancelAnimationFrame(raf);
@@ -247,7 +256,7 @@ export function useInPageFind(options: {
       observer.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [open, container, supported]);
+  }, [open, container]);
 
   // Move the active tint and scroll when the user steps between matches.
   // (Recompute handles the active tint for content-driven changes.)
