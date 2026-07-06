@@ -68,6 +68,11 @@ type TaskService struct {
 	// router.go; nil-safe (a quick-create with a workflow just skips the
 	// attach if unwired).
 	IssueWorkflowActivator IssueWorkflowActivator
+	// CEREBRO-PATCH(workflow-session-stamper): FIR-2283 followup point b — badge +
+	// rename the session a run_skill phase run opened, deterministically on
+	// completion (not dependent on the agent calling rename_session). Set from
+	// router.go; nil-safe.
+	WorkflowSessionStamper WorkflowSessionStamper
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -91,6 +96,13 @@ type IssueWorkflowActivator interface {
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+// CEREBRO-PATCH(workflow-session-stamper-iface): FIR-2283 followup point b seam.
+// Implemented by cerebro/workflows.SessionPhaseStamper; the interface keeps the
+// upstream service package free of a cerebro import.
+type WorkflowSessionStamper interface {
+	StampOnComplete(ctx context.Context, task db.AgentTaskQueue)
 }
 
 // CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause invoker seam.
@@ -1732,6 +1744,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// parsing the agent's stdout for an identifier.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		s.notifyQuickCreateCompleted(ctx, task, qc)
+	}
+
+	// CEREBRO-PATCH(workflow-session-stamper-call): FIR-2283 followup point b —
+	// badge/rename the phase session this run opened. No-op unless the task
+	// carried loop_phase; runs post-commit so it never blocks completion.
+	if s.WorkflowSessionStamper != nil {
+		s.WorkflowSessionStamper.StampOnComplete(ctx, task)
 	}
 
 	// For chat tasks, broadcast chat:done. The assistant reply, the

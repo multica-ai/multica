@@ -754,7 +754,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
 	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
-		WithIssueLoopCompiler(cerebroloops.NewIssueLoopBridge(cerebroQueries, cerebroIssueLoopColumns)).
+		// CEREBRO-PATCH(cerebro-issue-loop-skill-validate): FIR-2283 followup — reject a recipe naming a skill the workspace lacks at save time.
+		WithIssueLoopCompiler(cerebroloops.NewIssueLoopBridge(cerebroQueries, cerebroIssueLoopColumns).WithSkillLister(queries)).
 		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation): FIR-2283 v2 point 8 — plug the upstream issue lookup so the per-issue activation endpoints can confirm the target issue exists and belongs to the caller's workspace.
 	cerebroWorkflowsHandler.WithIssueLookup(queries)
@@ -762,6 +763,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.IssueWorkflowActivator = cerebroWorkflowsHandler
 	// CEREBRO-PATCH(task-issue-workflow-activator-wire): FIR-2283 followup — same seam for the quick-create (Create-with-agent) completion path, which attaches the picked workflow once the async-created issue is resolved.
 	h.TaskService.IssueWorkflowActivator = cerebroWorkflowsHandler
+	// CEREBRO-PATCH(workflow-session-stamper-wire): FIR-2283 followup point b — deterministic phase badge/rename on run_skill completion; nil-safe seam.
+	h.TaskService.WorkflowSessionStamper = cerebroworkflows.NewSessionPhaseStamper(pool)
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
 	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries).WithUpstream(queries).WithTx(pool)
 	// CEREBRO-PATCH(custom-status-resolver-wire): FIR-1550 v2b — UpdateIssue invokes the resolver.

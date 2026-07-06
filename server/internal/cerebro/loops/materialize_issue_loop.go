@@ -33,19 +33,89 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// WorkspaceSkillLister lists the skills defined in a workspace so an
+// issue_loop recipe's plan/build skills can be checked for existence at
+// save time (FIR-2283 followup). Satisfied directly by *db.Queries, so
+// router.go passes the upstream queries handle with no adapter.
+type WorkspaceSkillLister interface {
+	ListSkillSummariesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
+}
 
 // IssueLoopBridge implements workflows.IssueLoopCompiler over the generated
 // cerebro DB queries and the issue-loop column store.
 type IssueLoopBridge struct {
 	queries *cerebrodb.Queries
 	columns *workflows.IssueLoopColumnStore
+	// skills is optional and nil-safe: without it, a recipe's plan/build
+	// skills are not existence-checked at save time (the runtime run_skill
+	// dispatch still fails hard on a missing skill). Wired via WithSkillLister.
+	skills WorkspaceSkillLister
 }
 
 // NewIssueLoopBridge builds an IssueLoopBridge over the given queries and
 // issue-loop column store.
 func NewIssueLoopBridge(queries *cerebrodb.Queries, columns *workflows.IssueLoopColumnStore) *IssueLoopBridge {
 	return &IssueLoopBridge{queries: queries, columns: columns}
+}
+
+// WithSkillLister plugs in the workspace skill lister used to reject a recipe
+// whose plan_skill/build_skill names don't exist in the workspace, at save
+// time instead of at dispatch time. Optional and nil-safe; returns the
+// receiver for chainable init.
+func (b *IssueLoopBridge) WithSkillLister(l WorkspaceSkillLister) *IssueLoopBridge {
+	b.skills = l
+	return b
+}
+
+// validateSkillsExist rejects a recipe that names a plan_skill / build_skill /
+// per-phase build_skill / judge_skill the workspace doesn't have. Nil-safe:
+// without a skill lister wired, it is a no-op (the runtime run_skill dispatch
+// still enforces existence, just later and less visibly). References are
+// checked in a fixed order so the first missing skill reported is
+// deterministic.
+func (b *IssueLoopBridge) validateSkillsExist(ctx context.Context, workspaceID pgtype.UUID, wire issueLoopSpecWire) error {
+	if b.skills == nil {
+		return nil
+	}
+	type ref struct{ label, name string }
+	refs := []ref{
+		{"plan_skill", wire.PlanSkill},
+		{"build_skill", wire.BuildSkill},
+		{"judge_skill", wire.JudgeSkill},
+	}
+	for i, ph := range wire.Spec.Phases {
+		refs = append(refs, ref{fmt.Sprintf("phases[%d].build_skill", i), ph.BuildSkill})
+	}
+	anyNamed := false
+	for _, r := range refs {
+		if r.name != "" {
+			anyNamed = true
+			break
+		}
+	}
+	if !anyNamed {
+		return nil
+	}
+	skills, err := b.skills.ListSkillSummariesByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("loop_spec: verify skills: %w", err)
+	}
+	have := make(map[string]struct{}, len(skills))
+	for _, sk := range skills {
+		have[sk.Name] = struct{}{}
+	}
+	for _, r := range refs {
+		if r.name == "" {
+			continue
+		}
+		if _, ok := have[r.name]; !ok {
+			return fmt.Errorf("loop_spec: %s %q does not exist in this workspace", r.label, r.name)
+		}
+	}
+	return nil
 }
 
 // issueLoopSpecWire is the JSON wire shape of an issue_loop recipe's
@@ -117,6 +187,13 @@ func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workfl
 	// build_skill is not required there — Compile drives the loop from phase 0.
 	if wire.BuildSkill == "" && len(wire.Spec.Phases) == 0 {
 		return fmt.Errorf("loop_spec: build_skill is required")
+	}
+	// Reject a recipe that names a skill the workspace doesn't have, at save
+	// time — otherwise the miss only surfaces at dispatch as a "Workflow
+	// failed" issue ("agent does not have skill X attached"), invisible to the
+	// person who built the recipe (FIR-2283 followup).
+	if err := b.validateSkillsExist(ctx, workspaceID, wire); err != nil {
+		return err
 	}
 
 	params := CompileParams{
