@@ -679,6 +679,18 @@ export function pickOpenIdeTaskId(tasks: AgentTask[] | undefined): string | unde
   return latest?.id;
 }
 
+export function pickLatestRelativeWorkDir(tasks: AgentTask[] | undefined): string | undefined {
+  if (!tasks?.length) return undefined;
+  let latest: AgentTask | undefined;
+  for (const task of tasks) {
+    if (!task.relative_work_dir) continue;
+    if (!latest || task.created_at > latest.created_at) {
+      latest = task;
+    }
+  }
+  return latest?.relative_work_dir;
+}
+
 const OPEN_IDE_STATUS_POLL_INTERVAL_MS = 1_000;
 const OPEN_IDE_STATUS_POLL_ATTEMPTS = 10;
 
@@ -1163,6 +1175,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: issueTasks = [] } = useQuery({
+    queryKey: issueKeys.tasks(id),
+    queryFn: () => api.listTasksByIssue(id),
+    enabled: !!issue,
+    staleTime: 30_000,
+  });
+  const latestRelativeWorkDir = useMemo(
+    () => pickLatestRelativeWorkDir(issueTasks),
+    [issueTasks],
+  );
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
@@ -1550,6 +1572,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )}
             </div>
           </PropRow>
+          {latestRelativeWorkDir && (
+            <div className="-mx-2 col-span-2 grid grid-cols-subgrid px-2 pb-1">
+              <span aria-hidden="true" />
+              <code className="min-w-0 break-all rounded bg-muted/50 px-1.5 py-1 font-mono text-[11px] leading-4 text-muted-foreground">
+                {latestRelativeWorkDir}
+              </code>
+            </div>
+          )}
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the

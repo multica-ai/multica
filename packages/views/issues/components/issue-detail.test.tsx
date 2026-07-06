@@ -689,6 +689,63 @@ describe("IssueDetail (shared)", () => {
     })).toBeInTheDocument();
   });
 
+  it("shows the latest work directory under the project row", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-old",
+        agent_id: "agent-1",
+        runtime_id: "",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-01-01T00:00:00Z",
+        relative_work_dir: "ws/task-old/workdir",
+      },
+      {
+        id: "task-new",
+        agent_id: "agent-1",
+        runtime_id: "",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-01-02T00:00:00Z",
+        relative_work_dir: "ws/task-new/workdir",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("ws/task-new/workdir")).toBeInTheDocument();
+    expect(screen.queryByText("ws/task-old/workdir")).not.toBeInTheDocument();
+  });
+
   it("does not show the IntelliJ IDEA open button when the issue has no project", async () => {
     renderIssueDetail();
 
