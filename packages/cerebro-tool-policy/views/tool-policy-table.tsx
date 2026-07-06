@@ -210,6 +210,11 @@ const SETTING_LABEL: Record<ToolSetting, string> = {
 };
 const DECISION_FILTERS: ToolEffectiveSetting[] = ["allow", "ask", "deny"];
 
+// Restrictiveness rank — a sub-row choice can only TIGHTEN a group-wide floor,
+// never loosen it (TECH-3287 hul 7). Mirrors the connection sheet's rank so the
+// inline catalog lists and the sheet gate futile choices identically.
+const SETTING_RANK: Record<ToolEffectiveSetting, number> = { allow: 0, ask: 1, deny: 2 };
+
 // Decision palette — emerald / amber / destructive, matching the cerebro fork's
 // other permission surfaces (simple table, cerebro-access).
 const VERDICT_PILL: Record<ToolEffectiveSetting, string> = {
@@ -1296,7 +1301,14 @@ export function DecisionControl({
 // the row bar stays one control wide and the tool name never gets crowded off on
 // mobile. It composes the same DecisionControl verdict styling and the extracted
 // ConditionEditorBody, so the underlying write semantics are unchanged.
-function CatalogDecisionControl({
+//
+// Exported for the inline group lists (ConnectionToolList, DataSourceList) so
+// every expanded sub-row in the catalog renders the exact same control
+// (FIR-2706 follow-up — Jesper: "100% identical everywhere"). The optional
+// floorRank/floorLabel pair carries the connection sheet's tighten-only rule:
+// choices looser than the group-wide floor are disabled as futile
+// (TECH-3287 hul 7).
+export function CatalogDecisionControl({
   row,
   editLayer,
   disabled,
@@ -1304,6 +1316,8 @@ function CatalogDecisionControl({
   onCondition,
   wsId,
   argScopeConfig,
+  floorRank,
+  floorLabel,
 }: {
   row: ToolPolicyRow;
   editLayer: ToolLayer;
@@ -1312,6 +1326,10 @@ function CatalogDecisionControl({
   onCondition: (condition: ToolCondition | null) => void;
   wsId?: string;
   argScopeConfig?: ScopeConfig | null;
+  /** Restrictiveness rank of the group-wide floor; looser choices are futile. */
+  floorRank?: number;
+  /** Display label of the group-wide floor, for the futile-choice tooltip. */
+  floorLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = row.effective.setting;
@@ -1359,29 +1377,42 @@ function CatalogDecisionControl({
             <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Decision
             </span>
-            {SETTING_CHOICES.map((choice) => (
-              <button
-                key={choice}
-                type="button"
-                data-testid={`catalog-decision-${row.tool_key}-${choice}`}
-                onClick={() => {
-                  onDecision(choice);
-                  setOpen(false);
-                }}
-                className={cn(
-                  "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
-                  choice === "inherit" && "text-muted-foreground",
-                  row.layers[editLayer] === choice && "font-semibold",
-                )}
-              >
-                {SETTING_LABEL[choice]}
-                {choice === "inherit" && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    clears {LAYER_LABEL[editLayer]}
-                  </span>
-                )}
-              </button>
-            ))}
+            {SETTING_CHOICES.map((choice) => {
+              const futile =
+                floorRank !== undefined &&
+                choice !== "inherit" &&
+                SETTING_RANK[choice] < floorRank;
+              return (
+                <button
+                  key={choice}
+                  type="button"
+                  data-testid={`catalog-decision-${row.tool_key}-${choice}`}
+                  disabled={futile}
+                  title={
+                    futile
+                      ? `The connection is set to “${floorLabel}” — “${SETTING_LABEL[choice]}” here is more open and has no effect.`
+                      : undefined
+                  }
+                  onClick={() => {
+                    onDecision(choice);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                    choice === "inherit" && "text-muted-foreground",
+                    row.layers[editLayer] === choice && "font-semibold",
+                    futile && "cursor-not-allowed opacity-50 hover:bg-transparent",
+                  )}
+                >
+                  {SETTING_LABEL[choice]}
+                  {choice === "inherit" && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      clears {LAYER_LABEL[editLayer]}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           {showWhen ? (
             <div className="border-t p-3">

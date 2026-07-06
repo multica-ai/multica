@@ -34,7 +34,11 @@ import {
   type ToolPolicyRow,
   type ToolSetting,
 } from "../core/tool-policy";
-import { DecisionControl, ConditionControl } from "./tool-policy-table";
+import {
+  CatalogDecisionControl,
+  ConditionControl,
+  DecisionControl,
+} from "./tool-policy-table";
 
 export interface FirtalRegistryDataSourceSheetProps {
   open: boolean;
@@ -285,8 +289,10 @@ export function FirtalRegistryDataSourceConfigure({
 // DataSourceList (FIR-2706) renders the firtal_registry data sources as an inline
 // list — the SAME per-source rows the sheet shows, mounted directly under an
 // expanded row in the capability catalog as a "Data sources" sub-group, instead
-// of behind the "Data sources (N)" button. Reuses DecisionControl + the identical
-// write semantics so inline and sheet editing can never drift.
+// of behind the "Data sources (N)" button. Renders CatalogDecisionControl (the
+// catalog's single decision-with-When pill, same as repo and credential
+// sub-rows) with the identical write semantics so inline and sheet editing can
+// never drift.
 export function DataSourceList({
   toolKey,
   sourceRows,
@@ -359,17 +365,15 @@ export function DataSourceList({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <DecisionControl
+            {/* The SAME single pill as every other catalog sub-row (repos,
+                credential groups, connection tools): decision + When inside
+                one control (FIR-2706 follow-up — "100% identical everywhere"). */}
+            <CatalogDecisionControl
               row={r}
               editLayer={editLayer}
               disabled={busy}
-              onChange={(s) => applySetting(r.resource_pattern, s)}
-            />
-            <ConditionControl
-              row={r}
-              editLayer={editLayer}
-              disabled={busy}
-              onChange={(c) => applyCondition(r, c)}
+              onDecision={(s) => applySetting(r.resource_pattern, s)}
+              onCondition={(c) => applyCondition(r, c)}
             />
           </div>
         </div>

@@ -43,7 +43,59 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   ),
 }));
 
-import { ConnectionConfigSheet } from "./connection-config-sheet";
+// The catalog decision pill (CatalogDecisionControl) lives in a Radix Popover
+// (portals + pointer APIs jsdom lacks). Flatten it the same way the table test
+// does so the inline list's single pill is drivable.
+vi.mock("@multica/ui/components/ui/popover", async () => {
+  const React = await import("react");
+  const Ctx = React.createContext<{ open: boolean; onOpenChange: (v: boolean) => void }>({
+    open: false,
+    onOpenChange: () => {},
+  });
+  return {
+    Popover: ({
+      open,
+      onOpenChange,
+      children,
+    }: {
+      open?: boolean;
+      onOpenChange?: (v: boolean) => void;
+      children: ReactNode;
+    }) => (
+      <Ctx.Provider value={{ open: !!open, onOpenChange: onOpenChange ?? (() => {}) }}>
+        {children}
+      </Ctx.Provider>
+    ),
+    PopoverTrigger: ({
+      children,
+      onClick,
+      ...props
+    }: { children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) => {
+      const { open, onOpenChange } = React.useContext(Ctx);
+      return (
+        <button
+          type="button"
+          {...props}
+          onClick={(e) => {
+            onClick?.(e);
+            onOpenChange(!open);
+          }}
+        >
+          {children}
+        </button>
+      );
+    },
+    PopoverContent: ({ children }: { children: ReactNode }) => {
+      const { open } = React.useContext(Ctx);
+      return open ? <div>{children}</div> : null;
+    },
+    PopoverTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    PopoverDescription: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    PopoverHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  };
+});
+
+import { ConnectionConfigSheet, ConnectionToolList } from "./connection-config-sheet";
 import type { ToolPolicyRow } from "../core";
 
 function connRow(
@@ -168,5 +220,79 @@ describe("ConnectionConfigSheet (TECH-3287 hul 1/6/7)", () => {
     const tool = screen.getByTestId("connection-tool-lookup_order");
     expect(tool.querySelector(".truncate")).toBeNull();
     expect(tool.querySelector(".whitespace-nowrap")).not.toBeNull();
+  });
+});
+
+// ConnectionToolList — the inline list under an expanded connection row in the
+// capability catalog. FIR-2706 follow-up: each tool row renders the SAME single
+// decision-with-When pill as repo and credential sub-rows (CatalogDecisionControl),
+// with the sheet's tighten-only floor rule preserved.
+function renderInlineList(connectionRow: ToolPolicyRow) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <ConnectionToolList
+        connectionKey="connection:customer-service"
+        connectionRow={connectionRow}
+        toolRows={[toolRow("lookup_order"), toolRow("draft_reply")]}
+        editLayer="agent"
+        subjectId="agent-1"
+      />
+    </QueryClientProvider>,
+  );
+}
+
+describe("ConnectionToolList (FIR-2706 same-design)", () => {
+  it("renders each tool with ONE Decision pill and no separate When button", () => {
+    renderInlineList(connRow("allow"));
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    // Exactly one control on the bar: the catalog Decision pill. The old
+    // standalone When button (condition-control-*) is gone — When now lives
+    // inside the pill, identical to repo and credential sub-rows.
+    expect(within(tool).getByRole("button", { name: /^Decision:/ })).toBeInTheDocument();
+    expect(
+      within(tool).queryByTestId("condition-control-connection:customer-service"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("writes the chosen setting scoped to the tool's resource_pattern", async () => {
+    const user = userEvent.setup();
+    renderInlineList(connRow("allow"));
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    await user.click(within(tool).getByRole("button", { name: /^Decision:/ }));
+    await user.click(
+      within(tool).getByTestId("catalog-decision-connection:customer-service-deny"),
+    );
+    const puts = mockCerebroRequest.mock.calls.filter(
+      (c) => (c[1] as RequestInit | undefined)?.method === "PUT",
+    );
+    const body = JSON.parse((puts.at(-1)![1] as RequestInit).body as string);
+    expect(body).toMatchObject({
+      tool_key: "connection:customer-service",
+      resource_pattern: "lookup_order",
+      layer: "agent",
+      subject_id: "agent-1",
+      setting: "deny",
+    });
+  });
+
+  it("disables the looser-than-floor choices inside the pill when the connection floor is Deny", async () => {
+    const user = userEvent.setup();
+    renderInlineList(connRow("deny", { decided_by: "workspace" }));
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    await user.click(within(tool).getByRole("button", { name: /^Decision:/ }));
+    // Tighten-only (TECH-3287 hul 7): Allow/Ask are futile below a Deny floor.
+    expect(
+      within(tool).getByTestId("catalog-decision-connection:customer-service-allow"),
+    ).toBeDisabled();
+    expect(
+      within(tool).getByTestId("catalog-decision-connection:customer-service-ask"),
+    ).toBeDisabled();
+    expect(
+      within(tool).getByTestId("catalog-decision-connection:customer-service-deny"),
+    ).toBeEnabled();
+    expect(
+      within(tool).getByTestId("catalog-decision-connection:customer-service-inherit"),
+    ).toBeEnabled();
   });
 });

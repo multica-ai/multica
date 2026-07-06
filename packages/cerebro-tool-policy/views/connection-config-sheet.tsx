@@ -50,7 +50,7 @@ import {
   type ToolSetting,
   type ToolPolicyRow,
 } from "../core/tool-policy";
-import { ConditionControl } from "./tool-policy-table";
+import { CatalogDecisionControl, ConditionControl } from "./tool-policy-table";
 
 const CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 const CHOICE_LABEL: Record<ToolSetting, string> = {
@@ -382,10 +382,11 @@ export function ConnectionConfigSheet({
 // ConnectionToolList (FIR-2706) renders a connection's per-tool rows as an inline
 // list — the SAME rows the sheet shows, but mounted directly under an expanded
 // connection row in the capability catalog instead of inside a right-side Sheet.
-// It reuses EndpointDecisionControl (one toggle per tool) and the identical
-// tighten-only write semantics, so inline editing and sheet editing can never
-// drift. The wide Sheet stays for the classic table; this is the redesign's
-// "expand and show the group" surface Jesper asked for.
+// It renders CatalogDecisionControl (the catalog's single decision-with-When
+// pill, same as repo and credential sub-rows) with the identical tighten-only
+// write semantics, so inline editing and sheet editing can never drift. The
+// wide Sheet stays for the classic table; this is the redesign's "expand and
+// show the group" surface Jesper asked for.
 export function ConnectionToolList({
   connectionKey,
   connectionRow,
@@ -487,19 +488,18 @@ export function ConnectionToolList({
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <EndpointDecisionControl
+            {/* The SAME single pill as every other catalog sub-row (repos,
+                credential groups): decision + When inside one control
+                (FIR-2706 follow-up — "100% identical everywhere"). The
+                floorRank/floorLabel pair keeps the sheet's tighten-only rule. */}
+            <CatalogDecisionControl
               row={r}
               editLayer={editLayer}
               disabled={busy}
               floorRank={floorRank}
               floorLabel={CHOICE_LABEL[floor]}
-              onChange={(setting) => write(r.resource_pattern, setting)}
-            />
-            <ConditionControl
-              row={r}
-              editLayer={editLayer}
-              disabled={busy}
-              onChange={(c) => applyCondition(r, c)}
+              onDecision={(setting) => write(r.resource_pattern, setting)}
+              onCondition={(c) => applyCondition(r, c)}
             />
           </div>
         </div>
