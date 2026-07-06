@@ -17,9 +17,13 @@ import (
 
 // fakeDispatchQueries stubs the upstream issue queries the TaskDispatcher needs.
 type fakeDispatchQueries struct {
-	agent   db.Agent
-	getErr  error
-	created []db.CreateQuickCreateTaskParams
+	agent       db.Agent
+	getErr      error
+	issue       db.Issue
+	getIssueErr error
+	created     []db.CreateQuickCreateTaskParams
+	comments    []db.CreateCommentParams
+	issueTasks  []db.CreateAgentTaskParams
 }
 
 func (f *fakeDispatchQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
@@ -28,6 +32,28 @@ func (f *fakeDispatchQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.
 
 func (f *fakeDispatchQueries) CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error) {
 	f.created = append(f.created, arg)
+	return db.AgentTaskQueue{}, nil
+}
+
+func (f *fakeDispatchQueries) GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error) {
+	if f.getIssueErr != nil {
+		return db.Issue{}, f.getIssueErr
+	}
+	if f.issue.ID.Valid {
+		return f.issue, nil
+	}
+	return db.Issue{ID: id}, nil
+}
+
+func (f *fakeDispatchQueries) CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error) {
+	f.comments = append(f.comments, arg)
+	var id pgtype.UUID
+	_ = id.Scan("99999999-9999-9999-9999-999999999999")
+	return db.Comment{ID: id, IssueID: arg.IssueID, AuthorType: arg.AuthorType, AuthorID: arg.AuthorID, Content: arg.Content}, nil
+}
+
+func (f *fakeDispatchQueries) CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	f.issueTasks = append(f.issueTasks, arg)
 	return db.AgentTaskQueue{}, nil
 }
 

@@ -210,6 +210,14 @@ type ActionConfigRunSkill struct {
 	// to infer it from the issue status. Set by the loop compiler on the
 	// planning-dispatch rule.
 	PlanMode bool `json:"plan_mode,omitempty"`
+	// LoopPhase names the Issue-workflow phase this run_skill dispatch belongs
+	// to ("plan" / "build"). Set by the loop compiler on the phase dispatch
+	// rules. When set AND the trigger has an issue, the action runner starts
+	// the run ON that issue — a visible kickoff comment opens a session thread
+	// (badged with the phase) and the agent task is issue-bound — instead of a
+	// detached quick_create task nobody can see on the issue (Tine's live-test
+	// finding: 0 comments / 0 sessions on the workflow's target issue).
+	LoopPhase string `json:"loop_phase,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

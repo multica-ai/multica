@@ -51,6 +51,19 @@ type Service struct {
 	// WithGateEvaluator (see check_gate.go) so the loops adapter plugs in
 	// without workflows importing loops.
 	gateEval GateEvaluator
+
+	// sessionStamper badges the session thread a phase dispatch opens
+	// ("Plan"/"Build") the moment it is dispatched. Optional and nil-safe:
+	// without it the completion-time fallback (SessionPhaseStamper wired on
+	// TaskService) still badges the session when the run finishes. Wired via
+	// WithSessionStamper from main.go.
+	sessionStamper *SessionPhaseStamper
+}
+
+// WithSessionStamper plugs in the dispatch-time session badge writer.
+func (s *Service) WithSessionStamper(st *SessionPhaseStamper) *Service {
+	s.sessionStamper = st
+	return s
 }
 
 // New builds a Service. enabled is true when the CEREBRO_WORKFLOWS_ENABLED

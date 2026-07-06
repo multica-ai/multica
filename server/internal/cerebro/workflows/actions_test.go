@@ -25,7 +25,10 @@ type fakeIssueActions struct {
 	Agent       db.Agent
 	GetAgentErr error
 
-	TaskQueued       db.CreateQuickCreateTaskParams
+	TaskQueued           db.CreateQuickCreateTaskParams
+	IssueTaskQueued      db.CreateAgentTaskParams
+	IssueTaskQueuedCount int
+	IssueTaskQueueErr    error
 	TaskQueueErr     error
 	CreatedComment   db.CreateCommentParams
 	CreateCommentErr error
@@ -142,6 +145,15 @@ func (f *fakeIssueActions) UpdateIssueAssignee(_ context.Context, p db.UpdateIss
 		return db.Issue{}, f.UpdateAssigneeErr
 	}
 	return db.Issue{ID: p.ID, AssigneeType: p.AssigneeType, AssigneeID: p.AssigneeID}, nil
+}
+
+func (f *fakeIssueActions) CreateAgentTask(_ context.Context, p db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	f.IssueTaskQueued = p
+	f.IssueTaskQueuedCount++
+	if f.IssueTaskQueueErr != nil {
+		return db.AgentTaskQueue{}, f.IssueTaskQueueErr
+	}
+	return db.AgentTaskQueue{ID: mustUUID("44444444-4444-4444-4444-444444444444")}, nil
 }
 
 func mustUUID(s string) pgtype.UUID {
@@ -496,7 +508,9 @@ func TestBuildPlanModePrompt(t *testing.T) {
 		t.Fatalf("plan-mode prompt dropped the inner skill instruction: %q", got)
 	}
 	// And the run must be told it is planning and must not write code.
-	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status", "rename_session", "\"plan\""} {
+	// rename_session is deliberately absent: the session badge is stamped
+	// server-side at dispatch time now, not requested from the agent.
+	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("plan-mode prompt missing %q, got:\n%s", want, got)
 		}

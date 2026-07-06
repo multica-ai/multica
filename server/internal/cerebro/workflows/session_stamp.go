@@ -84,56 +84,46 @@ func (s *SessionPhaseStamper) StampOnComplete(ctx context.Context, task db.Agent
 		return
 	}
 
-	// Anchor = the first top-level comment the run's agent posted on the target
-	// issue since the run started. That comment IS the run's session thread root
-	// (thread = session, FIR-1874), so its id keys the cerebro_session row. Fall
-	// back to CreatedAt when StartedAt is null (never-claimed tasks don't reach
-	// completion, so StartedAt is normally set).
-	since := task.StartedAt
-	if !since.Valid {
-		since = task.CreatedAt
-	}
-	var rootCommentID pgtype.UUID
-	err = s.pool.QueryRow(ctx, `
-		SELECT id FROM comment
-		WHERE issue_id = $1
-		  AND author_type = 'agent'
-		  AND author_id = $2
-		  AND parent_id IS NULL
-		  AND type = 'comment'
-		  AND created_at >= $3
-		ORDER BY created_at ASC, id ASC
-		LIMIT 1`,
-		targetIssueID, task.AgentID, since).Scan(&rootCommentID)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			// The run posted no top-level comment (e.g. it only replied in an
-			// existing thread, or produced nothing). Nothing to anchor a session
-			// to — the agent's own rename_session remains the fallback.
-			slog.Info("workflow session stamp: no thread root to badge",
-				"issue_id", uuidString(targetIssueID), "loop_phase", phase)
+	// Anchor preference: an issue-bound phase dispatch (the deterministic path)
+	// sets TriggerCommentID to the kickoff comment it created — that IS the
+	// session root, no guessing needed. Older detached dispatches fall back to
+	// the first top-level comment the run's agent posted on the target issue
+	// since the run started (thread = session, FIR-1874). CreatedAt covers a
+	// null StartedAt (never-claimed tasks don't reach completion normally).
+	rootCommentID := task.TriggerCommentID
+	if !rootCommentID.Valid {
+		since := task.StartedAt
+		if !since.Valid {
+			since = task.CreatedAt
+		}
+		err = s.pool.QueryRow(ctx, `
+			SELECT id FROM comment
+			WHERE issue_id = $1
+			  AND author_type = 'agent'
+			  AND author_id = $2
+			  AND parent_id IS NULL
+			  AND type = 'comment'
+			  AND created_at >= $3
+			ORDER BY created_at ASC, id ASC
+			LIMIT 1`,
+			targetIssueID, task.AgentID, since).Scan(&rootCommentID)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				// The run posted no top-level comment (e.g. it only replied in an
+				// existing thread, or produced nothing). Nothing to anchor a session
+				// to — the agent's own rename_session remains the fallback.
+				slog.Info("workflow session stamp: no thread root to badge",
+					"issue_id", uuidString(targetIssueID), "loop_phase", phase)
+				return
+			}
+			slog.Warn("workflow session stamp: thread-root lookup failed",
+				"issue_id", uuidString(targetIssueID), "error", err)
 			return
 		}
-		slog.Warn("workflow session stamp: thread-root lookup failed",
-			"issue_id", uuidString(targetIssueID), "error", err)
-		return
 	}
 
 	badge, name := phaseBadgeAndName(phase, tc.LoopSessionName)
-
-	// Upsert the session metadata row keyed on its thread root. ON CONFLICT the
-	// partial unique index (root_comment_id WHERE NOT NULL) turns a re-run into an
-	// update. The badge is always refreshed; the name only fills a blank one so a
-	// human- or agent-chosen name is never clobbered.
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase)
-		VALUES ($1, $2, 0, $3, $4)
-		ON CONFLICT (root_comment_id) WHERE root_comment_id IS NOT NULL
-		DO UPDATE SET
-			phase = EXCLUDED.phase,
-			name = CASE WHEN cerebro_session.name = '' THEN EXCLUDED.name ELSE cerebro_session.name END,
-			updated_at = now()`,
-		targetIssueID, rootCommentID, name, badge); err != nil {
+	if err := s.StampSession(ctx, targetIssueID, rootCommentID, badge, name); err != nil {
 		slog.Warn("workflow session stamp: upsert failed",
 			"issue_id", uuidString(targetIssueID),
 			"root_comment_id", uuidString(rootCommentID), "error", err)
@@ -143,6 +133,29 @@ func (s *SessionPhaseStamper) StampOnComplete(ctx context.Context, task db.Agent
 		"issue_id", uuidString(targetIssueID),
 		"root_comment_id", uuidString(rootCommentID),
 		"phase", badge, "name", name)
+}
+
+// StampSession upserts the session metadata row keyed on its thread root:
+// badge `phase` + display `name`. ON CONFLICT the partial unique index
+// (root_comment_id WHERE NOT NULL) turns a re-stamp into an update. The badge
+// is always refreshed; the name only fills a blank one so a human- or
+// agent-chosen name is never clobbered. Called at dispatch time by the
+// workflow engine (deterministic badge the moment the phase starts) and at
+// completion by StampOnComplete as the fallback. Satisfies loops.SessionStamper.
+func (s *SessionPhaseStamper) StampSession(ctx context.Context, issueID, rootCommentID pgtype.UUID, phase, name string) error {
+	if s == nil || s.pool == nil {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase)
+		VALUES ($1, $2, 0, $3, $4)
+		ON CONFLICT (root_comment_id) WHERE root_comment_id IS NOT NULL
+		DO UPDATE SET
+			phase = EXCLUDED.phase,
+			name = CASE WHEN cerebro_session.name = '' THEN EXCLUDED.name ELSE cerebro_session.name END,
+			updated_at = now()`,
+		issueID, rootCommentID, name, phase)
+	return err
 }
 
 // phaseBadgeAndName derives the stored badge and the display name from the

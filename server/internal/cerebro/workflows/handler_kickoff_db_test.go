@@ -113,7 +113,10 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 		AgentSkills: []db.Skill{{Name: "plan"}, {Name: "build"}},
 		Agent:       db.Agent{RuntimeID: mustUUID("bbbbbbbb-1111-2222-3333-444444444444")},
 	}
-	svc := &Service{queries: cq, issues: fake, enabled: true}
+	// GetIssue must return the real target issue so the issue-bound dispatch
+	// anchors comment + task on it.
+	fake.ParentIssue = db.Issue{ID: issueID, WorkspaceID: f.workspaceID, Title: "Plan me", Status: "todo"}
+	svc := &Service{queries: cq, issues: fake, enabled: true, sessionStamper: NewSessionPhaseStamper(pool)}
 	h := NewHandler(cq).
 		WithService(svc).
 		WithIssueLoopColumns(cols).
@@ -123,12 +126,25 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 		t.Fatalf("activate for issue: %v", err)
 	}
 
-	// The plan phase must have been dispatched as a task.
-	if fake.TaskQueued.Context == nil {
-		t.Fatal("activation did not dispatch the plan phase: no quick_create task enqueued")
+	// The plan phase must have been dispatched as an ISSUE-BOUND task (Tine
+	// live-test fix) — visible on the issue, never a detached quick_create.
+	if fake.TaskQueued.Context != nil {
+		t.Fatal("plan phase was dispatched as a detached quick_create task; want an issue-bound task")
+	}
+	if fake.IssueTaskQueuedCount == 0 {
+		t.Fatal("activation did not dispatch the plan phase: no issue-bound task enqueued")
+	}
+	if got := uuidString(fake.IssueTaskQueued.IssueID); got != uuidString(issueID) {
+		t.Fatalf("plan task bound to issue %s, want %s", got, uuidString(issueID))
+	}
+	if !fake.IssueTaskQueued.TriggerCommentID.Valid {
+		t.Fatal("plan task has no trigger comment: the kickoff comment must open the session thread")
+	}
+	if !fake.IssueTaskQueued.ForceFreshSession.Bool {
+		t.Fatal("plan task must force a fresh session")
 	}
 	var taskCtx map[string]any
-	if err := json.Unmarshal(fake.TaskQueued.Context, &taskCtx); err != nil {
+	if err := json.Unmarshal(fake.IssueTaskQueued.Context, &taskCtx); err != nil {
 		t.Fatalf("task context is not JSON: %v", err)
 	}
 	if taskCtx["plan_mode"] != true {
@@ -137,15 +153,20 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 	if taskCtx["loop_phase"] != "plan" {
 		t.Fatalf("dispatched task loop_phase = %v, want \"plan\"", taskCtx["loop_phase"])
 	}
-	prompt, _ := taskCtx["prompt"].(string)
+	// The plan-mode instruction now lives in the kickoff comment the agent is
+	// triggered on — that is what makes the plan phase visible on the issue.
+	prompt := fake.CreatedComment.Content
 	if !strings.Contains(prompt, "PLAN MODE") {
-		t.Fatalf("dispatched prompt is not the plan-mode prompt: %q", prompt)
+		t.Fatalf("kickoff comment is not the plan-mode prompt: %q", prompt)
 	}
 	if !strings.Contains(prompt, "must NOT write or edit") {
-		t.Fatalf("plan-mode prompt missing the no-code instruction: %q", prompt)
+		t.Fatalf("plan-mode kickoff missing the no-code instruction: %q", prompt)
+	}
+	if fake.CreatedComment.AuthorType != "agent" {
+		t.Fatalf("kickoff comment author_type = %q, want \"agent\"", fake.CreatedComment.AuthorType)
 	}
 	// And the agent it dispatched to is the recipe's build/plan agent.
-	if got := uuidString(fake.TaskQueued.AgentID); got != planAgent {
+	if got := uuidString(fake.IssueTaskQueued.AgentID); got != planAgent {
 		t.Fatalf("plan dispatched to agent %s, want %s", got, planAgent)
 	}
 }

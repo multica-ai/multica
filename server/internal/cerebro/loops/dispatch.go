@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -114,17 +115,38 @@ type RevisionDispatch struct {
 type DispatchQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	// Issue-bound phase dispatch (Tine live-test fix): a next-phase build run
+	// is enqueued ON the loop's issue behind a visible kickoff comment, not as
+	// a detached quick_create task. Both are satisfied by upstream db.Queries.
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error)
+	CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error)
+}
+
+// SessionStamper badges the session thread a phase dispatch opens (name +
+// phase on the cerebro_session row keyed by the thread root). Implemented by
+// workflows.SessionPhaseStamper; optional and nil-safe on the dispatcher.
+type SessionStamper interface {
+	StampSession(ctx context.Context, issueID, rootCommentID pgtype.UUID, phase, name string) error
 }
 
 // TaskDispatcher dispatches a check by enqueuing an agent task on the worker
 // agent's runtime, reusing the quick_create task shape the daemon already runs.
 type TaskDispatcher struct {
 	queries DispatchQueries
+	stamper SessionStamper
 }
 
 // NewTaskDispatcher builds a TaskDispatcher over the given issue queries.
 func NewTaskDispatcher(queries DispatchQueries) *TaskDispatcher {
 	return &TaskDispatcher{queries: queries}
+}
+
+// WithSessionStamper plugs in the dispatch-time session badge writer used by
+// issue-bound phase dispatches (DispatchRevision with a PhaseLabel).
+func (t *TaskDispatcher) WithSessionStamper(s SessionStamper) *TaskDispatcher {
+	t.stamper = s
+	return t
 }
 
 // DispatchCheck enqueues a quick_create task asking the worker agent to run the
@@ -214,10 +236,49 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		return fmt.Errorf("dispatch revision: agent has no runtime")
 	}
 
+	issueID, err := util.ParseUUID(d.IssueID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: parse issue id: %w", err)
+	}
+	issue, err := t.queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: load issue: %w", err)
+	}
+
+	// Issue-bound dispatch (Tine live-test fix): the revision / next-phase
+	// build runs ON the loop's issue. The kickoff comment opens the session
+	// thread the user watches; the task is comment-triggered so the agent's
+	// whole run lands on the issue timeline — never a detached quick_create
+	// task with no issue link.
+	prompt := buildRevisionPrompt(d)
+	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    agentID,
+		Content:     prompt,
+		Type:        "comment",
+		ParentID:    pgtype.UUID{}, // top-level == new session root
+	})
+	if err != nil {
+		return fmt.Errorf("dispatch revision: create kickoff comment: %w", err)
+	}
+
+	// Session name: the phase label for a multi-phase build ("Build 2"),
+	// otherwise the revision round ("Build round 3"). Badge is always "build".
+	name := d.PhaseLabel
+	if name == "" {
+		name = fmt.Sprintf("Build round %d", d.Round)
+	}
+	if t.stamper != nil {
+		if err := t.stamper.StampSession(ctx, issue.ID, comment.ID, "build", name); err != nil {
+			slog.Warn("dispatch revision: dispatch-time session badge failed",
+				"issue_id", d.IssueID, "error", err)
+		}
+	}
+
 	taskContext := map[string]any{
-		"type":         "quick_create",
-		"prompt":       buildRevisionPrompt(d),
-		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+		"type": "workflow_phase",
 		// Structured loop_revision fields, mirroring loop_check: bookkeeping
 		// the daemon ignores today, pinned for a later deterministic handler.
 		"loop_revision": map[string]any{
@@ -225,23 +286,25 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 			"gate":     d.Gate,
 			"round":    d.Round,
 		},
-	}
-	// Multi-phase: stamp the phase label so the dispatched build runs in a
-	// session named/badged for its phase (FIR-2283 followup points 3 + 6).
-	if d.PhaseLabel != "" {
-		taskContext["loop_phase"] = d.PhaseLabel
-		taskContext["loop_session_name"] = d.PhaseLabel
+		"workflow_target_issue_id": d.IssueID,
+		"loop_phase":               "build",
+		"loop_session_name":        name,
 	}
 	contextJSON, err := json.Marshal(taskContext)
 	if err != nil {
 		return fmt.Errorf("dispatch revision: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		AgentID:   agentID,
-		RuntimeID: agent.RuntimeID,
-		Priority:  0,
-		Context:   contextJSON,
+	if _, err := t.queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		IssueID:           issue.ID,
+		Priority:          0,
+		TriggerCommentID:  comment.ID,
+		Context:           contextJSON,
+		TriggerSummary:    pgtype.Text{String: name + " — " + d.SkillName, Valid: true},
+		Title:             pgtype.Text{String: name + ": " + issue.Title, Valid: true},
+		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("dispatch revision: enqueue task: %w", err)
 	}

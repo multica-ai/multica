@@ -383,6 +383,9 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			ActionConfig: workflows.ActionConfigRunSkill{
 				SkillName: buildSkill,
 				AgentID:   buildAgentID,
+				// Phase marker: the build kickoff runs ON the issue in a
+				// session badged "build" (see ActionConfigRunSkill.LoopPhase).
+				LoopPhase: "build",
 			},
 		},
 		{
@@ -446,6 +449,9 @@ func PlanningDispatchRule(agentID, skillName, planningStatus string) Rule {
 			// the run must be told it is planning (only plan in Multica, no
 			// code) rather than inferring it from the issue status.
 			PlanMode: true,
+			// Phase marker: the plan run happens ON the issue in a session
+			// badged "plan" (see ActionConfigRunSkill.LoopPhase).
+			LoopPhase: "plan",
 		},
 	}
 }

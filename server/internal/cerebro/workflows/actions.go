@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -54,6 +55,10 @@ type IssueActions interface {
 	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	// Issue-bound phase dispatch (Tine live-test fix): a plan/build phase run
+	// is enqueued ON the target issue with a trigger comment, not as a
+	// detached quick_create task.
+	CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error)
 	ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]db.IssueLabel, error)
 	ListCommentsForIssue(ctx context.Context, arg db.ListCommentsForIssueParams) ([]db.Comment, error)
 	ListAttachmentsByIssue(ctx context.Context, arg db.ListAttachmentsByIssueParams) ([]db.Attachment, error)
@@ -406,6 +411,28 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	}
 
 	prompt := buildRunSkillPrompt(skillName, cfg.SkillInput)
+	// FIR-2283 followup point 3 — a plan-phase dispatch must make the run KNOW
+	// it is planning: prepend an explicit plan-mode instruction (only plan in
+	// Multica, do not write code) and stamp the phase on the task so it is
+	// visible downstream instead of the agent having to infer it from status.
+	phase := strings.TrimSpace(cfg.LoopPhase)
+	if cfg.PlanMode {
+		prompt = buildPlanModePrompt(prompt)
+		if phase == "" {
+			phase = "plan"
+		}
+	}
+
+	// Issue-workflow phase dispatch (Tine's live-test finding): a plan/build
+	// run must happen ON the triggering issue — a visible kickoff comment opens
+	// the session thread (badged with the phase at dispatch) and the task is
+	// issue-bound, so the agent's whole run lands on the issue timeline. A
+	// detached quick_create task has no issue link, which is exactly why
+	// FIR-3081 showed 0 comments / 0 sessions after activation.
+	if phase != "" && te.IssueID != "" {
+		return s.dispatchPhaseRunOnIssue(ctx, wf, te, cfg, agent, agentID, skillName, phase, prompt)
+	}
+
 	taskContext := map[string]any{
 		"type":         "quick_create",
 		"prompt":       prompt,
@@ -417,12 +444,7 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 		"workflow_skill_input":     cfg.SkillInput,
 		"workflow_target_issue_id": te.IssueID,
 	}
-	// FIR-2283 followup point 3 — a plan-phase dispatch must make the run KNOW
-	// it is planning: prepend an explicit plan-mode instruction (only plan in
-	// Multica, do not write code) and stamp the phase on the task so it is
-	// visible downstream instead of the agent having to infer it from status.
 	if cfg.PlanMode {
-		taskContext["prompt"] = buildPlanModePrompt(prompt)
 		taskContext["loop_phase"] = "plan"
 		taskContext["plan_mode"] = true
 	}
@@ -441,6 +463,127 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	// claim cycle picks it up within the daemon's normal poll window;
 	// workflows are async by nature so the brief delay is fine.
 	return nil
+}
+
+// dispatchPhaseRunOnIssue starts an Issue-workflow phase run (plan / build)
+// ON the target issue: it posts the phase instruction as a top-level comment
+// (opening the session thread the user watches), badges that session with the
+// phase, and enqueues an issue-bound, comment-triggered task for the agent —
+// forceFreshSession so a build run never resumes the plan run's conversation.
+// The kickoff comment is authored by the dispatched agent, mirroring the
+// one-command handoff's fresh-session kickoff (sessions.startFreshSession).
+func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te TriggerEvent, cfg ActionConfigRunSkill, agent db.Agent, agentID pgtype.UUID, skillName, phase, prompt string) error {
+	issueID, err := parseUUID(te.IssueID)
+	if err != nil {
+		return fmt.Errorf("run_skill: parse issue id: %w", err)
+	}
+	issue, err := s.issues.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("run_skill: load target issue: %w", err)
+	}
+
+	comment, err := s.issues.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    agentID,
+		Content:     prompt,
+		Type:        "comment",
+		ParentID:    pgtype.UUID{}, // top-level == new session root
+	})
+	if err != nil {
+		return fmt.Errorf("run_skill: create phase kickoff comment: %w", err)
+	}
+	s.publishPhaseKickoffComment(issue, comment)
+
+	// Deterministic badge: the session shows "Plan"/"Build" the moment the
+	// phase starts, not only if/when the agent remembers rename_session.
+	// Best-effort — the completion-time stamper is the fallback.
+	badge, name := phaseBadgeAndName(phase, "")
+	if err := s.sessionStamper.StampSession(ctx, issue.ID, comment.ID, badge, name); err != nil {
+		slog.Warn("run_skill: dispatch-time session badge failed",
+			"issue_id", uuidString(issue.ID), "phase", badge, "error", err)
+	}
+
+	// Human provenance: the workflow's creator authorises the run, so the
+	// dispatched agent can fan out (mention other agents) under the same
+	// delegation rules as a comment-triggered run.
+	var originalUserID pgtype.UUID
+	if wf.createdByType == "member" {
+		originalUserID = wf.createdByID
+	}
+
+	taskContext := mustJSON(map[string]any{
+		"type": "workflow_phase",
+		// Bookkeeping mirrored from the quick_create variant so the workflow
+		// log and the completion-time session stamper read the same fields.
+		"workflow_id":              uuidString(wf.id),
+		"workflow_skill_name":      skillName,
+		"workflow_skill_input":     cfg.SkillInput,
+		"workflow_target_issue_id": te.IssueID,
+		"loop_phase":               phase,
+		"plan_mode":                cfg.PlanMode,
+	})
+	if _, err := s.issues.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		IssueID:           issue.ID,
+		Priority:          0,
+		TriggerCommentID:  comment.ID,
+		Context:           taskContext,
+		TriggerSummary:    pgtype.Text{String: snippetLine(prompt, 200), Valid: true},
+		Title:             pgtype.Text{String: name + ": " + issue.Title, Valid: true},
+		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true},
+		OriginalUserID:    originalUserID,
+	}); err != nil {
+		return fmt.Errorf("run_skill: enqueue phase task: %w", err)
+	}
+	// Same as the quick_create path: no daemon wakeup from the engine — the
+	// claim poll picks the task up.
+	return nil
+}
+
+// publishPhaseKickoffComment broadcasts comment:created for the phase kickoff
+// so the issue timeline updates live. Mention-triggered workflow rules ignore
+// it (the kickoff contains no mention links), so this cannot re-trigger the
+// engine. Nil-safe on a bus-less Service (tests).
+func (s *Service) publishPhaseKickoffComment(issue db.Issue, comment db.Comment) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: uuidString(issue.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     uuidString(comment.AuthorID),
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          uuidString(comment.ID),
+				"issue_id":    uuidString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   uuidString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"parent_id":   nil,
+				"created_at":  comment.CreatedAt.Time.Format(time.RFC3339),
+			},
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+		},
+	})
+}
+
+// snippetLine returns the first line of s capped at max runes-ish (byte cap is
+// fine for a summary column), for the task's trigger_summary snapshot.
+func snippetLine(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if len(s) > max {
+		s = strings.TrimSpace(s[:max]) + "…"
+	}
+	return s
 }
 
 // buildRunSkillPrompt renders the skill-input map into the prompt the
@@ -470,9 +613,6 @@ func buildPlanModePrompt(inner string) string {
 		"(write it as a comment / plan on the issue). You must NOT write or edit " +
 		"code, must NOT run build, migration, or deploy commands, and must NOT open " +
 		"a pull request or otherwise change the repository. Planning only.\n\n" +
-		"As soon as this run has a session thread, name the session by calling " +
-		"rename_session with name \"Plan\" and phase \"plan\", so the session header " +
-		"badges it as the planning phase.\n\n" +
 		"When the plan is complete, move the issue forward to the build status so the " +
 		"build phase can start — do not start building yourself.\n\n" +
 		inner
