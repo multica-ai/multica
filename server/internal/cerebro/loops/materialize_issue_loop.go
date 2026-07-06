@@ -216,14 +216,21 @@ func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workfl
 		return fmt.Errorf("compile loop spec: %w", err)
 	}
 
-	if issueID.Valid {
-		if err := b.columns.DeleteAllGeneratedChildrenForIssue(ctx, issueID); err != nil {
-			return err
-		}
-	} else {
-		if err := b.columns.DeleteGeneratedChildren(ctx, workflowID); err != nil {
-			return err
-		}
+	if !issueID.Valid {
+		// FIR-2283 followup (Tine live-test finding): an Issue workflow recipe
+		// is a per-issue TEMPLATE — it only runs when activated on a specific
+		// issue (ActivateOnIssue). Compiling it project-wide materialized
+		// globally-firing rules (notably an unscoped loop:planning-dispatch)
+		// that fired on unrelated issues entering the planning status. So the
+		// project-wide sync on recipe save still Compiles above (to validate the
+		// recipe is runnable), but materializes NOTHING — it only cleans up any
+		// project-wide rules a previous save generated. Rules are created solely
+		// per-issue, in the issueID.Valid branch below.
+		return b.columns.DeleteGeneratedChildren(ctx, workflowID)
+	}
+
+	if err := b.columns.DeleteAllGeneratedChildrenForIssue(ctx, issueID); err != nil {
+		return err
 	}
 	for _, rule := range rules {
 		if err := b.materializeRule(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, rule, issueID); err != nil {

@@ -30,6 +30,65 @@ func seedIssueLoopRecipe(t *testing.T, workspaceID pgtype.UUID, name string, loo
 	return id
 }
 
+// TestIssueLoopBridge_ProjectWideSyncMaterializesNoRules covers the Tine
+// live-test finding: saving an Issue workflow recipe (the project-wide
+// SyncIssueLoop path) must NOT materialize globally-firing rules — those
+// fired on unrelated issues (e.g. an unscoped loop:planning-dispatch). A
+// recipe is a per-issue template: only ActivateOnIssue materializes rules.
+func TestIssueLoopBridge_ProjectWideSyncMaterializesNoRules(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+
+	var workspaceID pgtype.UUID
+	if err := loopTestPool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id = $1`, issueID).Scan(&workspaceID); err != nil {
+		t.Fatalf("load issue workspace: %v", err)
+	}
+
+	loopSpecJSON, err := json.Marshal(issueLoopSpecWire{
+		Spec:       *goodSpec(t),
+		BuildSkill: "build",
+	})
+	if err != nil {
+		t.Fatalf("marshal loop spec: %v", err)
+	}
+
+	recipe := seedIssueLoopRecipe(t, workspaceID, "project-wide sync recipe", loopSpecJSON)
+	bridge := NewIssueLoopBridge(cerebrodb.New(loopTestPool), workflows.NewIssueLoopColumnStore(loopTestPool))
+
+	// Project-wide sync (recipe save) must create zero generated rules.
+	if err := bridge.SyncIssueLoop(ctx, workspaceID, recipe, pgtype.UUID{}, pgtype.UUID{}, "member", loopSpecJSON); err != nil {
+		t.Fatalf("project-wide sync: %v", err)
+	}
+	var projectWide int
+	if err := loopTestPool.QueryRow(ctx,
+		`SELECT count(*) FROM cerebro_workflow WHERE generated_from_workflow_id = $1`,
+		recipe,
+	).Scan(&projectWide); err != nil {
+		t.Fatalf("count generated rules: %v", err)
+	}
+	if projectWide != 0 {
+		t.Fatalf("project-wide sync should materialize no rules, got %d", projectWide)
+	}
+
+	// Activation on a specific issue still materializes that issue's rules.
+	if err := bridge.ActivateOnIssue(ctx, workspaceID, recipe, pgtype.UUID{}, recipe, issueID, "member", loopSpecJSON); err != nil {
+		t.Fatalf("activate on issue: %v", err)
+	}
+	var perIssue int
+	if err := loopTestPool.QueryRow(ctx,
+		`SELECT count(*) FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id = $2`,
+		recipe, issueID,
+	).Scan(&perIssue); err != nil {
+		t.Fatalf("count per-issue rules: %v", err)
+	}
+	if perIssue == 0 {
+		t.Fatal("activation on an issue should materialize that issue's rules")
+	}
+}
+
 func TestIssueLoopBridge_ActivateOnIssueReplacesPriorRecipeForSameIssue(t *testing.T) {
 	if loopTestPool == nil {
 		t.Skip("no test DB")
