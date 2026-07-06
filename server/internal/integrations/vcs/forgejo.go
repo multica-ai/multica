@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -180,6 +181,14 @@ func (p forgejoProvider) ValidateToken(ctx context.Context, instanceURL, token s
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// Log the upstream status + body snippet so a bad token (401) is
+		// distinguishable from an insufficient-scope token (403) without
+		// leaking the secret into the HTTP response.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		slog.Warn("forgejo: token validation rejected",
+			"endpoint", endpoint,
+			"status", resp.StatusCode,
+			"body", strings.TrimSpace(string(b)))
 		return Account{}, ErrUnauthorized
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
