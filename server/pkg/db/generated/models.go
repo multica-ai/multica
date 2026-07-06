@@ -452,11 +452,11 @@ type GitlabConnection struct {
 	NamespaceType  string             `json:"namespace_type"`
 	AvatarUrl      pgtype.Text        `json:"avatar_url"`
 	AccessToken    string             `json:"access_token"`
-	RefreshToken   pgtype.Text        `json:"refresh_token"`
 	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
 	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
 }
 
 type GitlabIssue struct {

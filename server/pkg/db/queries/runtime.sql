@@ -29,6 +29,14 @@ FOR UPDATE;
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetFirstRuntimeForWorkspace :one
+-- Returns the best available runtime in a workspace: online runtimes first,
+-- then by oldest created_at. Used as the default when copying an agent.
+SELECT * FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY (status = 'online') DESC, created_at ASC
+LIMIT 1;
+
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 -- that updated an existing row (false). Analytics reads this to fire

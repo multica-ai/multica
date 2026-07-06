@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Lock,
   MoreHorizontal,
+  Send,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +50,7 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
+import { DeployAgentModal } from "./deploy-agent-modal";
 import { useT } from "../../i18n";
 
 interface AgentDetailPageProps {
@@ -100,6 +102,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
 
   // One-shot channel: the inspector's compact Lark status row asks the
   // overview pane to focus a tab. The pane clears it after consuming.
@@ -252,7 +255,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         backHref={paths.agents()}
         canArchive={canEdit.allowed}
         onArchive={() => setConfirmArchive(true)}
+        onDeploy={() => setDeployOpen(true)}
       />
+      {deployOpen && (
+        <DeployAgentModal
+          agent={agent}
+          currentWorkspaceId={wsId}
+          open={deployOpen}
+          onOpenChange={setDeployOpen}
+        />
+      )}
 
       {!canEdit.allowed && (
         <div className="px-6 pt-3">
@@ -358,12 +370,14 @@ function DetailHeader({
   backHref,
   canArchive,
   onArchive,
+  onDeploy,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
   backHref: string;
   canArchive: boolean;
   onArchive: () => void;
+  onDeploy: () => void;
 }) {
   const { t } = useT("agents");
   const isArchived = !!agent.archived_at;
@@ -392,7 +406,7 @@ function DetailHeader({
         </>
       }
       actions={
-        !isArchived && canArchive ? (
+        !isArchived ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button variant="ghost" size="icon-sm" />}
@@ -400,6 +414,11 @@ function DetailHeader({
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
+              <DropdownMenuItem onClick={onDeploy}>
+                <Send className="h-3.5 w-3.5" />
+                Deploy to workspace
+              </DropdownMenuItem>
+              {canArchive && (
               <DropdownMenuItem
                 variant="destructive"
                 onClick={onArchive}
@@ -407,6 +426,7 @@ function DetailHeader({
                 <Trash2 className="h-3.5 w-3.5" />
                 {t(($) => $.detail.more_archive)}
               </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null
