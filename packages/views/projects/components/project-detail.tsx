@@ -407,11 +407,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
+          {/* Display-only in v1: the project↔team set binds at creation.
+              Post-create editing was cut together with issue move-to-team. */}
           <PropRow label={t(($) => $.table.teams)}>
             <TeamMultiPicker
               teamIds={project.team_ids ?? []}
-              onChange={(teamIds) => handleUpdateField({ team_ids: teamIds })}
+              onChange={() => {}}
               align="start"
+              disabled
             />
           </PropRow>
         </div>}
