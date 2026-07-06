@@ -32,7 +32,7 @@ function workspaceScoped(slug: string) {
     teamIssues: (key: string) => `${ws}/team/${encode(key)}/issues`,
     teamProjects: (key: string) => `${ws}/team/${encode(key)}/projects`,
     teamAutopilots: (key: string) => `${ws}/team/${encode(key)}/autopilots`,
-    teamSettings: (key: string) => `${ws}/team/${encode(key)}/settings`,
+    teamDetail: (key: string) => `${ws}/team/${encode(key)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

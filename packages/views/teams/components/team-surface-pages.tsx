@@ -47,7 +47,7 @@ export function TeamIssuesPage({ teamKey }: { teamKey: string }) {
       <PageHeader className="gap-2">
         {/* Team name links into the team's settings page. */}
         <AppLink
-          href={p.teamSettings(team.key)}
+          href={p.teamDetail(team.key)}
           className="flex items-center gap-2 rounded px-1 -mx-1 transition-colors hover:bg-accent/40"
         >
           <TeamIcon team={team} />

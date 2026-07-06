@@ -6,5 +6,5 @@ export {
   TeamIssuesPage,
   TeamProjectsPage,
   TeamAutopilotsPage,
-  TeamSettingsPage,
+  TeamDetailPage,
 } from "./components";

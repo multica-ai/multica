@@ -103,7 +103,7 @@ export function TeamsPage() {
                 <ListGridRow
                   key={team.id}
                   className="cursor-pointer"
-                  {...rowLink(p.teamSettings(team.key))}
+                  {...rowLink(p.teamDetail(team.key))}
                 >
                   <ListGridCell className="gap-2">
                     <TeamIcon team={team} />

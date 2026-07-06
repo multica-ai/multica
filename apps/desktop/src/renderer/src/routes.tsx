@@ -16,7 +16,7 @@ import {
   TeamIssuesRoute,
   TeamProjectsRoute,
   TeamAutopilotsRoute,
-  TeamSettingsRoute,
+  TeamDetailRoute,
 } from "./pages/team-surface-pages";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
@@ -174,9 +174,9 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Team autopilots" },
           },
           {
-            path: "team/:teamKey/settings",
-            element: <TeamSettingsRoute />,
-            handle: { title: "Team settings" },
+            path: "team/:teamKey",
+            element: <TeamDetailRoute />,
+            handle: { title: "Team detail" },
           },
           {
             path: "projects/:id",

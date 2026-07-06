@@ -3,7 +3,7 @@ import {
   TeamIssuesPage,
   TeamProjectsPage,
   TeamAutopilotsPage,
-  TeamSettingsPage,
+  TeamDetailPage,
 } from "@multica/views/teams";
 
 // Router wrappers: resolve the :teamKey param and hand it to the shared
@@ -27,8 +27,8 @@ export function TeamAutopilotsRoute() {
   return <TeamAutopilotsPage teamKey={teamKey} />;
 }
 
-export function TeamSettingsRoute() {
+export function TeamDetailRoute() {
   const { teamKey } = useParams<{ teamKey: string }>();
   if (!teamKey) return null;
-  return <TeamSettingsPage teamKey={teamKey} />;
+  return <TeamDetailPage teamKey={teamKey} />;
 }

@@ -46,13 +46,13 @@ const underline =
   "rounded-none border-0 border-b border-input bg-transparent dark:bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground";
 
 /**
- * Team settings — /team/:key/settings, Linear team-page shape. Left column is
- * the identity itself rendered as page text (icon picker applies on pick,
- * name and description commit on blur — no save buttons); the right column
- * holds members (avatar stack → checkbox config; saving an empty set
- * archives behind a confirm), go-to links, and archive.
+ * Team detail — /team/:key, the sidebar team row's landing page. A single
+ * narrow column: the identity rendered as page text (icon picker applies on
+ * pick, name and description commit on blur — no save buttons), then members
+ * (avatar stack → checkbox config; saving an empty set archives behind a
+ * confirm), go-to links, and archive.
  */
-export function TeamSettingsPage({ teamKey }: { teamKey: string }) {
+export function TeamDetailPage({ teamKey }: { teamKey: string }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
   // Full list (not active-only): an archived team's settings stay viewable.
@@ -77,15 +77,11 @@ export function TeamSettingsPage({ teamKey }: { teamKey: string }) {
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl gap-10 px-6 py-8">
-          <div className="min-w-0 flex-1">
-            <Identity team={team} />
-          </div>
-          <aside className="flex w-52 shrink-0 flex-col gap-6">
-            <MembersSection team={team} />
-            <GotoSection team={team} />
-            <ArchiveSection team={team} />
-          </aside>
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-6 py-8">
+          <Identity team={team} />
+          <MembersSection team={team} />
+          <GotoSection team={team} />
+          <ArchiveSection team={team} />
         </div>
       </div>
     </div>
@@ -299,7 +295,7 @@ function MembersSection({ team }: { team: Team }) {
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">
-              {t(($) => $.picker.empty)}
+              {t(($) => $.settings.members_empty)}
             </span>
           )}
         </PopoverTrigger>
@@ -337,7 +333,7 @@ function MembersSection({ team }: { team: Team }) {
             ))}
             {filteredMembers.length === 0 && (
               <div className="px-1 py-4 text-center text-sm text-muted-foreground">
-                {t(($) => $.picker.empty)}
+                {t(($) => $.dialog.member_search_empty)}
               </div>
             )}
           </div>

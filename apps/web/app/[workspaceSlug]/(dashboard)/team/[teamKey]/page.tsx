@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { TeamSettingsPage } from "@multica/views/teams";
+import { TeamDetailPage } from "@multica/views/teams";
 
 export default function Page({
   params,
@@ -9,5 +9,5 @@ export default function Page({
   params: Promise<{ teamKey: string }>;
 }) {
   const { teamKey } = use(params);
-  return <TeamSettingsPage teamKey={teamKey} />;
+  return <TeamDetailPage teamKey={teamKey} />;
 }
