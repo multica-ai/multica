@@ -637,6 +637,8 @@ export function ToolPolicyTable({
               onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
               onSetGroup={applyRepoGroup}
               onSetCondition={applyCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
             />
           )}
 
@@ -648,6 +650,8 @@ export function ToolPolicyTable({
               onSetCapability={(resource, toolKey, s) => applySetting(toolKey, s, resource)}
               onSetGroup={applyCredentialGroup}
               onSetCondition={applyCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
             />
           )}
 
@@ -2080,6 +2084,58 @@ function ArgScopePicker({
 
 // --- repo groups (FIR-2505 slice 3) -----------------------------------------
 
+// GroupCapabilityRow is the redesigned full-width sub-row inside a collapsible
+// group (a repo's read/checkout/push, a credential box's actions). It matches the
+// catalog leaf-row layout exactly: the capability name takes the full width and a
+// single CatalogDecisionControl pill holds BOTH the decision and the When editor
+// (FIR-2706 follow-up — Jesper: "Repos and groups get the same design"). This
+// replaces the old two-control bar (DecisionControl + a separate When button) that
+// crowded the name on mobile and made groups read differently from the catalog.
+function GroupCapabilityRow({
+  row,
+  editLayer,
+  busy,
+  testid,
+  onDecision,
+  onCondition,
+  wsId,
+  argScopeConfig,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  busy: boolean;
+  testid: string;
+  onDecision: (setting: ToolSetting) => void;
+  onCondition: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+}) {
+  return (
+    <div
+      data-testid={testid}
+      className="flex items-center justify-between gap-4 border-t px-4 py-3 first:border-t-0"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{row.title || row.tool_key}</div>
+        <div className="truncate font-mono text-xs text-muted-foreground">
+          {row.tool_key}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <CatalogDecisionControl
+          row={row}
+          editLayer={editLayer}
+          disabled={busy}
+          onDecision={onDecision}
+          onCondition={onCondition}
+          wsId={wsId}
+          argScopeConfig={argScopeConfig}
+        />
+      </div>
+    </div>
+  );
+}
+
 // RepoGroupData is one repo's collapsible group: the repo URL plus its (up to
 // three) capability rows in read → checkout → push order.
 interface RepoGroupData {
@@ -2131,6 +2187,8 @@ function RepoSection({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   groups: RepoGroupData[];
   editLayer: ToolLayer;
@@ -2139,6 +2197,8 @@ function RepoSection({
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
   /** Write/clear the When condition on one repo capability row. */
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="repo-policy-section">
@@ -2163,6 +2223,8 @@ function RepoSection({
             onSetCapability={onSetCapability}
             onSetGroup={onSetGroup}
             onSetCondition={onSetCondition}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         ))}
       </div>
@@ -2177,6 +2239,8 @@ function RepoGroup({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   group: RepoGroupData;
   editLayer: ToolLayer;
@@ -2184,13 +2248,18 @@ function RepoGroup({
   onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = repoGroupVerdict(group, editLayer);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div className="rounded-lg border" data-testid={`repo-group-${group.url}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`repo-group-${group.url}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -2209,31 +2278,17 @@ function RepoGroup({
       {open && (
         <div className="border-t">
           {group.rows.map((row) => (
-            <div
+            <GroupCapabilityRow
               key={`${row.tool_key}:${row.resource_pattern}`}
-              data-testid={`repo-cap-${row.tool_key}-${row.resource_pattern}`}
-              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm">{row.title || row.tool_key}</span>
-                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <OriginTag row={row} editLayer={editLayer} />
-                <DecisionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(s) => onSetCapability(group.url, row.tool_key, s)}
-                />
-                <ConditionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(c) => onSetCondition(row, c)}
-                />
-              </div>
-            </div>
+              testid={`repo-cap-${row.tool_key}-${row.resource_pattern}`}
+              row={row}
+              editLayer={editLayer}
+              busy={busy}
+              onDecision={(s) => onSetCapability(group.url, row.tool_key, s)}
+              onCondition={(c) => onSetCondition(row, c)}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
+            />
           ))}
         </div>
       )}
@@ -2441,6 +2496,8 @@ function CredentialSection({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   groups: CredentialGroupData[];
   editLayer: ToolLayer;
@@ -2449,6 +2506,8 @@ function CredentialSection({
   onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
   /** Write/clear the When condition on one credential capability row. */
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="credential-policy-section">
@@ -2475,6 +2534,8 @@ function CredentialSection({
             onSetCapability={onSetCapability}
             onSetGroup={onSetGroup}
             onSetCondition={onSetCondition}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         ))}
       </div>
@@ -2495,6 +2556,8 @@ function CredentialTreeNodeView({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   node: CredentialTreeNode;
   depth: number;
@@ -2503,6 +2566,8 @@ function CredentialTreeNodeView({
   onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(true);
   if (node.group) {
@@ -2514,6 +2579,8 @@ function CredentialTreeNodeView({
         onSetCapability={onSetCapability}
         onSetGroup={onSetGroup}
         onSetCondition={onSetCondition}
+        wsId={wsId}
+        argScopeConfig={argScopeConfig}
       />
     );
   }
@@ -2521,8 +2588,11 @@ function CredentialTreeNodeView({
   const Chevron = open ? ChevronDown : ChevronRight;
   const leaves = subtreeGroups(node);
   return (
-    <div className="rounded-lg border" data-testid={`credential-branch-${node.key}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`credential-branch-${node.key}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -2553,6 +2623,8 @@ function CredentialTreeNodeView({
               onSetCapability={onSetCapability}
               onSetGroup={onSetGroup}
               onSetCondition={onSetCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
             />
           ))}
         </div>
@@ -2568,6 +2640,8 @@ function CredentialGroup({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   group: CredentialGroupData;
   editLayer: ToolLayer;
@@ -2575,6 +2649,8 @@ function CredentialGroup({
   onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = credentialGroupVerdict(group, editLayer);
@@ -2586,23 +2662,19 @@ function CredentialGroup({
     const row = group.rows[0]!;
     return (
       <div
-        className="flex items-center justify-between gap-3 rounded-lg border p-3"
+        className="flex items-center justify-between gap-4 rounded-xl border bg-background px-4 py-3 shadow-sm"
         data-testid={`credential-group-${group.resource}`}
       >
-        <span className="truncate text-sm font-medium">{group.label}</span>
-        <div className="flex items-center gap-2">
-          <OriginTag row={row} editLayer={editLayer} />
-          <DecisionControl
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <CatalogDecisionControl
             row={row}
             editLayer={editLayer}
             disabled={busy}
-            onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
-          />
-          <ConditionControl
-            row={row}
-            editLayer={editLayer}
-            disabled={busy}
-            onChange={(c) => onSetCondition(row, c)}
+            onDecision={(s) => onSetCapability(group.resource, row.tool_key, s)}
+            onCondition={(c) => onSetCondition(row, c)}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         </div>
       </div>
@@ -2610,8 +2682,11 @@ function CredentialGroup({
   }
 
   return (
-    <div className="rounded-lg border" data-testid={`credential-group-${group.resource}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`credential-group-${group.resource}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -2630,31 +2705,17 @@ function CredentialGroup({
       {open && (
         <div className="border-t">
           {group.rows.map((row) => (
-            <div
+            <GroupCapabilityRow
               key={`${row.tool_key}:${row.resource_pattern}`}
-              data-testid={`credential-cap-${row.tool_key}-${row.resource_pattern}`}
-              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm">{row.title || row.tool_key}</span>
-                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <OriginTag row={row} editLayer={editLayer} />
-                <DecisionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
-                />
-                <ConditionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(c) => onSetCondition(row, c)}
-                />
-              </div>
-            </div>
+              testid={`credential-cap-${row.tool_key}-${row.resource_pattern}`}
+              row={row}
+              editLayer={editLayer}
+              busy={busy}
+              onDecision={(s) => onSetCapability(group.resource, row.tool_key, s)}
+              onCondition={(c) => onSetCondition(row, c)}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
+            />
           ))}
         </div>
       )}

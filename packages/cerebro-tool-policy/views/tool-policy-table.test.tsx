@@ -470,6 +470,18 @@ describe("ToolPolicyTable (repo groups)", () => {
     expect(screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`)).toBeInTheDocument();
   });
 
+  it("renders each repo capability with ONE Decision pill and no separate When button (FIR-2706 same-design)", async () => {
+    const user = userEvent.setup();
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const checkout = screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`);
+    // Exactly one control on the bar: the Decision pill. The old standalone When
+    // button (condition-control-*) is gone — When now lives inside the pill.
+    expect(within(checkout).getByLabelText(/^Decision:/)).toBeInTheDocument();
+    expect(within(checkout).queryByTestId("condition-control-repo.checkout")).not.toBeInTheDocument();
+  });
+
   it("setting the repo group cascades the choice to all three capabilities with the repo as resource", async () => {
     const user = userEvent.setup();
     renderRepoTable();
@@ -495,7 +507,7 @@ describe("ToolPolicyTable (repo groups)", () => {
     await user.click(within(group).getByRole("button", { expanded: false }));
     const checkout = screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`);
     await user.click(within(checkout).getByLabelText(/^Decision:/));
-    await user.click(within(checkout).getByRole("menuitem", { name: "Ask" }));
+    await user.click(within(checkout).getByTestId("catalog-decision-repo.checkout-ask"));
     await waitFor(() => {
       const put = findPutCalls().at(-1);
       expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({
@@ -522,7 +534,9 @@ describe("ToolPolicyTable (repo groups)", () => {
     const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
     await user.click(within(group).getByRole("button", { expanded: false }));
     const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
-    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    // The When editor now lives inside the row's single Decision pill popover
+    // (FIR-2706 — one control per row), so open the pill to reach it.
+    await user.click(within(push).getByLabelText(/^Decision:/));
     const editor = within(await screen.findByTestId("condition-editor-repo.push"));
     // Preset action chips for the repo verb model.
     expect(editor.getByLabelText("Action read")).toBeInTheDocument();
@@ -541,7 +555,9 @@ describe("ToolPolicyTable (repo groups)", () => {
     const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
     await user.click(within(group).getByRole("button", { expanded: false }));
     const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
-    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    // The When editor now lives inside the row's single Decision pill popover
+    // (FIR-2706 — one control per row), so open the pill to reach it.
+    await user.click(within(push).getByLabelText(/^Decision:/));
     const editor = within(await screen.findByTestId("condition-editor-repo.push"));
     await user.click(editor.getByLabelText("Action push"));
     await user.click(editor.getByRole("button", { name: "Save" }));
@@ -1124,7 +1140,7 @@ describe("ToolPolicyTable — Credentials in the Connections tab (FIR-1479)", ()
     // A vault box (only "Use secret") is a plain row — no fold, one decision.
     const box = await screen.findByTestId("credential-group-agentvault-vault:bigquery");
     await user.click(within(box).getByLabelText(/^Decision:/));
-    await user.click(within(box).getByRole("menuitem", { name: "Allow" }));
+    await user.click(within(box).getByTestId("catalog-decision-credential.reveal-allow"));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
@@ -1148,7 +1164,7 @@ describe("ToolPolicyTable — Credentials in the Connections tab (FIR-1479)", ()
       "credential-cap-credential.rotate-cerebro-credential:box-1",
     );
     await user.click(within(cap).getByLabelText(/^Decision:/));
-    await user.click(within(cap).getByRole("menuitem", { name: "Allow" }));
+    await user.click(within(cap).getByTestId("catalog-decision-credential.rotate-allow"));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
