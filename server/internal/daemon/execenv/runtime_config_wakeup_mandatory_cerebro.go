@@ -37,5 +37,7 @@ func cerebroWakeupMandatoryRule() string {
 	add("- There is a small minimum interval between two time-wakeups on the same agent+issue. The limit is a per-workspace setting (in **Cerebro features**) and is typically a few minutes — there is NO fixed platform-wide number to memorize.\n")
 	add("- Do not learn a specific number: just set the `fire_at` you actually need. If it is too soon, the API rejects it with the exact current minimum in the error text (e.g. \"fire_at must be at least N minutes from now\") — use that number and retry.\n")
 	add("- Only one pending wakeup per agent+issue at a time; create a new one after the previous one has fired or been cancelled.\n\n")
+	// CEREBRO-PATCH(runtime-config-wakeup-mandatory): FIR-2679 — route agents to the wakeup-rules home skill so interval choice, no-working-hours, event-triggers and cheaper-model checks live in one place, not this brief.
+	add("**Full wakeup rules — read the `cerebro-agent-triggers` skill before scheduling.** In short: a short build-wakeup (under 5 min) is fine ONLY with a good reason — you are actively building and keeping the context cache warm, never as a blind repeated poll. You have NO working hours: if there is build work and you are not waiting on anything, build NOW — never park it for \"tomorrow\". When waiting, prefer an event-trigger (`on-github-ci`, `on-issue-status`) over a timer. For a pure check (\"is CI green?\") set a cheaper `--model` so it never fires Opus.\n\n")
 	return string(b)
 }
