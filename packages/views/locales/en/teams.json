@@ -81,6 +81,7 @@
     "archive_confirm_title": "Archive team?",
     "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
     "default_cannot_archive": "The default team cannot be archived",
+    "archive_admin_only": "Only admins can archive a team",
     "goto": "Go to"
   }
 }

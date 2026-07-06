@@ -80,6 +80,7 @@
     "archive_confirm_title": "チームをアーカイブしますか？",
     "archive_confirm_body": "全メンバーを外すと {{name}} はアーカイブされます。既存の issue は閲覧できます。",
     "default_cannot_archive": "デフォルトチームはアーカイブできません",
+    "archive_admin_only": "チームをアーカイブできるのは管理者のみです",
     "goto": "移動"
   }
 }

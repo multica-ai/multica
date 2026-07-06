@@ -14,7 +14,9 @@ import {
   useUpdateTeam,
 } from "@multica/core/teams/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentMember } from "@multica/core/permissions";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -188,6 +190,8 @@ function Identity({ team }: { team: Team }) {
 function MembersSection({ team }: { team: Team }) {
   const { t } = useT("teams");
   const wsId = useWorkspaceId();
+  const { role } = useCurrentMember(wsId);
+  const isAdmin = role === "owner" || role === "admin";
   const { data: members = [] } = useQuery(teamMembersOptions(wsId, team.id));
   const { data: allMembers = [] } = useQuery(memberListOptions(wsId));
   const replaceMembers = useReplaceTeamMembers();
@@ -239,6 +243,12 @@ function MembersSection({ team }: { team: Team }) {
     if (selected.length === 0) {
       if (team.is_default) {
         toast.error(t(($) => $.settings.default_cannot_archive));
+        return;
+      }
+      // Empty membership funnels into archive, which is admin-only —
+      // pre-check here so members get the reason instead of a raw 403.
+      if (!isAdmin) {
+        toast.error(t(($) => $.settings.archive_admin_only));
         return;
       }
       setConfirmArchive(true);
@@ -417,6 +427,9 @@ function GotoSection({ team }: { team: Team }) {
 
 function ArchiveSection({ team }: { team: Team }) {
   const { t } = useT("teams");
+  const wsId = useWorkspaceId();
+  const { role } = useCurrentMember(wsId);
+  const isAdmin = role === "owner" || role === "admin";
   const archiveTeam = useArchiveTeam();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -439,13 +452,24 @@ function ArchiveSection({ team }: { team: Team }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">
         {t(($) => $.settings.danger_title)}
       </h3>
-      <button
-        type="button"
-        onClick={() => setConfirmOpen(true)}
-        className="-mx-1.5 flex items-center rounded-md px-1.5 py-1 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
-      >
-        {t(($) => $.actions.archive)}
-      </button>
+      {/* Archiving is admin-only (server enforces with a 403). The button
+          stays visible but disabled so members learn the rule instead of
+          wondering where the action went. */}
+      <Tooltip>
+        <TooltipTrigger render={<span className="-mx-1.5 inline-flex w-fit" />}>
+          <button
+            type="button"
+            disabled={!isAdmin}
+            onClick={() => setConfirmOpen(true)}
+            className="flex items-center rounded-md px-1.5 py-1 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+          >
+            {t(($) => $.actions.archive)}
+          </button>
+        </TooltipTrigger>
+        {!isAdmin && (
+          <TooltipContent>{t(($) => $.settings.archive_admin_only)}</TooltipContent>
+        )}
+      </Tooltip>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">

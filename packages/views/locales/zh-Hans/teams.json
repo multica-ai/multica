@@ -44,7 +44,7 @@
     "name": "名称",
     "name_placeholder": "Engineering",
     "key": "标识符",
-    "key_hint": "用于该团队的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
+    "key_hint": "用于该 Team 的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
     "key_locked": "已有 issue 创建后，标识符会被锁定。",
     "icon": "图标",
     "description": "描述",
@@ -66,7 +66,7 @@
   "toast_archive_failed": "归档 Team 失败",
   "toast_save_failed": "保存 Team 失败",
   "surface": {
-    "not_found": "未找到团队"
+    "not_found": "未找到 Team"
   },
   "settings": {
     "stats_title": "概况",
@@ -77,9 +77,10 @@
     "archive_hint": "归档后停止接收新工作;已有 issue 仍可查看。",
     "members": "成员",
     "members_empty": "暂无成员",
-    "archive_confirm_title": "归档团队？",
+    "archive_confirm_title": "归档 Team？",
     "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
-    "default_cannot_archive": "默认团队不能归档",
+    "default_cannot_archive": "默认 Team 不能归档",
+    "archive_admin_only": "只有管理员可以归档 Team",
     "goto": "前往"
   }
 }

@@ -445,6 +445,25 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$")
 			return
 		}
+		// Key changes are admin-only: the key is the workspace-wide issue
+		// identifier namespace, and the legacy workspace issue_prefix path
+		// (admin-gated at the router) funnels into the same row — both
+		// doors must carry the same gate.
+		current, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
+			ID:          teamID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "team not found")
+			return
+		}
+		if current.Key != key {
+			member, ok := ctxMember(r.Context())
+			if !ok || !roleAllowed(member.Role, "owner", "admin") {
+				writeError(w, http.StatusForbidden, "only workspace admins can change the team key")
+				return
+			}
+		}
 		params.Key = pgtype.Text{String: key, Valid: true}
 	}
 	if req.Description != nil {
@@ -531,6 +550,13 @@ func (h *Handler) ArchiveTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	// Archiving is admin-only, matching the destructive-op convention
+	// (project delete, squad delete). Everything else on a team stays
+	// member-open — membership is not a permission layer.
+	if member, ok := ctxMember(r.Context()); !ok || !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace admins can archive a team")
 		return
 	}
 	// Block archiving a Team that still drives live autopilots — the SQL only
