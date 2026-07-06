@@ -887,13 +887,22 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 	taskRegistry.db = e.registry.db
 	if tools, handled := e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID); handled {
-		return len(tools) > 0
+		if len(tools) > 0 {
+			return true
+		}
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools are additive
+		// (offered by the memory gates, not the policy/cascade), so an agent whose
+		// only tools are memory tools must still enter the tool loop.
+		return len(CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)) > 0
 	}
 	cascadeUserID := originalUserID
 	if !cascadeUserID.Valid {
 		cascadeUserID = ownerID
 	}
-	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)) > 0
+	if len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)) > 0 {
+		return true
+	}
+	return len(CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)) > 0 // CEREBRO-PATCH(memory-tools-offer): FIR-1794
 }
 
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
@@ -1025,6 +1034,24 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			connTools = append(connTools, buildGatewayMCPTools(ctx, resolved.MCPServers, nil, e.logger)...)
 			if len(connTools) > 0 {
 				for _, t := range connTools {
+					taskRegistry.Register(t)
+					enabledTools = append(enabledTools, t)
+				}
+				enabledTools = limitFirtalGatewayTools(enabledTools)
+				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+				activeRegistry = taskRegistry
+				useRegistry = true
+			}
+		}
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — additive, like the
+		// API-connection tools above: when the three memory gates pass for this
+		// (workspace, agent, originating user), the Cognee memory tools are
+		// appended and registered. The gates re-run inside every Call, so this
+		// list is a UX courtesy — no other grant path can bypass the switches.
+		if e.cerebro != nil {
+			memTools := CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)
+			if len(memTools) > 0 {
+				for _, t := range memTools {
 					taskRegistry.Register(t)
 					enabledTools = append(enabledTools, t)
 				}

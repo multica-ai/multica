@@ -50,6 +50,13 @@ func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, 
 	// CEREBRO-PATCH(invoke-cascade-check): TECH-3226 — same permission check as
 	// firtal-gateway's agentHasCallableTools: cascade grants, not raw agent_tool_grant.
 	enabledTools := reg.GetCascadeEnabledToolsForAgent(ctx, e.CerebroQueries, agentID, cascadeUserID)
+	// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools are additive,
+	// offered by the three memory gates rather than the cascade, mirroring the
+	// gateway executor. Each tool re-checks the gates at Call time, fail closed.
+	for _, t := range CerebroMemoryToolsForTask(ctx, e.CerebroQueries, tctx, cascadeUserID) {
+		reg.Register(t)
+		enabledTools = append(enabledTools, t)
+	}
 	toolAllowed := false
 	for _, t := range enabledTools {
 		if t.Name() == toolName {

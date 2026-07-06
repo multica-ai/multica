@@ -709,6 +709,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// creating a throwaway registry (nil queries/pool) to extract static schemas.
 		schemaReg := cerebroruntime.NewDefaultRegistry(nil, nil, cerebroruntime.ToolContext{})
 		schemas := schemaReg.AllToolSchemas()
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools are per-task
+		// constructions the throwaway registry never sees; merge their static
+		// schemas so external runtimes can present them to the model.
+		for name, schema := range cerebroruntime.CerebroMemoryToolSchemas() {
+			schemas[name] = schema
+		}
 		items := make([]handler.CerebroToolItem, len(rawMeta))
 		for i, m := range rawMeta {
 			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description, Status: m.Status, InputSchema: schemas[m.Name]} // CEREBRO-PATCH(router-tool-status): expose explicit exclusion status to the tools API.
