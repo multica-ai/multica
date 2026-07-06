@@ -685,10 +685,10 @@ var catalog = []Capability{
 	},
 	{
 		Key:           "manage_group_overrides",
-		Title:         "Override group members' access",
+		Title:         "Manage group permissions",
 		Category:      CategoryPermissions,
-		Description:   "Author another member's own (User-layer) tool-policy or Connections access row, for members who share a group with you. Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
-		DescriptionZh: "为与你共享群组的其他成员，编写其个人（User 层）工具策略或 Connections 访问规则。永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
+		Description:   "Author another member's own (User-layer) tool-policy or Connections access row — including an Allow that overrides a workspace-level Deny — for members who share a group with you. A WHEN condition on this permission (argument group_id) limits it to specific group(s). Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
+		DescriptionZh: "为与你共享群组的其他成员，编写其个人（User 层）工具策略或 Connections 访问规则——包括覆盖工作区级 Deny 的 Allow。此权限上的 WHEN 条件（参数 group_id）可将其限定到特定群组。永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
 		Evidence: []string{
 			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
 			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride
@@ -696,10 +696,10 @@ var catalog = []Capability{
 	},
 	{
 		Key:           "manage_workspace_overrides",
-		Title:         "Override any member's access",
+		Title:         "Manage permissions",
 		Category:      CategoryPermissions,
-		Description:   "Author another member's own (User-layer) tool-policy or Connections access row, for anyone in the workspace. Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
-		DescriptionZh: "为工作区内任何其他成员编写其个人（User 层）工具策略或 Connections 访问规则。永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
+		Description:   "Author tool-policy or Connections access rows at the User, Group, and Agent layers, for anyone and any agent in the workspace — including an Allow that overrides a workspace-level Deny. Workspace/runtime defaults themselves stay owner/admin-only. Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
+		DescriptionZh: "为工作区内任何成员和任何代理，编写 User、Group 和 Agent 层的工具策略或 Connections 访问规则——包括覆盖工作区级 Deny 的 Allow。工作区/运行时默认值本身仍仅限所有者/管理员修改，且永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
 		Evidence: []string{
 			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
 			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride

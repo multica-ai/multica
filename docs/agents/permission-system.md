@@ -72,18 +72,41 @@ Keep these apart. This doc answers question 2 honestly.
 > `_OpenableMatchesResolveMemberOverride` (byte-for-byte equality against every
 > existing test case). `Store.ResolveGeneral` now calls `ResolveWithMode`
 > internally instead of branching between two function names; every other call
-> site is untouched. This is the FIR-2351 build-plan "expand" step only — the
-> plan's "authored vs default deny" distinction (a workspace row someone
-> deliberately set to Deny staying a hard ceiling even under `ModeOpenable`,
-> vs. an unset default staying openable) needs a schema change (an origin/
-> authored marker on `cerebro_tool_policy` rows) and is NOT built yet; today,
-> `ModeOpenable` treats every explicit Workspace/Group/User setting the same
-> regardless of why it was set, exactly like the pre-unification
-> `ResolveMemberOverride` did. The "contract" step (deleting `Resolve` /
+> site is untouched. The "contract" step (deleting `Resolve` /
 > `ResolveMemberOverride` and moving every call site onto `ResolveWithMode`
-> directly) is also deferred — it touches ~15 call sites across
+> directly) is deferred — it touches ~15 call sites across
 > `toolpolicy/table*.go` and is left for a follow-up PR per the plan's own
 > expand→shadow→flip→contract sequencing.
+>
+> **FIR-2351 (workspace Deny = openable default, product decision 2026-07-06):**
+> this REVERSES the earlier build-plan item "authored vs default deny" (which
+> wanted a deliberately authored Workspace-Deny to stay a hard ceiling under
+> `ModeOpenable`). The product decision is the opposite: **a workspace-level
+> setting — authored or not — is a DEFAULT, and an explicit Allow authored at
+> the Agent, Group, or User layer opens it.** Safety moves from resolution to
+> the WRITE path: only owner/admin and holders of the two Manage-permissions
+> capabilities below may author the opening rows. Three consequences, ALL
+> behind `cerebro_member_override` (flag off = pre-decision behavior,
+> byte-for-byte):
+> 1. `ModeOpenable` lets an explicit **Agent-layer** setting open a
+>    workspace-authored default when no explicit Group/User row caps it; an
+>    explicit member row is still the agent's absolute ceiling, and Runtime /
+>    on_behalf_of / System stay tighten-only (`chain.go`,
+>    `TestResolveMemberOverride_AgentOpensWorkspaceDefault`).
+> 2. The admin table's **Effective column resolves with the same mode the gates
+>    enforce** (`Store.Table` reads the workspace-level flag; `tableRowMode`
+>    keeps credential.*, repo./credential. verbed keys, and
+>    `tools:agent-browser` on the tighten-only display) — before this the table
+>    always showed the hard-floor fold, so a genuinely working override
+>    displayed as Deny.
+> 3. `ConnectionEndpointEffective` treats an explicit **workspace-layer** row on
+>    a connection as a workspace-authored default (endpoint row beats the wide
+>    row by specificity), decided after per-actor rows and before the
+>    connection's `default_access`. A per-actor explicit Deny still revokes
+>    instantly and on_behalf_of stays Deny-only.
+> The deny-by-default floors (credentials, agent-browser sandbox, repo
+> checkout, approval cap) never consult the flag and stay strictly
+> tighten-only, unchanged.
 >
 > **FIR-2351 (delegated override capabilities, product decision 2026-07-03):**
 > `cerebro_member_override` above is SELF-only — it lets a member's own row
@@ -112,6 +135,23 @@ Keep these apart. This doc answers question 2 honestly.
 > to admins who already hold unrestricted authority. Credentials remain
 > untouched by this — `credential.*` keys stay on `manage_credential_access`
 > only.
+>
+> **FIR-2351 follow-up (renames + wider write scope + group-scoped WHEN,
+> product decision 2026-07-06):** the two capabilities are now titled **`Manage
+> permissions`** (`manage_workspace_overrides`) and **`Manage group
+> permissions`** (`manage_group_overrides`) — keys unchanged, so existing grant
+> rows keep working. Two scope changes in `RequireToolPolicyWritePolicy`:
+> (a) a **Manage permissions** holder may now also author **Group- and
+> Agent-layer** non-credential rows (`cerebroRequireManagePermissionsPolicy`) —
+> that is how you grant a group or one agent access that opens a
+> workspace-level default Deny; workspace/runtime/system rows stay
+> owner/admin-only, and the User-layer self-target ban is unchanged.
+> (b) **Manage group permissions** can be pinned to specific group(s): the
+> write gate resolves the capability once per group the actor and target
+> SHARE, threading `group_id` into `RequestContext.ArgValues`, so an
+> `arg_allowlist` WHEN condition on `group_id` on the capability's Allow row
+> limits it to the listed group(s) (`EnforcedConditionKinds` offers the arg
+> term on this key). An unconditioned row keeps the any-shared-group reach.
 
 ---
 

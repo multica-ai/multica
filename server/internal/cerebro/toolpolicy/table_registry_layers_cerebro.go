@@ -101,6 +101,17 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 		return nil, err
 	}
 
+	// The Effective column must show what the registry gate enforces: openable
+	// when the workspace member-override flag is on, tighten-only otherwise
+	// (FIR-2351). These methods are called by handlers directly (not through
+	// Table), so decide the mode here.
+	if in.mode == "" {
+		in.mode = ModeHardFloor
+		if s.MemberOverrideEnabled(ctx, in.WorkspaceID) {
+			in.mode = ModeOpenable
+		}
+	}
+
 	authored := map[string]bool{}
 	for _, row := range out {
 		if row.ToolKey == RegistryToolKey && row.ResourcePattern != "" {
@@ -133,7 +144,7 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 			}
 		}
-		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: in.Base})
 		out = append(out, row)
 	}
 	return out, nil
@@ -154,6 +165,17 @@ func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in Tab
 	settings, err := s.loadRegistryResourceSettings(ctx, in, groupIDs)
 	if err != nil {
 		return nil, err
+	}
+
+	// The Effective column must show what the registry gate enforces: openable
+	// when the workspace member-override flag is on, tighten-only otherwise
+	// (FIR-2351). These methods are called by handlers directly (not through
+	// Table), so decide the mode here.
+	if in.mode == "" {
+		in.mode = ModeHardFloor
+		if s.MemberOverrideEnabled(ctx, in.WorkspaceID) {
+			in.mode = ModeOpenable
+		}
 	}
 
 	authored := map[string]bool{}
@@ -187,7 +209,7 @@ func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in Tab
 		if len(cell.groups) > 0 {
 			row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 		}
-		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: in.Base})
 		out = append(out, row)
 	}
 	return out, nil

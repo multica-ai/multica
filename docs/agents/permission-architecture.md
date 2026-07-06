@@ -42,12 +42,21 @@ The unified tool-policy chain is the model we want **everything** to converge on
   byte-for-byte equal to the pre-unification functions by
   `TestResolveWithMode_HardFloorMatchesResolve` / `_OpenableMatchesResolveMemberOverride`.
   `Store.ResolveGeneral` calls `ResolveWithMode` internally; no other call site changed.
-  This is the build plan's "expand" step only (see FIR-2351 build plan artifact) — the
-  "authored vs default deny" distinction (a deliberately authored workspace Deny staying a
-  hard ceiling even under `ModeOpenable`, vs. an unset default staying openable) needs a
-  schema change and is deferred, and the "contract" step (deleting the two wrapper names
-  and moving every `Resolve(...)` call site onto `ResolveWithMode` directly) is deferred to
-  a follow-up PR.
+  The "contract" step (deleting the two wrapper names and moving every `Resolve(...)` call
+  site onto `ResolveWithMode` directly) is deferred to a follow-up PR.
+- **Workspace Deny = openable default (FIR-2351, product decision 2026-07-06):** REVERSES
+  the earlier "authored vs default deny" plan item — a workspace-level setting, authored or
+  not, is a DEFAULT under `ModeOpenable`, and an explicit Allow authored at the Agent, Group,
+  or User layer opens it (safety lives on the write path: owner/admin + the two
+  Manage-permissions capabilities). Concretely, and ALL behind `cerebro_member_override`:
+  (1) an explicit Agent-layer setting may open a workspace-authored default when no explicit
+  Group/User row caps it (member rows stay the agent's ceiling; Runtime/on_behalf_of/System
+  stay tighten-only); (2) `Store.Table`'s Effective column resolves with the same mode the
+  gates enforce (`tableRowMode` keeps credential.*/repo-verbed/agent-browser rows on the
+  tighten-only display); (3) `ConnectionEndpointEffective` treats an explicit workspace-layer
+  row as the connection's workspace-authored default, decided after per-actor rows and before
+  `default_access` (per-actor explicit Deny still revokes instantly; on_behalf_of stays
+  Deny-only). Floors never consult the flag and are unchanged.
 - **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
@@ -78,8 +87,15 @@ The unified tool-policy chain is the model we want **everything** to converge on
   workspace (a UUID valid only in a different workspace is rejected via
   `GetMemberByUserAndWorkspace`). **Neither may ever target the actor's own row**
   (`toolpolicy.CanAuthorDelegatedOverride`) — admin is the one deliberate, documented exception
-  and bypasses both, including on its own row. Every other write (Group/Workspace/Runtime/
-  Agent/System layer, on a non-credential key) stays admin-only.
+  and bypasses both, including on its own row. **FIR-2351 follow-up (2026-07-06):** the two
+  capabilities are titled `Manage permissions` / `Manage group permissions` in the app (keys
+  unchanged); a **Group- or Agent-layer** row on a non-credential key now routes to
+  `manage_workspace_overrides` too (`cerebroRequireManagePermissionsPolicy`) so a Manage
+  permissions holder can grant a group or one agent access that opens a workspace default
+  Deny; and group-scope resolves once per actor∩target shared group with `group_id` threaded
+  into `RequestContext.ArgValues`, so an `arg_allowlist` WHEN condition on the capability row
+  pins `Manage group permissions` to specific group(s). Workspace/Runtime/System-layer writes
+  (on a non-credential key) stay admin-only.
 - **CLI surface (FIR-1609):** `multica permissions explain|set|clear`
   (`server/cmd/multica/cerebro_permissions.go`) wraps the read model + write surface above —
   `explain` (GET) prints per-tool `Effective` + `DecidedBy`/`CappedBy`/reason + group blame to

@@ -191,6 +191,28 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	return ResolveWithMode(mode, input), nil
 }
 
+// MemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// flag is on for the workspace — read from the workspace-level row (the all-zero
+// sentinel user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
+// local-runtime (daemonMemberOverrideEnabled) gates, so a display surface that
+// consults it can never disagree with enforcement. A lookup miss or DB error
+// resolves to OFF (the flag's default): a path that can LOOSEN access must never
+// switch itself on by accident.
+func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if s == nil || s.q == nil {
+		return false
+	}
+	enabled, err := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     FlagMemberOverride,
+	})
+	if err != nil || !enabled {
+		return false
+	}
+	return true
+}
+
 // ResolveOptIn loads the explicit settings for the query's (workspace, user,
 // groups, tool) context and decides an OFF-by-default capability gate: false
 // unless an explicit Allow has been granted at the user or group layer. Unlike

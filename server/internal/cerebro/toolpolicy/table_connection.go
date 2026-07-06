@@ -174,7 +174,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: base})
+			row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: base})
 			out = append(out, row)
 		}
 	}
@@ -265,7 +265,7 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 		if len(a.groups) > 0 {
 			a.layers[LayerGroup] = CombineGroups(a.groups...)
 		}
-		out[key] = Resolve(Input{Settings: a.layers, Base: in.Base}).Setting
+		out[key] = ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: a.layers, Base: in.Base}).Setting
 	}
 	return out, nil
 }
@@ -498,7 +498,17 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	wantKey := connectionToolKeyPrefix + connName
 	wantPattern := method + " " + path
+	// Workspace-Deny-as-default (FIR-2351, product decision 2026-07-06): with the
+	// workspace member-override flag on, an explicit WORKSPACE-layer setting on a
+	// connection is a workspace-authored DEFAULT, not an instant global verdict —
+	// so "deny this connection for the workspace" can still be opened for one
+	// specific agent/member/group by an explicit Allow at those layers, exactly
+	// like the connection's own default_access=deny. Who may author those rows is
+	// the write path's job. With the flag off, behavior is unchanged: an explicit
+	// Deny at ANY layer (workspace included) wins immediately.
+	openableWS := s.MemberOverrideEnabled(ctx, workspaceID)
 	var hasAllow, hasAsk bool
+	var wsWide, wsEndpoint Setting
 	for _, r := range rows {
 		if r.ToolKey != wantKey {
 			continue
@@ -531,6 +541,17 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 				}
 				continue
 			}
+			if openableWS && layer == LayerWorkspace {
+				// Collect the workspace-authored default instead of treating it as a
+				// per-actor verdict; it applies below (endpoint row wins over the
+				// connection-wide row by specificity) only when no per-actor row spoke.
+				if isEndpoint {
+					wsEndpoint = set
+				} else {
+					wsWide = set
+				}
+				continue
+			}
 			switch set {
 			case SettingDeny:
 				return SettingDeny, connName, nil
@@ -548,6 +569,23 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	if hasAsk {
 		return SettingAsk, connName, nil
+	}
+	// No per-actor row spoke — the workspace-authored default (flag on) decides
+	// before the connection's configured default_access, endpoint-specific over
+	// connection-wide.
+	if openableWS {
+		wsDefault := wsWide
+		if rank(wsEndpoint) >= 0 {
+			wsDefault = wsEndpoint
+		}
+		switch wsDefault {
+		case SettingAllow:
+			return SettingAllow, "", nil
+		case SettingAsk:
+			return SettingAsk, connName, nil
+		case SettingDeny:
+			return SettingDeny, connName, nil
+		}
 	}
 	// No explicit per-actor row — fall back to the connection's configured default
 	// access (allow/ask/deny), chosen when the connection was created/edited. A

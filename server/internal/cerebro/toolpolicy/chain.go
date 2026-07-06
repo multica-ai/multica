@@ -292,12 +292,16 @@ func resolveHardFloor(in Input) Effective {
 //	  own setting is authoritative for the member; group/workspace are the
 //	  inherited defaults it can override.
 //	Stage B — the AGENT inherits the member verdict as a CEILING, then Runtime,
-//	  Agent, on_behalf_of (and System) may only TIGHTEN it. An agent can never do
-//	  more than its member; a Deny on runtime/agent wins even when member/workspace
-//	  say Allow. on_behalf_of (the delegated task initiator, FIR-2441) is a peer of
-//	  runtime/agent here — tighten-only, same as under Resolve — so a member driving
-//	  someone else's agent can be restricted but can never widen what that agent's
-//	  own owner allows.
+//	  Agent, on_behalf_of (and System) may only TIGHTEN it — with ONE exception
+//	  (FIR-2351, product decision 2026-07-06): when the member verdict came from
+//	  the WORKSPACE default (no explicit Group/User row), an explicit Agent-layer
+//	  setting may OPEN it, so an operator can grant one agent a tool the
+//	  workspace default denies. An explicit Group or User row is still an
+//	  absolute ceiling for the agent. A Deny on runtime/agent wins even when
+//	  member/workspace say Allow. on_behalf_of (the delegated task initiator,
+//	  FIR-2441) is a peer of runtime here — tighten-only, same as under Resolve —
+//	  so a member driving someone else's agent can be restricted but can never
+//	  widen what that agent's own owner allows.
 //
 // CONTRAST WITH Resolve: Resolve is pure most-restrictive-wins (tighten-only at
 // every layer) and is the load-bearing invariant for the deny-by-default gates —
@@ -332,7 +336,24 @@ func resolveOpenable(in Input) Effective {
 	resolved := memberEff
 	decidedBy := memberDecidedBy
 	var cappedBy Layer
-	memberRank := rank(memberEff)
+
+	// Agent opening (FIR-2351, product decision 2026-07-06): a workspace-authored
+	// setting is a DEFAULT, not a cap — an operator with permission-write rights
+	// must be able to open it for one specific agent ("give this agent access even
+	// though the workspace default says deny"). So an explicit Agent-layer setting
+	// may LOOSEN the running value, but only when the member verdict came from the
+	// workspace default (or the base) — an explicit Group or User row is the
+	// member's own ceiling and an agent can never exceed its member, exactly as
+	// before. Who may AUTHOR an agent row is the write path's job
+	// (RequireToolPolicyWritePolicy); resolution trusts authored rows.
+	if v := in.Settings[LayerAgent]; rank(v) >= 0 &&
+		(memberDecidedBy == "" || memberDecidedBy == LayerWorkspace) &&
+		rank(v) < rank(resolved) {
+		resolved = v
+		decidedBy = LayerAgent
+	}
+
+	memberRank := rank(resolved)
 	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerOnBehalfOf, LayerSystem} {
 		v := in.Settings[layer]
 		if rank(v) < 0 {
