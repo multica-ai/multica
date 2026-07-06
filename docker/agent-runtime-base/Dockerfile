@@ -45,9 +45,10 @@ ARG TARGETOS
 ARG TARGETARCH
 # Concrete semver, not "dev": the daemon reports this as its CLI version, and
 # the quick-create gate rejects anything unparsable as ≥ 0.2.21 ("daemon doesn't
-# report a CLI version"). Kept in sync with docker-bake.hcl's default. See the
-# bake file for why 0.3.21.
-ARG MULTICA_VERSION=0.3.21
+# report a CLI version"). Version is set by docker-bake.hcl; no default here
+# so a bare docker build without --build-arg fails loudly rather than silently
+# stamping an empty version string.
+ARG MULTICA_VERSION
 ARG MULTICA_COMMIT=unknown
 
 WORKDIR /src

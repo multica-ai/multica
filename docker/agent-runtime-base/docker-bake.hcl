@@ -34,10 +34,9 @@ variable "GO_VERSION"          { default = "1.26.1" }
 // Concrete semver (not "dev"): the daemon tags its registration with this, and
 // the quick-create gate (server/pkg/agent/version.go) rejects anything that
 // doesn't parse as semver ≥ 0.2.21 — "dev" surfaces to users as "daemon doesn't
-// report a CLI version". 0.3.21 is the most recent upstream multica tag
-// reachable from the commit this fork's server/ was last synced to. CI does not
-// override this, so the default is what ships.
-variable "MULTICA_VERSION"     { default = "0.3.21" }
+// report a CLI version". 0.3.34 matches the latest agentfarm fork tag. CI does
+// not override this, so the default is what ships.
+variable "MULTICA_VERSION"     { default = "0.3.34" }
 variable "MULTICA_COMMIT"      { default = "unknown" }
 variable "CLAUDE_CODE_VERSION" { default = "latest" }
 variable "CODEX_VERSION"       { default = "latest" }
