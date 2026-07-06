@@ -1684,7 +1684,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </PropRow>
             )}
             {/* Kiro CLI 2.10+ reports per-turn cost as a native `credit`
-                unit with no token breakdown (GH #4943 / migration 136-137).
+                unit with no token breakdown (GH #4943 / migration 137-138).
                 Hide the row for every backend that already fills tokens so
                 the panel doesn't clutter with a zero. */}
             {usage.total_credits > 0 && (

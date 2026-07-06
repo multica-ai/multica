@@ -1416,7 +1416,7 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 // The test inserts a synthetic task with a Kiro-style credit-only payload
 // (all four token counters at zero, `credits` > 0), drives the rollup, and
 // asserts every read path returns the credit value verbatim. Before the
-// migration 137 pipeline change this test would fail because
+// migration 138 pipeline change this test would fail because
 // task_usage_hourly had no credits column.
 func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 	ctx := context.Background()
@@ -1476,7 +1476,7 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 	// `rollup_task_usage_hourly` (migration 102). A 1970-anchored window
 	// would trivially recompute every bucket and would NOT catch a
 	// dirty-queue-only path regression — see
-	// TestKiroCreditsMigration137EnqueuesDirtyKeys for that side.
+	// TestKiroCreditsMigration138EnqueuesDirtyKeys for that side.
 	if _, err := testPool.Exec(ctx, `
 		SELECT rollup_task_usage_hourly_window(now() - interval '1 minute', now() + interval '1 hour')
 	`); err != nil {
@@ -1509,7 +1509,7 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 	}
 
 	// --- 2) Runtime usage list (task_usage_hourly path) --------------
-	// Proves migration 137 + rollup fn extension work end-to-end.
+	// Proves migration 138 + rollup fn extension work end-to-end.
 	{
 		w := httptest.NewRecorder()
 		req := newRequest("GET", "/api/runtimes/"+runtimeID+"/usage", nil)
@@ -1590,7 +1590,7 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 	}
 }
 
-// TestKiroCreditsMigration137EnqueuesDirtyKeys proves migration 137's
+// TestKiroCreditsMigration138EnqueuesDirtyKeys proves migration 138's
 // **targeted backfill** strategy — enqueue only (bucket, workspace,
 // runtime, agent, project, provider, model) keys whose `task_usage`
 // rows already hold `credits > 0` — recovers historical credit rows
@@ -1612,10 +1612,10 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 //      wouldn't see it).
 //   2) Verify a normal narrow-window rollup DOES NOT pick it up.
 //   3) Run the migration's exact backfill INSERT (the SQL body from
-//      migration 137's dirty-queue enqueue).
+//      migration 138's dirty-queue enqueue).
 //   4) Verify the same narrow-window rollup NOW picks it up via
 //      `dirty_from_queue`, without any watermark rewind.
-func TestKiroCreditsMigration137EnqueuesDirtyKeys(t *testing.T) {
+func TestKiroCreditsMigration138EnqueuesDirtyKeys(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
@@ -1692,8 +1692,8 @@ func TestKiroCreditsMigration137EnqueuesDirtyKeys(t *testing.T) {
 		t.Fatalf("baseline: expected 0 credits in hourly, got %v — the narrow window unexpectedly caught the historic row, test is invalid", haveBefore)
 	}
 
-	// Migration 137's exact backfill statement. Kept inline so a future
-	// edit to migration 137 that widens/narrows the SELECT (e.g. a WHERE
+	// Migration 138's exact backfill statement. Kept inline so a future
+	// edit to migration 138 that widens/narrows the SELECT (e.g. a WHERE
 	// clause change) is caught by this test, not by a customer report.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO task_usage_hourly_dirty (

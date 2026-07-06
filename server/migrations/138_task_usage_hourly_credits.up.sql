@@ -1,8 +1,8 @@
--- Thread Kiro `credits` (migration 136) through the rollup.
+-- Thread Kiro `credits` (migration 137) through the rollup.
 --
 -- Motivation: #4943 was reported as "task count OK, usage / amount empty" on
 -- the workspace dashboard, per-issue usage, and per-runtime pages. Migration
--- 136 captured raw credits into `task_usage`, but every user-visible cost
+-- 137 captured raw credits into `task_usage`, but every user-visible cost
 -- surface reads from `task_usage_hourly` (dashboard, runtime trend) or from
 -- SUM(task_usage.*) shapes that were still token-only (issue summary,
 -- runtime by-agent, runtime by-hour). Without this migration the fix stops
@@ -22,7 +22,7 @@
 --
 --   3. Force a targeted backfill of history so existing hourly rows pick up
 --      any pre-migration credit values that were persisted by the daemon
---      after migration 136 shipped. **Only** the (bucket, workspace,
+--      after migration 137 shipped. **Only** the (bucket, workspace,
 --      runtime, agent, project, provider, model) keys that actually hold
 --      `task_usage.credits > 0` are enqueued into `task_usage_hourly_dirty`
 --      — a global watermark rewind would take ~70 days to catch up under

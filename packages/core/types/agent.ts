@@ -645,7 +645,7 @@ export interface IssueUsageSummary {
   total_cache_write_tokens: number;
   // Vendor-billed cost for backends that report a native metering unit
   // instead of tokens (Kiro CLI 2.10+; 0 for token-only backends). See
-  // migration 137 for the aggregation path — the number is summed across
+  // migration 138 for the aggregation path — the number is summed across
   // every task on this issue.
   total_credits: number;
   task_count: number;

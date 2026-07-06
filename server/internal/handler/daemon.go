@@ -2326,7 +2326,7 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 //
 // Credits carries a vendor-billed cost when the runtime does not expose a
 // per-token breakdown. Kiro CLI 2.10+ is the motivating case — see
-// migration 136 for the schema note. `omitempty` keeps the wire payload
+// migration 137 for the schema note. `omitempty` keeps the wire payload
 // unchanged for every backend that still fills tokens.
 type TaskUsagePayload struct {
 	Provider         string  `json:"provider"`
@@ -2392,7 +2392,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 
 		// Surface credit-only Kiro rows in structured logs so operators can
 		// grep for them until the dashboard learns to display credits
-		// (rollup pipeline is not yet credits-aware; see migration 136).
+		// (rollup pipeline is not yet credits-aware; see migration 137).
 		if u.Credits > 0 && u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
 			slog.Info("task credit-only usage",
 				"task_id", taskID,
@@ -2777,7 +2777,7 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
 		// Kiro CLI 2.10+ reports per-turn cost only in credits; every
-		// other backend leaves this at 0. See migration 136 / 137 for
+		// other backend leaves this at 0. See migration 137 / 138 for
 		// the persistence + aggregation path.
 		"total_credits": row.TotalCredits,
 		"task_count":    row.TaskCount,

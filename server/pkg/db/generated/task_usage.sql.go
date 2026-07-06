@@ -433,8 +433,8 @@ type UpsertTaskUsageParams struct {
 // would never propagate to the rollup.
 //
 // `credits` carries Kiro CLI 2.10+'s per-turn vendor-billed cost (migration
-// 136). Every other backend fills tokens and leaves this at 0. The rollup
-// pipeline is not yet credits-aware — see migration 136 for the scope
+// 137). Every other backend fills tokens and leaves this at 0. The rollup
+// pipeline is not yet credits-aware — see migration 137 for the scope
 // rationale.
 func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
 	_, err := q.db.Exec(ctx, upsertTaskUsage,

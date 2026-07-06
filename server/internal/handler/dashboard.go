@@ -65,7 +65,7 @@ type DashboardUsageDailyResponse struct {
 	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	// Credits: vendor-billed cost for backends that report a native
 	// metering unit instead of tokens (Kiro CLI 2.10+). 0 for
-	// token-only backends. See migration 137 for the aggregation path.
+	// token-only backends. See migration 138 for the aggregation path.
 	Credits   float64 `json:"credits"`
 	TaskCount int32   `json:"task_count"`
 }

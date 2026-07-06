@@ -878,7 +878,7 @@ export interface CostByKey {
   cost: number;
   // Credits summed across contributing rows. Non-zero only when at least
   // one row came from a backend that reports vendor-billed cost instead
-  // of tokens (Kiro CLI 2.10+). See migration 137 for the aggregation path.
+  // of tokens (Kiro CLI 2.10+). See migration 138 for the aggregation path.
   credits: number;
   taskCount: number;
 }

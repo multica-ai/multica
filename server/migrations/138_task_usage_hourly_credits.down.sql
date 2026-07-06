@@ -1,4 +1,4 @@
--- Restore the pre-137 rollup shape. The `credits` column drop must come
+-- Restore the pre-138 rollup shape. The `credits` column drop must come
 -- after the function is restored to the four-token-only form, otherwise
 -- the still-installed function's `INSERT ... credits` would error before
 -- we can revert it.
