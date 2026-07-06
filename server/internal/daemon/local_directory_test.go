@@ -631,3 +631,44 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 		t.Errorf("wait-local-directory calls = %d, want 1", got)
 	}
 }
+
+
+// TestLocalDirectoryRefModeDefaults pins the daemon-side helpers so a
+// missing mode / max_parallel silently reads as in_place / the default,
+// keeping backwards compatibility with rows written before MUL-3483.
+func TestLocalDirectoryRefModeDefaults(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  localDirectoryRef
+		mode string
+		max  int
+	}{
+		{"empty mode → in_place", localDirectoryRef{}, "in_place", defaultWorktreePoolMaxParallel},
+		{"explicit in_place", localDirectoryRef{Mode: "in_place"}, "in_place", defaultWorktreePoolMaxParallel},
+		{"worktree_pool", localDirectoryRef{Mode: "worktree_pool"}, "worktree_pool", defaultWorktreePoolMaxParallel},
+		{"custom max", localDirectoryRef{Mode: "worktree_pool", MaxParallel: 8}, "worktree_pool", 8},
+		{"negative max clamped", localDirectoryRef{Mode: "worktree_pool", MaxParallel: -1}, "worktree_pool", defaultWorktreePoolMaxParallel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.ref.modeOrDefault(); got != tc.mode {
+				t.Errorf("modeOrDefault = %q, want %q", got, tc.mode)
+			}
+			if got := tc.ref.maxParallelOrDefault(); got != tc.max {
+				t.Errorf("maxParallelOrDefault = %d, want %d", got, tc.max)
+			}
+		})
+	}
+}
+
+// TestDefaultWorktreePoolRoot pins the fallback path we compose when the
+// ref left pool_root blank. Placing the pool alongside the base repo
+// (rather than inside it) prevents pool worktrees from ever showing up
+// in the parent's `git status`.
+func TestDefaultWorktreePoolRoot(t *testing.T) {
+	got := defaultWorktreePoolRoot("/home/u/code/proj")
+	want := filepath.Join("/home/u/code", ".multica-worktrees", "proj")
+	if got != want {
+		t.Errorf("defaultWorktreePoolRoot = %q, want %q", got, want)
+	}
+}
