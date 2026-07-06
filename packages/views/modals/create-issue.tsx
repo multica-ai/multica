@@ -40,6 +40,7 @@ import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, 
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { TeamPicker } from "../teams/components/team-picker";
+import { TeamProjectConflictDialog } from "../teams/components/team-project-conflict-dialog";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -361,7 +362,29 @@ export function ManualCreatePanel({
     setFormResetKey((key) => key + 1);
   };
 
+  // Linear-style interception: team ∉ project's team set pauses the submit
+  // behind a resolution dialog. "Add to project" proceeds unchanged (the
+  // server adds the association), "move" retargets the issue's team first.
+  const teamProjectConflict = useMemo(() => {
+    if (!selectedProject || !effectiveTeamId) return null;
+    const ids = selectedProject.team_ids ?? [];
+    if (ids.length === 0 || ids.includes(effectiveTeamId)) return null;
+    const team = teams.find((tm) => tm.id === effectiveTeamId);
+    if (!team) return null;
+    return { team, projectTeams: teams.filter((tm) => ids.includes(tm.id)) };
+  }, [selectedProject, effectiveTeamId, teams]);
+  const [conflictOpen, setConflictOpen] = useState(false);
+
   const handleSubmit = async () => {
+    if (!title.trim() || submitting) return;
+    if (teamProjectConflict) {
+      setConflictOpen(true);
+      return;
+    }
+    await doSubmit(effectiveTeamId);
+  };
+
+  const doSubmit = async (finalTeamId: string | undefined) => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
@@ -380,7 +403,7 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
-        team_id: effectiveTeamId,
+        team_id: finalTeamId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
@@ -931,6 +954,24 @@ export function ManualCreatePanel({
                 )}
               </div>
             </div>
+      {teamProjectConflict && (
+        <TeamProjectConflictDialog
+          open={conflictOpen}
+          teamName={teamProjectConflict.team.name}
+          projectName={selectedProject?.title ?? ""}
+          projectTeams={teamProjectConflict.projectTeams}
+          onAddTeam={() => {
+            setConflictOpen(false);
+            void doSubmit(effectiveTeamId);
+          }}
+          onMoveToTeam={(tid) => {
+            setConflictOpen(false);
+            setTeamId(tid);
+            void doSubmit(tid);
+          }}
+          onCancel={() => setConflictOpen(false)}
+        />
+      )}
     </>
   );
 }

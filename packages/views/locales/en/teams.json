@@ -83,5 +83,12 @@
     "default_cannot_archive": "The default team cannot be archived",
     "archive_admin_only": "Only admins can archive a team",
     "goto": "Go to"
+  },
+  "conflict": {
+    "title": "{{team}} is not part of the project",
+    "body": "The {{team}} team is not currently part of the {{project}} project. Add the team to the project, or move the issue to one of the project's teams.",
+    "add_team": "Add {{team}} to the project",
+    "project_teams": "Project teams",
+    "move_issue": "Move issue to {{team}}"
   }
 }

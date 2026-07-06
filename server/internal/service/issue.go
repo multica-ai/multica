@@ -267,6 +267,16 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	teamID = team.ID
 
+	// Invariant: an issue's team is always part of its project's team set.
+	// The UI resolves a mismatch with an explicit dialog whose default is
+	// "add the team to the project"; headless callers (agents, CLI, API)
+	// get that same default applied here, so the invariant holds on every
+	// path and a team's Projects page never misses a project that holds
+	// its issues.
+	if err := EnsureProjectHasTeam(ctx, qtx, p.WorkspaceID, projectID, teamID); err != nil {
+		return IssueCreateResult{}, err
+	}
+
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, teamID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("duplicate guard: %w", err)
@@ -412,6 +422,37 @@ func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamI
 		teamID = team.ID
 	}
 	return ValidateActiveTeam(ctx, q, workspaceID, teamID)
+}
+
+// EnsureProjectHasTeam upholds the invariant that an issue's team is part of
+// its project's team set, by adding the association when it is missing (the
+// same default the UI's conflict dialog offers). No-op without a project.
+// Exported via the issue create/update paths only — project↔team stays a
+// creation-time default for everything else.
+func EnsureProjectHasTeam(ctx context.Context, q *db.Queries, workspaceID, projectID, teamID pgtype.UUID) error {
+	if !projectID.Valid || !teamID.Valid {
+		return nil
+	}
+	teams, err := q.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		return fmt.Errorf("list project teams: %w", err)
+	}
+	for _, t := range teams {
+		if t.ID == teamID {
+			return nil
+		}
+	}
+	if err := q.AddProjectTeam(ctx, db.AddProjectTeamParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		TeamID:      teamID,
+	}); err != nil {
+		return fmt.Errorf("add project team: %w", err)
+	}
+	return nil
 }
 
 // ValidateActiveTeam loads a Team by ID and returns it only if it exists in the
