@@ -39,6 +39,30 @@ export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (workspaceId: string) => api.deleteWorkspace(workspaceId),
+    // Optimistically drop the workspace from the list cache while the
+    // DELETE is in flight. The delete flow navigates away BEFORE awaiting
+    // the mutation (see workspace-tab.tsx's navigateAwayFromCurrentWorkspace
+    // for the CancelledError race that forces that ordering), so during the
+    // pending window every list consumer — sidebar switcher, by-slug route
+    // resolution, post-auth destination — must already see the workspace as
+    // gone, or a concurrent list refetch re-presents it as selectable and
+    // it can be re-entered mid-delete.
+    onMutate: async (workspaceId) => {
+      // Cancel in-flight list fetches so a response that started before the
+      // delete can't land after the optimistic update and resurrect the row.
+      await qc.cancelQueries({ queryKey: workspaceKeys.list() });
+      const previous = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) =>
+        old?.filter((w) => w.id !== workspaceId),
+      );
+      return { previous };
+    },
+    // Rollback: the server still has the workspace, so put it back in the
+    // list (the caller surfaces the error toast). onSettled's invalidate
+    // then reconciles against server truth either way.
+    onError: (_err, _workspaceId, ctx) => {
+      if (ctx?.previous) qc.setQueryData(workspaceKeys.list(), ctx.previous);
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
     },
