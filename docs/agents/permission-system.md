@@ -292,6 +292,35 @@ These constrain agents but along a different axis than "is this action allowed":
 
 ---
 
+## Known enforcement outage: 2026-06-23 → FIR-2743 restore
+
+Upstream syncs #4454 (`handler/daemon.go`, June 23) and #4530 (`daemon/daemon.go`,
+June 24) silently deleted several of the wirings this doc describes. Until the
+FIR-2743 restore landed, the following were documented-but-dark:
+
+- **Staged local tool-policy (TECH-2563):** the claim did not return
+  `local_tool_policy_stage` and the daemon did not wire the Claude PreToolUse
+  hook — observe/enforce workspaces got no local per-tool enforcement.
+- **Workspace capability policy at claim (FIR-458):** sandbox network
+  allowlists and per-agent MCP denies from Settings were not applied.
+- **Capability register mirrors (FIR-2129/FIR-2284):** runtime snapshots
+  stopped landing in the register on register/heartbeat, so the unified tool
+  table went stale for runtimes that reconnected in the window.
+- **OS sandbox at spawn (JEH-418/FIR-1428):** the daemon spawned agents
+  WITHOUT the Seatbelt wrapper (no `Sandbox:` on `agent.New`), and the
+  agent-browser gate folded its grant into a sandbox policy the daemon never
+  received. Deny-by-default posture was effectively off for local runs in the
+  window.
+- **User communication profile (JEH-304):** claim-time compilation and the
+  brief section were dropped (delivery feature, not enforcement — listed for
+  completeness).
+
+All of the above are restored and now guarded by source-presence tripwire tests
+(`handler/daemon_permission_wiring_cerebro_test.go`,
+`daemon/spawn_permission_wiring_cerebro_test.go`) so the next upstream sync
+cannot drop them silently. If you are auditing behavior inside the outage
+window, assume these gates were NOT enforced on local daemon runtimes.
+
 ## If you are mapping or refactoring permissions
 
 - Start from the live table above; it is the source of truth for current behavior.
