@@ -160,6 +160,8 @@ type Task struct {
 	IssueSnapshot string `json:"issue_snapshot,omitempty"`
 	// CEREBRO-PATCH(daemon-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction shipped at claim time when the graphify saving is on.
 	GraphifyNudge string `json:"graphify_nudge,omitempty"`
+	// CEREBRO-PATCH(daemon-memory-autorecall): FIR-1794 layer 3 — automatically recalled memories shipped at claim time when cerebro_memory is on.
+	MemoryContext string `json:"memory_context,omitempty"`
 	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
 	// presentation_mode from claim response. "interactive" tells the daemon
 	// to mirror agent stdout to the cerebro terminal broker so a browser

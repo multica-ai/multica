@@ -396,6 +396,18 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		return
 	}
 
+	// FIR-1794 layer 3 — automatic memory recall at run start. When the
+	// cerebro_memory flag is on for this workspace, recall memories relevant
+	// to the task server-side and fold them into the system prompt, so memory
+	// use does not depend on the model remembering to call memory_recall.
+	// Fail open: an empty block (flag off, nothing recalled, service down)
+	// leaves the messages untouched.
+	if e.cerebro != nil && plan.recallQuery != "" && len(messages) > 0 && messages[0].Role == "system" {
+		if block := CerebroMemoryAutoRecallBlock(parent, e.cerebro, plan.workspaceID, task.AgentID, task.OriginalUserID, plan.recallQuery); block != "" {
+			messages[0].Content += "\n\n" + strings.TrimSpace(block)
+		}
+	}
+
 	// FIR-2325: resolve the workspace's cost-saving modes once and apply the
 	// model_routing saving when it is "on". Default (no override) is off, so the
 	// requested model is unchanged for every workspace that hasn't opted in.
@@ -503,6 +515,9 @@ type taskPlan struct {
 	// context is the human-readable run context (surface, issue, project)
 	// forwarded to the registry AI-gateway so each logged call is attributable.
 	context gatewayContext
+	// recallQuery is the task-derived query for automatic memory recall at run
+	// start (FIR-1794 layer 3). Empty disables auto-recall for the run.
+	recallQuery string
 }
 
 // gatewayContext is the best-effort, human-readable context for a gateway run.
@@ -557,6 +572,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			// Chat history is inlined; a daemon agent would list it itself.
 			inlinedContextReads: 1,
 			context:             gatewayContext{surface: "chat"},
+			recallQuery:         CerebroMemoryAutoRecallQuery(lastUserChatMessage(history)),
 		}, nil
 
 	case task.IssueID.Valid:
@@ -614,6 +630,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
 			context:             issueCtx,
+			recallQuery: CerebroMemoryAutoRecallQuery(issue.Title, func() string {
+				if triggerComment != nil {
+					return triggerComment.Content
+				}
+				return ""
+			}()),
 		}, nil
 
 	case task.AutopilotRunID.Valid:
@@ -645,11 +667,24 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			},
 			emptyMessageError: "autopilot run has no prompt to answer",
 			context:           apCtx,
+			recallQuery:       CerebroMemoryAutoRecallQuery(ap.Title, ap.Description.String),
 		}, nil
 
 	default:
 		return taskPlan{}, fmt.Errorf("firtal gateway runtime cannot fulfil this task kind (no chat, issue, or autopilot link)")
 	}
+}
+
+// lastUserChatMessage returns the newest user-authored message in a
+// chronologically-ordered chat history — the text the run is answering, used
+// as the automatic memory-recall query for chat tasks.
+func lastUserChatMessage(history []db.ChatMessage) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			return history[i].Content
+		}
+	}
+	return ""
 }
 
 func (e *FirtalGatewayExecutor) effectiveWorkspaceConfig(ctx context.Context, workspaceID pgtype.UUID) (FirtalGatewayRuntimeConfig, bool, error) {

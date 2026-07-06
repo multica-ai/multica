@@ -2069,6 +2069,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp.EffectiveTools = h.cerebroEffectiveToolsForBrief(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission non-CLI tools for the brief
+	h.applyMemoryAutoRecall(r.Context(), &resp, *task)                                                                            // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
 }

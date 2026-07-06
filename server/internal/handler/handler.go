@@ -261,6 +261,8 @@ type Handler struct {
 	APIConnectionBrief CerebroAPIConnectionBriefResolver
 	// CEREBRO-PATCH(handler-agent-memory-settings): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle.
 	AgentMemory AgentMemorySettingsService
+	// CEREBRO-PATCH(handler-memory-autorecall): FIR-1794 layer 3 — automatic memory recall for daemon claims.
+	MemoryAutoRecall CerebroMemoryAutoRecaller
 	// CEREBRO-PATCH(handler-issue-workflow-activator): FIR-2283 followup —
 	// attaches an Issue workflow recipe to a freshly created issue when the
 	// create request (HTTP or CLI) carries workflow_id, so agents get the same
