@@ -279,11 +279,55 @@ func TestThreadRecoversBotAttachmentText(t *testing.T) {
 	if got == nil {
 		t.Fatalf("bot root message was dropped: %+v", page.Messages)
 	}
-	if got.Text != "[FIRING:1] HighLatency prod" {
-		t.Errorf("root text = %q, want the attachment fallback", got.Text)
+	if got.Text != "HighLatency\np99 over threshold" {
+		t.Errorf("root text = %q, want the attachment title and body", got.Text)
 	}
 	if got.Author != "Grafana" {
 		t.Errorf("root author = %q, want Grafana", got.Author)
+	}
+}
+
+func TestAttachmentTextPriority(t *testing.T) {
+	tests := []struct {
+		name string
+		att  slack.Attachment
+		want string
+	}{
+		{
+			name: "fallback only",
+			att: slack.Attachment{
+				Fallback: "short fallback",
+			},
+			want: "short fallback",
+		},
+		{
+			name: "text beats fallback",
+			att: slack.Attachment{
+				Fallback: "[FIRING:1] HighLatency prod",
+				Title:    "HighLatency",
+				Text:     "Summary: p99 over threshold\nDescription: checkout is slow",
+			},
+			want: "HighLatency\nSummary: p99 over threshold\nDescription: checkout is slow",
+		},
+		{
+			name: "fields beat fallback",
+			att: slack.Attachment{
+				Fallback: "short fallback",
+				Fields: []slack.AttachmentField{
+					{Title: "severity", Value: "critical"},
+					{Title: "pod", Value: "checkout-7d8"},
+				},
+			},
+			want: "severity critical\npod checkout-7d8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := attachmentText(tt.att); got != tt.want {
+				t.Fatalf("attachmentText() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

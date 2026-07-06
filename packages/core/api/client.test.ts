@@ -152,6 +152,59 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
+  it("posts feedback kind and parses the response through the schema", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "feedback-1", created_at: "2026-06-26T00:00:00Z" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const response = await client.createFeedback({
+      message: "Desktop route crashed",
+      url: "app://desktop/acme/issues",
+      workspace_id: "ws-1",
+      kind: "bug",
+    });
+
+    expect(response).toEqual({
+      id: "feedback-1",
+      created_at: "2026-06-26T00:00:00Z",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/feedback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          message: "Desktop route crashed",
+          url: "app://desktop/acme/issues",
+          workspace_id: "ws-1",
+          kind: "bug",
+        }),
+      }),
+    );
+  });
+
+  it("falls back to an empty feedback response when the server shape drifts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 42, created_at: "2026-06-26T00:00:00Z" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createFeedback({ message: "hello" })).resolves.toEqual({
+      id: "",
+      created_at: "",
+    });
+  });
+
   it("uses the expected HTTP contract for comment trigger preview and suppress", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(

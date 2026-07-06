@@ -25,6 +25,8 @@ data:
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
 
-  # --- PostgreSQL (also consumed by the backend to build DATABASE_URL) ---
+  {{- if not .Values.postgres.external.enabled }}
+  # --- PostgreSQL (consumed by the backend to build DATABASE_URL) ---
   POSTGRES_DB: {{ .Values.postgres.database | quote }}
   POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  {{- end }}

@@ -165,6 +165,9 @@ func (s *IssueService) hasPendingRun(ctx context.Context, issueID, agentID pgtyp
 	pending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issueID,
 		AgentID: agentID,
+		// Key dedup on the reviewed head so a pending run against an old HEAD
+		// does not shadow a request after HEAD advanced (TEN-356).
+		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issueID)),
 	})
 	if err != nil {
 		return true

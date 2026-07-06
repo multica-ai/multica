@@ -124,6 +124,17 @@ type CreateAgentFromTemplateRequest struct {
 	Model              string `json:"model,omitempty"`
 	Visibility         string `json:"visibility,omitempty"`
 	MaxConcurrentTasks int32  `json:"max_concurrent_tasks,omitempty"`
+	// PermissionMode + InvocationTargets are the invocation-permission inputs
+	// (MUL-3963). When permission_mode is present it is authoritative and
+	// Visibility is ignored; when absent, legacy Visibility is mapped through
+	// parsePermissionInput ("workspace" -> public_to + workspace target;
+	// "private" or "" -> private). Persisting these fields keeps template
+	// creates aligned with the manual CreateAgent path — without them the
+	// template row lands as `permission_mode='private'` (the SQL default) and
+	// canInvokeAgent silently locks out every non-owner, even if the caller
+	// asked for a workspace-shared agent.
+	PermissionMode    *string                    `json:"permission_mode,omitempty"`
+	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets,omitempty"`
 	// Optional overrides — let the picker UI customise the template before
 	// creation without forcing a second round-trip to the detail page.
 	// When nil/empty, the template's own values are used.
@@ -156,7 +167,8 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	}
 
 	var req CreateAgentFromTemplateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -208,6 +220,20 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		return
+	}
+
+	// Resolve invocation permission (MUL-3963) — mirrors CreateAgent so the
+	// two entry points can't drift. permission_mode is authoritative when
+	// present; otherwise legacy visibility is mapped through the same helper
+	// ("workspace" -> public_to + workspace target; "private" -> private).
+	// On create the caller is always the owner, so any submitted targets are
+	// accepted unconditionally.
+	_, hasTargets := rawFields["invocation_targets"]
+	legacyVis := req.Visibility
+	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
+	if permErr != nil {
+		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
 
@@ -440,7 +466,8 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		RuntimeMode:        runtime.RuntimeMode,
 		RuntimeConfig:      rc,
 		RuntimeID:          runtime.ID,
-		Visibility:         req.Visibility,
+		Visibility:         perm.legacyVisibility(),
+		PermissionMode:     perm.mode,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            creatorUUID,
 		CustomEnv:          ce,
@@ -489,6 +516,23 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusInternalServerError, "failed to attach skill: "+err.Error())
 			return
 		}
+	}
+
+	// Persist the invocation allow-list (MUL-3963) inside the same tx as the
+	// agent row so the agent is never visible to callers in a state where the
+	// row exists but its targets are missing. Without this the freshly created
+	// row would default to `permission_mode=private` + zero targets — meaning
+	// canInvokeAgent silently locks out every non-owner even when the caller
+	// asked for a workspace-shared agent (the manual CreateAgent path already
+	// did this; the template path was diverging until MUL-4010).
+	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, agent.ID, creatorUUID, perm.targets); err != nil {
+		slog.Error("agent-template create: persist invocation targets failed",
+			append(logger.RequestAttrs(r),
+				"agent_id", uuidToString(agent.ID),
+				"error", err,
+			)...)
+		writeError(w, http.StatusInternalServerError, "failed to persist invocation targets: "+err.Error())
+		return
 	}
 
 	// Attach user-supplied extra skills (selected in the create dialog
@@ -550,6 +594,15 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
+	}
+	// Reflect the invocation-permission state we just persisted (MUL-4010).
+	// Without this the response would still show empty invocation_targets and
+	// derive Visibility from permission_mode alone — so a client that just
+	// asked for `visibility="workspace"` would round-trip to a legacy
+	// "private" and re-render the wrong access badge.
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, agent.ID); err != nil {
+		slog.Warn("agent-template create: load invocation targets for response failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})

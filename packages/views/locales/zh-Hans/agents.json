@@ -210,6 +210,7 @@
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
+    "composio_mcp": "MCP 应用",
     "integrations": "集成",
     "runtime_config": "路由",
     "discard_dialog_title": "放弃未保存的修改？",
@@ -227,6 +228,17 @@
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
     "visibility_label": "可见性",
+    "access": {
+      "label": "访问权限",
+      "private_title": "私有",
+      "private_desc": "只有你可以运行该智能体",
+      "public_title": "公开",
+      "public_desc": "选择谁可以运行该智能体",
+      "public_workspace_option": "工作区内所有人",
+      "public_members_group": "指定成员",
+      "public_members_empty": "没有可选择的工作区成员",
+      "public_targets_empty_hint": "至少勾选下方一项 —— 否则该智能体仍为私有。"
+    },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
     "runtime_filter_all": "全部",
@@ -320,6 +332,22 @@
       "save_failed_toast": "保存 MCP 配置失败",
       "redacted_title": "已配置 —— 当前账号无权查看",
       "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
+    },
+    "composio_mcp": {
+      "subtitle": "勾选 toolkit，只在你自己（这个 agent 的创建者）直接或通过下级 agent 链路触发这个 agent 时，才把它挂载为 MCP server。",
+      "loading": "正在加载你的连接…",
+      "load_failed": "无法加载你已连接的应用，请稍后重试。",
+      "empty_title": "还没有已连接的应用",
+      "empty_hint": "你还没连接任何第三方服务。先去授权一个，再回到这里勾选允许。",
+      "empty_link_to_settings": "去 设置 → 集成 连一个",
+      "connected": "已连接",
+      "toggle_aria": "允许该 agent 使用 {{toolkit}}",
+      "saving": "正在保存…",
+      "save_failed_toast": "保存失败，请重试",
+      "redacted_title": "已配置 —— 对你隐藏",
+      "redacted_hint": "只有该 agent 的创建者才能查看或修改它可使用的应用。",
+      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用「私有」或缩小访问范围。",
+      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
     },
     "runtime_config": {
       "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
@@ -419,6 +447,28 @@
       "tooltip": "工作区 · 工作区内所有人都可以使用该智能体"
     }
   },
+  "access": {
+    "tooltip": "访问权限 · 谁可以运行该智能体",
+    "trigger_private": "仅自己",
+    "trigger_workspace": "工作区",
+    "trigger_members_count": "{{count}} 人",
+    "trigger_members_empty": "指定成员",
+    "trigger_team": "团队",
+    "private_title": "私有",
+    "private_desc": "只有你可以运行该智能体",
+    "workspace_title": "公开给工作区",
+    "workspace_desc": "工作区内任何人都可以运行该智能体",
+    "members_title": "公开给指定成员",
+    "members_desc": "只有你选择的人可以运行该智能体",
+    "team_title": "公开给团队",
+    "team_desc": "向整个团队授予访问权限",
+    "team_coming_soon": "即将推出",
+    "members_group": "成员",
+    "public_group": "公开访问",
+    "owner_only_readonly": "只有该 Agent 的所有者可以更改谁能调用它。",
+    "members_empty": "没有可选择的工作区成员",
+    "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
+  },
   "profile_card": {
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
@@ -451,7 +501,11 @@
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
     "sort_chronological": "时间顺序",
-    "sort_newest_first": "最新在前"
+    "sort_newest_first": "最新在前",
+    "expand_visible": "展开当前可见项",
+    "collapse_visible": "收起当前可见项",
+    "preserve_filters": "保留筛选",
+    "default_expanded": "默认展开详情"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",
