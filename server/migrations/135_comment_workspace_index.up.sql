@@ -29,17 +29,20 @@
 -- 60 ms (hashed global scan) to 1.8 ms (subplan uses this index).
 -- Prd extrapolation: 32.3 s → tens of milliseconds.
 --
--- Plain CREATE INDEX (not CONCURRENTLY) is used because CONCURRENTLY
--- cannot be inside the DO block that guards the migration for
--- environments where the table shape has drifted; on prd the operator
--- can pre-create with CONCURRENTLY and the IF NOT EXISTS guard will
--- make this migration a no-op.
+-- This CREATE INDEX is deliberately unwrapped. The whole point of
+-- MUL-4059 was that migrations 032 / 033 / 036 hid CREATE INDEX inside
+-- `DO $$ ... EXCEPTION WHEN OTHERS $$` blocks, so on any environment
+-- where pg_bigm was absent the migration "succeeded" while quietly
+-- creating no indexes at all — the exact silent-skip pattern that took
+-- prd search down. This index is the critical support for the fix, not
+-- an optional CJK bonus, so a real failure (lock timeout, disk full,
+-- permission denied, schema drift) MUST abort the migration and fail
+-- deployment, not slip through as a green success. IF NOT EXISTS keeps
+-- the migration idempotent for the operator-precreated case; operators
+-- who need concurrent creation on a large prd table should run
+-- `CREATE INDEX CONCURRENTLY idx_comment_workspace ON comment
+-- (workspace_id);` before applying, which turns this statement into a
+-- no-op.
 
-DO $$
-BEGIN
-  CREATE INDEX IF NOT EXISTS idx_comment_workspace
+CREATE INDEX IF NOT EXISTS idx_comment_workspace
     ON comment (workspace_id);
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'skipping idx_comment_workspace (comment.workspace_id missing?)';
-END
-$$;

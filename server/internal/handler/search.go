@@ -25,7 +25,10 @@ import (
 // The 3 s cap is generous compared to a properly indexed search (typically
 // <50 ms) and short enough that the frontend's implicit request timeout
 // (browser default, ~30 s) never kicks in. On timeout the caller sees a
-// standard 500 with a descriptive error rather than a stalled connection.
+// 503 with a descriptive error rather than a stalled connection —
+// SearchIssues / SearchProjects map SQLSTATE 57014 to
+// http.StatusServiceUnavailable so the frontend can distinguish this
+// from a generic 500.
 const searchStatementTimeout = 3 * time.Second
 
 // searchStatementTimeoutOverride, when non-zero, replaces
