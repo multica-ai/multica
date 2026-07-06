@@ -383,9 +383,49 @@ function FileCardDiv({
     </div>
   );
 }
+// CEREBRO-PATCH(readonly-image-strip): FIR-2714 — a paragraph that holds only
+// images (soft-break-separated `![image N](url)` lines, e.g. the composer image
+// tray appended on send) is rendered as a left-aligned, horizontally scrollable
+// strip instead of centered stacked blocks. Detects the shape off the hast node
+// so a paragraph mixing text and an inline image is left as a normal <p>.
+function isImageOnlyParagraph(node?: {
+  children?: Array<{ type?: string; tagName?: string; value?: unknown }>;
+}): boolean {
+  const children = node?.children;
+  if (!Array.isArray(children) || children.length === 0) return false;
+  let hasImage = false;
+  for (const child of children) {
+    if (child.type === "element" && child.tagName === "img") {
+      hasImage = true;
+      continue;
+    }
+    if (child.type === "element" && child.tagName === "br") continue;
+    if (child.type === "text" && String(child.value ?? "").trim() === "") continue;
+    return false;
+  }
+  return hasImage;
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
+
+  // CEREBRO-PATCH(readonly-image-strip): FIR-2714 — image-only paragraphs render
+  // as a left-aligned scrollable strip (see .rte-image-strip in cerebro-overrides.css).
+  p: function ReadonlyParagraph({
+    node,
+    children,
+    ...props
+  }: React.ComponentProps<"p"> & {
+    node?: {
+      children?: Array<{ type?: string; tagName?: string; value?: unknown }>;
+    };
+  }) {
+    if (isImageOnlyParagraph(node)) {
+      return <div className="rte-image-strip">{children}</div>;
+    }
+    return <p {...props}>{children}</p>;
+  },
 
   // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
   img: function ReadonlyImage({ src, alt }) {

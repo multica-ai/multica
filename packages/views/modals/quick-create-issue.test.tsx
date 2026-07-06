@@ -198,6 +198,45 @@ vi.mock("../editor", () => {
   };
 });
 
+// FIR-2714: the prompt field renders EditorImageTray from
+// @multica/cerebro-composer. Stub it to the same ref-forwarding textarea so the
+// quick-create tests exercise create logic, not the tray internals.
+vi.mock("@multica/cerebro-composer", () => {
+  const EditorImageTray = forwardRef(
+    ({ defaultValue, onUpdate, onSubmit, placeholder }: any, ref: any) => {
+      const valueRef = useRef(defaultValue || "");
+      const [value, setValue] = useState(defaultValue || "");
+      useImperativeHandle(ref, () => ({
+        getMarkdown: () => valueRef.current,
+        clearContent: () => {
+          valueRef.current = "";
+          setValue("");
+        },
+        uploadFile: vi.fn(),
+        focus: vi.fn(),
+      }));
+      return (
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              onSubmit?.();
+            }
+          }}
+        />
+      );
+    },
+  );
+  EditorImageTray.displayName = "EditorImageTray";
+  return { EditorImageTray };
+});
+
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogTitle: ({ children, className }: { children: ReactNode; className?: string }) => (
     <div className={className}>{children}</div>

@@ -32,7 +32,11 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+// CEREBRO-PATCH(create-issue-image-tray): FIR-2714 — description swaps ContentEditor
+// for EditorImageTray so dropped/pasted/attached images collect in the numbered tray
+// at the top (flag-gated inside EditorImageTray; identical to ContentEditor when off).
+import { type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(create-issue-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
 import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
@@ -468,7 +472,8 @@ export function ManualCreatePanel({
 
             {/* Description — takes remaining space */}
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
-              <ContentEditor
+              {/* CEREBRO-PATCH(create-issue-image-tray): FIR-2714 — EditorImageTray in place of ContentEditor for the numbered image tray. */}
+              <EditorImageTray
                 ref={descEditorRef}
                 defaultValue={draft.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}

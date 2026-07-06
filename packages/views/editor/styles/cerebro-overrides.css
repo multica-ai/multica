@@ -372,3 +372,31 @@
     display: none;
   }
 }
+
+/* CEREBRO-PATCH(readonly-image-strip): FIR-2714 — posted images (issue comments,
+   descriptions, chat, channel/DM messages) used to render each markdown image as a
+   centered block (media.css `.image-node { display:block; text-align:center }`), so a
+   single attachment sat in the middle of the message and several attachments stacked
+   down the thread. Jesper wants them laid out like the composer image tray:
+   left-aligned, on one row, and horizontally scrollable when they exceed the width.
+   readonly-content.tsx wraps an image-only paragraph in `.rte-image-strip`; this styles
+   that wrapper as the scroll row and pins each thumbnail so it keeps its size. Scoped to
+   `.readonly` so the editable editor is untouched. */
+.rich-text-editor.readonly .rte-image-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.rich-text-editor.readonly .rte-image-strip br {
+  display: none;
+}
+.rich-text-editor.readonly .rte-image-strip .image-node {
+  display: block !important;
+  flex: 0 0 auto;
+  margin: 0;
+  text-align: left;
+}

@@ -42,11 +42,14 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
-  ContentEditor,
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
+// CEREBRO-PATCH(quick-create-image-tray): FIR-2714 — prompt uses EditorImageTray so
+// dropped/pasted/attached images collect in the numbered tray at the top (flag-gated
+// inside EditorImageTray; identical to ContentEditor when off).
+import { EditorImageTray } from "@multica/cerebro-composer";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 // CEREBRO-PATCH(quick-create-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
 import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
@@ -546,7 +549,8 @@ export function AgentCreatePanel({
           {...dropZoneProps}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
-          <ContentEditor
+          {/* CEREBRO-PATCH(quick-create-image-tray): FIR-2714 — EditorImageTray in place of ContentEditor for the numbered image tray. */}
+          <EditorImageTray
             ref={editorRef}
             defaultValue={initialPrompt}
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}

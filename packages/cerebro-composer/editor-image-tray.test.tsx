@@ -10,6 +10,10 @@ import { createRef } from "react";
 import { EditorImageTray } from "./editor-image-tray";
 import type { ContentEditorRef } from "@multica/views/editor";
 
+// Shared spy for the inner ContentEditor.uploadFile so tests can assert whether
+// a file was routed inline (embed) vs diverted to the tray.
+const { innerUploadFile } = vi.hoisted(() => ({ innerUploadFile: vi.fn() }));
+
 // The real ContentEditor is a heavy Tiptap mount. EditorImageTray only drives
 // its ref (getMarkdown) + onUpdate, so we stub it with a textarea that holds the
 // markdown body and forwards edits — exactly the surface under test.
@@ -32,7 +36,8 @@ vi.mock("@multica/views/editor", async () => {
       clearDictationPreview: () => {},
       focus: () => {},
       blur: () => {},
-      uploadFile: () => {},
+      uploadFile: (file: File, options?: { embedImage?: boolean }) =>
+        innerUploadFile(file, options),
       hasActiveUploads: () => false,
     }));
     return react.createElement("textarea", {
@@ -85,6 +90,12 @@ const WITH_TWO =
 
 beforeEach(() => {
   cleanup();
+  innerUploadFile.mockClear();
+  // jsdom has no object-URL impl; the tray guards on typeof, so stub it.
+  if (typeof URL.createObjectURL !== "function") {
+    URL.createObjectURL = () => "blob:stub";
+    URL.revokeObjectURL = () => {};
+  }
 });
 
 describe("EditorImageTray persistence round-trip", () => {
@@ -138,6 +149,48 @@ describe("EditorImageTray persistence round-trip", () => {
     expect(onUpdate).toHaveBeenLastCalledWith(
       "New body\n\n![image 1](https://cdn/a.png)\n![image 2](https://cdn/b.png)",
     );
+  });
+
+  // FIR-2714: an external attach button calls ref.uploadFile directly. Image
+  // files must divert to the tray (land at the top), not go inline.
+  it("routes an image passed to uploadFile() into the tray, not inline", async () => {
+    const onUploadFile = vi
+      .fn()
+      .mockResolvedValue({ link: "https://cdn/c.png", id: "att-c", filename: "c.png" });
+    const ref = createRef<ContentEditorRef>();
+    render(<EditorImageTray ref={ref} onUploadFile={onUploadFile} />);
+
+    const file = new File(["x"], "c.png", { type: "image/png" });
+    ref.current?.uploadFile(file);
+
+    await waitFor(() => {
+      expect(onUploadFile).toHaveBeenCalledWith(file);
+    });
+    // Shows as a tray chip and never went inline through the editor.
+    expect(screen.getByTestId("chip")).toHaveTextContent("c.png");
+    expect(innerUploadFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit embed (embedImage) inline via the editor", () => {
+    const ref = createRef<ContentEditorRef>();
+    render(<EditorImageTray ref={ref} onUploadFile={vi.fn()} />);
+
+    const file = new File(["x"], "c.png", { type: "image/png" });
+    ref.current?.uploadFile(file, { embedImage: true });
+
+    expect(innerUploadFile).toHaveBeenCalledWith(file, { embedImage: true });
+    expect(screen.queryByTestId("chip")).toBeNull();
+  });
+
+  it("routes a non-image file passed to uploadFile() inline", () => {
+    const ref = createRef<ContentEditorRef>();
+    render(<EditorImageTray ref={ref} onUploadFile={vi.fn()} />);
+
+    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
+    ref.current?.uploadFile(file);
+
+    expect(innerUploadFile).toHaveBeenCalledWith(file, undefined);
+    expect(screen.queryByTestId("chip")).toBeNull();
   });
 
   it("re-emits without a removed image and renumbers the rest", async () => {

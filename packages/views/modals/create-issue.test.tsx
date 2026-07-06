@@ -157,6 +157,39 @@ vi.mock("../editor", () => {
   };
 });
 
+// FIR-2714: the description field renders EditorImageTray from
+// @multica/cerebro-composer. Stub it to the same ref-forwarding textarea as the
+// ContentEditor mock above so the modal tests exercise create logic, not the tray.
+vi.mock("@multica/cerebro-composer", () => {
+  const EditorImageTray = forwardRef(
+    ({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+      const valueRef = useRef(defaultValue || "");
+      const [value, setValue] = useState(defaultValue || "");
+      useImperativeHandle(ref, () => ({
+        getMarkdown: () => valueRef.current,
+        clearContent: () => {
+          valueRef.current = "";
+          setValue("");
+        },
+        uploadFile: vi.fn(),
+      }));
+      return (
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+        />
+      );
+    },
+  );
+  EditorImageTray.displayName = "EditorImageTray";
+  return { EditorImageTray };
+});
+
 vi.mock("../issues/components", () => ({
   StatusIcon: ({ status }: { status: string }) => <span data-testid="status-icon">{status}</span>,
   StatusPicker: () => <div data-testid="status-picker" />,

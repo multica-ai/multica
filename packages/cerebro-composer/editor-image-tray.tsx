@@ -221,8 +221,17 @@ const FieldImageTray = forwardRef<ContentEditorRef, EditorImageTrayProps>(
           innerRef.current?.commitDictationPreview(text),
         clearDictationPreview: () => innerRef.current?.clearDictationPreview(),
         blur: () => innerRef.current?.blur(),
-        uploadFile: (file: File, options?: { embedImage?: boolean }) =>
-          innerRef.current?.uploadFile(file, options),
+        // FIR-2714: an external attach button (e.g. the create-issue footer) calls
+        // uploadFile directly. With the tray active, route image files to the tray
+        // so they land at the top like drop/paste — unless the caller explicitly
+        // asked to embed the image inline (options.embedImage), which stays inline.
+        uploadFile: (file: File, options?: { embedImage?: boolean }) => {
+          if (!options?.embedImage && file.type.startsWith("image/")) {
+            tray.addFiles([file]);
+            return;
+          }
+          innerRef.current?.uploadFile(file, options);
+        },
         hasActiveUploads: () => innerRef.current?.hasActiveUploads() ?? false,
       }),
       // eslint-disable-next-line react-hooks/exhaustive-deps

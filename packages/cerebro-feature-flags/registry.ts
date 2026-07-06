@@ -456,10 +456,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_image_gallery: false,
   // FIR-2034: OFF until QA signs off — opt-in moves issue attachments into a tab.
   cerebro_attachments_tab: false,
-  // FIR-2693: OFF until the numbered-thumbnail tray is verified on staging
-  // (drag-drop / paste / attach across chat, comments, channels, DMs). Flip on
-  // to make the tray the standard for inserted images.
-  cerebro_composer_image_tray: false,
+  // FIR-2693: the numbered-thumbnail tray is the standard way to insert images
+  // (drag-drop / paste / attach) across chat, comments, channels, DMs, and the
+  // field editors (issue description, notes, documents, create-issue). FIR-2714:
+  // ON — Jesper signed off making the tray the standard everywhere.
+  cerebro_composer_image_tray: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
