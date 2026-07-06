@@ -31,6 +31,7 @@
       "notifications": "알림",
       "tokens": "API 토큰",
       "general": "일반",
+      "issue_types": "Issue 유형",
       "repositories": "저장소",
       "github": "GitHub",
       "integrations": "연동",
