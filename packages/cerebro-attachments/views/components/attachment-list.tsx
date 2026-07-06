@@ -2,13 +2,19 @@
 
 // CEREBRO-PATCH(attachment-list-cerebro): cerebro modification of upstream file
 
+import { useState } from "react";
 import { Download, FileText, Eye, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
 import { standaloneAttachments } from "@multica/cerebro-attachments/core/standalone";
+import {
+  attachmentDownloadHref,
+  attachmentForceDownloadPath,
+} from "@multica/cerebro-attachments/core/download-url";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
-import { AttachmentChip } from "@multica/cerebro-ui";
+import { AttachmentChip, ImageGallery, type GalleryImage } from "@multica/cerebro-ui";
 import { useAttachmentActions } from "../use-attachment-actions";
 
 // Renders attachments that are NOT already referenced inline in the markdown
@@ -44,33 +50,69 @@ export function AttachmentList({
   onRemove?: (attachmentId: string) => void;
 }) {
   const chipsEnabled = useFlagValue("cerebro_attachment_chips");
+  // FIR-2710: open a paginated gallery lightbox for image chips instead of
+  // routing each image to its own full-page viewer in a new tab.
+  const galleryEnabled = useFlagValue("cerebro_image_gallery");
+  const wsId = useWorkspaceId();
   const { openViewer, downloadFile } = useAttachmentActions();
+  const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
   if (!attachments?.length) return null;
   const standalone = standaloneAttachments(attachments, content);
   if (!standalone.length) return null;
 
   if (chipsEnabled) {
+    // The images among the standalone chips, in display order — the set the
+    // gallery pages through. Each chip that is an image opens the gallery at
+    // its position here.
+    const imageAttachments = galleryEnabled
+      ? standalone.filter((a) => viewableKind(a.content_type, a.filename) === "image")
+      : [];
+    const galleryImages: GalleryImage[] = imageAttachments.map((a) => ({
+      src: attachmentDownloadHref(a.download_url, wsId) || a.url,
+      alt: a.filename,
+      downloadHref: a.download_url
+        ? attachmentForceDownloadPath(a.id, wsId)
+        : undefined,
+    }));
+
     return (
-      <div className={cn("flex flex-wrap items-start gap-2", className)}>
-        {standalone.map((a) => {
-          const viewable = isViewableAttachment(a.content_type, a.filename);
-          const isImage = viewableKind(a.content_type, a.filename) === "image";
-          const activate = () => {
-            if (viewable) openViewer(a.id, a.filename);
-            else if (a.download_url) downloadFile(a.id);
-          };
-          return (
-            <AttachmentChip
-              key={a.id}
-              filename={a.filename}
-              thumbnailSrc={isImage ? a.url : undefined}
-              onActivate={activate}
-              activateLabel={viewable ? "Open in viewer" : "Download"}
-              onRemove={onRemove ? () => onRemove(a.id) : undefined}
-            />
-          );
-        })}
-      </div>
+      <>
+        <div className={cn("flex flex-wrap items-start gap-2", className)}>
+          {standalone.map((a) => {
+            const viewable = isViewableAttachment(a.content_type, a.filename);
+            const isImage = viewableKind(a.content_type, a.filename) === "image";
+            const activate = () => {
+              if (galleryEnabled && isImage) {
+                const gi = imageAttachments.findIndex((img) => img.id === a.id);
+                if (gi >= 0) {
+                  setGalleryIndex(gi);
+                  return;
+                }
+              }
+              if (viewable) openViewer(a.id, a.filename);
+              else if (a.download_url) downloadFile(a.id);
+            };
+            return (
+              <AttachmentChip
+                key={a.id}
+                filename={a.filename}
+                thumbnailSrc={isImage ? a.url : undefined}
+                onActivate={activate}
+                activateLabel={viewable ? "Open in viewer" : "Download"}
+                onRemove={onRemove ? () => onRemove(a.id) : undefined}
+              />
+            );
+          })}
+        </div>
+        {galleryEnabled && galleryImages.length > 0 && (
+          <ImageGallery
+            images={galleryImages}
+            startIndex={galleryIndex ?? 0}
+            open={galleryIndex !== null}
+            onClose={() => setGalleryIndex(null)}
+          />
+        )}
+      </>
     );
   }
 

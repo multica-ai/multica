@@ -106,6 +106,11 @@ export type CerebroFlagKey =
   // across issue comments/bodies, chat, DM, and channels. Off = the legacy grey
   // single-icon row.
   | "cerebro_attachment_chips"
+  // FIR-2710: clicking an image attachment under a comment opens a paginated
+  // gallery lightbox above the thread (prev/next through the message's images,
+  // counter, thumbnail strip, per-image zoom) instead of routing to a single
+  // full-page image in a new tab. Off = the legacy per-image new-tab viewer.
+  | "cerebro_image_gallery"
   // FIR-2034: move an issue's standalone attachments off the top of the page
   // into a dedicated "Attachments" tab, rendered as a tidy list of rows
   // (preview + name + size + uploader/time). The top shows only a one-line
@@ -446,6 +451,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2034: ON — unified attachment chips (image thumbnails + colour-coded
   // document cards) everywhere. Opt-out via this flag (kill-switch, no redeploy).
   cerebro_attachment_chips: true,
+  // FIR-2710: OFF until QA signs off on staging — paginated image gallery
+  // lightbox for comment image attachments (desktop + mobile).
+  cerebro_image_gallery: false,
   // FIR-2034: OFF until QA signs off — opt-in moves issue attachments into a tab.
   cerebro_attachments_tab: false,
   // FIR-2693: OFF until the numbered-thumbnail tray is verified on staging
@@ -879,6 +887,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Show attachments in one consistent format everywhere: images render as a real thumbnail (not a file box), and documents render as fixed-size colour-coded cards by type (PDF red, Excel green, Word blue, PowerPoint orange, archive amber, code violet). Same card in the composer while you type and in the posted thread, and identical across issue comments & descriptions, chat, DM, and channels. Every card is clickable (preview or download) and keyboard-focusable. Off falls back to the legacy grey single-icon row.",
+  },
+  {
+    key: "cerebro_image_gallery",
+    label: "Image gallery lightbox",
+    group: "issues",
+    description:
+      "Clicking an image attachment under a comment opens a full-screen gallery above the thread instead of routing to a single image on its own page in a new tab. The gallery pages through all the images in that message with prev/next arrows, keyboard arrows, a tap-able thumbnail strip, and a \"3 / 5\" counter, and each image zooms (wheel on desktop, pinch on mobile). Works on desktop and mobile. Off restores the legacy per-image new-tab viewer.",
   },
   {
     key: "cerebro_attachments_tab",

@@ -20,11 +20,15 @@
     "lucide-react": "catalog:"
   },
   "peerDependencies": {
-    "react": "catalog:"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
