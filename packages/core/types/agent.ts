@@ -110,6 +110,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "kiro",
   "antigravity",
   "qoder",
+  "traecli",
 ] as const;
 
 export type RuntimeProtocolFamily =
