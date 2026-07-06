@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
 	"regexp"
 	"strings"
@@ -21,18 +20,6 @@ import (
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var teamKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
 var nonTeamKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
-
-// defaultTeamIcons is the pool a fresh default team's emoji is drawn from —
-// deliberately generic, work-flavored glyphs; users personalize on the team
-// detail page.
-var defaultTeamIcons = []string{
-	"🚀", "🛠️", "⚡", "🎯", "🧭", "🌊", "🔥", "🌱",
-	"🦄", "🐙", "🛰️", "🧩", "🎨", "📦", "⚙️", "🌈",
-}
-
-func randomTeamIcon() string {
-	return defaultTeamIcons[rand.IntN(len(defaultTeamIcons))]
-}
 
 // defaultTeamKeyFromSlug derives the default team key by normalizing the
 // slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
@@ -260,10 +247,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Key:         defaultTeamKey,
 		IsDefault:   true,
 		Description: pgtype.Text{},
-		// A fresh default team gets a random emoji so team rows read as
-		// teams from the first render instead of the bare fallback glyph;
-		// owners change it on the team detail page.
-		Icon:      pgtype.Text{String: randomTeamIcon(), Valid: true},
+		// No icon on purpose: the default team renders TeamIcon's colored
+		// fallback block, which is the designated landing spot for the
+		// planned per-team colors (see TeamIcon).
+		Icon:      pgtype.Text{},
 		CreatedBy: parseUUID(userID),
 	})
 	if err != nil {
