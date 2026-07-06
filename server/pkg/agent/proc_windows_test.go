@@ -3,13 +3,22 @@
 package agent
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+const windowsProcessGroupHostJobHelperEnv = "MULTICA_WINDOWS_PROCESS_GROUP_HOST_JOB_HELPER"
 
 // TestHideAgentWindowSetsCreateNewConsole guards against a regression where
 // hideAgentWindow reverts to CREATE_NO_WINDOW. CREATE_NO_WINDOW strips the
@@ -95,4 +104,150 @@ func TestPrepareProcessGroupCreatesKillOnCloseSuspendedJob(t *testing.T) {
 		t.Errorf("job LimitFlags should include KILL_ON_JOB_CLOSE (0x%x), got 0x%x",
 			windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, info.BasicLimitInformation.LimitFlags)
 	}
+}
+
+func TestStartProcessGroupKillsGrandchildWhenLeaderExits(t *testing.T) {
+	runProcessGroupGrandchildCleanup(t)
+}
+
+func TestStartProcessGroupWorksWhenHostAlreadyInJob(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable failed: %v", err)
+	}
+
+	cmd := exec.Command(exe, "-test.run=^TestStartProcessGroupHostJobHelper$", "-test.v")
+	cmd.Env = append(os.Environ(), windowsProcessGroupHostJobHelperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("host-job helper failed: %v\n%s", err, output)
+	}
+}
+
+func TestStartProcessGroupHostJobHelper(t *testing.T) {
+	if os.Getenv(windowsProcessGroupHostJobHelperEnv) != "1" {
+		t.Skip("helper process only")
+	}
+
+	parentJob, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		t.Fatalf("CreateJobObject parent failed: %v", err)
+	}
+	defer windows.CloseHandle(parentJob)
+
+	if err := windows.AssignProcessToJobObject(parentJob, windows.CurrentProcess()); err != nil {
+		t.Fatalf("assign helper process to parent job: %v", err)
+	}
+
+	runProcessGroupGrandchildCleanup(t)
+}
+
+func runProcessGroupGrandchildCleanup(t *testing.T) {
+	t.Helper()
+
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	leaderScript := strings.Join([]string{
+		"$ErrorActionPreference = 'Stop'",
+		"$child = Start-Process -FilePath powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @(",
+		"  '-NoProfile',",
+		"  '-ExecutionPolicy', 'Bypass',",
+		"  '-Command', 'Start-Sleep -Seconds 60'",
+		")",
+		"$child.Id | Set-Content -Path $env:MULTICA_TEST_GRANDCHILD_PID_FILE -NoNewline -Encoding ascii",
+	}, "\n")
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", leaderScript)
+	cmd.Env = append(os.Environ(), "MULTICA_TEST_GRANDCHILD_PID_FILE="+pidFile)
+	hideAgentWindow(cmd)
+	configureProcessGroup(cmd)
+
+	var waited bool
+	cleaned := false
+	t.Cleanup(func() {
+		if cleaned || cmd.Process == nil {
+			return
+		}
+		signalProcessGroup(cmd.Process, syscall.SIGKILL)
+		releaseProcessGroup(cmd.Process)
+		if !waited {
+			_ = cmd.Wait()
+		}
+	})
+
+	if err := startProcessGroup(cmd); err != nil {
+		t.Fatalf("startProcessGroup failed: %v", err)
+	}
+
+	grandchildPID := waitForPIDFile(t, pidFile)
+	if running, err := windowsProcessRunning(grandchildPID); err != nil {
+		t.Fatalf("checking grandchild before release: %v", err)
+	} else if !running {
+		t.Fatalf("grandchild process %d exited before job release", grandchildPID)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("leader process failed: %v", err)
+	}
+	waited = true
+
+	releaseProcessGroup(cmd.Process)
+	cleaned = true
+	waitForProcessExit(t, grandchildPID)
+}
+
+func waitForPIDFile(t *testing.T, path string) int {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil {
+				t.Fatalf("parse pid file %s: %v", path, err)
+			}
+			if pid <= 0 {
+				t.Fatalf("pid file %s contained invalid pid %d", path, pid)
+			}
+			return pid
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for pid file %s", path)
+	return 0
+}
+
+func waitForProcessExit(t *testing.T, pid int) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		running, err := windowsProcessRunning(pid)
+		if err != nil {
+			t.Fatalf("checking process %d: %v", pid, err)
+		}
+		if !running {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("process %d still running after job release", pid)
+}
+
+func windowsProcessRunning(pid int) (bool, error) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return false, nil
+		}
+		return false, fmt.Errorf("open process: %w", err)
+	}
+	defer windows.CloseHandle(handle)
+
+	const stillActive = 259
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(handle, &exitCode); err != nil {
+		return false, fmt.Errorf("get exit code: %w", err)
+	}
+	return exitCode == stillActive, nil
 }
