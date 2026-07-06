@@ -793,6 +793,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
 
+		// Review asset download — same pattern: auth-only, handler
+		// self-resolves workspace from the asset row.
+		r.Get("/api/issues/{id}/reviews/assets/{assetId}/download", h.DownloadReviewAsset)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -989,10 +993,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Reviews
 					r.Route("/reviews", func(r chi.Router) {
 						r.Get("/assets", h.ListReviewAssets)
+						// NOTE: /assets/{assetId}/download is registered outside the
+						// workspace group (auth-only) for browser <img>/<video> src compat.
 						r.Post("/assets/presign", h.PresignReviewAssetUpload)
 						r.Put("/assets/direct-upload", h.DirectUploadReviewAsset)
 						r.Post("/assets/complete", h.CompleteReviewAssetUpload)
 						r.Patch("/assets/{assetId}/status", h.UpdateReviewAssetStatus)
+						r.Delete("/assets/{assetId}", h.DeleteReviewAsset)
+						r.Delete("/assets/group/{groupId}", h.DeleteReviewAssetGroup)
 						r.Post("/assets/bulk-approve", h.BulkApproveReviewAssets)
 						r.Get("/pending-issues", h.ListPendingReviewIssueIDs)
 						

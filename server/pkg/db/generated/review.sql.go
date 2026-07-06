@@ -133,6 +133,15 @@ func (q *Queries) DeleteReviewAsset(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteReviewAssetGroup = `-- name: DeleteReviewAssetGroup :exec
+DELETE FROM review_assets WHERE asset_group_id = $1
+`
+
+func (q *Queries) DeleteReviewAssetGroup(ctx context.Context, assetGroupID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteReviewAssetGroup, assetGroupID)
+	return err
+}
+
 const deleteReviewComment = `-- name: DeleteReviewComment :exec
 DELETE FROM review_comments WHERE id = $1
 `

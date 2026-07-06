@@ -26,6 +26,9 @@ UPDATE review_assets SET status = 'approved', updated_at = now() WHERE issue_id 
 -- name: DeleteReviewAsset :exec
 DELETE FROM review_assets WHERE id = $1;
 
+-- name: DeleteReviewAssetGroup :exec
+DELETE FROM review_assets WHERE asset_group_id = $1;
+
 -- name: CreateReviewComment :one
 INSERT INTO review_comments (
   asset_id, author_id, content, timestamp, shapes, parent_id

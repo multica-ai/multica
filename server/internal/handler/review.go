@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -21,8 +23,8 @@ type ReviewAssetResponse struct {
 	AssetGroupID string   `json:"asset_group_id"`
 	Name         string   `json:"name"`
 	AssetType    string   `json:"asset_type"`
-	FileURL      string   `json:"file_url"`
-	ThumbnailURL *string  `json:"thumbnail_url"`
+	SrcURL       string   `json:"src_url"`
+	ThumbnailURL *string  `json:"thumbnail_url,omitempty"`
 	Width        *int32   `json:"width"`
 	Height       *int32   `json:"height"`
 	Duration     *float32 `json:"duration"`
@@ -34,21 +36,31 @@ type ReviewAssetResponse struct {
 }
 
 type ReviewCommentResponse struct {
-	ID         string  `json:"id"`
-	AssetID    string  `json:"asset_id"`
-	AuthorID   string  `json:"author_id"`
-	Content    string  `json:"content"`
-	Timestamp  *float32 `json:"timestamp"`
+	ID         string          `json:"id"`
+	AssetID    string          `json:"asset_id"`
+	AuthorID   string          `json:"author_id"`
+	Content    string          `json:"content"`
+	Timestamp  *float32        `json:"timestamp"`
 	Shapes     json.RawMessage `json:"shapes"`
-	Resolved   bool    `json:"resolved"`
-	ResolvedBy *string `json:"resolved_by"`
-	ResolvedAt *string `json:"resolved_at"`
-	ParentID   *string `json:"parent_id"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	Resolved   bool            `json:"resolved"`
+	ResolvedBy *string         `json:"resolved_by"`
+	ResolvedAt *string         `json:"resolved_at"`
+	ParentID   *string         `json:"parent_id"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
 }
 
-func reviewAssetToResponse(a db.ReviewAsset) ReviewAssetResponse {
+func (h *Handler) reviewAssetToResponse(a db.ReviewAsset) ReviewAssetResponse {
+	fileURL := a.FileUrl // fallback: raw key
+	if presigner, ok := h.Storage.(storage.Presigner); ok {
+		if signed, err := presigner.PresignGet(context.Background(), a.FileUrl, 30*time.Minute); err == nil {
+			fileURL = signed
+		} else {
+			slog.Warn("review asset presign failed, returning raw key", "asset_id", uuidToString(a.ID), "error", err)
+		}
+	} else {
+		slog.Warn("storage does not support presigned GETs; review asset src_url will be a raw key", "asset_id", uuidToString(a.ID))
+	}
 	return ReviewAssetResponse{
 		ID:           uuidToString(a.ID),
 		IssueID:      uuidToString(a.IssueID),
@@ -56,7 +68,7 @@ func reviewAssetToResponse(a db.ReviewAsset) ReviewAssetResponse {
 		AssetGroupID: uuidToString(a.AssetGroupID),
 		Name:         a.Name,
 		AssetType:    a.AssetType,
-		FileURL:      a.FileUrl,
+		SrcURL:       fileURL,
 		ThumbnailURL: textToPtr(a.ThumbnailUrl),
 		Width:        int4ToPtr(a.Width),
 		Height:       int4ToPtr(a.Height),
@@ -193,7 +205,7 @@ func (h *Handler) PresignReviewAssetUpload(w http.ResponseWriter, r *http.Reques
 
 	writeJSON(w, http.StatusOK, PresignReviewAssetUploadResponse{
 		UploadURL: uploadURL,
-		Asset:     reviewAssetToResponse(asset),
+		Asset:     h.reviewAssetToResponse(asset),
 	})
 }
 
@@ -322,11 +334,15 @@ func (h *Handler) ListReviewAssets(w http.ResponseWriter, r *http.Request) {
 
 	var res []ReviewAssetResponse
 	for _, a := range assets {
-		res = append(res, reviewAssetToResponse(a))
+		res = append(res, h.reviewAssetToResponse(a))
 	}
 	if res == nil {
 		res = []ReviewAssetResponse{}
 	}
+
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 
 	writeJSON(w, http.StatusOK, res)
 }
@@ -371,7 +387,7 @@ func (h *Handler) UpdateReviewAssetStatus(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	resp := reviewAssetToResponse(asset)
+	resp := h.reviewAssetToResponse(asset)
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID != "" {
 		issue, _ := h.Queries.GetIssue(ctx, asset.IssueID)
@@ -425,6 +441,46 @@ func (h *Handler) BulkApproveReviewAssets(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *Handler) DownloadReviewAsset(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	assetUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "assetId"), "assetId")
+	if !ok {
+		return
+	}
+
+	asset, err := h.Queries.GetReviewAsset(ctx, assetUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "asset not found")
+		return
+	}
+
+	workspaceIDStr := uuidToString(asset.WorkspaceID)
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceIDStr, "workspace not found", "owner", "admin", "member"); !ok {
+		return
+	}
+
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		return
+	}
+
+	// review_assets.file_url stores a bare S3 key (e.g. "reviews/<issueId>/<uuid>_file.jpg"),
+	// NOT a full URL. Presign it directly.
+	key := asset.FileUrl
+	presigner, ok := h.Storage.(storage.Presigner)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "storage does not support presigned downloads")
+		return
+	}
+	signedURL, err := presigner.PresignGet(ctx, key, h.attachmentDownloadURLTTL())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to create download URL")
+		return
+	}
+	http.Redirect(w, r, signedURL, http.StatusFound)
 }
 
 func (h *Handler) ResolveReviewComment(w http.ResponseWriter, r *http.Request) {
@@ -504,4 +560,35 @@ func (h *Handler) ListPendingReviewIssueIDs(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, res)
+}
+
+// DeleteReviewAsset deletes a single version by asset ID.
+// Comments cascade via the FK constraint.
+func (h *Handler) DeleteReviewAsset(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	assetID := chi.URLParam(r, "assetId")
+	assetUUID, ok := parseUUIDOrBadRequest(w, assetID, "assetId")
+	if !ok {
+		return
+	}
+	if err := h.Queries.DeleteReviewAsset(ctx, assetUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete review asset")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteReviewAssetGroup deletes all versions in an asset group.
+func (h *Handler) DeleteReviewAssetGroup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	groupID := chi.URLParam(r, "groupId")
+	groupUUID, ok := parseUUIDOrBadRequest(w, groupID, "groupId")
+	if !ok {
+		return
+	}
+	if err := h.Queries.DeleteReviewAssetGroup(ctx, groupUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete review asset group")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
