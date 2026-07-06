@@ -117,7 +117,6 @@ const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>>
 type NavKey =
   | "inbox"
   | "myIssues"
-  | "teams"
   | "projects"
   | "autopilots"
   | "agents"
@@ -152,9 +151,9 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 ];
 
 // The workspace-wide issues list left the nav with the team rollout: issues
-// live under their team (Teams section below) or under My Issues. Teams
-// management moved to Settings-adjacent /teams (reachable from the Teams
-// group), and Usage/Runtimes are demoted into the More subgroup.
+// live under their team (Teams section below) or under My Issues. Team
+// management lives on each team's detail page (the /teams overview was cut
+// from v1), and Usage/Runtimes are demoted into the More subgroup.
 // Autopilots are team-scoped like issues (team_id NOT NULL, their output
 // lands in their team), so they live under each team below — no global
 // entry, same rationale as the removed workspace-wide Issues.
@@ -1030,16 +1029,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 >
                   <Plus />
                 </SidebarGroupAction>
-                {/* Second hover action: the /teams management page (browse
-                    all teams incl. ones you haven't joined). right-9 = the
-                    + action's right-4 plus its 16px width + 4px gap. */}
-                <SidebarGroupAction
-                  title={t(($) => $.sidebar.manage_teams)}
-                  className="top-3 right-9 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/teams:opacity-100 [&>svg]:size-3"
-                  onClick={() => push(p.teams())}
-                >
-                  <MoreHorizontal />
-                </SidebarGroupAction>
                 <CollapsibleContent>
                   {/* pt-0.5 mirrors the team rows' own children breathing
                       (py-0.5): team rows are row-styled, not plain content,
@@ -1050,12 +1039,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       everywhere else. */}
                   <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
                     {myTeams.length === 0 && (
-                      <AppLink
-                        href={p.teams()}
-                        className="flex h-8 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                      <button
+                        type="button"
+                        onClick={() => useModalStore.getState().open("create-team")}
+                        className="flex h-8 cursor-pointer items-center rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                       >
                         {t(($) => $.sidebar.teams_empty)}
-                      </AppLink>
+                      </button>
                     )}
                     <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={teamDragMeasuring} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd} onDragCancel={handleTeamDragCancel}>
                       <SortableContext items={visibleTeams.map((team) => team.id)} strategy={verticalListSortingStrategy}>

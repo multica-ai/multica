@@ -46,7 +46,6 @@
       "dismiss": "关闭"
     },
     "new_team": "新建 Team",
-    "manage_teams": "管理 Team",
-    "teams_empty": "加入或新建 Team"
+    "teams_empty": "新建第一个 Team"
   }
 }

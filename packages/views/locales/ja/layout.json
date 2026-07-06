@@ -46,7 +46,6 @@
       "dismiss": "閉じる"
     },
     "new_team": "新しいチーム",
-    "manage_teams": "チームを管理",
-    "teams_empty": "チームに参加または作成"
+    "teams_empty": "最初のチームを作成"
   }
 }

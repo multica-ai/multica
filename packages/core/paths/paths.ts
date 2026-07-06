@@ -26,7 +26,6 @@ function workspaceScoped(slug: string) {
     // resolving via the server-side alias). The same route accepts a UUID —
     // internal navigation passes ids, shared links pass identifiers.
     issueDetail: (idOrIdentifier: string) => `${ws}/issue/${encode(idOrIdentifier)}`,
-    teams: () => `${ws}/teams`,
     // Team-scoped surfaces, addressed by team key (readable, stable: keys
     // freeze once a team has issues) — /team/ENG/issues, Linear-style.
     teamIssues: (key: string) => `${ws}/team/${encode(key)}/issues`,
