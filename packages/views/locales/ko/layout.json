@@ -48,7 +48,6 @@
       "dismiss": "닫기"
     },
     "new_team": "새 팀",
-    "manage_teams": "팀 관리",
-    "teams_empty": "팀에 참여하거나 만들기"
+    "teams_empty": "첫 팀 만들기"
   }
 }
