@@ -41,6 +41,8 @@ import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
 // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted images/files as unified cards behind cerebro_attachment_chips.
 import { AttachmentChip } from "@multica/cerebro-ui";
+// CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — inline images join the surface image gallery.
+import { useGalleryImage } from "@multica/cerebro-attachments/views";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(issue-link-open-mode): honor the account-level issue-link open preference.
 import { useIssueLinkOpenMode } from "@multica/cerebro-preferences/views";
@@ -433,17 +435,18 @@ const components: Partial<Components> = {
     const [lightbox, setLightbox] = useState(false);
     const imgSrc = typeof src === "string" ? src : "";
     const imgAlt = alt ?? "";
+    // CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — open the surface gallery when present, else the legacy lightbox.
+    const gallery = useGalleryImage({ src: imgSrc, alt: imgAlt, downloadHref: imgSrc });
+    const handleView = () => (gallery.enabled ? gallery.open() : setLightbox(true));
     // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted image as the compact thumbnail card + existing lightbox, matching the composer.
     const chipsEnabled = useFlagValue("cerebro_attachment_chips");
     if (chipsEnabled)
       return (
-        <span className="image-node">
-          <AttachmentChip filename={imgAlt || "image"} thumbnailSrc={imgSrc} onActivate={() => setLightbox(true)} activateLabel={t(($) => $.image.view)} className="my-1" />
+        <span className="image-node" ref={gallery.ref}>
+          <AttachmentChip filename={imgAlt || "image"} thumbnailSrc={imgSrc} onActivate={handleView} activateLabel={t(($) => $.image.view)} className="my-1" />
           {lightbox && <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />}
         </span>
       );
-
-    const handleView = () => setLightbox(true);
     const handleDownload = () => {
       window.open(imgSrc, "_blank", "noopener,noreferrer");
     };
@@ -457,7 +460,8 @@ const components: Partial<Components> = {
     };
 
     return (
-      <span className="image-node">
+      // CEREBRO-PATCH(readonly-image-gallery): FIR-2710 — register this image with the surface gallery via ref.
+      <span className="image-node" ref={gallery.ref}>
         <span className="image-figure" onClick={handleView}>
           <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
           <span

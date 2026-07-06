@@ -7,12 +7,19 @@
 // and render as a tidy list of fixed-height rows: small preview, filename +
 // type, size, uploader · time, and open/download actions on hover. The page
 // top stays clean; this is gated behind `cerebro_attachments_tab`.
+//
+// FIR-2710 point 3 — the tab is the issue's COMPLETE file index. It aggregates
+// the issue body's attachments AND every comment's, and no longer drops the
+// ones referenced inline: an image dragged straight into the description or a
+// comment (an "inline tray" image) belongs in the file list just like a
+// standalone upload. Callers pass `commentAttachments` gathered from the
+// timeline; `content` is intentionally no longer used to filter.
 
 import { Download, ExternalLink } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
-import { standaloneAttachments } from "@multica/cerebro-attachments/core/standalone";
+import { allIssueAttachments } from "@multica/cerebro-attachments/core/standalone";
 import { formatBytes } from "@multica/cerebro-attachments/core/format-bytes";
 import { attachmentDocType, DOC_TYPE_STYLES } from "@multica/cerebro-ui";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -118,18 +125,21 @@ function AttachmentRow({
 
 export function AttachmentsTab({
   attachments,
-  content,
+  commentAttachments,
   className,
 }: {
   attachments?: Attachment[];
-  content?: string;
+  // FIR-2710 point 3 — every comment's attachments, gathered from the timeline.
+  commentAttachments?: Attachment[];
   className?: string;
 }) {
   const { getActorName } = useActorName();
   const timeAgo = useTimeAgo();
   const { openViewer, downloadFile } = useAttachmentActions();
 
-  const files = standaloneAttachments(attachments, content).slice().sort(byNewest);
+  const files = allIssueAttachments(attachments, commentAttachments)
+    .slice()
+    .sort(byNewest);
   if (!files.length) {
     return (
       <p className={cn("py-6 text-center text-sm text-muted-foreground", className)}>
@@ -171,12 +181,12 @@ export function AttachmentsTab({
  */
 export function AttachmentsTabLabel({
   attachments,
-  content,
+  commentAttachments,
 }: {
   attachments?: Attachment[];
-  content?: string;
+  commentAttachments?: Attachment[];
 }) {
-  const count = standaloneAttachments(attachments, content).length;
+  const count = allIssueAttachments(attachments, commentAttachments).length;
   return (
     <span className="inline-flex items-center gap-1.5">
       Attachments

@@ -17,6 +17,8 @@ import { cn } from "@multica/ui/lib/utils";
 // CEREBRO-PATCH(image-chip-thumbnail): FIR-2034 — compact image card behind cerebro_attachment_chips.
 import { ZoomableImage, AttachmentChip } from "@multica/cerebro-ui";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(image-view-gallery): FIR-2710 — inline images join the surface image gallery.
+import { useGalleryImage } from "@multica/cerebro-attachments/views";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
@@ -72,17 +74,19 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
 
   const [lightbox, setLightbox] = useState(false);
   const isEditable = editor.isEditable;
+  // CEREBRO-PATCH(image-view-gallery): FIR-2710 — inline images open the surface gallery. Registration is harmless in an editable editor: only the Maximize button / non-editor figure click call handleView, never ProseMirror selection.
+  const gallery = useGalleryImage(uploading ? null : { src, alt, downloadHref: src });
+  const handleView = () => (gallery.enabled ? gallery.open() : setLightbox(true));
   // CEREBRO-PATCH(image-chip-thumbnail): FIR-2034 — compact thumbnail card + existing lightbox instead of the large figure.
   const chipsEnabled = useFlagValue("cerebro_attachment_chips");
   if (chipsEnabled)
     return (
-      <NodeViewWrapper as="span" className="image-node">
-        <AttachmentChip filename={alt || "image"} thumbnailSrc={src} onActivate={uploading ? undefined : () => setLightbox(true)} activateLabel={t(($) => $.image.view)} onRemove={isEditable ? () => deleteNode() : undefined} uploading={uploading} />
+      // CEREBRO-PATCH(image-view-gallery): FIR-2710 — register this image with the surface gallery via ref.
+      <NodeViewWrapper as="span" className="image-node" ref={gallery.ref}>
+        <AttachmentChip filename={alt || "image"} thumbnailSrc={src} onActivate={uploading ? undefined : handleView} activateLabel={t(($) => $.image.view)} onRemove={isEditable ? () => deleteNode() : undefined} uploading={uploading} />
         {lightbox && <ImageLightbox src={src} alt={alt} onClose={() => setLightbox(false)} />}
       </NodeViewWrapper>
     );
-
-  const handleView = () => setLightbox(true);
 
   const handleDownload = () => {
     // Cross-origin CDN images can't be fetched as blob (CORS),
@@ -118,7 +122,8 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
   };
 
   return (
-    <NodeViewWrapper className="image-node">
+    // CEREBRO-PATCH(image-view-gallery): FIR-2710 — register this image with the surface gallery via ref.
+    <NodeViewWrapper className="image-node" ref={gallery.ref}>
       <figure
         className={cn(
           "image-figure",

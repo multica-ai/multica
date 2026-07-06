@@ -2,7 +2,6 @@
 
 // CEREBRO-PATCH(attachment-list-cerebro): cerebro modification of upstream file
 
-import { useState } from "react";
 import { Download, FileText, Eye, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
@@ -14,8 +13,9 @@ import {
   attachmentForceDownloadPath,
 } from "@multica/cerebro-attachments/core/download-url";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
-import { AttachmentChip, ImageGallery, type GalleryImage } from "@multica/cerebro-ui";
+import { AttachmentChip, type GalleryImage } from "@multica/cerebro-ui";
 import { useAttachmentActions } from "../use-attachment-actions";
+import { EnsureGalleryProvider, useGalleryImage } from "./image-gallery-provider";
 
 // Renders attachments that are NOT already referenced inline in the markdown
 // content. Used both for issue bodies and for individual comments.
@@ -50,69 +50,50 @@ export function AttachmentList({
   onRemove?: (attachmentId: string) => void;
 }) {
   const chipsEnabled = useFlagValue("cerebro_attachment_chips");
-  // FIR-2710: open a paginated gallery lightbox for image chips instead of
-  // routing each image to its own full-page viewer in a new tab.
-  const galleryEnabled = useFlagValue("cerebro_image_gallery");
   const wsId = useWorkspaceId();
-  const { openViewer, downloadFile } = useAttachmentActions();
-  const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+  const { openViewer, downloadFile, viewerHref } = useAttachmentActions();
   if (!attachments?.length) return null;
   const standalone = standaloneAttachments(attachments, content);
   if (!standalone.length) return null;
 
   if (chipsEnabled) {
-    // The images among the standalone chips, in display order — the set the
-    // gallery pages through. Each chip that is an image opens the gallery at
-    // its position here.
-    const imageAttachments = galleryEnabled
-      ? standalone.filter((a) => viewableKind(a.content_type, a.filename) === "image")
-      : [];
-    const galleryImages: GalleryImage[] = imageAttachments.map((a) => ({
-      src: attachmentDownloadHref(a.download_url, wsId) || a.url,
-      alt: a.filename,
-      downloadHref: a.download_url
-        ? attachmentForceDownloadPath(a.id, wsId)
-        : undefined,
-    }));
-
+    // FIR-2710: image chips register with the surrounding ImageGalleryProvider
+    // (a comment/description/chat surface), so clicking any image opens the
+    // ONE surface gallery paged through every image — inline body images and
+    // these standalone chips together. Without an ancestor provider,
+    // EnsureGalleryProvider gives this list its own gallery, so a bare
+    // AttachmentList still pages through just its own images.
     return (
-      <>
+      <EnsureGalleryProvider>
         <div className={cn("flex flex-wrap items-start gap-2", className)}>
           {standalone.map((a) => {
             const viewable = isViewableAttachment(a.content_type, a.filename);
             const isImage = viewableKind(a.content_type, a.filename) === "image";
-            const activate = () => {
-              if (galleryEnabled && isImage) {
-                const gi = imageAttachments.findIndex((img) => img.id === a.id);
-                if (gi >= 0) {
-                  setGalleryIndex(gi);
-                  return;
+            const galleryImage: GalleryImage | null = isImage
+              ? {
+                  src: attachmentDownloadHref(a.download_url, wsId) || a.url,
+                  alt: a.filename,
+                  downloadHref: a.download_url
+                    ? attachmentForceDownloadPath(a.id, wsId)
+                    : undefined,
+                  pageHref: viewerHref(a.id),
                 }
-              }
-              if (viewable) openViewer(a.id, a.filename);
-              else if (a.download_url) downloadFile(a.id);
-            };
+              : null;
             return (
-              <AttachmentChip
+              <AttachmentImageChip
                 key={a.id}
+                galleryImage={galleryImage}
                 filename={a.filename}
                 thumbnailSrc={isImage ? a.url : undefined}
-                onActivate={activate}
-                activateLabel={viewable ? "Open in viewer" : "Download"}
+                viewable={viewable}
+                onViewer={() => openViewer(a.id, a.filename)}
+                onDownload={() => a.download_url && downloadFile(a.id)}
                 onRemove={onRemove ? () => onRemove(a.id) : undefined}
               />
             );
           })}
         </div>
-        {galleryEnabled && galleryImages.length > 0 && (
-          <ImageGallery
-            images={galleryImages}
-            startIndex={galleryIndex ?? 0}
-            open={galleryIndex !== null}
-            onClose={() => setGalleryIndex(null)}
-          />
-        )}
-      </>
+      </EnsureGalleryProvider>
     );
   }
 
@@ -178,5 +159,45 @@ export function AttachmentList({
         );
       })}
     </div>
+  );
+}
+
+// A single chip inside the chips grid. Images register with the surface gallery
+// (FIR-2710); when a provider is present and the flag is on, a click opens the
+// paginated gallery. Otherwise (non-image, flag off, or no provider) it falls
+// back to the in-app viewer / download, exactly as before.
+function AttachmentImageChip({
+  galleryImage,
+  filename,
+  thumbnailSrc,
+  viewable,
+  onViewer,
+  onDownload,
+  onRemove,
+}: {
+  galleryImage: GalleryImage | null;
+  filename: string;
+  thumbnailSrc?: string;
+  viewable: boolean;
+  onViewer: () => void;
+  onDownload: () => void;
+  onRemove?: () => void;
+}) {
+  const gallery = useGalleryImage(galleryImage);
+  const activate = () => {
+    if (gallery.enabled) gallery.open();
+    else if (viewable) onViewer();
+    else onDownload();
+  };
+  return (
+    <span ref={gallery.ref} className="inline-flex">
+      <AttachmentChip
+        filename={filename}
+        thumbnailSrc={thumbnailSrc}
+        onActivate={activate}
+        activateLabel={viewable ? "Open in viewer" : "Download"}
+        onRemove={onRemove}
+      />
+    </span>
   );
 }

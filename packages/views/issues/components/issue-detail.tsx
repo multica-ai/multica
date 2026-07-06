@@ -82,6 +82,8 @@ import { TitleEditor } from "../../editor/title-editor";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
 // CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments render in a dedicated tab as rows.
 import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(description-image-gallery): FIR-2710 — one image gallery for the description (inline + attachments).
+import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -957,6 +959,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+  // CEREBRO-PATCH(attachments-tab-aggregate): FIR-2710 — every comment's attachments feed the Attachments tab.
+  const commentAttachments = useMemo(
+    () => timeline.flatMap((e) => e.attachments ?? []),
+    [timeline],
+  );
   const { mutateAsync: moveCommentToSubIssue } = useMoveCommentToSubIssue(id, wsId);
   const handleMoveCommentToSubIssue = useCallback(
     async (commentId: string) => {
@@ -2374,6 +2381,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               description as a small topic-strip in the channel-header bar
               instead, so the rich-text editor would be a duplicate. */}
           {!isChat && (
+            // CEREBRO-PATCH(description-image-gallery): FIR-2710 — description body + attachment images page as one gallery.
+            <ImageGalleryProvider>
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
               <EditorImageTray
                 ref={descEditorRef}
@@ -2405,15 +2414,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               </div>
               {descDragOver && <FileDropOverlay />}
             </div>
-          )}
-
-          {!isChat && (
-            // CEREBRO-PATCH(attachments-tab): FIR-2034 — top slot shows a one-line hint when the tab is on, the inline list otherwise.
+            {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — top slot shows a one-line hint when the tab is on, the inline list otherwise. */}
             <IssueAttachmentsSlot
               attachments={issue.attachments}
               content={issue.description ?? ""}
               className="mt-3"
             />
+            </ImageGalleryProvider>
           )}
 
           {!isChat && <ArtifactList issueId={issue.id} className="mt-3" />}
@@ -2557,7 +2564,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments as a tab. */}
                   {attachmentsTabEnabled && (
                     <TabsTrigger value="attachments">
-                      <AttachmentsTabLabel attachments={issue.attachments} content={issue.description ?? ""} />
+                      <AttachmentsTabLabel attachments={issue.attachments} commentAttachments={commentAttachments} />
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -2583,7 +2590,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {!isChat && attachmentsTabEnabled && (
                 <TabsContent value="attachments">
                   <div className="mt-2">
-                    <AttachmentsTab attachments={issue.attachments} content={issue.description ?? ""} />
+                    <AttachmentsTab attachments={issue.attachments} commentAttachments={commentAttachments} />
                   </div>
                 </TabsContent>
               )}

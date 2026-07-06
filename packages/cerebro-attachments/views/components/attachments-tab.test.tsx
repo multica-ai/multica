@@ -82,8 +82,33 @@ describe("AttachmentsTab", () => {
     expect(downloadFile).toHaveBeenCalledWith("bin");
   });
 
-  it("hides inline attachments and shows an empty state when none remain", () => {
-    render(<AttachmentsTab attachments={[IMG]} content={`![x](${IMG.url})`} />);
+  // FIR-2710 point 3 — the tab is the complete file index: an image pasted
+  // inline into the description is no longer hidden.
+  it("keeps inline images (does not drop by content)", () => {
+    render(<AttachmentsTab attachments={[IMG]} />);
+    expect(screen.getByText("shot.png")).toBeTruthy();
+    expect(screen.queryByText("No attachments yet.")).toBeNull();
+  });
+
+  // FIR-2710 point 3 — aggregate issue attachments with every comment's,
+  // deduped by id.
+  it("aggregates issue + comment attachments and dedupes by id", () => {
+    const COMMENT_IMG = att({ id: "cimg", filename: "reply.png", url: "https://cdn.test/reply.png" });
+    render(
+      <AttachmentsTab
+        attachments={[IMG, CODE]}
+        commentAttachments={[COMMENT_IMG, IMG]}
+      />,
+    );
+    expect(screen.getByText("shot.png")).toBeTruthy();
+    expect(screen.getByText("chips.tsx")).toBeTruthy();
+    expect(screen.getByText("reply.png")).toBeTruthy();
+    // IMG appears in both lists but is counted once.
+    expect(screen.getByText("3 files · 6.0 KB")).toBeTruthy();
+  });
+
+  it("shows an empty state when there are no files at all", () => {
+    render(<AttachmentsTab attachments={[]} commentAttachments={[]} />);
     expect(screen.getByText("No attachments yet.")).toBeTruthy();
   });
 });
@@ -91,13 +116,16 @@ describe("AttachmentsTab", () => {
 describe("AttachmentsTabLabel", () => {
   afterEach(cleanup);
 
-  it("shows the standalone count as a badge", () => {
-    render(<AttachmentsTabLabel attachments={[IMG, CODE]} />);
+  it("counts issue + comment attachments (deduped) as a badge", () => {
+    const COMMENT_IMG = att({ id: "cimg", filename: "reply.png" });
+    render(
+      <AttachmentsTabLabel attachments={[IMG, CODE]} commentAttachments={[COMMENT_IMG, IMG]} />,
+    );
     expect(screen.getByText("Attachments")).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
   });
 
-  it("omits the badge when there are no standalone files", () => {
+  it("omits the badge when there are no files", () => {
     render(<AttachmentsTabLabel attachments={[]} />);
     expect(screen.queryByText("0")).toBeNull();
   });

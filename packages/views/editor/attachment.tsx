@@ -41,6 +41,8 @@ import { AttachmentCard } from "./attachment-card";
 // CEREBRO-PATCH(attachment-image-chip): FIR-2034 — images as compact thumbnail card behind cerebro_attachment_chips.
 import { AttachmentChip } from "@multica/cerebro-ui";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(attachment-gallery): FIR-2710 — chat/DM inline images join the surface image gallery.
+import { useGalleryImage } from "@multica/cerebro-attachments/views";
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
 import { getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
@@ -158,6 +160,13 @@ export function Attachment({
       ? getPreviewKind(state.contentType, state.filename)
       : null);
 
+  // CEREBRO-PATCH(attachment-gallery): FIR-2710 — chat/DM inline images join the surface gallery when a provider wraps the message.
+  const gallery = useGalleryImage(
+    kind === "image" && !state.uploading && state.url
+      ? { src: state.url, alt: state.filename, downloadHref: state.url }
+      : null,
+  );
+
   const openPreview = () => {
     if (state.record) {
       preview.tryOpen({ kind: "full", attachment: state.record });
@@ -180,12 +189,18 @@ export function Attachment({
     if (state.url) openByUrl(state.url);
   };
 
+  // CEREBRO-PATCH(attachment-gallery): FIR-2710 — prefer the surface gallery, else the existing preview modal.
+  const onView = () => (gallery.enabled ? gallery.open() : openPreview());
+
   if (kind === "image") {
     // CEREBRO-PATCH(attachment-image-chip): FIR-2034 — route images through the unified compact card + existing preview modal.
     if (chipsEnabled && !state.uploading)
       return (
         <>
-          <AttachmentChip filename={state.filename || "image"} thumbnailSrc={state.url} onActivate={openPreview} activateLabel="Preview" onRemove={editable ? onDelete : undefined} className={className} />
+          {/* CEREBRO-PATCH(attachment-gallery): FIR-2710 — register image chip with the surface gallery via ref. */}
+          <span ref={gallery.ref} className="inline-flex">
+            <AttachmentChip filename={state.filename || "image"} thumbnailSrc={state.url} onActivate={onView} activateLabel="Preview" onRemove={editable ? onDelete : undefined} className={className} />
+          </span>
           {preview.modal}
         </>
       );
@@ -199,10 +214,12 @@ export function Attachment({
           height={state.height}
           editable={editable}
           selected={selected}
-          onView={openPreview}
+          onView={onView}
           onDownload={handleDownload}
           onDelete={onDelete}
           className={className}
+          // CEREBRO-PATCH(attachment-gallery): FIR-2710 — register inline image with the surface gallery.
+          wrapperRef={gallery.ref}
         />
         {preview.modal}
       </>
@@ -263,6 +280,8 @@ interface ImageAttachmentViewProps {
   onDownload: () => void;
   onDelete?: () => void;
   className?: string;
+  // CEREBRO-PATCH(attachment-gallery): FIR-2710 — ref to the outer node so the surface gallery can order this image.
+  wrapperRef?: (node: HTMLElement | null) => void;
 }
 
 function ImageAttachmentView({
@@ -277,6 +296,7 @@ function ImageAttachmentView({
   onDownload,
   onDelete,
   className,
+  wrapperRef,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
 
@@ -300,7 +320,8 @@ function ImageAttachmentView({
   // the NodeViewWrapper still emits its own outer .image-node div around
   // this — the duplicate `image-node` class is harmless.
   return (
-    <span className="image-node">
+    // CEREBRO-PATCH(attachment-gallery): FIR-2710 — register this image with the surface gallery via ref.
+    <span className="image-node" ref={wrapperRef}>
       <span
         className={cn(
           "image-figure",

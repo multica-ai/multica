@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ExternalLink, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ZoomableImage } from "./zoomable-image";
 
@@ -31,6 +31,12 @@ export interface GalleryImage {
   alt: string;
   /** Optional direct download URL, surfaced as a per-image download button. */
   downloadHref?: string;
+  /**
+   * Optional link to the image's own standalone page (the in-app attachment
+   * viewer). Surfaced as an "open on its own page" button so the user can
+   * leave the gallery for the full-page view / a shareable URL.
+   */
+  pageHref?: string;
 }
 
 export interface ImageGalleryProps {
@@ -107,6 +113,18 @@ export function ImageGallery({
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {current.pageHref && (
+            <a
+              href={current.pageHref}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md p-1.5 text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+              title="Open on its own page"
+              aria-label="Open on its own page"
+            >
+              <ExternalLink className="size-5" />
+            </a>
+          )}
           {current.downloadHref && (
             <a
               href={current.downloadHref}

@@ -13,7 +13,11 @@ const downloadFile = vi.fn();
 const flags: Record<string, boolean> = {};
 
 vi.mock("../use-attachment-actions", () => ({
-  useAttachmentActions: () => ({ openViewer, downloadFile }),
+  useAttachmentActions: () => ({
+    openViewer,
+    downloadFile,
+    viewerHref: (id: string) => `/ws/attachments/${id}`,
+  }),
 }));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws",

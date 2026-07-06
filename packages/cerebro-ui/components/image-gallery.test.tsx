@@ -103,4 +103,21 @@ describe("ImageGallery", () => {
     );
     expect(currentAlt()).toBe("img-3");
   });
+
+  it("shows a download link and an open-on-its-own-page link for the current image", () => {
+    const withPage: GalleryImage[] = [
+      { src: "/a.png", alt: "img-1", downloadHref: "/a.png?download=1", pageHref: "/ws/attachments/a" },
+    ];
+    render(<ImageGallery images={withPage} open onClose={() => {}} />);
+    const download = screen.getByRole("link", { name: "Download" }) as HTMLAnchorElement;
+    const page = screen.getByRole("link", { name: "Open on its own page" }) as HTMLAnchorElement;
+    expect(download.getAttribute("href")).toBe("/a.png?download=1");
+    expect(page.getAttribute("href")).toBe("/ws/attachments/a");
+  });
+
+  it("omits the page link when the image has no pageHref", () => {
+    render(<ImageGallery images={[{ src: "/a.png", alt: "img-1" }]} open onClose={() => {}} />);
+    expect(screen.queryByRole("link", { name: "Open on its own page" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+  });
 });
