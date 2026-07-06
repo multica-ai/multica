@@ -50,6 +50,7 @@ apps/web/test-results/
 .context
 .agent_context/
 .multica/
+.omc/
 
 # local settings
 .claude/
