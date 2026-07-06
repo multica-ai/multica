@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
   View,
 } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
@@ -56,6 +56,7 @@ export default function IssueDetail() {
   }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const qc = useQueryClient();
+  const { showActionSheetWithOptions } = useActionSheet();
 
   const detail = useQuery(issueDetailOptions(wsId, id));
   const timeline = useQuery(issueTimelineOptions(wsId, id));
@@ -107,7 +108,7 @@ export default function IssueDetail() {
 
   // Three-dot menu: Pin/Unpin / Copy link / Open on web (if web URL set) /
   // Delete. Mirrors apps/mobile/app/(app)/[workspace]/project/[id].tsx — same
-  // ActionSheetIOS + Alert.alert confirm pattern. Property edits (status,
+  // action sheet + Alert.alert confirm pattern. Property edits (status,
   // priority, assignee, due_date) live on the IssueHeaderCard chips inside
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
@@ -123,7 +124,7 @@ export default function IssueDetail() {
     if (issueLink) options.push("Open on web");
     options.push("Delete issue");
     const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
@@ -131,6 +132,7 @@ export default function IssueDetail() {
         title: issue.identifier,
       },
       (i) => {
+        if (i === undefined) return;
         const label = options[i];
         if (label === "Pin") {
           createPin.mutate({ item_type: "issue", item_id: issue.id });
@@ -151,7 +153,15 @@ export default function IssueDetail() {
         }
       },
     );
-  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin]);
+  }, [
+    issue,
+    wsSlug,
+    deleteIssue,
+    isPinned,
+    createPin,
+    deletePin,
+    showActionSheetWithOptions,
+  ]);
 
   return (
     <View className="flex-1 bg-background">

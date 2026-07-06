@@ -1,8 +1,8 @@
 /**
  * Profile edit subscreen — name + avatar.
  *
- * Avatar tap opens an iOS native ActionSheet (Take Photo / Choose from Library
- * / Remove). Mirrors the avatar upload flow in
+ * Avatar tap opens a cross-platform action sheet (Take Photo / Choose from
+ * Library / Remove). Mirrors the avatar upload flow in
  * packages/views/settings/components/account-tab.tsx but the picker uses
  * native APIs per CLAUDE.md "iOS native > RNR > discuss" waterfall.
  *
@@ -12,13 +12,13 @@
  */
 import { useEffect, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   ActivityIndicator,
   Pressable,
   ScrollView,
   View,
 } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import * as ImagePicker from "expo-image-picker";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,7 @@ export default function ProfileSettingsScreen() {
   const [name, setName] = useState(user?.name ?? "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const { showActionSheetWithOptions } = useActionSheet();
 
   // Resync if `user` updates from outside (avatar upload, refetch, login as
   // different user). Without this the form would render stale init forever.
@@ -64,7 +65,7 @@ export default function ProfileSettingsScreen() {
     const cancelIndex = user?.avatar_url ? 3 : 2;
     const visibleOptions = user?.avatar_url ? options : options.filter((_, i) => i !== 2);
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options: visibleOptions,
         cancelButtonIndex: cancelIndex,

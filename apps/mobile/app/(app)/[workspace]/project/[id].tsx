@@ -9,13 +9,12 @@
  * Per-record realtime: `useProjectRealtime(id, onDeleted=back)` subscribes
  * to `project:updated` (full replace) and `project:deleted` (pop back).
  *
- * Right-top "…" menu (ActionSheetIOS) → Edit / Delete. Delete asks for
- * confirmation via `Alert.alert` per iOS HIG (destructive actions need
- * a second tap).
+ * Right-top "…" menu (cross-platform action sheet) → Edit / Delete. Delete
+ * asks for confirmation via `Alert.alert` per iOS HIG (destructive actions
+ * need a second tap).
  */
 import { useCallback } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -23,6 +22,7 @@ import {
   ScrollView,
   View,
 } from "react-native";
+import { useActionSheet } from "@expo/react-native-action-sheet";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,6 +50,7 @@ export default function ProjectDetail() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const qc = useQueryClient();
+  const { showActionSheetWithOptions } = useActionSheet();
 
   const detail = useQuery(projectDetailOptions(wsId, id));
   const deleteProject = useDeleteProject(id);
@@ -95,13 +96,14 @@ export default function ProjectDetail() {
       "Delete",
     ];
     const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
         destructiveButtonIndex: destructiveIndex,
       },
       (i) => {
+        if (i === undefined) return;
         const label = options[i];
         if (label === "Pin") {
           createPin.mutate({ item_type: "project", item_id: project.id });
