@@ -285,6 +285,18 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+// Kiro CLI reports per-turn cost as a fractional `credit` value on
+// `_kiro.dev/metadata`. The number can be as small as ~0.05 for a
+// one-word turn, so we keep more precision than the tens/hundreds a
+// token count sits at — but cap at three decimals so a busy issue with
+// thousands of credits stays readable.
+function formatCredits(n: number): string {
+  if (n === 0) return "0";
+  if (n < 0.001) return n.toExponential(2);
+  if (n >= 1000) return `${(n / 1000).toFixed(2)}k`;
+  return n.toFixed(3);
+}
+
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
@@ -1669,6 +1681,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     write: formatTokenCount(usage.total_cache_write_tokens),
                   })}
                 </span>
+              </PropRow>
+            )}
+            {/* Kiro CLI 2.10+ reports per-turn cost as a native `credit`
+                unit with no token breakdown (GH #4943 / migration 136-137).
+                Hide the row for every backend that already fills tokens so
+                the panel doesn't clutter with a zero. */}
+            {usage.total_credits > 0 && (
+              <PropRow label={t(($) => $.detail.prop_credits)}>
+                <span className="text-muted-foreground">{formatCredits(usage.total_credits)}</span>
               </PropRow>
             )}
             <PropRow label={t(($) => $.detail.prop_runs)}>

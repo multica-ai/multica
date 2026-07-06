@@ -123,6 +123,11 @@ export interface DashboardTokenTotals {
   cacheRead: number;
   cacheWrite: number;
   cost: number;
+  // Credits: vendor-billed cost captured from backends that don't emit
+  // tokens (Kiro CLI 2.10+). Stays separate from `cost` because the two
+  // metrics have different units — USD from tokens × pricing vs a native
+  // metering unit. The KPI tile displays credits alongside cost when >0.
+  credits: number;
   taskCount: number;
 }
 
@@ -139,9 +144,10 @@ export function computeDailyTotals(usage: DashboardUsageDaily[]): DashboardToken
       cacheRead: acc.cacheRead + u.cache_read_tokens,
       cacheWrite: acc.cacheWrite + u.cache_write_tokens,
       cost: acc.cost + estimateCost(u),
+      credits: acc.credits + (u.credits ?? 0),
       taskCount: acc.taskCount + u.task_count,
     }),
-    { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, taskCount: 0 },
+    { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, credits: 0, taskCount: 0 },
   );
 }
 
@@ -149,6 +155,7 @@ export interface AgentCostRow {
   agentId: string;
   tokens: number;
   cost: number;
+  credits: number;
   taskCount: number;
 }
 
@@ -162,21 +169,26 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
+      credits: 0,
       taskCount: 0,
     };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
     entry.cost += estimateCost(r);
+    entry.credits += r.credits ?? 0;
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
+  // Sort primary by cost desc; break ties on credits desc so Kiro-only
+  // agents (cost === 0 but credits > 0) still land above zero-usage rows.
+  return Array.from(map.values()).toSorted((a, b) => (b.cost - a.cost) || (b.credits - a.credits));
 }
 
 export interface AgentDashboardRow {
   agentId: string;
   tokens: number;
   cost: number;
+  credits: number;
   seconds: number;
   taskCount: number;
 }
@@ -204,6 +216,7 @@ export function mergeAgentDashboardRows(
       agentId: r.agentId,
       tokens: r.tokens,
       cost: r.cost,
+      credits: r.credits,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
     });
@@ -217,12 +230,17 @@ export function mergeAgentDashboardRows(
       agentId: r.agent_id,
       tokens: 0,
       cost: 0,
+      credits: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
     });
   }
+  // Primary sort by USD cost desc; break ties on credits desc so a
+  // Kiro-only agent (cost === 0, credits > 0) still ranks above zero-usage
+  // rows before falling back to run-time.
   return Array.from(merged.values()).toSorted((a, b) => {
     if (b.cost !== a.cost) return b.cost - a.cost;
+    if (b.credits !== a.credits) return b.credits - a.credits;
     return b.seconds - a.seconds;
   });
 }
@@ -261,6 +279,7 @@ export function bucketUnknownAgentRows(
     agentId: DELETED_AGENTS_ROW_ID,
     tokens: 0,
     cost: 0,
+    credits: 0,
     seconds: 0,
     taskCount: 0,
   };
@@ -273,6 +292,10 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    // Preserve credit total in the "hard-deleted agents" bucket so a
+    // workspace that only used Kiro (cost === 0 everywhere) still shows
+    // its historical spend after those agents get purged.
+    bucket.credits += r.credits;
   }
   return hasDeleted ? [...known, bucket] : known;
 }

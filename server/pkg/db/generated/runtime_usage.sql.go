@@ -61,6 +61,7 @@ SELECT
     SUM(tu.output_tokens)::bigint AS output_tokens,
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    SUM(tu.credits)::double precision AS credits,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -77,13 +78,14 @@ type GetRuntimeUsageByHourParams struct {
 }
 
 type GetRuntimeUsageByHourRow struct {
-	Hour             int32  `json:"hour"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	Hour             int32   `json:"hour"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Credits          float64 `json:"credits"`
+	TaskCount        int32   `json:"task_count"`
 }
 
 // Per-(hour, model) token aggregates (hour ∈ 0..23) for a runtime since a
@@ -110,6 +112,7 @@ func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsage
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.Credits,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -130,7 +133,8 @@ SELECT
     SUM(input_tokens)::bigint        AS input_tokens,
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(credits)::double precision   AS credits
 FROM task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= $3::timestamptz
@@ -152,6 +156,7 @@ type ListRuntimeUsageRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	Credits          float64     `json:"credits"`
 }
 
 // Reads from the UTC-bucketed `task_usage_hourly` rollup table,
@@ -182,6 +187,7 @@ func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsagePara
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.Credits,
 		); err != nil {
 			return nil, err
 		}
@@ -202,6 +208,7 @@ SELECT
     SUM(tu.output_tokens)::bigint AS output_tokens,
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    SUM(tu.credits)::double precision AS credits,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -224,6 +231,7 @@ type ListRuntimeUsageByAgentRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	Credits          float64     `json:"credits"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -255,6 +263,7 @@ func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUs
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.Credits,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err

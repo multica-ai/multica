@@ -8,6 +8,7 @@
   },
   "kpi": {
     "cost_label": "Cost · {{days}}D",
+    "cost_credits_hint": "+ {{credits}} credits",
     "tokens_label": "Tokens · {{days}}D",
     "tokens_hint": "Input {{input}} · Output {{output}}",
     "run_time_label": "Run time · {{days}}D",

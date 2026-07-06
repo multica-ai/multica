@@ -213,6 +213,7 @@
     "prop_cache": "キャッシュ",
     "prop_cache_value": "読み取り {{read}} / 書き込み {{write}}",
     "prop_runs": "実行",
+    "prop_credits": "クレジット",
     "activity_section": "アクティビティ",
     "subscribe": "購読",
     "unsubscribe": "購読解除",

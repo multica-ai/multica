@@ -213,6 +213,7 @@
     "prop_cache": "캐시",
     "prop_cache_value": "읽기 {{read}} / 쓰기 {{write}}",
     "prop_runs": "실행",
+    "prop_credits": "크레딧",
     "activity_section": "활동",
     "subscribe": "구독",
     "unsubscribe": "구독 해제",

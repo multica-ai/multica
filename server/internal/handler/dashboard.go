@@ -56,14 +56,18 @@ func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, b
 // stay on the wire so the client can disambiguate bare model ids that collide
 // across providers (e.g. Cursor's `auto`).
 type DashboardUsageDailyResponse struct {
-	Date             string `json:"date"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	Date             string  `json:"date"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	// Credits: vendor-billed cost for backends that report a native
+	// metering unit instead of tokens (Kiro CLI 2.10+). 0 for
+	// token-only backends. See migration 137 for the aggregation path.
+	Credits   float64 `json:"credits"`
+	TaskCount int32   `json:"task_count"`
 }
 
 // GetDashboardUsageDaily returns per-(date, model) token rows for the
@@ -115,6 +119,7 @@ func (h *Handler) listDashboardUsageDaily(
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			Credits:          row.Credits,
 			TaskCount:        row.TaskCount,
 		}
 	}
@@ -125,14 +130,15 @@ func (h *Handler) listDashboardUsageDaily(
 // rides along for the same cross-provider pricing disambiguation as the daily
 // response; the client folds by agent_id and sums cost.
 type DashboardUsageByAgentResponse struct {
-	AgentID          string `json:"agent_id"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	AgentID          string  `json:"agent_id"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Credits          float64 `json:"credits"`
+	TaskCount        int32   `json:"task_count"`
 }
 
 // GetDashboardUsageByAgent returns per-(agent, model) token aggregates
@@ -184,6 +190,7 @@ func (h *Handler) listDashboardUsageByAgent(
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			Credits:          row.Credits,
 			TaskCount:        row.TaskCount,
 		}
 	}

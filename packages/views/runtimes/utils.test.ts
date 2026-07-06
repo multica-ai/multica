@@ -26,6 +26,7 @@ const zeroUsage = {
   output_tokens: 0,
   cache_read_tokens: 0,
   cache_write_tokens: 0,
+  credits: 0,
 };
 
 describe("isSelfHealingRuntime", () => {
@@ -137,6 +138,7 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
       cache_write_tokens: 1_000_000,
+      credits: 0,
     });
     expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
   });
@@ -149,6 +151,7 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
       cache_write_tokens: 1_000_000,
+      credits: 0,
     });
     expect(cost).toBeCloseTo(2 + 10 + 0.2 + 2.5, 5);
   });
@@ -287,6 +290,7 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
         cache_read_tokens: 1_000_000,
         cache_write_tokens: 1_000_000,
+        credits: 0,
       });
 
     expect(costWithAllTokenTypes("auto")).toBeCloseTo(1.25 + 6 + 0.25, 5);
@@ -723,6 +727,7 @@ describe("sliceWindow (timezone-aware)", () => {
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
+      credits: 0,
     };
   }
 
@@ -780,6 +785,7 @@ describe("aggregateByWeek", () => {
       output_tokens: output,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
+      credits: 0,
     };
   }
 
@@ -922,6 +928,7 @@ describe("computeCostInWindow", () => {
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
+      credits: 0,
     };
   }
 

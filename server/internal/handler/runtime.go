@@ -75,14 +75,19 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 // ---------------------------------------------------------------------------
 
 type RuntimeUsageResponse struct {
-	RuntimeID        string `json:"runtime_id"`
-	Date             string `json:"date"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	RuntimeID        string  `json:"runtime_id"`
+	Date             string  `json:"date"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	// Credits is a vendor-billed cost in the runtime's native metering unit
+	// (Kiro CLI emits `credit` on `_kiro.dev/metadata` for every turn; every
+	// other backend leaves this at 0). Zero-filled on the wire so old
+	// clients that expect only tokens keep parsing.
+	Credits float64 `json:"credits"`
 }
 
 // GetRuntimeUsage returns daily token usage for a runtime, aggregated from
@@ -142,6 +147,7 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			Credits:          row.Credits,
 		}
 	}
 	return resp, nil
@@ -194,14 +200,15 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 // so pricing changes don't require a back-fill); provider disambiguates bare
 // model ids that collide across providers. The client groups by agent_id and sums.
 type RuntimeUsageByAgentResponse struct {
-	AgentID          string `json:"agent_id"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	AgentID          string  `json:"agent_id"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Credits          float64 `json:"credits"`
+	TaskCount        int32   `json:"task_count"`
 }
 
 // GetRuntimeUsageByAgent returns per-agent token aggregates for a runtime
@@ -247,6 +254,7 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			Credits:          row.Credits,
 			TaskCount:        row.TaskCount,
 		}
 	}
@@ -258,13 +266,14 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 // activity are omitted by the SQL — clients fill the gap to render a
 // continuous 0..23 axis. Model is preserved for client-side cost math.
 type RuntimeUsageByHourResponse struct {
-	Hour             int    `json:"hour"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	Hour             int     `json:"hour"`
+	Model            string  `json:"model"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Credits          float64 `json:"credits"`
+	TaskCount        int32   `json:"task_count"`
 }
 
 // GetRuntimeUsageByHour returns hourly (0..23) token aggregates for a
@@ -312,6 +321,7 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
+			Credits:          row.Credits,
 			TaskCount:        row.TaskCount,
 		}
 	}

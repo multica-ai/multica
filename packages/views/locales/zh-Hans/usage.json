@@ -8,6 +8,7 @@
   },
   "kpi": {
     "cost_label": "费用 · {{days}}天",
+    "cost_credits_hint": "+ {{credits}} 计量额度",
     "tokens_label": "Token · {{days}}天",
     "tokens_hint": "输入 {{input}} · 输出 {{output}}",
     "run_time_label": "运行时长 · {{days}}天",

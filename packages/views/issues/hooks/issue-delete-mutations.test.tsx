@@ -84,6 +84,7 @@ const usage: IssueUsageSummary = {
   total_output_tokens: 20,
   total_cache_read_tokens: 1,
   total_cache_write_tokens: 2,
+  total_credits: 0,
   task_count: 1,
 };
 

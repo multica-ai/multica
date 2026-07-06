@@ -17,6 +17,7 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(tu.credits), 0)::double precision AS total_credits,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -24,11 +25,12 @@ WHERE atq.issue_id = $1
 `
 
 type GetIssueUsageSummaryRow struct {
-	TotalInputTokens      int64 `json:"total_input_tokens"`
-	TotalOutputTokens     int64 `json:"total_output_tokens"`
-	TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
-	TaskCount             int32 `json:"task_count"`
+	TotalInputTokens      int64   `json:"total_input_tokens"`
+	TotalOutputTokens     int64   `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64   `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64   `json:"total_cache_write_tokens"`
+	TotalCredits          float64 `json:"total_credits"`
+	TaskCount             int32   `json:"task_count"`
 }
 
 func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
@@ -39,6 +41,7 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 		&i.TotalOutputTokens,
 		&i.TotalCacheReadTokens,
 		&i.TotalCacheWriteTokens,
+		&i.TotalCredits,
 		&i.TaskCount,
 	)
 	return i, err
@@ -238,6 +241,7 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(credits)::double precision   AS credits,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -261,6 +265,7 @@ type ListDashboardUsageByAgentRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	Credits          float64     `json:"credits"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -295,6 +300,7 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.Credits,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -316,6 +322,7 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(credits)::double precision   AS credits,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -340,6 +347,7 @@ type ListDashboardUsageDailyRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	Credits          float64     `json:"credits"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -382,6 +390,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.Credits,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err

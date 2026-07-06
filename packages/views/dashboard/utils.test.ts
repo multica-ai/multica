@@ -22,6 +22,7 @@ describe("aggregateDailyCost", () => {
         output_tokens: 500_000,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 3,
       },
       {
@@ -32,6 +33,7 @@ describe("aggregateDailyCost", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 1,
       },
     ]);
@@ -55,6 +57,7 @@ describe("aggregateDailyCost", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 0,
       },
     ]);
@@ -73,6 +76,7 @@ describe("aggregateAgentTokens", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 1,
       },
       {
@@ -83,6 +87,7 @@ describe("aggregateAgentTokens", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 3,
       },
       {
@@ -93,6 +98,7 @@ describe("aggregateAgentTokens", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 2,
       },
     ]);
@@ -115,6 +121,7 @@ describe("computeDailyTotals", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 2,
       },
       {
@@ -125,6 +132,7 @@ describe("computeDailyTotals", () => {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        credits: 0,
         task_count: 3,
       },
     ]);
@@ -145,6 +153,7 @@ describe("mergeAgentDashboardRows", () => {
         agentId: "agent-a",
         tokens: 3_000_000,
         cost: 12,
+        credits: 0,
         taskCount: 2, // overcounted because (model-1: 1) + (model-2: 1)
       },
     ];
@@ -167,7 +176,7 @@ describe("mergeAgentDashboardRows", () => {
     // rollup is silent on this agent. Keep the token-side estimate
     // instead of dropping the agent from the table entirely.
     const merged = mergeAgentDashboardRows(
-      [{ agentId: "agent-b", tokens: 100, cost: 0.5, taskCount: 1 }],
+      [{ agentId: "agent-b", tokens: 100, cost: 0.5, credits: 0, taskCount: 1 }],
       [],
     );
     expect(merged[0]!.taskCount).toBe(1);
@@ -191,9 +200,9 @@ describe("mergeAgentDashboardRows", () => {
   it("sorts by cost desc with run-time as a tiebreaker", () => {
     const merged = mergeAgentDashboardRows(
       [
-        { agentId: "low", tokens: 100, cost: 1, taskCount: 1 },
-        { agentId: "high", tokens: 100, cost: 9, taskCount: 1 },
-        { agentId: "zero-cost-long", tokens: 0, cost: 0, taskCount: 0 },
+        { agentId: "low", tokens: 100, cost: 1, credits: 0, taskCount: 1 },
+        { agentId: "high", tokens: 100, cost: 9, credits: 0, taskCount: 1 },
+        { agentId: "zero-cost-long", tokens: 0, cost: 0, credits: 0, taskCount: 0 },
       ],
       [
         { agent_id: "zero-cost-long", total_seconds: 1000, task_count: 5, failed_count: 0 },
@@ -204,11 +213,12 @@ describe("mergeAgentDashboardRows", () => {
 });
 
 describe("bucketUnknownAgentRows", () => {
-  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const live = { agentId: "live", tokens: 100, cost: 1, credits: 0, seconds: 10, taskCount: 1 };
   const archived = {
     agentId: "archived",
     tokens: 80,
     cost: 0.8,
+    credits: 0,
     seconds: 8,
     taskCount: 2,
   };
@@ -216,6 +226,7 @@ describe("bucketUnknownAgentRows", () => {
     agentId: "deleted-a",
     tokens: 50,
     cost: 0.5,
+    credits: 0,
     seconds: 5,
     taskCount: 1,
   };
@@ -223,6 +234,7 @@ describe("bucketUnknownAgentRows", () => {
     agentId: "deleted-b",
     tokens: 30,
     cost: 0.25,
+    credits: 0,
     seconds: 3,
     taskCount: 4,
   };

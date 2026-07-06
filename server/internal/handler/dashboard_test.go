@@ -1407,3 +1407,179 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 		t.Errorf("after delete: expected bucket recomputed to 0, got %d", got)
 	}
 }
+
+// TestKiroCreditsFlowThroughUserVisiblePipeline exercises the fix requested
+// on PR #4970's re-review (Niko): raw `task_usage.credits` must roll up
+// into `task_usage_hourly` AND surface on every user-visible aggregation
+// (issue usage summary, runtime usage list, dashboard daily / by-agent).
+//
+// The test inserts a synthetic task with a Kiro-style credit-only payload
+// (all four token counters at zero, `credits` > 0), drives the rollup, and
+// asserts every read path returns the credit value verbatim. Before the
+// migration 137 pipeline change this test would fail because
+// task_usage_hourly had no credits column.
+func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
+	ctx := context.Background()
+
+	// Reuse a live runtime + agent from the shared test workspace.
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	// One issue → one task → one task_usage row with credit-only payload.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'kiro credit e2e', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'completed', now(), now(), now())
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	// The exact credit reading captured from kiro-cli 2.11.0 in the #4943
+	// reproduction — keep it byte-for-byte so this test doubles as a
+	// regression against payload-shape drift.
+	const wantCredits = 0.08904971814262025
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model,
+		                        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+		                        credits, created_at)
+		VALUES ($1, 'kiro', 'kiro-credit-e2e', 0, 0, 0, 0, $2, now())
+	`, taskID, wantCredits); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+
+	// Force the rollup for both fresh runs and the migration-137 reseed
+	// path: from epoch so the recompute REPLACES every affected bucket.
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("rollup: %v", err)
+	}
+
+	// --- 1) Issue usage summary --------------------------------------
+	// Reads directly from task_usage.credits — no rollup involved.
+	{
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.GetIssueUsage(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("issue usage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var body struct {
+			TotalCredits float64 `json:"total_credits"`
+			TaskCount    int32   `json:"task_count"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode issue usage: %v", err)
+		}
+		if body.TotalCredits != wantCredits {
+			t.Fatalf("issue.total_credits = %v, want %v", body.TotalCredits, wantCredits)
+		}
+		if body.TaskCount != 1 {
+			t.Fatalf("issue.task_count = %d, want 1", body.TaskCount)
+		}
+	}
+
+	// --- 2) Runtime usage list (task_usage_hourly path) --------------
+	// Proves migration 137 + rollup fn extension work end-to-end.
+	{
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/runtimes/"+runtimeID+"/usage", nil)
+		req = withURLParam(req, "runtimeId", runtimeID)
+		testHandler.GetRuntimeUsage(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("runtime usage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []struct {
+			Provider string  `json:"provider"`
+			Model    string  `json:"model"`
+			Credits  float64 `json:"credits"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode runtime usage: %v", err)
+		}
+		var got float64
+		for _, r := range rows {
+			if r.Model == "kiro-credit-e2e" {
+				got += r.Credits
+			}
+		}
+		if got != wantCredits {
+			t.Fatalf("runtime.credits = %v, want %v (rollup didn't propagate credits)", got, wantCredits)
+		}
+	}
+
+	// --- 3) Dashboard daily (workspace-wide) -------------------------
+	// Same task_usage_hourly path, workspace-scoped.
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("dashboard daily: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []struct {
+			Model   string  `json:"model"`
+			Credits float64 `json:"credits"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode dashboard daily: %v", err)
+		}
+		var got float64
+		for _, r := range rows {
+			if r.Model == "kiro-credit-e2e" {
+				got += r.Credits
+			}
+		}
+		if got != wantCredits {
+			t.Fatalf("dashboard.credits = %v, want %v", got, wantCredits)
+		}
+	}
+
+	// --- 4) Dashboard by-agent (workspace-wide) ----------------------
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("dashboard by-agent: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []struct {
+			AgentID string  `json:"agent_id"`
+			Model   string  `json:"model"`
+			Credits float64 `json:"credits"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode dashboard by-agent: %v", err)
+		}
+		var got float64
+		for _, r := range rows {
+			if r.Model == "kiro-credit-e2e" && r.AgentID == agentID {
+				got += r.Credits
+			}
+		}
+		if got != wantCredits {
+			t.Fatalf("dashboard by-agent.credits = %v, want %v", got, wantCredits)
+		}
+	}
+}

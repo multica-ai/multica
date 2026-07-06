@@ -108,6 +108,16 @@ function fmtMoney(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+// Kiro credit metering is fractional (~0.09 per one-word turn), so a
+// three-decimal cap keeps the KPI hint readable without dropping
+// significant precision. Values above 1000 flip to `k` to stay short.
+function formatCredits(n: number): string {
+  if (n === 0) return "0";
+  if (n < 0.001) return n.toExponential(2);
+  if (n >= 1000) return `${(n / 1000).toFixed(2)}k`;
+  return n.toFixed(3);
+}
+
 // Local segmented control — same visual language the runtime usage section
 // uses for its period / tab toggles. shadcn's Tabs is wired for full tab
 // pages with ARIA semantics the compact toolbar pill doesn't need.
@@ -390,6 +400,18 @@ export function DashboardPage() {
                 <KpiCard
                   label={t(($) => $.kpi.cost_label, { days })}
                   value={fmtMoney(totals.cost)}
+                  hint={
+                    // Kiro CLI 2.10+ backends report per-turn cost as a
+                    // native credit unit with no token breakdown (GH #4943),
+                    // so their spend never rolls into `totals.cost`. Surface
+                    // it in the KPI hint so a workspace with Kiro-only
+                    // runtimes doesn't appear "free".
+                    totals.credits > 0
+                      ? t(($) => $.kpi.cost_credits_hint, {
+                          credits: formatCredits(totals.credits),
+                        })
+                      : undefined
+                  }
                 />
                 <KpiCard
                   label={t(($) => $.kpi.tokens_label, { days })}

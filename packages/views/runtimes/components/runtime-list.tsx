@@ -57,6 +57,7 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   computeCostInWindow,
+  computeCreditsInWindow,
   formatLastSeen,
   pctChange,
 } from "../utils";
@@ -351,6 +352,12 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
     () => computeCostInWindow(usage, 7, tz, 7),
     [usage, tz],
   );
+  // Credits sit alongside cost so a Kiro-only runtime (no token pricing
+  // entry, but non-zero `credits`) is not shown as `$0` — GH #4943.
+  const credits7d = useMemo(
+    () => computeCreditsInWindow(usage, 7, tz),
+    [usage, tz],
+  );
   const delta = pctChange(cost7d, costPrev7d);
 
   if (usage.length === 0) {
@@ -360,7 +367,11 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
       </div>
     );
   }
-  const fmt = cost7d >= 100 ? `$${cost7d.toFixed(0)}` : `$${cost7d.toFixed(2)}`;
+  const hasUsdCost = cost7d > 0;
+  const fmtCost = cost7d >= 100 ? `$${cost7d.toFixed(0)}` : `$${cost7d.toFixed(2)}`;
+  // Credit unit — Kiro emits fractional values (~0.09 per one-word turn),
+  // so keep three decimals up to a thousand and switch to k above that.
+  const fmtCredits = credits7d < 1000 ? `${credits7d.toFixed(3)}c` : `${(credits7d / 1000).toFixed(2)}kc`;
   const deltaTone =
     delta == null
       ? "text-muted-foreground"
@@ -377,10 +388,17 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
     <div className="flex w-full flex-col items-end leading-tight">
-      <span className="text-sm font-medium tabular-nums">{fmt}</span>
-      {deltaLabel && (
+      <span className="text-sm font-medium tabular-nums">
+        {hasUsdCost ? fmtCost : credits7d > 0 ? fmtCredits : fmtCost}
+      </span>
+      {deltaLabel && hasUsdCost && (
         <span className={`text-[11px] tabular-nums ${deltaTone}`}>
           {deltaLabel}
+        </span>
+      )}
+      {!hasUsdCost && credits7d > 0 && (
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          credits
         </span>
       )}
     </div>

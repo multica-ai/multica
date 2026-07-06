@@ -148,7 +148,7 @@ func runRuntimeUsage(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, usage)
 	}
 
-	headers := []string{"DATE", "PROVIDER", "MODEL", "INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE"}
+	headers := []string{"DATE", "PROVIDER", "MODEL", "INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "CREDITS"}
 	rows := make([][]string, 0, len(usage))
 	for _, u := range usage {
 		rows = append(rows, []string{
@@ -159,6 +159,7 @@ func runRuntimeUsage(cmd *cobra.Command, args []string) error {
 			strVal(u, "output_tokens"),
 			strVal(u, "cache_read_tokens"),
 			strVal(u, "cache_write_tokens"),
+			strVal(u, "credits"),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)

@@ -434,6 +434,7 @@ const DashboardUsageDailySchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  credits: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -447,6 +448,7 @@ const DashboardUsageByAgentSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  credits: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -486,6 +488,7 @@ const RuntimeUsageSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  credits: z.number().default(0),
 }).loose();
 
 export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
@@ -505,6 +508,7 @@ const RuntimeUsageByAgentSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  credits: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -517,6 +521,7 @@ const RuntimeUsageByHourSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  credits: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 

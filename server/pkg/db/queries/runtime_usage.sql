@@ -17,7 +17,8 @@ SELECT
     SUM(input_tokens)::bigint        AS input_tokens,
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(credits)::double precision   AS credits
 FROM task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= sqlc.arg('since')::timestamptz
@@ -55,6 +56,7 @@ SELECT
     SUM(tu.output_tokens)::bigint AS output_tokens,
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    SUM(tu.credits)::double precision AS credits,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -79,6 +81,7 @@ SELECT
     SUM(tu.output_tokens)::bigint AS output_tokens,
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    SUM(tu.credits)::double precision AS credits,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id

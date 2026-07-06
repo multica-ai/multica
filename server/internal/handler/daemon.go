@@ -2776,7 +2776,11 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_output_tokens":      row.TotalOutputTokens,
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+		// Kiro CLI 2.10+ reports per-turn cost only in credits; every
+		// other backend leaves this at 0. See migration 136 / 137 for
+		// the persistence + aggregation path.
+		"total_credits": row.TotalCredits,
+		"task_count":    row.TaskCount,
 	})
 }
 

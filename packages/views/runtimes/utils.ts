@@ -455,7 +455,7 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 type Priceable = Pick<
   RuntimeUsage,
   "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
-> & { provider?: string };
+> & { provider?: string; credits?: number };
 
 export function estimateCost(usage: Priceable): number {
   const pricing = resolvePricing(usage.model, usage.provider);
@@ -876,12 +876,17 @@ export interface CostByKey {
   key: string;
   tokens: number;
   cost: number;
+  // Credits summed across contributing rows. Non-zero only when at least
+  // one row came from a backend that reports vendor-billed cost instead
+  // of tokens (Kiro CLI 2.10+). See migration 137 for the aggregation path.
+  credits: number;
   taskCount: number;
 }
 
 // Per-(agent, model) rows → per-agent totals. Cost is summed across all
 // models for that agent, then the list is sorted by cost desc so the
-// heaviest-spending agent appears first.
+// heaviest-spending agent appears first. Ties broken on credits desc so a
+// Kiro-only agent (cost === 0, credits > 0) doesn't sink to the bottom.
 export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
   const map = new Map<string, CostByKey>();
   for (const r of rows) {
@@ -889,15 +894,17 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
       key: r.agent_id,
       tokens: 0,
       cost: 0,
+      credits: 0,
       taskCount: 0,
     };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
     entry.cost += estimateCost(r);
+    entry.credits += r.credits ?? 0;
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => (b.cost - a.cost) || (b.credits - a.credits));
 }
 
 // Per-(date, model) rows → per-model totals (the "By model" tab reuses the
@@ -906,13 +913,14 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
   const map = new Map<string, CostByKey>();
   for (const r of rows) {
     const key = modelGroupingKey(r.model, r.provider);
-    const entry = map.get(key) ?? { key, tokens: 0, cost: 0, taskCount: 0 };
+    const entry = map.get(key) ?? { key, tokens: 0, cost: 0, credits: 0, taskCount: 0 };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
     entry.cost += estimateCost(r);
+    entry.credits += r.credits ?? 0;
     map.set(key, entry);
   }
-  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => (b.cost - a.cost) || (b.credits - a.credits));
 }
 
 // Sum of estimated cost over the trailing window
@@ -941,6 +949,27 @@ export function computeCostInWindow(
   let total = 0;
   for (const r of rows) {
     if (r.date >= isoStart && r.date < isoEnd) total += estimateCost(r);
+  }
+  return total;
+}
+
+// Sibling of `computeCostInWindow` for vendor-billed credit metering.
+// Same window semantics; used by runtime-list / runtime-detail cells to
+// surface Kiro-style spend that has no per-token pricing entry. Both
+// functions can return non-zero on the same window (a runtime that
+// executed both a token-priced backend and Kiro-cli in the last 7 days).
+export function computeCreditsInWindow(
+  rows: readonly RuntimeUsage[],
+  daysBack: number,
+  tz: string,
+  offsetDays: number = 0,
+): number {
+  const today = todayIso(tz);
+  const isoEnd = addDaysIso(today, -offsetDays);
+  const isoStart = addDaysIso(today, -offsetDays - daysBack);
+  let total = 0;
+  for (const r of rows) {
+    if (r.date >= isoStart && r.date < isoEnd) total += r.credits ?? 0;
   }
   return total;
 }

@@ -1630,12 +1630,17 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 
 	// JSON numbers decode to float64; formatMetadataValue renders them as clean
 	// integers (no scientific notation for large cache-token counts).
-	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS"}
+	// CREDITS is emitted alongside tokens for Kiro CLI 2.10+ turns, which
+	// don't report per-token breakdowns (0 elsewhere). Keeping it as a plain
+	// column instead of hiding it on zero avoids the CLI users having to
+	// remember it's model-conditional; the JSON path already carries it.
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "CREDITS", "RUNS"}
 	rows := [][]string{{
 		formatMetadataValue(result["total_input_tokens"]),
 		formatMetadataValue(result["total_output_tokens"]),
 		formatMetadataValue(result["total_cache_read_tokens"]),
 		formatMetadataValue(result["total_cache_write_tokens"]),
+		formatMetadataValue(result["total_credits"]),
 		formatMetadataValue(result["task_count"]),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
