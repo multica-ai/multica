@@ -398,7 +398,7 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
       )}
       {!hasUsdCost && credits7d > 0 && (
         <span className="text-[11px] tabular-nums text-muted-foreground">
-          credits
+          {t(($) => $.list.cost_credits_unit)}
         </span>
       )}
     </div>

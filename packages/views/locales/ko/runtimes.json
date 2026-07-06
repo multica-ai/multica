@@ -249,6 +249,7 @@
     "col_cost": "비용 · 7일",
     "col_cli": "CLI",
     "cost_delta_flat": "변화 없음",
+    "cost_credits_unit": "크레딧",
     "cli_managed_badge": "데스크톱",
     "row_actions_aria": "행 작업",
     "delete_action": "삭제",

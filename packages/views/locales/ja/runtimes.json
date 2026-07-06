@@ -249,6 +249,7 @@
     "col_cost": "コスト · 7 日",
     "col_cli": "CLI",
     "cost_delta_flat": "変化なし",
+    "cost_credits_unit": "クレジット",
     "cli_managed_badge": "デスクトップ",
     "row_actions_aria": "行の操作",
     "delete_action": "削除",

@@ -1469,10 +1469,16 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 		t.Fatalf("insert task_usage: %v", err)
 	}
 
-	// Force the rollup for both fresh runs and the migration-137 reseed
-	// path: from epoch so the recompute REPLACES every affected bucket.
+	// Force the rollup along the SAME path production uses: a window ending
+	// at "now" + 1h, starting shortly before the task_usage insert. That
+	// exercises `dirty_from_updates` picking the new row up via
+	// `tu.updated_at >= p_from`, matching the 5-min cron cadence in
+	// `rollup_task_usage_hourly` (migration 102). A 1970-anchored window
+	// would trivially recompute every bucket and would NOT catch a
+	// dirty-queue-only path regression — see
+	// TestKiroCreditsMigration137EnqueuesDirtyKeys for that side.
 	if _, err := testPool.Exec(ctx, `
-		SELECT rollup_task_usage_hourly_window('1970-01-01'::timestamptz, now() + interval '1 hour')
+		SELECT rollup_task_usage_hourly_window(now() - interval '1 minute', now() + interval '1 hour')
 	`); err != nil {
 		t.Fatalf("rollup: %v", err)
 	}
@@ -1581,5 +1587,174 @@ func TestKiroCreditsFlowThroughUserVisiblePipeline(t *testing.T) {
 		if got != wantCredits {
 			t.Fatalf("dashboard by-agent.credits = %v, want %v", got, wantCredits)
 		}
+	}
+}
+
+// TestKiroCreditsMigration137EnqueuesDirtyKeys proves migration 137's
+// **targeted backfill** strategy — enqueue only (bucket, workspace,
+// runtime, agent, project, provider, model) keys whose `task_usage`
+// rows already hold `credits > 0` — recovers historical credit rows
+// without stalling live traffic behind a 70-day watermark walk.
+//
+// Regression against Niko's PR #4970 review "Must fix 1": an earlier
+// draft rewound `task_usage_hourly_rollup_state.watermark_at` to epoch
+// so the cron would recompute everything. That would freeze new
+// dashboard/runtime usage for ~70 days at migration 102's 1-day LEAST
+// cap × the 5-min scheduler cadence, since `dirty_from_updates` would
+// only scan very old `updated_at` windows during catch-up.
+//
+// The corrected migration inserts credit-only keys directly into
+// `task_usage_hourly_dirty`, keeping the watermark at its current value
+// so live traffic still lands in the hourly bucket. This test simulates
+// that scenario end-to-end:
+//   1) Insert a historic task_usage row whose updated_at is BEFORE the
+//      current watermark (so the normal `dirty_from_updates` window
+//      wouldn't see it).
+//   2) Verify a normal narrow-window rollup DOES NOT pick it up.
+//   3) Run the migration's exact backfill INSERT (the SQL body from
+//      migration 137's dirty-queue enqueue).
+//   4) Verify the same narrow-window rollup NOW picks it up via
+//      `dirty_from_queue`, without any watermark rewind.
+func TestKiroCreditsMigration137EnqueuesDirtyKeys(t *testing.T) {
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	// Historic task whose usage was recorded long before any recent
+	// watermark tick. `updated_at = created_at - <old>` mimics a
+	// production row written by the daemon before this migration ran.
+	var issueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'kiro credit backfill', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// task_usage_hourly's bucket_hour truncates created_at to the UTC
+	// hour, so we pin created_at to a stable historic hour we can
+	// assert about. 3 hours ago keeps it well outside the "last minute"
+	// live-traffic window the follow-up rollup uses.
+	historic := time.Now().Add(-3 * time.Hour).UTC()
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		VALUES ($1, $2, $3, 'completed', $4, $4, $4)
+		RETURNING id
+	`, agentID, issueID, runtimeID, historic).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	const wantCredits = 0.089049718
+	// updated_at pinned to `historic` so the `updated_at >= p_from`
+	// filter in `dirty_from_updates` will NOT pick this row up on a
+	// narrow live window — this is the exact production shape a
+	// pre-migration Kiro row has.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model,
+		                        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+		                        credits, created_at, updated_at)
+		VALUES ($1, 'kiro', 'kiro-backfill-e2e', 0, 0, 0, 0, $2, $3, $3)
+	`, taskID, wantCredits, historic); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+
+	// Baseline: normal narrow-window rollup — the shape the cron runs
+	// on every 5-min tick — must NOT surface the historic row, because
+	// its updated_at is well outside `[now()-1m, now()+1h)`.
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window(now() - interval '1 minute', now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("baseline rollup: %v", err)
+	}
+	var haveBefore float64
+	if err := testPool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(credits), 0)::double precision
+		  FROM task_usage_hourly
+		 WHERE runtime_id = $1 AND model = 'kiro-backfill-e2e'
+	`, runtimeID).Scan(&haveBefore); err != nil {
+		t.Fatalf("read hourly (before): %v", err)
+	}
+	if haveBefore != 0 {
+		t.Fatalf("baseline: expected 0 credits in hourly, got %v — the narrow window unexpectedly caught the historic row, test is invalid", haveBefore)
+	}
+
+	// Migration 137's exact backfill statement. Kept inline so a future
+	// edit to migration 137 that widens/narrows the SELECT (e.g. a WHERE
+	// clause change) is caught by this test, not by a customer report.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage_hourly_dirty (
+		    bucket_hour, workspace_id, runtime_id, agent_id,
+		    project_id, provider, model, enqueued_at
+		)
+		SELECT DISTINCT
+		    task_usage_hour_bucket(tu.created_at),
+		    a.workspace_id,
+		    atq.runtime_id,
+		    atq.agent_id,
+		    i.project_id,
+		    tu.provider,
+		    tu.model,
+		    now()
+		  FROM task_usage tu
+		  JOIN agent_task_queue atq ON atq.id      = tu.task_id
+		  JOIN agent            a   ON a.id        = atq.agent_id
+		  LEFT JOIN issue       i   ON i.id        = atq.issue_id
+		 WHERE tu.credits > 0
+		   AND atq.runtime_id IS NOT NULL
+		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_dirty_key DO UPDATE
+		    SET enqueued_at = GREATEST(task_usage_hourly_dirty.enqueued_at, EXCLUDED.enqueued_at)
+	`); err != nil {
+		t.Fatalf("migration backfill INSERT: %v", err)
+	}
+
+	// The same narrow-window rollup must now pick the historic row up
+	// via `dirty_from_queue` — that's the whole point of the targeted
+	// backfill, no watermark movement required.
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window(now() - interval '1 minute', now() + interval '1 hour')
+	`); err != nil {
+		t.Fatalf("post-backfill rollup: %v", err)
+	}
+	var haveAfter float64
+	if err := testPool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(credits), 0)::double precision
+		  FROM task_usage_hourly
+		 WHERE runtime_id = $1 AND model = 'kiro-backfill-e2e'
+	`, runtimeID).Scan(&haveAfter); err != nil {
+		t.Fatalf("read hourly (after): %v", err)
+	}
+	if haveAfter != wantCredits {
+		t.Fatalf("after backfill: got %v credits in hourly, want %v — targeted backfill failed to re-rollup the historic row", haveAfter, wantCredits)
+	}
+
+	// The rollup window function drains rows whose `enqueued_at < p_to`
+	// (migration 102's `DELETE FROM task_usage_hourly_dirty WHERE
+	// enqueued_at < p_to`). Verify the enqueued key is gone so
+	// production doesn't grow an unbounded dirty queue after the
+	// backfill lands.
+	var stillDirty int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM task_usage_hourly_dirty
+		 WHERE runtime_id = $1 AND model = 'kiro-backfill-e2e'
+	`, runtimeID).Scan(&stillDirty); err != nil {
+		t.Fatalf("read dirty queue: %v", err)
+	}
+	if stillDirty != 0 {
+		t.Fatalf("dirty queue not drained after rollup: %d rows still enqueued", stillDirty)
 	}
 }

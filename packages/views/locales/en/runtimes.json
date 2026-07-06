@@ -261,6 +261,7 @@
     "col_cost": "Cost · 7d",
     "col_cli": "CLI",
     "cost_delta_flat": "flat",
+    "cost_credits_unit": "credits",
     "cli_managed_badge": "Desktop",
     "row_actions_aria": "Row actions",
     "delete_action": "Delete",

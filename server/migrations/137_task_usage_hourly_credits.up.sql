@@ -20,14 +20,15 @@
 --      REPLACES the entire bucket from `task_usage`, so re-running an
 --      overlapping window yields the same final state.
 --
---   3. Force a full re-rollup of history so existing hourly rows pick up
+--   3. Force a targeted backfill of history so existing hourly rows pick up
 --      any pre-migration credit values that were persisted by the daemon
---      after migration 136 shipped. Push the watermark back to epoch — the
---      cron loop will walk forward in bounded one-day steps (LEAST cap in
---      migration 102's `rollup_task_usage_hourly`), so this reseed is safe
---      and cheap: at most one row per (bucket, workspace, runtime, agent,
---      project, provider, model) is rewritten, and the reseed converges
---      on its own without operator action.
+--      after migration 136 shipped. **Only** the (bucket, workspace,
+--      runtime, agent, project, provider, model) keys that actually hold
+--      `task_usage.credits > 0` are enqueued into `task_usage_hourly_dirty`
+--      — a global watermark rewind would take ~70 days to catch up under
+--      migration 102's 1-day cap × 5-min cadence and would freeze new usage
+--      during the walk. The watermark stays at its current value so live
+--      Kiro turns continue rolling forward in real time.
 --
 -- Out of scope: `task_usage_hourly_dirty` — that queue only tracks WHICH
 -- bucket to recompute, never per-column data.
@@ -173,13 +174,51 @@ BEGIN
 END;
 $$;
 
--- Rewind the watermark so the next scheduled tick re-rollups every
--- historical bucket. Idempotent (the recompute CTE REPLACES buckets,
--- doesn't delta), cron-safe (the cron entry serialises via advisory
--- lock 4246), and bounded in wall-clock cost by migration 102's
--- one-day LEAST cap. Existing production rows will pick up any credit
--- values written into `task_usage` after migration 136 shipped, without
--- an operator-run backfill.
-UPDATE task_usage_hourly_rollup_state
-   SET watermark_at = '1970-01-01 00:00:00+00'
- WHERE id = 1;
+-- Targeted backfill for buckets that already carry credit rows.
+--
+-- Rewinding `task_usage_hourly_rollup_state.watermark_at` to epoch (an
+-- earlier draft of this migration) would work in principle — the recompute
+-- CTE is REPLACE-shaped — but the cron entry advances the watermark in
+-- bounded one-day steps (migration 102's `LEAST(now() - 5 min, v_from + 1
+-- day)`) on a 5-minute cadence (server/internal/scheduler/jobs_task_usage.go).
+-- From 1970 to 2026 that's ~20k ticks ≈ 70 days of catch-up, and while the
+-- watermark is walking through history the `dirty_from_updates` CTE only
+-- scans stale `updated_at` windows — every NEW Kiro turn recorded during
+-- catch-up would fall outside the window and its hourly bucket would stay
+-- token-only. Dashboard / runtime usage would appear frozen for weeks.
+--
+-- Instead: enqueue only the (workspace, runtime, agent, project, provider,
+-- model, bucket_hour) tuples that actually hold `task_usage.credits > 0`.
+-- The dirty-queue path in `rollup_task_usage_hourly_window` recomputes
+-- exactly these buckets on the next tick; the watermark stays at its
+-- current value so live traffic keeps flowing into the rollup.
+--
+-- Scale: a workspace on Kiro CLI 2.10+ produces at most one row per
+-- (task_id, provider, model), and the hour bucket collapses many tasks
+-- into one dirty key, so the enqueue is bounded by the count of
+-- (bucket_hour, workspace, runtime, agent, project, provider, model)
+-- combinations that ever saw credit — tiny compared to a full backfill.
+-- `enqueued_at` is set to `now()` so the standard `enqueued_at < p_to`
+-- drain window picks these up on the next scheduled tick without any
+-- operator action.
+INSERT INTO task_usage_hourly_dirty (
+    bucket_hour, workspace_id, runtime_id, agent_id,
+    project_id, provider, model, enqueued_at
+)
+SELECT DISTINCT
+    task_usage_hour_bucket(tu.created_at),
+    a.workspace_id,
+    atq.runtime_id,
+    atq.agent_id,
+    i.project_id,
+    tu.provider,
+    tu.model,
+    now()
+  FROM task_usage tu
+  JOIN agent_task_queue atq ON atq.id      = tu.task_id
+  JOIN agent            a   ON a.id        = atq.agent_id
+  LEFT JOIN issue       i   ON i.id        = atq.issue_id
+ WHERE tu.credits > 0
+   AND atq.runtime_id IS NOT NULL
+ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_dirty_key DO UPDATE
+    SET enqueued_at = GREATEST(task_usage_hourly_dirty.enqueued_at, EXCLUDED.enqueued_at);

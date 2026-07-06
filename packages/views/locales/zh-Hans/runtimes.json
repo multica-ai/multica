@@ -249,6 +249,7 @@
     "col_cost": "费用 · 7 天",
     "col_cli": "CLI",
     "cost_delta_flat": "持平",
+    "cost_credits_unit": "计量额度",
     "cli_managed_badge": "桌面端",
     "row_actions_aria": "行操作",
     "delete_action": "删除",
