@@ -237,7 +237,7 @@ export function CapabilityCatalog({
                   {isOpen ? (
                     <div
                       data-testid={`tool-detail-${row.tool_key}`}
-                      className="border-t bg-muted/30 px-4 py-3"
+                      className="border-t bg-muted/30 px-1.5 py-2 sm:px-2"
                     >
                       {detail}
                     </div>

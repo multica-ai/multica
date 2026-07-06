@@ -1209,11 +1209,13 @@ describe("ToolPolicyTabs — three tabs (FIR-2281, FIR-2706)", () => {
   });
 });
 
-describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8)", () => {
+describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8, FIR-2706)", () => {
   function renderRedesigned(view: "agent" | "runtime" = "agent") {
-    // Only the redesign flag is on; every other flag stays off.
+    // The capability catalog is now gated on the permissions flag itself
+    // (cerebro_tool_policy) rather than the agent-page preview (FIR-2706). Only
+    // that flag is on; every other flag stays off.
     mockUseFeatureFlag.mockImplementation(
-      (key: string) => key === "cerebro_agent_page_redesign",
+      (key: string) => key === "cerebro_tool_policy",
     );
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
@@ -1238,8 +1240,11 @@ describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8)", () => 
     const user = userEvent.setup();
     renderRedesigned("agent");
     const slackRow = await screen.findByTestId("tool-card-slack.post_message");
+    // FIR-2706 — the row now carries a SINGLE combined control: the Decision pill
+    // opens a popover whose choices are buttons (and which also holds When), not a
+    // dropdown menu + a separate When button on the bar.
     await user.click(within(slackRow).getByLabelText(/^Decision:/));
-    await user.click(within(slackRow).getByRole("menuitem", { name: "Ask" }));
+    await user.click(within(slackRow).getByTestId("catalog-decision-slack.post_message-ask"));
     await waitFor(() => {
       const put = findPutCalls().at(-1);
       expect(put).toBeTruthy();
@@ -1250,5 +1255,23 @@ describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8)", () => 
         setting: "ask",
       });
     });
+  });
+
+  it("gives the row a single combined control — no separate When button on the bar", async () => {
+    const user = userEvent.setup();
+    renderRedesigned("agent");
+    const slackRow = await screen.findByTestId("tool-card-slack.post_message");
+    // The row bar carries the single Decision toggle and NOT a standalone When
+    // button — that was the mobile-crowding source (FIR-2706).
+    expect(within(slackRow).getByLabelText(/^Decision:/)).toBeInTheDocument();
+    expect(
+      within(slackRow).queryByTestId("condition-control-slack.post_message"),
+    ).not.toBeInTheDocument();
+    // Opening the toggle reveals the decision choices as buttons inside one popover
+    // (the same popover that also holds the When editor).
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    expect(
+      within(slackRow).getByTestId("catalog-decision-slack.post_message-deny"),
+    ).toBeInTheDocument();
   });
 });

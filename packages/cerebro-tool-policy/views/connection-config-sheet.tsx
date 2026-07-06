@@ -455,14 +455,21 @@ export function ConnectionToolList({
   }
 
   return (
-    <div className="flex flex-col gap-1" data-testid={`connection-tool-list-${connectionKey}`}>
+    // FIR-2706 — a full-width divided list flush to the expanded panel, not a stack
+    // of inset bordered cards. Each row spends its width on the tool name, not on
+    // padding + a per-card margin, so long names survive on mobile; the controls
+    // wrap under the name on a narrow row instead of crushing it.
+    <div
+      className="flex flex-col divide-y overflow-hidden rounded-md border bg-background"
+      data-testid={`connection-tool-list-${connectionKey}`}
+    >
       {sorted.map((r) => (
         <div
           key={r.resource_pattern}
           data-testid={`connection-tool-${r.resource_pattern}`}
-          className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2"
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-2.5 py-2"
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 basis-40">
             <div
               className={`truncate text-sm ${!r.title || r.title === r.resource_pattern ? "font-mono" : "font-medium"}`}
             >

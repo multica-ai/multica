@@ -21,7 +21,7 @@
 // ../core fail CLOSED (unknown verdict → deny), so a drifted response can never
 // render a tool as Allow by accident.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -325,14 +325,16 @@ export function ToolPolicyTable({
   // on; gate them on the same flag the backend gates the rows with so the
   // Credentials type is a consistent surface the moment an admin enables it.
   const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
-  // FIR-2670 #8: the redesigned "Tools & permissions" look — the flat catalog
-  // rendered as grouped capability cards. Presentation only; every verdict,
-  // filter, and write path below is unchanged. Gated by the same preview flag as
-  // the rest of the agent-page redesign so production keeps the classic table
-  // until the flag flips, and every surface that renders this shared component
-  // (agent Tools tab, runtime, group, member, autopilot, connections,
-  // collections, settings) picks up the new look at once when it does.
-  const redesign = useFeatureFlag("cerebro_agent_page_redesign");
+  // FIR-2706: the redesigned "Tools & permissions" look — the flat catalog
+  // rendered as grouped capability cards with inline-expanding connections and a
+  // single Decision-toggle-that-holds-When per row. Presentation only; every
+  // verdict, filter, and write path below is unchanged. Gated on the permissions
+  // flag itself (`cerebro_tool_policy`, default ON) rather than the agent-page
+  // preview — Jesper's call, so the catalog IS the default permissions surface on
+  // production, and every surface that renders this shared component (agent Tools
+  // tab, runtime, group, member, autopilot, connections, collections, settings)
+  // shows it. The classic table below only serves installs with tool-policy off.
+  const showCatalog = useFeatureFlag("cerebro_tool_policy");
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
@@ -528,61 +530,41 @@ export function ToolPolicyTable({
   // FIR-2706 — a catalog row is itself a GROUP when it carries underlying rows:
   // a connection with per-tool rows, or a tool (firtal_registry) with data
   // sources. Group rows expand inline instead of opening a Sheet, so the wide
-  // "Configure (N)" / "Data sources (N)" buttons no longer crowd the row on
-  // mobile. Leaf rows keep the compact inline When beside the single toggle.
+  // "Configure (N)" / "Data sources (N)" buttons no longer crowd the row on mobile.
   const connToolsFor = (row: ToolPolicyRow) =>
     row.source === "connection" ? (connectionToolsByKey.get(row.tool_key) ?? []) : [];
   const dataSourcesFor = (row: ToolPolicyRow) =>
     registryDataSourcesByKey.get(row.tool_key) ?? [];
-  const rowIsGroup = (row: ToolPolicyRow) =>
-    connToolsFor(row).length > 0 || dataSourcesFor(row).length > 0;
 
-  // The per-row header cell in the redesigned catalog: the single Decision
-  // toggle Jesper asked for. Leaf rows also show the compact When inline (they
-  // have no expand to hold it); group rows move their When into the expanded
-  // detail below, so the header stays one toggle + the expand chevron.
+  // The per-row control in the redesigned catalog: ONE Decision toggle that also
+  // holds the When editor inside its popover (FIR-2706 — Jesper's "When lives in
+  // the toggle, not a second button on the bar"). Same single control for leaf and
+  // group rows, so the row bar is always one control wide and the tool name never
+  // gets crowded off on mobile. Group rows additionally expand (chevron) to reveal
+  // their sub-tool list; that lives in renderCatalogDetail below.
   const renderDecision = (row: ToolPolicyRow) => (
-    <>
-      <DecisionControl
-        row={row}
-        editLayer={editLayer}
-        disabled={busy}
-        onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
-      />
-      {!rowIsGroup(row) ? (
-        <ConditionControl
-          row={row}
-          editLayer={editLayer}
-          disabled={busy}
-          onChange={(c) => applyCondition(row, c)}
-          wsId={wsId}
-          argScopeConfig={argScopeConfig}
-        />
-      ) : null}
-    </>
+    <CatalogDecisionControl
+      row={row}
+      editLayer={editLayer}
+      disabled={busy}
+      onDecision={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
+      onCondition={(c) => applyCondition(row, c)}
+      wsId={wsId}
+      argScopeConfig={argScopeConfig}
+    />
   );
 
-  // The inline detail for a group row: the group-wide When on top, the per-tool
-  // list (connections), and data sources as their own labelled sub-group —
-  // "expand and show the group" (FIR-2706). Returns null for a leaf row, which
-  // keeps its chevron hidden in the catalog.
+  // The inline detail for a group row: the per-tool list (connections) and data
+  // sources as their own labelled sub-group — "expand and show the group"
+  // (FIR-2706). The group-wide When now lives inside the row's Decision toggle
+  // (see renderDecision), so it no longer sits at the top of the detail. Returns
+  // null for a leaf row, which keeps its chevron hidden in the catalog.
   const renderCatalogDetail = (row: ToolPolicyRow): ReactNode | null => {
     const connTools = connToolsFor(row);
     const dataSources = dataSourcesFor(row);
     if (connTools.length === 0 && dataSources.length === 0) return null;
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">When</span>
-          <ConditionControl
-            row={row}
-            editLayer={editLayer}
-            disabled={busy}
-            onChange={(c) => applyCondition(row, c)}
-            wsId={wsId}
-            argScopeConfig={argScopeConfig}
-          />
-        </div>
         {connTools.length > 0 ? (
           <ConnectionToolList
             connectionKey={row.tool_key}
@@ -669,7 +651,7 @@ export function ToolPolicyTable({
             />
           )}
 
-          {filtered.length > 0 && redesign && (
+          {filtered.length > 0 && showCatalog && (
             <CapabilityCatalog
               rows={filtered}
               renderDecision={renderDecision}
@@ -677,7 +659,7 @@ export function ToolPolicyTable({
             />
           )}
 
-          {filtered.length > 0 && !redesign && (
+          {filtered.length > 0 && !showCatalog && (
           <>
           {/* Desktop: the full sortable catalog table. */}
           <div className="hidden overflow-hidden rounded-lg border md:block">
@@ -1303,6 +1285,126 @@ export function DecisionControl({
   );
 }
 
+// CatalogDecisionControl is the SINGLE per-row control for the redesigned catalog
+// (FIR-2706): one pill on the row that opens a popover holding BOTH the decision
+// choices (Allow/Ask/Deny/Inherit) AND the When editor. This is Jesper's ask —
+// "the When lives inside the Allow toggle, not as a second button on the bar" — so
+// the row bar stays one control wide and the tool name never gets crowded off on
+// mobile. It composes the same DecisionControl verdict styling and the extracted
+// ConditionEditorBody, so the underlying write semantics are unchanged.
+function CatalogDecisionControl({
+  row,
+  editLayer,
+  disabled,
+  onDecision,
+  onCondition,
+  wsId,
+  argScopeConfig,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  disabled?: boolean;
+  onDecision: (setting: ToolSetting) => void;
+  onCondition: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const verdict = row.effective.setting;
+  const locked = isLockedFromElsewhere(row, editLayer);
+  const Icon = locked ? Lock : VERDICT_ICON[verdict];
+  const overridden = !!row.layers[editLayer];
+  const lockTooltip = locked ? rowAttribution(row, editLayer).tooltip : undefined;
+
+  // Does this row have a meaningful When condition to edit? Mirrors
+  // ConditionControl's gate so the When section shows exactly where it would as a
+  // standalone control — but now inside the same popover as the decision.
+  const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
+  const hasConcreteRule =
+    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
+  const current = conditionForLayer(row, editLayer);
+  const active = !conditionIsEmpty(current);
+  const facets = conditionFacets(row);
+  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const meaningful =
+    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+  const showWhen = editLayer !== "group" && (meaningful || active);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        aria-label={`Decision: ${SETTING_LABEL[verdict]}`}
+        title={lockTooltip}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          VERDICT_PILL[verdict],
+          overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {SETTING_LABEL[verdict]}
+        {active ? (
+          <SlidersHorizontal className="size-3 opacity-70" aria-label="Has a When condition" />
+        ) : null}
+        <ChevronDown className="size-3 opacity-60" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-0">
+        <div className="flex flex-col">
+          <div className="flex flex-col gap-0.5 p-1.5">
+            <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Decision
+            </span>
+            {SETTING_CHOICES.map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                data-testid={`catalog-decision-${row.tool_key}-${choice}`}
+                onClick={() => {
+                  onDecision(choice);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                  choice === "inherit" && "text-muted-foreground",
+                  row.layers[editLayer] === choice && "font-semibold",
+                )}
+              >
+                {SETTING_LABEL[choice]}
+                {choice === "inherit" && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    clears {LAYER_LABEL[editLayer]}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {showWhen ? (
+            <div className="border-t p-3">
+              {hasConcreteRule ? (
+                <ConditionEditorBody
+                  row={row}
+                  editLayer={editLayer}
+                  onChange={onCondition}
+                  wsId={wsId}
+                  argScopeConfig={argScopeConfig}
+                  enabled={open}
+                  onClose={() => setOpen(false)}
+                />
+              ) : (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <SlidersHorizontal className="size-3.5 shrink-0" />
+                  Set a decision above to add a When condition.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // --- condition editor (FIR-1609 — the WHEN layer) ---------------------------
 
 // Bare host or subdomain wildcard, e.g. firtal.com or *.firtal.com. Mirrors the
@@ -1433,6 +1535,105 @@ export function ConditionControl({
   argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
+
+  const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
+  const hasConcreteRule =
+    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
+  const current = conditionForLayer(row, editLayer);
+  const active = !conditionIsEmpty(current);
+  // The contextual facets: which structured sections are worth showing for this
+  // tool. `meaningful` is the gate for whether the control appears at all.
+  const facets = conditionFacets(row);
+  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const meaningful =
+    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+
+  // Group has no single condition — show nothing there.
+  if (editLayer === "group") return null;
+  // Hide entirely on a tool where a condition makes no sense AND none is set — no
+  // stray "When" affordance on a notification tool. A row that already carries a
+  // condition keeps its control so the value stays editable.
+  if (!meaningful && !active) return null;
+
+  // No concrete rule on this layer → nothing to refine. Disabled hint that names
+  // the prerequisite, rather than silently creating an override.
+  if (!hasConcreteRule) {
+    return (
+      <button
+        type="button"
+        disabled
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label="Condition unavailable"
+        title="Set a decision (Allow/Ask/Deny) on this level first to add a condition."
+        className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs font-medium text-muted-foreground opacity-50"
+      >
+        <SlidersHorizontal className="size-3.5" />
+        When
+      </button>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label={active ? `Condition: ${summarizeCondition(current!)}` : "Add condition"}
+        title={
+          active
+            ? `Applies only when: ${summarizeCondition(current!)}`
+            : "Add a condition — narrow when this rule applies"
+        }
+        className={cn(
+          "inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+          active
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-dashed border-border bg-background text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <SlidersHorizontal className="size-3.5 shrink-0" />
+        <span className="truncate">{active ? summarizeCondition(current!) : "When…"}</span>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80">
+        <ConditionEditorBody
+          row={row}
+          editLayer={editLayer}
+          onChange={onChange}
+          wsId={wsId}
+          argScopeConfig={argScopeConfig}
+          enabled={open}
+          onClose={() => setOpen(false)}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ConditionEditorBody is the WHEN editor form (FIR-2706), extracted from
+// ConditionControl so it renders both in that standalone popover AND inside the
+// catalog Decision toggle's popover — so "When" no longer needs a second button on
+// the row bar (the mobile-crowding fix). It owns its draft state, seeded from the
+// persisted condition each time `enabled` rises. Callers MUST gate that a concrete
+// rule exists (hasConcreteRule) before showing it.
+export function ConditionEditorBody({
+  row,
+  editLayer,
+  onChange,
+  wsId,
+  argScopeConfig,
+  enabled,
+  onClose,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  onChange: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+  /** True while the editor is visible; gates seeding + the lazy scope fetch. */
+  enabled: boolean;
+  /** Close the surrounding popover after Save / Cancel / Clear. */
+  onClose: () => void;
+}) {
   const [hosts, setHosts] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
   const [expr, setExpr] = useState("");
@@ -1448,68 +1649,53 @@ export function ConditionControl({
   const [argSearch, setArgSearch] = useState("");
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
-  const hasConcreteRule =
-    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
   const current = conditionForLayer(row, editLayer);
   const active = !conditionIsEmpty(current);
-
-  // The contextual facets: which structured sections are worth showing for this
-  // tool. `meaningful` is the gate for whether the control appears at all.
   const facets = conditionFacets(row);
   // The arg picker shows only when the row is arg-scoped AND a scope binding
   // (connection + options source) was resolved for the workspace.
   const showArg = facets.arg && !!wsId && !!argScopeConfig;
-  const meaningful =
-    facets.host || facets.actions.length > 0 || facets.cel || showArg;
 
-  // Lazily fetch the scope options only while the popover is open (one cached
+  // Lazily fetch the scope options only while the editor is open (one cached
   // registry round-trip per edit session, not on every table render).
   const { options: scopeOptions, loading: scopeLoading } = useScopeOptions(
     wsId ?? "",
     showArg ? argScopeConfig ?? null : null,
-    open && showArg,
+    enabled && showArg,
   );
 
-  // Group has no single condition — show nothing there.
-  if (editLayer === "group") return null;
-
-  // Hide the control entirely on a tool where a condition makes no sense AND none
-  // is already set — no stray "When" affordance on a notification tool. A row
-  // that already carries a condition keeps its control so the value stays
-  // editable even if the heuristic would otherwise hide it.
-  if (!meaningful && !active) return null;
-
-  // Seed the form from the persisted condition each time the popover opens, so an
+  // Seed the form from the persisted condition each time the editor opens, so an
   // abandoned edit never leaks into the next open.
-  function handleOpenChange(next: boolean) {
-    if (next) {
-      setHosts(current?.host_allowlist ?? []);
-      setActions(current?.actions ?? []);
-      setExpr(current?.expr ?? "");
-      setHostDraft("");
-      setHostError(null);
-      setArgSearch("");
-      // Seed the arg picker from the stored allowlist: a folder_id entry → folder
-      // mode, otherwise the data_source_id entry → source mode.
-      const folderEntry = current?.arg_allowlist?.find(
-        (a) => a.arg === FOLDER_ARG && a.values.length > 0,
-      );
-      const sourceEntry = current?.arg_allowlist?.find(
-        (a) => a.arg === DATA_SOURCE_ARG && a.values.length > 0,
-      );
-      if (folderEntry) {
-        setArgMode("folder");
-        setArgValues(folderEntry.values);
-      } else {
-        setArgMode("source");
-        setArgValues(sourceEntry?.values ?? []);
-      }
-      // Open the Advanced disclosure pre-expanded only when a CEL expression is
-      // already set, so an existing expression is never hidden behind a click.
-      setAdvancedOpen(!!current?.expr.trim());
+  useEffect(() => {
+    if (!enabled) return;
+    setHosts(current?.host_allowlist ?? []);
+    setActions(current?.actions ?? []);
+    setExpr(current?.expr ?? "");
+    setHostDraft("");
+    setHostError(null);
+    setArgSearch("");
+    // Seed the arg picker from the stored allowlist: a folder_id entry → folder
+    // mode, otherwise the data_source_id entry → source mode.
+    const folderEntry = current?.arg_allowlist?.find(
+      (a) => a.arg === FOLDER_ARG && a.values.length > 0,
+    );
+    const sourceEntry = current?.arg_allowlist?.find(
+      (a) => a.arg === DATA_SOURCE_ARG && a.values.length > 0,
+    );
+    if (folderEntry) {
+      setArgMode("folder");
+      setArgValues(folderEntry.values);
+    } else {
+      setArgMode("source");
+      setArgValues(sourceEntry?.values ?? []);
     }
-    setOpen(next);
-  }
+    // Open the Advanced disclosure pre-expanded only when a CEL expression is
+    // already set, so an existing expression is never hidden behind a click.
+    setAdvancedOpen(!!current?.expr.trim());
+    // Seed once per open (the rising edge of `enabled`); an in-progress edit must
+    // not be reset by re-renders while the editor stays open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
   // Switching the scope axis resets the selection — folder ids and source ids are
   // different value spaces, so a selection never carries across modes.
@@ -1557,31 +1743,12 @@ export function ConditionControl({
       expr: expr.trim(),
     };
     onChange(conditionIsEmpty(next) ? null : next);
-    setOpen(false);
+    onClose();
   }
 
   function clear() {
     onChange(null);
-    setOpen(false);
-  }
-
-  // No concrete rule on this layer → nothing to refine. Disabled hint that names
-  // the prerequisite, rather than silently creating an override. Only shown when
-  // a facet IS meaningful — on a non-meaningful row we hid the control above.
-  if (!hasConcreteRule) {
-    return (
-      <button
-        type="button"
-        disabled
-        data-testid={`condition-control-${row.tool_key}`}
-        aria-label="Condition unavailable"
-        title="Set a decision (Allow/Ask/Deny) on this level first to add a condition."
-        className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs font-medium text-muted-foreground opacity-50"
-      >
-        <SlidersHorizontal className="size-3.5" />
-        When
-      </button>
-    );
+    onClose();
   }
 
   const draftEmpty = conditionIsEmpty({
@@ -1595,27 +1762,6 @@ export function ConditionControl({
   });
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        disabled={disabled}
-        data-testid={`condition-control-${row.tool_key}`}
-        aria-label={active ? `Condition: ${summarizeCondition(current!)}` : "Add condition"}
-        title={
-          active
-            ? `Applies only when: ${summarizeCondition(current!)}`
-            : "Add a condition — narrow when this rule applies"
-        }
-        className={cn(
-          "inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
-          active
-            ? "border-primary/40 bg-primary/10 text-primary"
-            : "border-dashed border-border bg-background text-muted-foreground hover:bg-muted",
-        )}
-      >
-        <SlidersHorizontal className="size-3.5 shrink-0" />
-        <span className="truncate">{active ? summarizeCondition(current!) : "When…"}</span>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
         <div className="flex flex-col gap-4" data-testid={`condition-editor-${row.tool_key}`}>
           <div className="flex flex-col gap-1">
             <PopoverTitle className="text-sm font-semibold">When this rule applies</PopoverTitle>
@@ -1748,7 +1894,7 @@ export function ConditionControl({
               Clear
             </Button>
             <div className="flex gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="button" size="sm" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
               <Button type="button" size="sm" onClick={save}>
@@ -1757,8 +1903,6 @@ export function ConditionControl({
             </div>
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 

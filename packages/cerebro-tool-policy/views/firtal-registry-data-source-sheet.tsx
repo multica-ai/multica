@@ -337,14 +337,20 @@ export function DataSourceList({
   if (sorted.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-1" data-testid={`data-source-list-${toolKey}`}>
+    // FIR-2706 — full-width divided list flush to the panel (see ConnectionToolList):
+    // width goes to the source name, not padding + a per-card margin, and controls
+    // wrap under the name on a narrow row instead of crushing it on mobile.
+    <div
+      className="flex flex-col divide-y overflow-hidden rounded-md border bg-background"
+      data-testid={`data-source-list-${toolKey}`}
+    >
       {sorted.map((r) => (
         <div
           key={r.resource_pattern}
           data-testid={`registry-data-source-${r.resource_pattern}`}
-          className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2"
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-2.5 py-2"
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 basis-40">
             <div className="truncate text-sm font-medium">
               {r.title || r.resource_pattern}
             </div>
