@@ -31,6 +31,7 @@ import {
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { activeTeamListOptions } from "@multica/core/teams/queries";
+import { creationDefaultTeamId } from "@multica/core/teams/default-team";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -225,8 +226,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     if (seededDefaultTeamRef.current || teams.length === 0) return;
     seededDefaultTeamRef.current = true;
     if (teamIds.length > 0) return;
-    const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
-    if (defaultTeam) setTeamIds([defaultTeam.id]);
+    // Same personal default as the issue/quick-create/autopilot forms: my
+    // first team, falling back to the workspace default team.
+    const defaultTeamId = creationDefaultTeamId(teams);
+    if (defaultTeamId) setTeamIds([defaultTeamId]);
   }, [teamIds.length, teams]);
 
   const leadLabel =
@@ -236,10 +239,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
-    if (teams.length > 0 && teamIds.length === 0) {
-      toast.error(t(($) => $.create_project.team_required));
-      return;
-    }
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.

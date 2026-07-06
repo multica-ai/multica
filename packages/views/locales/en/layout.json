@@ -47,6 +47,8 @@
       "description": "Chat with the team and other builders.",
       "dismiss": "Dismiss"
     },
-    "new_team": "New team"
+    "new_team": "New team",
+    "manage_teams": "Manage teams",
+    "teams_empty": "Join or create a team"
   }
 }

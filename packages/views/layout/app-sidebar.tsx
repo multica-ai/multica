@@ -1027,9 +1027,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
           {/* Teams — joined teams only, in the user's personal order.
               Drag a team header to reorder; the first team doubles as the
-              issue-creation default. The + action opens team management. */}
-          {myTeams.length > 0 && (
-            <Collapsible open={teamsCollapse.open} onOpenChange={teamsCollapse.onOpenChange}>
+              issue-creation default. Always rendered: a user with no joined
+              teams gets an empty-state row (join/create) instead of losing
+              the section — and with it every create/browse entry point. */}
+          <Collapsible open={teamsCollapse.open} onOpenChange={teamsCollapse.onOpenChange}>
               <SidebarGroup className="group/teams relative py-1">
                 <SidebarGroupLabel
                   render={<CollapsibleTrigger />}
@@ -1052,6 +1053,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 >
                   <Plus />
                 </SidebarGroupAction>
+                {/* Second hover action: the /teams management page (browse
+                    all teams incl. ones you haven't joined). right-9 = the
+                    + action's right-4 plus its 16px width + 4px gap. */}
+                <SidebarGroupAction
+                  title={t(($) => $.sidebar.manage_teams)}
+                  className="top-3 right-9 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/teams:opacity-100 [&>svg]:size-3"
+                  onClick={() => push(p.teams())}
+                >
+                  <MoreHorizontal />
+                </SidebarGroupAction>
                 <CollapsibleContent>
                   {/* pt-0.5 mirrors the team rows' own children breathing
                       (py-0.5): team rows are row-styled, not plain content,
@@ -1061,6 +1072,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       (children→next row) — same spacing as SidebarMenu rows
                       everywhere else. */}
                   <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
+                    {myTeams.length === 0 && (
+                      <AppLink
+                        href={p.teams()}
+                        className="flex h-8 items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                      >
+                        {t(($) => $.sidebar.teams_empty)}
+                      </AppLink>
+                    )}
                     <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={teamDragMeasuring} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd} onDragCancel={handleTeamDragCancel}>
                       <SortableContext items={visibleTeams.map((team) => team.id)} strategy={verticalListSortingStrategy}>
                         {visibleTeams.map((team) => (
@@ -1079,7 +1098,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 </CollapsibleContent>
               </SidebarGroup>
             </Collapsible>
-          )}
 
         </SidebarContent>
 

@@ -47,6 +47,8 @@
       "description": "チームや他のユーザーと交流しましょう。",
       "dismiss": "閉じる"
     },
-    "new_team": "新しいチーム"
+    "new_team": "新しいチーム",
+    "manage_teams": "チームを管理",
+    "teams_empty": "チームに参加または作成"
   }
 }

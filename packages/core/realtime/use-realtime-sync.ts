@@ -351,6 +351,11 @@ export function applyWorkspaceUpdatedToCache(
   if (team?.workspace_id) {
     qc.invalidateQueries({ queryKey: teamKeys.list(team.workspace_id) });
     qc.invalidateQueries({ queryKey: issueKeys.all(team.workspace_id) });
+    // Mirror useArchiveTeam.onSettled: projects carry team_ids, autopilots
+    // carry team_id, and both group under teams in the sidebar — an archive
+    // or rename on another client must refresh them too.
+    qc.invalidateQueries({ queryKey: projectKeys.all(team.workspace_id) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(team.workspace_id) });
   }
   const next = payload.workspace;
   if (next?.id) {

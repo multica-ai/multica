@@ -654,16 +654,19 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	)
 	if _, ok := rawFields["team_ids"]; ok {
 		replaceTeams = true
-		if len(req.TeamIDs) == 0 {
-			writeError(w, http.StatusBadRequest, "team_ids must not be empty")
-			return
-		}
-		var msg string
-		var valid bool
-		nextTeamIDs, valid, msg = h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
-		if !valid {
-			writeError(w, http.StatusBadRequest, msg)
-			return
+		// An explicit empty list clears every association: project↔team is a
+		// creation-time default, not an invariant, so a project with no teams
+		// is legal (issue creation under it falls back to the default team).
+		if len(req.TeamIDs) > 0 {
+			var msg string
+			var valid bool
+			nextTeamIDs, valid, msg = h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
+			if !valid {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		} else {
+			nextTeamIDs = []pgtype.UUID{}
 		}
 	}
 

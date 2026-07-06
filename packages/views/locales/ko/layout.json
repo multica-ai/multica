@@ -47,6 +47,8 @@
       "description": "팀과 다른 사용자들과 교류해 보세요.",
       "dismiss": "닫기"
     },
-    "new_team": "새 팀"
+    "new_team": "새 팀",
+    "manage_teams": "팀 관리",
+    "teams_empty": "팀에 참여하거나 만들기"
   }
 }
