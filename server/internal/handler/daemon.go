@@ -2207,6 +2207,24 @@ type TaskCompleteRequest struct {
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
 }
 
+// logAgentAction writes a best-effort audit row for an agent task
+// lifecycle event. It never blocks or fails the caller; the audit trail
+// is advisory and its absence must not affect task processing.
+func (h *Handler) logAgentAction(ctx context.Context, agentID, issueID pgtype.UUID, toolName, resultSummary, status string) {
+	if h.Queries == nil {
+		return
+	}
+	if _, err := h.Queries.CreateAgentActionLog(ctx, db.CreateAgentActionLogParams{
+		AgentID:       pgtype.Text{String: uuidToString(agentID), Valid: agentID.Valid},
+		IssueID:       pgtype.Text{String: uuidToString(issueID), Valid: issueID.Valid},
+		ToolName:      toolName,
+		ResultSummary: pgtype.Text{String: resultSummary, Valid: resultSummary != ""},
+		Status:        pgtype.Text{String: status, Valid: status != ""},
+	}); err != nil {
+		slog.Warn("audit log write failed", "tool", toolName, "error", err)
+	}
+}
+
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -2231,6 +2249,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+	h.logAgentAction(r.Context(), task.AgentID, task.IssueID, "task:completed", "", "completed")
 
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
@@ -2425,6 +2444,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
+	h.logAgentAction(r.Context(), task.AgentID, task.IssueID, "task:failed", req.Error, "failed")
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
