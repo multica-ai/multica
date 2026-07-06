@@ -9,6 +9,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ThemeProvider } from "@react-navigation/native";
 import { PortalHost } from "@rn-primitives/portal";
+import { ActionSheetProvider } from "@expo/react-native-action-sheet";
 import { api } from "@/data/api";
 import { queryClient } from "@/data/query-client";
 import { useAuthStore } from "@/data/auth-store";
@@ -61,25 +62,27 @@ export default function RootLayout() {
   const { colorScheme, isDarkColorScheme } = useColorScheme();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <KeyboardProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider value={NAV_THEME[colorScheme]}>
-              <AuthInitializer>
-                <LightboxProvider>
-                  <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="index" />
-                    <Stack.Screen name="(auth)" />
-                    <Stack.Screen name="(app)" />
-                  </Stack>
-                  <PortalHost />
-                </LightboxProvider>
-              </AuthInitializer>
-            </ThemeProvider>
-          </QueryClientProvider>
-        </KeyboardProvider>
-      </SafeAreaProvider>
+      <ActionSheetProvider>
+        <SafeAreaProvider>
+          <KeyboardProvider>
+            <QueryClientProvider client={queryClient}>
+              <ThemeProvider value={NAV_THEME[colorScheme]}>
+                <AuthInitializer>
+                  <LightboxProvider>
+                    <StatusBar style={isDarkColorScheme ? "light" : "dark"} />
+                    <Stack screenOptions={{ headerShown: false }}>
+                      <Stack.Screen name="index" />
+                      <Stack.Screen name="(auth)" />
+                      <Stack.Screen name="(app)" />
+                    </Stack>
+                    <PortalHost />
+                  </LightboxProvider>
+                </AuthInitializer>
+              </ThemeProvider>
+            </QueryClientProvider>
+          </KeyboardProvider>
+        </SafeAreaProvider>
+      </ActionSheetProvider>
     </GestureHandlerRootView>
   );
 }

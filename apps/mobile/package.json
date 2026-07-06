@@ -23,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@expo/react-native-action-sheet": "4.1.1",
     "@expo/vector-icons": "^14.1.0",
     "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "8.6.0",
