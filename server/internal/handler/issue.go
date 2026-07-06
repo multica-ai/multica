@@ -2613,11 +2613,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
 	// WillEnqueueRun predicate, shared verbatim with the preview endpoint so
-	// the two never drift (MUL-3375). Cancellation on reassignment is a
-	// separate side effect and always runs, independent of the run decision.
-	if assigneeChanged {
-		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-	}
+	// the two never drift (MUL-3375).
+	//
+	// A reassignment intentionally does NOT cancel existing tasks on the issue
+	// (#4963 / MUL-4113). The previous "cancel every active task on the issue"
+	// was too coarse: it silently dropped unrelated in-flight work (a
+	// mention-triggered run for another agent, a squad task) with no requeue,
+	// and it self-cancelled a run that reassigned the issue from inside itself.
+	// Ownership handoff no longer implies interruption; the new assignee's run,
+	// if any, is enqueued by WillEnqueueRun below and runs alongside whatever
+	// was already in flight. Explicit terminal actions — issue → cancelled and
+	// delete — still cancel active tasks (see below / DeleteIssue).
 	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
 		service.IssueTriggerInput{
 			Issue:           issue,
@@ -3113,9 +3119,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"project_changed":  projectChanged,
 		})
 
-		if assigneeChanged {
-			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-		}
+		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
+		// mirrors UpdateIssue. See that handler for the rationale.
+		//
 		// Same single predicate as UpdateIssue — batch must not grow its own
 		// copy of the enqueue rule (the historical source of four-entry-point
 		// drift, MUL-3375). suppress_run applies batch-wide.
