@@ -21,6 +21,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -79,6 +80,10 @@ export type ComposerPinMode = "none" | "fixed" | "sticky-bottom";
 export type ComposerDictation = "action-row" | "corner" | "off";
 
 const OVERLAY_BAND = 28; // px — clears the ~24px chip row anchored at top-1
+const DRAFT_CONNECTION_CHECK_DELAY_MS = 1200;
+const DRAFT_CONNECTION_RECHECK_MS = 15_000;
+const DRAFT_CONNECTION_WARNING =
+  "Connection lost. Your draft is saved locally. Sign in again before submitting.";
 
 export interface BaseComposerProps {
   /** Issue/channel id uploads attach to + ContentEditor context (sub-issue
@@ -239,6 +244,8 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   const [markdown, setMarkdown] = useState(() => draft.defaultValue);
   const [submitting, setSubmitting] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const draftConnectionWarningShownRef = useRef(false);
+  const draftConnectionLastCheckedAtRef = useRef(0);
 
   // Dictation now lives in the bottom-LEFT cluster next to the attach button on
   // every text surface (FIR-1637, Jesper) — chat, thread replies and comments
@@ -397,6 +404,51 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   }, [imageTrayEnabled, disabled]);
 
   const showDropOverlay = imageTrayEnabled ? trayDragOver : isDragOver;
+
+  // FIR-2648 — while a local draft is held, probe the connection/session in the
+  // background so we warn the user their session died BEFORE they hit Submit,
+  // instead of failing silently. The draft is already persisted locally.
+  useEffect(() => {
+    if (isEmpty) {
+      draftConnectionWarningShownRef.current = false;
+      draftConnectionLastCheckedAtRef.current = 0;
+      return;
+    }
+
+    const lastCheckedAt = draftConnectionLastCheckedAtRef.current;
+    if (
+      lastCheckedAt > 0 &&
+      Date.now() - lastCheckedAt < DRAFT_CONNECTION_RECHECK_MS
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const warnOnce = () => {
+      if (cancelled || draftConnectionWarningShownRef.current) return;
+      draftConnectionWarningShownRef.current = true;
+      toast.error(DRAFT_CONNECTION_WARNING);
+    };
+
+    const timer = window.setTimeout(() => {
+      draftConnectionLastCheckedAtRef.current = Date.now();
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        warnOnce();
+        return;
+      }
+
+      api.getMe()
+        .then(() => {
+          if (!cancelled) draftConnectionWarningShownRef.current = false;
+        })
+        .catch(() => warnOnce());
+    }, DRAFT_CONNECTION_CHECK_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isEmpty, markdown]);
 
   const handleSubmit = async () => {
     const text =

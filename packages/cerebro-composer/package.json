@@ -21,7 +21,8 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "react": "catalog:"
