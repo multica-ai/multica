@@ -408,13 +408,27 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	if client == nil {
 		client = &http.Client{Timeout: apiConnectionToolTimeout}
 	}
+	// Per-agent delegation (FIR-2668): when enabled and the call has an
+	// authenticated agent caller, stamp the agent onto the request so the
+	// remote API authorizes it as that agent's own grants (Firtal Data
+	// Registry x-on-behalf-of contract). Takes precedence over
+	// session_exchange — a delegated agent call must not ride the triggering
+	// human's (broader) session key.
+	delegatedAgent := ""
+	if ob := t.auth.OnBehalfOf; ob != nil && ob.Enabled {
+		delegatedAgent = ConnectionAgent(ctx)
+		if delegatedAgent != "" {
+			req.Header.Set(onBehalfOfHeader, "agent:"+delegatedAgent)
+		}
+	}
+
 	// Per-person session exchange (FIR-2564 fase 2): when enabled and the run
 	// has a triggering human, the call runs on that person's own short-lived
 	// key instead of the shared connection key — fail closed on any exchange
 	// error, never fall back to the (broader) shared key. System runs with no
 	// triggering human keep the shared key.
 	effectiveAuth := t.auth
-	if se := t.auth.SessionExchange; se != nil && se.Enabled {
+	if se := t.auth.SessionExchange; se != nil && se.Enabled && delegatedAgent == "" {
 		if member := ConnectionTriggerMember(ctx); member != "" {
 			if t.exchanger == nil {
 				return "", fmt.Errorf("api connection %q: session exchange is enabled but not available on this surface", t.connName)

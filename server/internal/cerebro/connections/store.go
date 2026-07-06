@@ -125,6 +125,14 @@ type AuthConfig struct {
 	// exchanged keys are cached encrypted in cerebro_connection_person_key,
 	// never here.
 	SessionExchange *SessionExchangeConfig `json:"session_exchange,omitempty"`
+	// OnBehalfOf, when enabled, makes server-side API-connection dispatch stamp
+	// the calling agent onto every outgoing request as the X-On-Behalf-Of header
+	// ("agent:<uuid>" — the Firtal Data Registry delegation contract, FIR-2564
+	// fase 1). The remote API then authorizes the call as THAT agent's own
+	// grants (its key's delegation_allowlist must cover the agent, fail closed
+	// on its side) instead of the shared connection key's grants. Non-secret
+	// config. (FIR-2668)
+	OnBehalfOf *OnBehalfOfConfig `json:"on_behalf_of,omitempty"`
 }
 
 // TrimCredentials strips leading/trailing whitespace from every credential
@@ -153,6 +161,12 @@ type SessionExchangeConfig struct {
 	// TTLSeconds is the lifetime requested for each exchanged key.
 	// Default 3600 (1 hour); the remote API caps it server-side.
 	TTLSeconds int `json:"ttl_seconds,omitempty"`
+}
+
+// OnBehalfOfConfig configures per-agent identity delegation for an API-type
+// connection (FIR-2668).
+type OnBehalfOfConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // EndpointPermission describes one REST path and the HTTP methods allowed on it.

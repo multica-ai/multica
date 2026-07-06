@@ -170,7 +170,10 @@ func (h *Handler) Call(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "tool requires human approval and cannot be dispatched on a local runtime")
 			return
 		}
-		result, err := v.Tool.Call(r.Context(), req.Arguments)
+		// FIR-2668: carry the server-resolved agent identity to dispatch so
+		// on_behalf_of-enabled connections stamp the agent's delegated identity.
+		callCtx := runtime.WithConnectionAgent(r.Context(), util.UUIDToString(ident.agentID))
+		result, err := v.Tool.Call(callCtx, req.Arguments)
 		if err != nil {
 			// The endpoint call itself failed (upstream HTTP error, bad params,
 			// timeout). Surface the redacted message Call already produced —

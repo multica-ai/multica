@@ -262,10 +262,10 @@ func TestAPIConnectionToolGatewayTrace(t *testing.T) {
 	rec := &captureHandler{}
 	tool := &APIConnectionTool{
 		toolName: "infisical_admin__get_secrets", connName: "infisical-admin",
-		connID:  "conn-123",
-		method:  "GET", path: "/secrets",
+		connID: "conn-123",
+		method: "GET", path: "/secrets",
 		baseURL: srv.URL, auth: connections.AuthConfig{BearerToken: "super-secret-token-value"},
-		client:  srv.Client(),
+		client: srv.Client(),
 	}
 	tool.attachTrace(slog.New(rec), GatewayRequestMeta{
 		AgentID: "agent-1", AgentName: "Mia", TaskID: "task-9", IssueID: "issue-7", Surface: "issue",
@@ -458,5 +458,99 @@ func TestAPIToolDescriptionIncludesSummary(t *testing.T) {
 	plain := byName["registry__get_manifest"]
 	if !strings.HasPrefix(plain, "Call the Firtal Data Registry API: GET /manifest") {
 		t.Errorf("unexpected unlabeled description %q", plain)
+	}
+}
+
+// FIR-2668: an on_behalf_of-enabled connection stamps the calling agent as the
+// X-On-Behalf-Of delegation header, and an agent-delegated call never rides the
+// triggering human's session exchange (the shared key + header is the whole
+// contract). No agent on the context → no header, unchanged dispatch.
+func TestAPIConnectionToolCallOnBehalfOfAgent(t *testing.T) {
+	var gotHeader, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-On-Behalf-Of")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	tool := &APIConnectionTool{
+		toolName: "t", connName: "c", method: "GET", path: "/rows",
+		baseURL: srv.URL,
+		auth: connections.AuthConfig{
+			BearerToken: "shared",
+			OnBehalfOf:  &connections.OnBehalfOfConfig{Enabled: true},
+			// Session exchange enabled with NO exchanger wired: if the agent
+			// delegation below did not take precedence, the triggering-member
+			// path would fail closed and the call would error.
+			SessionExchange: &connections.SessionExchangeConfig{Enabled: true},
+		},
+		client: srv.Client(),
+	}
+
+	ctx := WithConnectionAgent(context.Background(), "0ec120c8-d899-408f-ac1b-143f888bdc57")
+	ctx = WithConnectionTriggerMember(ctx, "d7a6fa72-e68d-48ca-86be-2ab4313ecf44")
+	if _, err := tool.Call(ctx, nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if gotHeader != "agent:0ec120c8-d899-408f-ac1b-143f888bdc57" {
+		t.Errorf("X-On-Behalf-Of = %q", gotHeader)
+	}
+	if gotAuth != "Bearer shared" {
+		t.Errorf("agent delegation must dispatch on the shared key, got auth %q", gotAuth)
+	}
+}
+
+func TestAPIConnectionToolCallOnBehalfOfNoAgent(t *testing.T) {
+	var gotHeader string
+	var sawHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-On-Behalf-Of")
+		_, sawHeader = r.Header["X-On-Behalf-Of"]
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer srv.Close()
+
+	tool := &APIConnectionTool{
+		toolName: "t", connName: "c", method: "GET", path: "/rows",
+		baseURL: srv.URL,
+		auth: connections.AuthConfig{
+			BearerToken: "shared",
+			OnBehalfOf:  &connections.OnBehalfOfConfig{Enabled: true},
+		},
+		client: srv.Client(),
+	}
+	// No agent on the context (system/human surface): header must be absent.
+	if _, err := tool.Call(context.Background(), nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if sawHeader {
+		t.Errorf("X-On-Behalf-Of must not be sent without an agent caller, got %q", gotHeader)
+	}
+}
+
+func TestAPIConnectionToolCallOnBehalfOfDisabled(t *testing.T) {
+	var sawHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawHeader = r.Header["X-On-Behalf-Of"]
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer srv.Close()
+
+	tool := &APIConnectionTool{
+		toolName: "t", connName: "c", method: "GET", path: "/rows",
+		baseURL: srv.URL,
+		auth:    connections.AuthConfig{BearerToken: "shared"},
+		client:  srv.Client(),
+	}
+	ctx := WithConnectionAgent(context.Background(), "0ec120c8-d899-408f-ac1b-143f888bdc57")
+	if _, err := tool.Call(ctx, nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if sawHeader {
+		t.Error("X-On-Behalf-Of must not be sent when on_behalf_of is not enabled")
 	}
 }

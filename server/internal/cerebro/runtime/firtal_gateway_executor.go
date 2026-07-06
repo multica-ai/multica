@@ -951,6 +951,9 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
 	// exchange-enabled connections run on that person's own session key.
 	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
+	// FIR-2668: carry the calling agent to API-connection dispatch so
+	// on_behalf_of-enabled connections stamp the agent's delegated identity.
+	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
 	// Pin the default file-attachment target (create_file) to the surface this
 	// task runs on, so an agent never has to know the chat-message UUID.
@@ -1367,6 +1370,9 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
 	// exchange-enabled connections run on that person's own session key.
 	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
+	// FIR-2668: carry the calling agent to API-connection dispatch so
+	// on_behalf_of-enabled connections stamp the agent's delegated identity.
+	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
