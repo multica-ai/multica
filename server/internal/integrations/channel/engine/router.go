@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,6 +284,23 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 
+	// 5b. A bare fresh-session directive (/new or /reset with no prompt) is
+	//     consumed here: mark the session so the NEXT message starts a fresh
+	//     agent session, and skip the append + run trigger — an empty prompt
+	//     would burn a run on nothing (and some providers reject empty input
+	//     outright). The pending mark is in-process state; a restart drops it,
+	//     which degrades to "the next message resumes the old session" and the
+	//     user can re-issue the command.
+	if msg.ForceFresh && strings.TrimSpace(msg.Text) == "" {
+		r.markPendingFresh(keyForSession(sessionID))
+		return Result{
+			Outcome:        OutcomeFreshSession,
+			InstallationID: inst.ID,
+			ChatSessionID:  sessionID,
+			Sender:         msg.Source.SenderID,
+		}, finalizeMark, nil
+	}
+
 	// 6. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
@@ -345,7 +363,9 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
+		// Merge any pending bare-/new mark so the directive is honored even
+		// when batching is disabled.
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
 		return
 	}
 	if fresh {

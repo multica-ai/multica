@@ -17,7 +17,7 @@ Each bot is bound **one-to-one** to a single Multica agent. Binding a second age
 | **DM the bot** | A workspace member messages the bot directly in DingTalk. Each conversation becomes a Multica [chat](/chat) session with the agent; the agent's replies come back as messages. |
 | **@-mention in a group** | Add the bot to a DingTalk group and @-mention it. DingTalk only delivers messages that @-mention the robot — the bot never sees the rest of the group. |
 | **`/issue` command** | Sending `/issue <title>` (optionally with a body) creates a new Multica issue in the workspace, attributed to you. |
-| **`/new` command** | Drops the current conversation context and handles your message in a brand-new agent session. |
+| **`/new` command** | Drops the current conversation context and handles your message in a brand-new agent session (`/reset` is an equivalent alias). |
 | **`/unbind` command** | Unlinks your own DingTalk account from Multica. |
 | **🤔思考中 reaction** | Once your message is picked up, the bot pins the 🤔思考中 ("thinking") reaction to it and removes it when the reply lands. |
 
@@ -57,7 +57,7 @@ Only people who are **members of the workspace** can use the bot. If you aren't 
 
 - **Ask the agent anything** — DM the bot or @-mention it in a group. The conversation is a normal agent chat session; while you wait, your message carries the 🤔思考中 reaction, and the agent's reply comes back as a message.
 - **File an issue** — send `/issue Fix the login redirect` and Multica creates that issue in the workspace, confirming with "✅ 已创建 MUL-123 — Fix the login redirect". Add more lines after the title for a description; a bare `/issue` uses your previous message as the title. The command must be lowercase `/issue`.
-- **Start over** — send `/new` (optionally followed by your next question, e.g. `/new let's talk about deployments`) and the agent drops the conversation's prior context and answers in a fresh session.
+- **Start over** — send `/new` (optionally followed by your next question, e.g. `/new let's talk about deployments`) and the agent drops the conversation's prior context and answers in a fresh session. A bare `/new` (no text) confirms immediately and takes effect on your next message; `/reset` is an equivalent alias.
 - **Unlink yourself** — send `/unbind` on its own line (no arguments) and the bot removes the link between your DingTalk account and Multica, confirming in the chat; your next message goes through identification again.
 
 If the agent is **offline** (its runtime isn't connected) or **archived**, the bot replies with a short status notice instead of silently dropping your message; if the agent is busy (at its concurrent-task limit), the bot tells you your message is queued and will be handled as soon as a slot frees.

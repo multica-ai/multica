@@ -73,3 +73,16 @@ func TestParseFreshSessionCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFreshSessionCommand_ResetAlias(t *testing.T) {
+	cmd, ok := parseFreshSessionCommand("/reset 换个话题")
+	if !ok || cmd.Body != "换个话题" {
+		t.Fatalf("parse /reset: ok=%v body=%q", ok, cmd)
+	}
+	if cmd, ok := parseFreshSessionCommand("/reset"); !ok || cmd.Body != "" {
+		t.Fatalf("parse bare /reset: ok=%v body=%q", ok, cmd)
+	}
+	if _, ok := parseFreshSessionCommand("/reset了吗"); ok {
+		t.Fatal("/reset了吗 must not match (token-bounded)")
+	}
+}

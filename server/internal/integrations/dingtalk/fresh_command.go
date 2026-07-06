@@ -7,11 +7,22 @@ import "strings"
 // first non-empty line can be a command. The directive is stripped from
 // the body; the remainder (possibly empty) is the actual prompt.
 
-const newCommandPrefix = "/new"
+// freshCommandPrefixes are the accepted fresh-session directives. /reset is
+// an alias for /new — same semantics, common muscle memory from other bots.
+var freshCommandPrefixes = []string{"/new", "/reset"}
 
-// parseFreshSessionCommand extracts a first-line /new command from a
-// message body. Returns the body with the directive removed and whether
-// the command matched.
+func matchedFreshPrefix(line string) (string, bool) {
+	for _, p := range freshCommandPrefixes {
+		if strings.HasPrefix(line, p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// parseFreshSessionCommand extracts a first-line /new (or /reset) command
+// from a message body. Returns the body with the directive removed and
+// whether the command matched.
 func parseFreshSessionCommand(body string) (string, bool) {
 	lines := strings.Split(body, "\n")
 
@@ -27,10 +38,11 @@ func parseFreshSessionCommand(body string) (string, bool) {
 	}
 
 	trimmed := strings.TrimLeft(lines[firstIdx], " \t")
-	if !strings.HasPrefix(trimmed, newCommandPrefix) {
+	prefix, ok := matchedFreshPrefix(trimmed)
+	if !ok {
 		return "", false
 	}
-	rest := trimmed[len(newCommandPrefix):]
+	rest := trimmed[len(prefix):]
 	if rest != "" {
 		if r0 := rest[0]; r0 != ' ' && r0 != '\t' {
 			return "", false

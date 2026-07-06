@@ -570,3 +570,60 @@ func TestRouter_EmptyMessageID_SkipsDedup(t *testing.T) {
 		t.Fatalf("message must still ingest without a dedup key")
 	}
 }
+
+// TestRouter_BareFreshCommand_ConsumedWithoutRun covers the bare /new (or
+// /reset) directive: no chat_message lands, no run is enqueued (an empty
+// prompt would burn a run on nothing), the user gets the confirmation
+// outcome, and the NEXT message's run starts a fresh agent session.
+func TestRouter_BareFreshCommand_ConsumedWithoutRun(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Text = ""
+	msg.ForceFresh = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.router.Drain()
+
+	if h.binder.lastAppend.SessionID.Valid {
+		t.Error("bare /new must not append a chat message")
+	}
+	if h.tasks.wasCalled() {
+		t.Error("bare /new must not enqueue a run")
+	}
+	if h.dedup.marks() != 1 {
+		t.Errorf("dedup marks = %d, want 1 (command consumed)", h.dedup.marks())
+	}
+	results := h.replier.calls()
+	if len(results) != 1 || results[0].Outcome != OutcomeFreshSession {
+		t.Fatalf("replier results = %+v, want one OutcomeFreshSession", results)
+	}
+
+	// The next plain message runs fresh exactly once.
+	next := p2pMessage(t)
+	next.EventID, next.MessageID = "evt-2", "om-2"
+	next.Text = "hello again"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("Handle next: %v", err)
+	}
+	h.router.Drain()
+	if !h.tasks.wasCalled() {
+		t.Fatal("next message must enqueue a run")
+	}
+	if !h.tasks.freshArg() {
+		t.Error("next run must carry force_fresh from the consumed /new")
+	}
+
+	// And the mark is consumed: a third message runs without fresh.
+	third := p2pMessage(t)
+	third.EventID, third.MessageID = "evt-3", "om-3"
+	third.Text = "third"
+	if err := h.router.Handle(context.Background(), third); err != nil {
+		t.Fatalf("Handle third: %v", err)
+	}
+	h.router.Drain()
+	if h.tasks.freshArg() {
+		t.Error("pending fresh must be consumed by the previous run")
+	}
+}

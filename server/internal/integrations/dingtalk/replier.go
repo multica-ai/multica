@@ -39,6 +39,7 @@ const (
 	agentBusyText     = "⏳ 智能体正在处理其他任务，你的消息已排队，空出来后会立即处理。"
 	unboundText       = "✅ 已解除你的钉钉账号与 Multica 的绑定。之后再发消息会重新识别身份。"
 	unboundMissText   = "当前钉钉账号没有绑定记录，无需解绑。"
+	freshSessionText  = "✨ 已开启新会话，之前的对话上下文已清空。直接发送新任务即可。"
 )
 
 // bindingMinter is the binding-token surface the replier needs.
@@ -129,6 +130,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		}
 		if err := r.post(ctx, msg, text); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: unbind confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeFreshSession:
+		if err := r.post(ctx, msg, freshSessionText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: fresh-session confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIngested:

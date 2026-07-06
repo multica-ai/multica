@@ -271,3 +271,71 @@ func TestDingtalkMessageBodyAndTitle(t *testing.T) {
 		t.Errorf("empty body = %q, want empty", got)
 	}
 }
+
+// TestCommandViewAndAliases covers the @-prefix handling for slash commands:
+// API-sent messages (other bots, CLI tools) carry the robot mention as
+// literal text — "@Multica /new" — which must not hide the command; plain
+// mentions that are content must be left alone.
+func TestCommandViewAndAliases(t *testing.T) {
+	mk := func(content string) channel.InboundMessage {
+		msg, ok := inboundFromBotCallback(botCallbackData{
+			ConversationID: "cid", MsgID: "m1", SenderStaffID: "s1",
+			ConversationType: "2", Msgtype: "text", SenderNick: "冬翔",
+			Text: struct {
+				Content string `json:"content"`
+			}{Content: content},
+		}, "c")
+		if !ok {
+			t.Fatalf("inboundFromBotCallback dropped %q", content)
+		}
+		return msg
+	}
+
+	// API-sent "@bot /new" — the real-world shape that used to be missed.
+	m := mk("@Multica   /new")
+	if !m.ForceFresh || m.Text != "" {
+		t.Errorf("@bot /new: ForceFresh=%v Text=%q, want consumed bare directive", m.ForceFresh, m.Text)
+	}
+
+	// /reset alias, with prompt, behind a mention.
+	m = mk("@Multica /reset 重新来，帮我查部署状态")
+	if !m.ForceFresh || m.Text != "重新来，帮我查部署状态" {
+		t.Errorf("@bot /reset: ForceFresh=%v Text=%q", m.ForceFresh, m.Text)
+	}
+
+	// Plain /reset without mention.
+	m = mk("/reset")
+	if !m.ForceFresh || m.Text != "" {
+		t.Errorf("/reset: ForceFresh=%v Text=%q", m.ForceFresh, m.Text)
+	}
+
+	// Multiple mentions before the command are all stripped.
+	m = mk("@Multica @张三 /new 继续")
+	if !m.ForceFresh || m.Text != "继续" {
+		t.Errorf("multi-mention /new: ForceFresh=%v Text=%q", m.ForceFresh, m.Text)
+	}
+
+	// Mentions WITHOUT a command are content — kept verbatim.
+	m = mk("@张三 请跟进一下这个问题")
+	if m.ForceFresh || m.Text != "@张三 请跟进一下这个问题" {
+		t.Errorf("content mention: ForceFresh=%v Text=%q, want untouched", m.ForceFresh, m.Text)
+	}
+
+	// A lone mention stays untouched.
+	m = mk("@Multica")
+	if m.ForceFresh || m.Text != "@Multica" {
+		t.Errorf("lone mention: Text=%q, want untouched", m.Text)
+	}
+
+	// /resetXYZ is not the command (token-bounded).
+	m = mk("/reset了吗")
+	if m.ForceFresh {
+		t.Error("/reset了吗 must not match the /reset command")
+	}
+
+	// Multi-line: mention+command on the first line, body follows.
+	m = mk("@Multica /new\n帮我建个文档")
+	if !m.ForceFresh || m.Text != "帮我建个文档" {
+		t.Errorf("multiline /new: ForceFresh=%v Text=%q", m.ForceFresh, m.Text)
+	}
+}

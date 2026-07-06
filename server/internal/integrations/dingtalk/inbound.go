@@ -58,6 +58,34 @@ type richTextNode struct {
 // in content.richText.
 const msgtypeRichText = "richText"
 
+// commandView strips leading @-mention tokens when a slash command follows
+// them. Messages sent through the API (other bots, CLI tools) carry the
+// robot's mention as literal text — "@Multica /new" — which would hide the
+// command from the first-token parsers; real-client mentions are stripped
+// by DingTalk before delivery and never reach text.content. The stripped
+// view is adopted ONLY when the remainder starts with "/": for anything
+// else the mentions are kept — they are content ("@张三 请跟进").
+func commandView(text string) string {
+	lines := strings.SplitN(text, "\n", 2)
+	rest := strings.TrimLeft(lines[0], " \t")
+	stripped := false
+	for strings.HasPrefix(rest, "@") {
+		sp := strings.IndexAny(rest, " \t")
+		if sp < 0 {
+			return text // a lone mention; no command can follow
+		}
+		rest = strings.TrimLeft(rest[sp:], " \t")
+		stripped = true
+	}
+	if !stripped || !strings.HasPrefix(rest, "/") {
+		return text
+	}
+	if len(lines) == 2 {
+		return rest + "\n" + lines[1]
+	}
+	return rest
+}
+
 // flattenRichText renders a richText callback's node list to plain text.
 // Text runs are concatenated verbatim (DingTalk encodes line breaks
 // inside the runs); picture nodes degrade to the bracketed placeholder
@@ -146,9 +174,13 @@ func inboundFromBotCallback(data botCallbackData, clientID string) (channel.Inbo
 		// lands in the session for context.
 		msgType = channel.MsgTypeUnknown
 	}
-	// /new on the first non-empty line forces a fresh agent session for
-	// this dispatch (mirrors the Lark enricher): the directive is stripped
-	// and the remainder is the prompt.
+	// Leading @-mentions hide a slash command from the first-token parsers
+	// (/new, /reset, /issue, /unbind); adopt the stripped view when — and
+	// only when — a command follows.
+	text = commandView(text)
+	// /new (or /reset) on the first non-empty line forces a fresh agent
+	// session for this dispatch (mirrors the Lark enricher): the directive
+	// is stripped and the remainder is the prompt.
 	forceFresh := false
 	if stripped, ok := parseFreshSessionCommand(text); ok {
 		text = stripped

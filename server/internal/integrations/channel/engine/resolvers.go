@@ -37,6 +37,13 @@ const (
 	// from the debounced flush (rate-limited per session) so the user knows
 	// their message is queued rather than lost.
 	OutcomeAgentBusy Outcome = "agent_busy"
+	// OutcomeFreshSession: the sender issued a bare fresh-session directive
+	// (/new or /reset with no prompt). The directive is consumed: the session
+	// is marked so the NEXT message starts a fresh agent session; no
+	// chat_message lands and no run triggers (an empty prompt would burn a
+	// run on nothing, and some providers reject empty input outright). The
+	// replier confirms so the user knows the reset took effect.
+	OutcomeFreshSession Outcome = "fresh_session"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
