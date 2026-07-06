@@ -98,6 +98,21 @@ SELECT * FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
+-- name: DeleteChannelInstallationByAppID :exec
+-- Hard-delete a REVOKED installation keyed by its platform app identity.
+-- When a Feishu/Lark Bot is disconnected from agent A (status → 'revoked')
+-- and the same Bot (same app_id) is later bound to agent B, the revoked
+-- row still occupies the (channel_type, config->>'app_id') unique slot
+-- and blocks the UpsertChannelInstallation INSERT. Removing the revoked
+-- placeholder first lets the upsert create a fresh row for the new agent.
+-- Fenced to one workspace AND status='revoked' so an active installation
+-- can never be silently deleted through this path.
+DELETE FROM channel_installation
+WHERE channel_type = sqlc.arg('channel_type')
+  AND config ->> 'app_id' = sqlc.arg('app_id')::text
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND status = 'revoked';
+
 -- name: ListChannelInstallationsByWorkspace :many
 -- Scoped by channel_type so a per-channel management surface (e.g. the Lark
 -- installation list) only ever sees its own platform's installations.

@@ -589,6 +589,25 @@ func (q *Queries) GetChannelInstallationByAppID(ctx context.Context, arg GetChan
 	return i, err
 }
 
+const deleteChannelInstallationByAppID = `-- name: DeleteChannelInstallationByAppID :exec
+DELETE FROM channel_installation
+WHERE channel_type = $1
+  AND config ->> 'app_id' = $2::text
+  AND workspace_id = $3
+  AND status = 'revoked'
+`
+
+type DeleteChannelInstallationByAppIDParams struct {
+	ChannelType string      `json:"channel_type"`
+	AppID       string      `json:"app_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteChannelInstallationByAppID(ctx context.Context, arg DeleteChannelInstallationByAppIDParams) error {
+	_, err := q.db.Exec(ctx, deleteChannelInstallationByAppID, arg.ChannelType, arg.AppID, arg.WorkspaceID)
+	return err
+}
+
 const getChannelInstallationInWorkspace = `-- name: GetChannelInstallationInWorkspace :one
 SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
 WHERE id = $1
