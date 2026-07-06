@@ -125,6 +125,7 @@ var (
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
+		"omp":           "omp",
 		"pi":            "pi",
 		"other":         "other",
 	}

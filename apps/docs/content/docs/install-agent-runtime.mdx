@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 14 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 15 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 14 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 15 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 14 supported tools
+## The 15 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 14.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 15.
 
 ### Claude Code (Anthropic)
 
@@ -167,6 +167,17 @@ ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** t
 | Install | See the official CLI docs at [docs.trae.cn/cli](https://docs.trae.cn/cli). |
 | Authentication | Run `traecli` once interactively to complete the browser-based enterprise login (the token persists in `~/.trae` plus the OS keyring). Logging into the Trae **IDE** does not log in the CLI — they are separate. |
 | Notes | traecli reads project rules from `.trae/rules/` and has no `--system-prompt` flag, so Multica delivers its runtime brief inline in the prompt. Set a daemon-wide default model with `MULTICA_TRAECLI_MODEL`. |
+
+### OMP (Oh My Pi)
+
+[OMP (oh-my-pi)](https://pi.dev/) is a Pi-derived coding agent. It is **not** wire-compatible with the upstream `pi` CLI's JSON stream mode, so Multica drives it over the standard ACP transport via `omp acp --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (OMP advertises models as a `configOptions` entry, switched per task via `session/set_config_option` — not `session/set_model`, which OMP rejects), and skills are copied into `.omp/skills/`. omp reads `AGENTS.md` natively, so the runtime brief is not inlined into the prompt.
+
+| | |
+|---|---|
+| Daemon looks for | `omp` |
+| Install | See the project at [pi.dev](https://pi.dev/). |
+| Authentication | Configure a model provider (Anthropic, OpenAI, etc.) via omp's own config (`~/.omp/agent`), or set the relevant `*_API_KEY` environment variable. |
+| Notes | Set a daemon-wide default model with `MULTICA_OMP_MODEL`. |
 
 ### Antigravity (Google)
 

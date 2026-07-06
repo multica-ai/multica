@@ -15,6 +15,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "opencode",
   "openclaw",
   "traecli",
+  "omp",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

@@ -3223,6 +3223,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
 var runtimeDisplayNameOverrides = map[string]string{
 	"traecli": "Trae",
+	"omp":     "Oh My Pi",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.

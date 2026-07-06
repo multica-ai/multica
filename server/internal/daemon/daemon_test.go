@@ -273,6 +273,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
+		// OMP reads AGENTS.md natively (agents-md discovery), so the runtime
+		// brief written there reaches it without inlining — same as hermes.
+		{provider: "omp", want: false},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}
