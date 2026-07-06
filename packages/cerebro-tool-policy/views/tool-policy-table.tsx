@@ -2185,6 +2185,98 @@ export function groupCredentialRows(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// FIR-2441: credential boxes follow the vault-naming convention
+// "<track>-<owner>-<credential>" (e.g. agents-mia-agent-vault,
+// members-jesper-bigquery), so the flat box list nests into a tree
+// track › owner › credential. Setting a decision on a track or owner node
+// cascades to every credential box beneath it — the naming IS the permission
+// structure. Boxes whose name does not fit the convention (e.g. "default", or a
+// registry credential UUID) stay at the top level as ungrouped leaves.
+const CREDENTIAL_TRACKS = ["agents", "members", "shared"];
+
+// A node in the credential permission tree. A branch (track/owner) carries
+// `children` and no `group`; a leaf carries `group` (one Agent Vault box) and no
+// children. `key` is stable across renders; `label` is the segment shown.
+export interface CredentialTreeNode {
+  key: string;
+  label: string;
+  children: CredentialTreeNode[];
+  group?: CredentialGroupData;
+}
+
+// buildCredentialTree nests the flat credential groups by parsing each box name
+// on "-": first segment = track (agents/members/shared), second = owner, the
+// rest = the credential label. Every level is sorted alphabetically so the tree
+// is stable. Names without a known track prefix are top-level leaves.
+export function buildCredentialTree(
+  groups: CredentialGroupData[],
+): CredentialTreeNode[] {
+  const roots: CredentialTreeNode[] = [];
+  const findOrAdd = (
+    siblings: CredentialTreeNode[],
+    key: string,
+    label: string,
+  ): CredentialTreeNode => {
+    let node = siblings.find((s) => s.key === key);
+    if (!node) {
+      node = { key, label, children: [] };
+      siblings.push(node);
+    }
+    return node;
+  };
+  for (const group of groups) {
+    const name = group.label;
+    const firstDash = name.indexOf("-");
+    const track = firstDash === -1 ? "" : name.slice(0, firstDash);
+    if (firstDash === -1 || !CREDENTIAL_TRACKS.includes(track)) {
+      roots.push({ key: group.resource, label: name, children: [], group });
+      continue;
+    }
+    const rest = name.slice(firstDash + 1); // e.g. "mia-agent-vault"
+    const secondDash = rest.indexOf("-");
+    const owner = secondDash === -1 ? rest : rest.slice(0, secondDash);
+    const leafLabel = secondDash === -1 ? rest : rest.slice(secondDash + 1);
+    const trackNode = findOrAdd(roots, `track:${track}`, track);
+    const ownerNode = findOrAdd(
+      trackNode.children,
+      `track:${track}/owner:${owner}`,
+      owner,
+    );
+    ownerNode.children.push({
+      key: group.resource,
+      label: leafLabel || name,
+      children: [],
+      group,
+    });
+  }
+  const sortRec = (nodes: CredentialTreeNode[]) => {
+    nodes.sort((a, b) => a.label.localeCompare(b.label));
+    for (const n of nodes) sortRec(n.children);
+  };
+  sortRec(roots);
+  return roots;
+}
+
+// subtreeGroups collects every leaf credential box under a node (the node itself
+// when it is a leaf) — the exact set a branch-level cascade writes to.
+export function subtreeGroups(node: CredentialTreeNode): CredentialGroupData[] {
+  return node.group ? [node.group] : node.children.flatMap(subtreeGroups);
+}
+
+// credentialNodeVerdict folds every capability row beneath a branch into one
+// header value: the shared Effective when all agree, else "mixed". `overridden`
+// is true when any row beneath carries an explicit setting at the page's layer.
+function credentialNodeVerdict(
+  node: CredentialTreeNode,
+  editLayer: ToolLayer,
+): { setting: ToolEffectiveSetting | "mixed"; overridden: boolean } {
+  const rows = subtreeGroups(node).flatMap((g) => g.rows);
+  const settings = new Set(rows.map((r) => r.effective.setting));
+  const overridden = rows.some((r) => !!r.layers[editLayer]);
+  const only = settings.size === 1 ? [...settings][0] : undefined;
+  return { setting: only ?? "mixed", overridden };
+}
+
 // credentialGroupVerdict folds a box's rows into one header value: the shared
 // Effective when all agree, else "mixed". `overridden` is true when any
 // capability carries an explicit setting at the page's own layer.
@@ -2224,14 +2316,16 @@ function CredentialSection({
         </span>
       </div>
       <p className="max-w-xl text-sm text-muted-foreground">
-        Set a whole credential, or expand it to decide each action separately.
-        Setting the credential cascades to every action.
+        Grouped by name (track › owner › credential). Set a whole track, a whole
+        owner, or one credential — the choice cascades to everything beneath it.
+        Expand a credential to decide each action separately.
       </p>
       <div className="flex flex-col gap-2">
-        {groups.map((group) => (
-          <CredentialGroup
-            key={group.resource}
-            group={group}
+        {buildCredentialTree(groups).map((node) => (
+          <CredentialTreeNodeView
+            key={node.key}
+            node={node}
+            depth={0}
             editLayer={editLayer}
             busy={busy}
             onSetCapability={onSetCapability}
@@ -2240,6 +2334,85 @@ function CredentialSection({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// CredentialTreeNodeView renders one node of the credential permission tree: a
+// leaf delegates to CredentialGroup (the box's per-action fold-out); a branch
+// (track/owner) renders a collapsible header whose Decision control cascades to
+// every credential box beneath it, then its children recursively. `depth` only
+// drives the left indent so the nesting reads visually.
+function CredentialTreeNodeView({
+  node,
+  depth,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+  onSetCondition,
+}: {
+  node: CredentialTreeNode;
+  depth: number;
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  if (node.group) {
+    return (
+      <CredentialGroup
+        group={node.group}
+        editLayer={editLayer}
+        busy={busy}
+        onSetCapability={onSetCapability}
+        onSetGroup={onSetGroup}
+        onSetCondition={onSetCondition}
+      />
+    );
+  }
+  const verdict = credentialNodeVerdict(node, editLayer);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  const leaves = subtreeGroups(node);
+  return (
+    <div className="rounded-lg border" data-testid={`credential-branch-${node.key}`}>
+      <div className="flex items-center justify-between gap-3 p-3">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <Chevron className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-semibold">{node.label}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {leaves.length === 1 ? "1 credential" : `${leaves.length} credentials`}
+          </span>
+        </button>
+        <CredentialGroupControl
+          verdict={verdict}
+          disabled={busy}
+          onChange={(s) => leaves.forEach((g) => onSetGroup(g, s))}
+        />
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2 border-t p-2 pl-4">
+          {node.children.map((child) => (
+            <CredentialTreeNodeView
+              key={child.key}
+              node={child}
+              depth={depth + 1}
+              editLayer={editLayer}
+              busy={busy}
+              onSetCapability={onSetCapability}
+              onSetGroup={onSetGroup}
+              onSetCondition={onSetCondition}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
