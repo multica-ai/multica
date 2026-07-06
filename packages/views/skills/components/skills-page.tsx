@@ -56,6 +56,10 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   usePendingChangeRequestSkillIds,
   withCerebroSkillColumns,
+  // CEREBRO-PATCH(skill-changes-review): FIR-2742 — owner alert + cross-skill review sheet.
+  useSkillChanges,
+  SkillChangesAlert,
+  SkillChangesReviewSheet,
 } from "@multica/cerebro-skill-ownership/views";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
@@ -239,6 +243,9 @@ export default function SkillsPage() {
   const pendingChangeIds = usePendingChangeRequestSkillIds();
   const ownershipEnabled = useFeatureFlag("cerebro_skill_ownership");
   const [pendingOnly, setPendingOnly] = useState(false);
+  // CEREBRO-PATCH(skill-changes-review): FIR-2742 — owner alert + review sheet state.
+  const skillChanges = useSkillChanges(skills);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -426,6 +433,14 @@ export default function SkillsPage() {
         </div>
       )}
 
+      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — alert for pending changes on skills you own. */}
+      {ownershipEnabled && (
+        <SkillChangesAlert
+          count={skillChanges.mine.length}
+          onReview={() => setReviewOpen(true)}
+        />
+      )}
+
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
         {!showEmpty && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
@@ -476,6 +491,18 @@ export default function SkillsPage() {
                   Pending changes
                 </Button>
               )}
+              {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — open the cross-skill review sheet (filter + sort). */}
+              {ownershipEnabled && skillChanges.all.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 text-muted-foreground"
+                  onClick={() => setReviewOpen(true)}
+                >
+                  Review changes
+                </Button>
+              )}
             </div>
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
@@ -513,6 +540,17 @@ export default function SkillsPage() {
         <CreateSkillDialog
           onClose={() => setCreateOpen(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — cross-skill change review sheet. */}
+      {ownershipEnabled && (
+        <SkillChangesReviewSheet
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          changes={skillChanges.all}
+          members={members}
+          hasMine={skillChanges.mine.length > 0}
         />
       )}
     </div>

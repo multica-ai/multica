@@ -177,7 +177,10 @@ owner + named approvers minus the proposer, `severity` `action_required`,
 `route` `inbox` by default with push opt-in; `details` carries `agent_id`,
 `agent_name`, `change_request_id`, `base_version`, `proposed_version`; carries no
 `issue_id` — the inbox UI deep-links from `details.agent_id` to the agent's
-Instructions tab, mirroring skill change-request rows. Emitted by the
+Instructions tab. (Skill change-request rows, by contrast, no longer navigate
+away: FIR-2742 opens them **in the inbox pane** via `SkillChangeInboxDetail`,
+which lists the diff from `details` and offers an explicit "Open in new window".)
+Emitted by the
 agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
 Bid C — the capability drift watcher alerts workspace owners/admins, `severity`

@@ -54,6 +54,33 @@ export function useReviewSkillChangeRequest(skillId: string, wsId: string) {
   });
 }
 
+/**
+ * FIR-2742 — review a change request from the workspace-wide queue, where the
+ * skill id is not known until the row is picked. Same endpoint as
+ * `useReviewSkillChangeRequest`, but the target skill id rides in the mutate
+ * payload so one hook serves every row in the cross-skill review sheet.
+ */
+export function useReviewAnyChangeRequest(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      crId,
+      data,
+    }: {
+      crId: string;
+      skillId: string;
+      data: ReviewSkillChangeRequestRequest;
+    }) => api.reviewSkillChangeRequest(crId, data),
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({
+        queryKey: skillOwnershipKeys.changeRequests(vars.skillId),
+      });
+      qc.invalidateQueries({ queryKey: skillOwnershipKeys.pendingAll() });
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId), exact: true });
+    },
+  });
+}
+
 export function useCreateSkillFork(skillId: string, wsId: string) {
   const qc = useQueryClient();
   return useMutation({
