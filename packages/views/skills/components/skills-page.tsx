@@ -416,7 +416,11 @@ export default function SkillsPage() {
     !!agentsError || !!membersError || !!runtimesError;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    // CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — on mobile the whole page
+    // scrolls vertically (header + alert + filters scroll away), instead of
+    // trapping the list in a cramped inner-scroll pane. On sm+ the desktop
+    // app-shell layout (fixed chrome, list scrolls internally) is restored.
+    <div className="flex flex-1 flex-col overflow-y-auto sm:min-h-0 sm:overflow-hidden">
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
@@ -443,7 +447,8 @@ export default function SkillsPage() {
         />
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
+      {/* CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — drop min-h-0 on mobile so this section grows with its content and the page (not an inner pane) scrolls. */}
+      <div className="flex flex-1 flex-col gap-4 p-3 sm:min-h-0 sm:p-6">
         {/* CEREBRO-PATCH(skill-changes-review): FIR-2748 — the personal review alert replaces this intro banner when the user has pending reviews. */}
         {!showEmpty && !(ownershipEnabled && skillChanges.mine.length > 0) && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
@@ -462,9 +467,11 @@ export default function SkillsPage() {
           </div>
         ) : (
           // CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar beside the list.
-          <div className="flex flex-1 min-h-0 overflow-hidden rounded-lg border bg-background">
+          // CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — on mobile this box sizes to its content (auto height) so the page scrolls; sm+ restores flex-1 min-h-0 internal scroll.
+          <div className="flex overflow-hidden rounded-lg border bg-background sm:min-h-0 sm:flex-1">
             {folderView.sidebar}
-            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            {/* CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — mobile: block flow so the DataTable renders at natural height (its flex-1/min-h-0 would otherwise collapse in an auto-height parent) and the page scrolls; sm+: flex column that fills so the table scrolls internally. */}
+            <div className="block min-w-0 sm:flex sm:flex-1 sm:flex-col sm:overflow-hidden">
             <CardToolbar
               search={search}
               setSearch={setSearch}

@@ -83,6 +83,30 @@ describe("enrichSkillChanges", () => {
       enrichSkillChanges([cr({ skill_id: "missing" })], [skill({ id: "s1" })], "me"),
     ).toHaveLength(0);
   });
+
+  // FIR-2748 regression: the skills LIST payload used to omit owner_id +
+  // approver_ids entirely, so at runtime those fields were `undefined`. That
+  // made `mine` always false and the personal review alert never rendered.
+  // Simulate that broken payload (owner info stripped) and prove the count is
+  // 0 — then prove it flips to mine when the server surfaces owner_id, which is
+  // exactly what the server-side fix restores.
+  it("counts nothing as mine when the list omits owner info (the pre-fix bug)", () => {
+    const stripped = skill({ id: "s1" });
+    // The real broken list payload had no owner_id / approver_ids keys at all.
+    delete (stripped as Partial<SkillSummary>).owner_id;
+    delete (stripped as Partial<SkillSummary>).approver_ids;
+    const mine = selectMyPendingChanges([cr({})], [stripped], "me");
+    expect(mine).toHaveLength(0);
+  });
+
+  it("counts the change as mine once the list carries owner_id", () => {
+    const mine = selectMyPendingChanges(
+      [cr({})],
+      [skill({ id: "s1", owner_id: "me" })],
+      "me",
+    );
+    expect(mine).toHaveLength(1);
+  });
 });
 
 describe("filterSkillChanges", () => {
