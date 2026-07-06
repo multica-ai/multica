@@ -68,6 +68,7 @@
     "./squads": "./squads/index.ts",
     "./squads/stores": "./squads/stores/index.ts",
     "./permissions": "./permissions/index.ts",
+    "./search": "./search/index.ts",
     "./projects": "./projects/index.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
