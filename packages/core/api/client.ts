@@ -153,6 +153,7 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import type { ZodType } from "zod";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -165,6 +166,7 @@ import {
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChildIssuesResponseSchema,
+  CommentSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
   IssueTriggerPreviewSchema,
@@ -198,6 +200,7 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  IssueSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
@@ -468,6 +471,30 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
+  // Strict write-side validation for responses that immediately seed React
+  // Query caches. A malformed 2xx response must behave like a failed mutation
+  // so optimistic updates roll back instead of persisting bad cache data.
+  private async fetchStrictWith<T>(
+    path: string,
+    schema: ZodType,
+    init: RequestInit,
+    opts: { endpoint: string; message: string; signal?: AbortSignal },
+  ): Promise<T> {
+    const raw = await this.fetch<unknown>(path, {
+      ...init,
+      signal: opts.signal ?? init.signal ?? undefined,
+    });
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      this.logger.error(`← shape mismatch ${opts.endpoint}`, {
+        issues: parsed.error.issues,
+        received: raw,
+      });
+      throw new ApiError(opts.message, 0, "Invalid Response", raw);
+    }
+    return parsed.data as T;
+  }
+
   // Auth
   async sendCode(email: string): Promise<void> {
     await this.fetch("/auth/send-code", {
@@ -662,26 +689,18 @@ export class ApiClient {
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
-    // Parse through a schema (not a raw cast): the create modal keys its
-    // label-attach compatibility fallback off `labels` being absent vs a
-    // validated Label[], so an unvalidated wrong shape must not slip through.
-    // Unlike list endpoints, a create that returns an unusable body is a
-    // FAILED mutation, not a safe-empty read: fall back to null and reject so
-    // the modal keeps the draft and shows a failure toast instead of a blank
-    // "created" card pointing at an empty issue id. parseWithFallback already
-    // logged the schema issues + raw payload; the empty message lets the modal
-    // render its localized "failed to create" toast.
-    const raw = await this.fetch<unknown>("/api/issues", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
-      endpoint: "POST /api/issues",
-    });
-    if (!issue) {
-      throw new Error();
-    }
-    return issue;
+    return this.fetchStrictWith(
+      "/api/issues",
+      CreateIssueResponseSchema,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+      {
+        endpoint: "POST /api/issues",
+        message: "invalid issue response",
+      },
+    );
   }
 
   async quickCreateIssue(data: {
@@ -716,9 +735,12 @@ export class ApiClient {
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`, {
+    return this.fetchStrictWith(`/api/issues/${id}`, IssueSchema, {
       method: "PUT",
       body: JSON.stringify(data),
+    }, {
+      endpoint: "PUT /api/issues/:id",
+      message: "invalid issue response",
     });
   }
 
@@ -780,7 +802,7 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
   ): Promise<Comment> {
-    return this.fetch(`/api/issues/${issueId}/comments`, {
+    return this.fetchStrictWith(`/api/issues/${issueId}/comments`, CommentSchema, {
       method: "POST",
       body: JSON.stringify({
         content,
@@ -789,6 +811,9 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
       }),
+    }, {
+      endpoint: "POST /api/issues/:id/comments",
+      message: "invalid comment response",
     });
   }
 
@@ -840,13 +865,16 @@ export class ApiClient {
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {
-    return this.fetch(`/api/comments/${commentId}`, {
+    return this.fetchStrictWith(`/api/comments/${commentId}`, CommentSchema, {
       method: "PUT",
       body: JSON.stringify({
         content,
         attachment_ids: attachmentIds,
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
       }),
+    }, {
+      endpoint: "PUT /api/comments/:id",
+      message: "invalid comment response",
     });
   }
 
@@ -855,11 +883,17 @@ export class ApiClient {
   }
 
   async resolveComment(commentId: string): Promise<Comment> {
-    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
+    return this.fetchStrictWith(`/api/comments/${commentId}/resolve`, CommentSchema, { method: "POST" }, {
+      endpoint: "POST /api/comments/:id/resolve",
+      message: "invalid comment response",
+    });
   }
 
   async unresolveComment(commentId: string): Promise<Comment> {
-    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
+    return this.fetchStrictWith(`/api/comments/${commentId}/resolve`, CommentSchema, { method: "DELETE" }, {
+      endpoint: "DELETE /api/comments/:id/resolve",
+      message: "invalid comment response",
+    });
   }
 
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {

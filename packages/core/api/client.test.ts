@@ -468,6 +468,122 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("rejects malformed issue write responses", async () => {
+    const malformedIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      // number must be a number; accepting this would corrupt issue caches.
+      number: "1",
+      identifier: "MUL-1",
+      title: "Bad issue",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      stage: null,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-07-06T00:00:00Z",
+      updated_at: "2026-07-06T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedIssue), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedIssue), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.createIssue({ title: "Bad issue" })).rejects.toMatchObject({
+      message: "invalid issue response",
+      status: 0,
+    });
+    await expect(client.updateIssue("issue-1", { title: "Bad issue" })).rejects.toMatchObject({
+      message: "invalid issue response",
+      status: 0,
+    });
+  });
+
+  it("rejects malformed comment write responses", async () => {
+    const malformedComment = {
+      id: "comment-1",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "hello",
+      type: "comment",
+      // parent_id must be string or null; accepting this would corrupt timeline caches.
+      parent_id: 123,
+      reactions: [],
+      attachments: [],
+      created_at: "2026-07-06T00:00:00Z",
+      updated_at: "2026-07-06T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedComment), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedComment), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedComment), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedComment), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.createComment("issue-1", "hello")).rejects.toMatchObject({
+      message: "invalid comment response",
+      status: 0,
+    });
+    await expect(client.updateComment("comment-1", "hello", [])).rejects.toMatchObject({
+      message: "invalid comment response",
+      status: 0,
+    });
+    await expect(client.resolveComment("comment-1")).rejects.toMatchObject({
+      message: "invalid comment response",
+      status: 0,
+    });
+    await expect(client.unresolveComment("comment-1")).rejects.toMatchObject({
+      message: "invalid comment response",
+      status: 0,
+    });
+  });
+
   it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
