@@ -349,13 +349,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               triggerRender={<PillButton />}
               align="start"
             />
-            {/* Inline nudge for the at-least-one-team rule; the submit
-                button disables on the same condition. */}
-            {teamSelectionMissing && (
-              <span className="text-[11px] text-destructive/80">
-                {t(($) => $.create_project.team_min_hint)}
-              </span>
-            )}
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
@@ -394,6 +387,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             </Tooltip>
           </div>
         </div>
+
+        {/* At-least-one-team nudge on its own line, aligned under the team
+            picker; the submit button disables on the same condition. */}
+        {teamSelectionMissing && (
+          <div className="px-5 -mt-1 pb-1 text-[11px] text-destructive/80 shrink-0">
+            {t(($) => $.create_project.team_min_hint)}
+          </div>
+        )}
 
         <div className="px-5 pb-2 shrink-0">
           <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
