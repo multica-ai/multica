@@ -2671,6 +2671,53 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 	}
 }
 
+func TestCodexSandboxPolicyForWindowsOverrides(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Setenv.
+
+	// Test default Windows behavior (no env var)
+	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "")
+	p1 := codexSandboxPolicyFor("windows", "0.121.0")
+	if p1.Mode != "workspace-write" {
+		t.Errorf("default windows: mode = %q, want workspace-write", p1.Mode)
+	}
+	if !p1.NetworkAccess {
+		t.Error("default windows: network access should be true")
+	}
+
+	// Test danger-full-access override
+	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "danger-full-access")
+	p2 := codexSandboxPolicyFor("windows", "0.121.0")
+	if p2.Mode != "danger-full-access" {
+		t.Errorf("danger-full-access: mode = %q, want danger-full-access", p2.Mode)
+	}
+	if p2.NetworkAccess {
+		t.Error("danger-full-access: network access should be false")
+	}
+
+	// Test workspace-write override
+	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "workspace-write")
+	p3 := codexSandboxPolicyFor("windows", "0.121.0")
+	if p3.Mode != "workspace-write" {
+		t.Errorf("workspace-write: mode = %q, want workspace-write", p3.Mode)
+	}
+	if !p3.NetworkAccess {
+		t.Error("workspace-write: network access should be true")
+	}
+
+	// Test invalid override value (should fall back to default workspace-write)
+	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "invalid-mode-typo")
+	p4 := codexSandboxPolicyFor("windows", "0.121.0")
+	if p4.Mode != "workspace-write" {
+		t.Errorf("invalid mode: mode = %q, want workspace-write", p4.Mode)
+	}
+	if !p4.NetworkAccess {
+		t.Error("invalid mode: network access should be true")
+	}
+	if !strings.Contains(p4.Reason, "invalid MULTICA_CODEX_WINDOWS_SANDBOX_MODE") {
+		t.Errorf("invalid mode: expected warning in Reason, got %q", p4.Reason)
+	}
+}
+
 func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 

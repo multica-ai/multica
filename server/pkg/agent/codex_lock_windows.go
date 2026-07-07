@@ -3,6 +3,8 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,22 +20,23 @@ const (
 
 // acquireCodexLaunchLock acquires an exclusive cross-process lock on Windows
 // to serialize Codex startup and prevent concurrent invocations of the native
-// sandbox helper. It returns a release function that closes the file handle.
-func acquireCodexLaunchLock(logger *slog.Logger) func() {
+// sandbox helper. It respects context cancellation and returns an error if
+// the lock cannot be acquired within the context deadline.
+func acquireCodexLaunchLock(ctx context.Context, logger *slog.Logger) (func(), error) {
 	lockPath := filepath.Join(os.TempDir(), "multica-codex-sandbox-setup.lock")
 	namePtr, err := syscall.UTF16PtrFromString(lockPath)
 	if err != nil {
-		if logger != nil {
-			logger.Error("codex lock: invalid temp path", "error", err)
-		}
-		return func() {}
+		return nil, fmt.Errorf("invalid temp path: %w", err)
 	}
 
-	start := time.Now()
-	timeout := 15 * time.Second // bounded timeout for lock acquisition
 	retryInterval := 50 * time.Millisecond
 
 	for {
+		// Check context cancellation first
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		// sharemode = 0 means exclusive access.
 		// FILE_FLAG_DELETE_ON_CLOSE deletes the file when the handle is closed.
 		h, err := syscall.CreateFile(
@@ -54,24 +57,18 @@ func acquireCodexLaunchLock(logger *slog.Logger) func() {
 				if logger != nil {
 					logger.Debug("codex lock: released launch lock", "path", lockPath)
 				}
-			}
+			}, nil
 		}
 
 		if err != errorSharingViolation && err != errorAccessDenied {
-			// Some other error, fail open to avoid deadlock
-			if logger != nil {
-				logger.Warn("codex lock: failed to acquire lock, failing open", "error", err)
-			}
-			return func() {}
+			return nil, fmt.Errorf("unexpected lock error on %s: %w", lockPath, err)
 		}
 
-		if time.Since(start) > timeout {
-			if logger != nil {
-				logger.Warn("codex lock: timeout waiting for launch lock, failing open")
-			}
-			return func() {}
+		// Wait or respect context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryInterval):
 		}
-
-		time.Sleep(retryInterval)
 	}
 }

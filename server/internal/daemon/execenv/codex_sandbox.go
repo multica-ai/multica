@@ -57,10 +57,17 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 	}
 	if goos == "windows" {
 		if v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE")); v != "" {
+			if v == "danger-full-access" || v == "workspace-write" {
+				return codexSandboxPolicy{
+					Mode:          v,
+					NetworkAccess: v == "workspace-write",
+					Reason:        "MULTICA_CODEX_WINDOWS_SANDBOX_MODE override",
+				}
+			}
 			return codexSandboxPolicy{
-				Mode:          v,
-				NetworkAccess: v == "workspace-write",
-				Reason:        "MULTICA_CODEX_WINDOWS_SANDBOX_MODE override",
+				Mode:          "workspace-write",
+				NetworkAccess: true,
+				Reason:        fmt.Sprintf("invalid MULTICA_CODEX_WINDOWS_SANDBOX_MODE %q, falling back to default", v),
 			}
 		}
 		return codexSandboxPolicy{
@@ -228,6 +235,10 @@ func stripLegacySandboxDirectives(content string) string {
 // The function logs (at warn level) when it falls back to danger-full-access
 // on macOS so the incident is visible in daemon logs.
 func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, detectedVersion string, logger *slog.Logger) error {
+	if strings.Contains(policy.Reason, "invalid") && logger != nil {
+		logger.Warn("codex sandbox override invalid; ignoring", "reason", policy.Reason)
+	}
+
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)

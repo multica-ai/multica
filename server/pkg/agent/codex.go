@@ -659,7 +659,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	unlock := acquireCodexLaunchLock(b.cfg.Logger)
+	unlock, err := acquireCodexLaunchLock(runCtx, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("acquire codex launch lock: %w", err)
+	}
 	var unlockOnce sync.Once
 	safeUnlock := func() {
 		unlockOnce.Do(func() {
