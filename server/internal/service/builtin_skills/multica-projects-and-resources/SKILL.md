@@ -37,7 +37,10 @@ Common resource types:
 multica project list --output json
 multica project get <project-id> --output json
 multica project create --title "<title>" --repo <github-url> --output json
+multica project create --title "<title>" --issue-prefix LOL --output json
 multica project update <project-id> --title "<title>" --output json
+multica project update <project-id> --issue-prefix LOL --output json
+multica project update <project-id> --issue-prefix "" --output json  # inherit workspace prefix
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
@@ -56,6 +59,15 @@ Add/update a project resource when the user asks for durable project context: "æ
 
 Project resources are durable and affect future tasks. `multica repo checkout`
 is task-local checkout state.
+
+## Project issue prefixes
+
+A project can override the workspace issue prefix with `issue_prefix`. Issues still
+use workspace-global numbers, but display identifiers prefer the project prefix
+when the issue is assigned to a project. For example, a workspace with `CAL` can
+have a PM-LOL project whose issues display as `LOL-123`. Pass an empty
+`--issue-prefix ""` on `project update` to clear the override and inherit the
+workspace prefix again.
 
 ## Debugging wrong context
 

@@ -134,6 +134,7 @@ func init() {
 	projectCreateCmd.Flags().String("description", "", "Project description")
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
+	projectCreateCmd.Flags().String("issue-prefix", "", "Project issue prefix; empty means inherit workspace prefix")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -177,6 +178,7 @@ func init() {
 	projectUpdateCmd.Flags().String("description", "", "New description")
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
+	projectUpdateCmd.Flags().String("issue-prefix", "", "New project issue prefix; pass empty string to inherit workspace prefix")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -297,40 +299,23 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, project)
 }
 
-func runProjectCreate(cmd *cobra.Command, _ []string) error {
-	title, _ := cmd.Flags().GetString("title")
-	if title == "" {
-		return fmt.Errorf("--title is required")
-	}
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
+func buildProjectCreateBody(cmd *cobra.Command, title string) (map[string]any, error) {
 	body := map[string]any{"title": title}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		if err := validateProjectStatus(v); err != nil {
-			return err
+			return nil, err
 		}
 		body["status"] = v
 	}
 	if v, _ := cmd.Flags().GetString("icon"); v != "" {
 		body["icon"] = v
 	}
-	if v, _ := cmd.Flags().GetString("lead"); v != "" {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v, memberOrAgentKinds)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve lead: %w", resolveErr)
-		}
-		body["lead_type"] = aType
-		body["lead_id"] = aID
+	if cmd.Flags().Changed("issue-prefix") {
+		v, _ := cmd.Flags().GetString("issue-prefix")
+		body["issue_prefix"] = v
 	}
 
 	// Bundle resources into the create payload so the server attaches them in
@@ -354,6 +339,36 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	return body, nil
+}
+
+func runProjectCreate(cmd *cobra.Command, _ []string) error {
+	title, _ := cmd.Flags().GetString("title")
+	if title == "" {
+		return fmt.Errorf("--title is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	body, err := buildProjectCreateBody(cmd, title)
+	if err != nil {
+		return err
+	}
+	if v, _ := cmd.Flags().GetString("lead"); v != "" {
+		aType, aID, resolveErr := resolveAssignee(ctx, client, v, memberOrAgentKinds)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve lead: %w", resolveErr)
+		}
+		body["lead_type"] = aType
+		body["lead_id"] = aID
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects", body, &result); err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -374,6 +389,34 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+func buildProjectUpdateBody(cmd *cobra.Command) (map[string]any, error) {
+	body := map[string]any{}
+	if cmd.Flags().Changed("title") {
+		v, _ := cmd.Flags().GetString("title")
+		body["title"] = v
+	}
+	if cmd.Flags().Changed("description") {
+		v, _ := cmd.Flags().GetString("description")
+		body["description"] = v
+	}
+	if cmd.Flags().Changed("status") {
+		v, _ := cmd.Flags().GetString("status")
+		if err := validateProjectStatus(v); err != nil {
+			return nil, err
+		}
+		body["status"] = v
+	}
+	if cmd.Flags().Changed("icon") {
+		v, _ := cmd.Flags().GetString("icon")
+		body["icon"] = v
+	}
+	if cmd.Flags().Changed("issue-prefix") {
+		v, _ := cmd.Flags().GetString("issue-prefix")
+		body["issue_prefix"] = v
+	}
+	return body, nil
+}
+
 func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -388,25 +431,9 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve project: %w", err)
 	}
 
-	body := map[string]any{}
-	if cmd.Flags().Changed("title") {
-		v, _ := cmd.Flags().GetString("title")
-		body["title"] = v
-	}
-	if cmd.Flags().Changed("description") {
-		v, _ := cmd.Flags().GetString("description")
-		body["description"] = v
-	}
-	if cmd.Flags().Changed("status") {
-		v, _ := cmd.Flags().GetString("status")
-		if err := validateProjectStatus(v); err != nil {
-			return err
-		}
-		body["status"] = v
-	}
-	if cmd.Flags().Changed("icon") {
-		v, _ := cmd.Flags().GetString("icon")
-		body["icon"] = v
+	body, err := buildProjectUpdateBody(cmd)
+	if err != nil {
+		return err
 	}
 	if cmd.Flags().Changed("lead") {
 		v, _ := cmd.Flags().GetString("lead")
@@ -419,7 +446,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --issue-prefix, --lead")
 	}
 
 	var result map[string]any

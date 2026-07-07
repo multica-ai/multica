@@ -1380,8 +1380,6 @@ func extractClosingIdentifiers(parts ...string) []string {
 	return out
 }
 
-// lookupIssueByIdentifier looks up an issue in the given workspace by its
-// "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
 // workspaceAutoLinkPRsEnabled reports whether the workspace allows the
 // GitHub webhook to create issue ↔ PR link rows. Defaults to true so that
 // workspaces predating RFC MUL-2414 keep the historical "auto-link on"
@@ -1408,14 +1406,17 @@ func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID p
 	return *s.GitHubAutoLinkPRsEnabled
 }
 
-// the workspace's configured prefix and the number resolves to a real issue.
-func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+// lookupIssueByIdentifier looks up an issue in the given workspace by its
+// "PREFIX-NUMBER" identifier. The number remains workspace-global, but the
+// prefix must match the issue's current display prefix (project override when
+// set, otherwise workspace prefix).
+func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, _ string, identifier string) (db.Issue, bool) {
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
 		return db.Issue{}, false
 	}
 	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
-	if !strings.EqualFold(gotPrefix, prefix) {
+	if gotPrefix == "" || numStr == "" {
 		return db.Issue{}, false
 	}
 	n, err := strconv.Atoi(numStr)
@@ -1427,6 +1428,9 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 		Number:      int32(n),
 	})
 	if err != nil {
+		return db.Issue{}, false
+	}
+	if !strings.EqualFold(gotPrefix, h.getIssueDisplayPrefix(ctx, issue)) {
 		return db.Issue{}, false
 	}
 	return issue, true
@@ -1451,7 +1455,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// exists, parent not terminal), so calling it unconditionally is safe.
 	h.notifyParentOfChildDone(ctx, issue, updated)
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	prefix := h.getIssueDisplayPrefix(ctx, updated)
 	resp := issueToResponse(updated, prefix)
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 		"issue":          resp,

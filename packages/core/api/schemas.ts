@@ -325,6 +325,7 @@ const ProjectSchema = z.object({
   icon: z.string().nullable(),
   status: z.string(),
   priority: z.string(),
+  issue_prefix: z.string().nullable().default(null),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
   created_at: z.string(),

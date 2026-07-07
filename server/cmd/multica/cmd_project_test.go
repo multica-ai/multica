@@ -26,6 +26,46 @@ func TestValidateProjectStatus(t *testing.T) {
 	}
 }
 
+func TestBuildProjectCreateBodyIncludesIssuePrefix(t *testing.T) {
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("icon", "", "")
+	cmd.Flags().String("issue-prefix", "", "")
+	cmd.Flags().StringArray("repo", nil, "")
+	_ = cmd.Flags().Set("issue-prefix", "LOL")
+
+	body, err := buildProjectCreateBody(cmd, "Project")
+	if err != nil {
+		t.Fatalf("buildProjectCreateBody: %v", err)
+	}
+	if body["issue_prefix"] != "LOL" {
+		t.Fatalf("issue_prefix = %v, want LOL", body["issue_prefix"])
+	}
+}
+
+func TestBuildProjectUpdateBodyIncludesEmptyIssuePrefix(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("icon", "", "")
+	cmd.Flags().String("issue-prefix", "", "")
+	_ = cmd.Flags().Set("issue-prefix", "")
+
+	body, err := buildProjectUpdateBody(cmd)
+	if err != nil {
+		t.Fatalf("buildProjectUpdateBody: %v", err)
+	}
+	value, ok := body["issue_prefix"]
+	if !ok {
+		t.Fatal("issue_prefix missing from update body")
+	}
+	if value != "" {
+		t.Fatalf("issue_prefix = %v, want empty string", value)
+	}
+}
+
 // newProjectResourceUpdateTestCmd mirrors the flag surface of
 // projectResourceUpdateCmd so unit tests can exercise the shortcut-flag plumbing
 // without spinning up a server.
