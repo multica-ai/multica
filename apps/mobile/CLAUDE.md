@@ -94,6 +94,13 @@ Start minimal. Add to this list when actually adopted — do NOT pre-list librar
   `ActionSheetIOS` calls now that mobile targets both platforms; every
   call site uses the `useActionSheet()` hook instead of the static
   `ActionSheetIOS.showActionSheetWithOptions` API.
+- **i18next** + **react-i18next** + **expo-localization** — mobile-owned
+  i18n runtime (independent from `packages/core/i18n` /
+  `packages/views/locales`). Two languages so far: `en`, `zh-Hans`.
+  Resources live in `apps/mobile/locales/<lang>/<namespace>.json`;
+  device-locale detection + persisted override live in
+  `apps/mobile/lib/i18n/`. Chinese copy follows the glossary in
+  `apps/docs/content/docs/developers/conventions.mdx`.
 
 When upgrading any of these, update this list.
 
