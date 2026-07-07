@@ -155,8 +155,6 @@ func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
 	b.WriteString(fmt.Sprintf("sandbox_mode = %q\n", policy.Mode))
 	if policy.Mode == "workspace-write" {
 		b.WriteString(fmt.Sprintf("sandbox_workspace_write.network_access = %t\n", policy.NetworkAccess))
-	} else if policy.Mode == "danger-full-access" {
-		b.WriteString("windows.sandbox = \"disabled\"\n")
 	}
 	b.WriteString(multicaManagedEndMarker)
 	b.WriteString("\n")
@@ -229,30 +227,6 @@ func stripLegacySandboxDirectives(content string) string {
 	return strings.Join(out, "\n")
 }
 
-// stripWindowsSandboxDirectives removes the `[windows]` section header
-// and any lines inside it until the next section header or EOF.
-func stripWindowsSandboxDirectives(content string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	inWindowsSection := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			inWindowsSection = trimmed == "[windows]"
-			if inWindowsSection {
-				continue
-			}
-			out = append(out, line)
-			continue
-		}
-		if inWindowsSection {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
 // ensureCodexSandboxConfig writes the multica-managed sandbox block into the
 // given config.toml according to the policy. It is idempotent: running it
 // twice produces the same file contents. The file is created if it doesn't
@@ -275,9 +249,6 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 	// versions so they don't collide with the managed block.
 	if existing != "" && !managedBlockRe.MatchString(existing) {
 		existing = stripLegacySandboxDirectives(existing)
-	}
-	if policy.Mode == "danger-full-access" && existing != "" {
-		existing = stripWindowsSandboxDirectives(existing)
 	}
 
 	updated := upsertMulticaManagedBlock(existing, policy)
