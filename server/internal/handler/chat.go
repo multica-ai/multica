@@ -778,6 +778,13 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// No accessible agents → every row would be filtered out anyway. Skip the
+	// DB round-trip and return an empty list (mirrors HasPendingChatTasks).
+	if len(allowed) == 0 {
+		writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: []PendingChatTaskItem{}})
+		return
+	}
+
 	rows, err := h.Queries.ListPendingChatTasksByCreator(r.Context(), db.ListPendingChatTasksByCreatorParams{
 		WorkspaceID: parseUUID(workspaceID),
 		CreatorID:   parseUUID(userID),
@@ -865,6 +872,8 @@ func (h *Handler) HasPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: hasPending})
 }
+
+// GetPendingChatTask returns the most recent in-flight task (queued / dispatched
 // / running) for a chat session. The frontend polls this on mount / session
 // switch so pending UI state survives refresh and reopen.
 func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {

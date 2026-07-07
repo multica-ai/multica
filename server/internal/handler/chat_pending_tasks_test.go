@@ -235,3 +235,43 @@ func TestHasPendingChatTasks_IgnoresTerminalTasks(t *testing.T) {
 		t.Fatalf("has-any returned true for a terminal (completed) task")
 	}
 }
+
+
+// TestHasPendingChatTasks_HidesOtherCreatorsTask locks the cs.creator_id gate:
+// user A's in-flight task on a workspace-visible agent — one B can freely
+// access — must still return has_pending=false for B, because B is not the
+// creator. This is the tenant boundary that the agent-visibility filter does
+// NOT cover (both users can see the agent), so it needs its own guard.
+func TestHasPendingChatTasks_HidesOtherCreatorsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// ownerID = user A (task creator), memberID = user B (different member).
+	// Both are plain workspace members who can access a workspace-visible agent.
+	_, creatorA, otherB := privateAgentTestFixture(t)
+	publicAgentID := createHandlerTestAgent(t, "PendingCrossCreatorAgent", []byte("[]"))
+	session := insertChatSessionAs(t, publicAgentID, creatorA)
+	insertPendingChatTask(t, publicAgentID, session, "running")
+
+	// B is not the creator → the creator_id filter must drop A's task.
+	w := httptest.NewRecorder()
+	testHandler.HasPendingChatTasks(w, chatPendingCtxAs(t, newRequestAs(otherB, "GET", "/api/chat/pending-tasks/has-any", nil), otherB))
+	if decodeHasPending(t, w) {
+		t.Fatalf("has-any leaked user A's task to user B (cs.creator_id gate not enforced)")
+	}
+
+	// Sanity: A (the creator) does see their own task on the same agent.
+	w = httptest.NewRecorder()
+	testHandler.HasPendingChatTasks(w, chatPendingCtxAs(t, newRequestAs(creatorA, "GET", "/api/chat/pending-tasks/has-any", nil), creatorA))
+	if !decodeHasPending(t, w) {
+		t.Fatalf("has-any returned false for the task's own creator")
+	}
+
+	// The detailed list endpoint enforces the same creator gate.
+	w = httptest.NewRecorder()
+	testHandler.ListPendingChatTasks(w, chatPendingCtxAs(t, newRequestAs(otherB, "GET", "/api/chat/pending-tasks", nil), otherB))
+	if resp := decodePendingTasks(t, w); len(resp.Tasks) != 0 {
+		t.Fatalf("list leaked user A's task to user B: %+v", resp.Tasks)
+	}
+}
