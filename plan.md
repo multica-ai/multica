@@ -502,7 +502,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 ### 4.5.2 Media Review Polish (from Phase 1)
 - [x] **Thread support:** Reply to review comments (threaded) and Resolve/Unresolve comments.
 - [x] **Upload UX:** Add upload progress indicator and thumbnail generation.
-- [ ] **Board UI:** Add a visual "Pending Review" indicator on issue cards.
+- [x] **Board UI:** Add a visual "Pending Review" indicator on issue cards.
 - [x] **Versioning:** Support uploading a new version of an asset.
 
 ### 4.5.3 Marketing Workflows UI (from Phase 2)

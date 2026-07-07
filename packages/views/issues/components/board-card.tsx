@@ -193,7 +193,7 @@ export const BoardCardContent = memo(function BoardCardContent({
           <IssueTypeBadge issueTypeId={issue.issue_type_id} />
           <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
           {hasPendingReview && (
-            <span className="flex items-center gap-1 bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-medium ml-1">
+            <span className="flex items-center gap-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium ml-1">
               <Eye className="size-3" /> Review
             </span>
           )}
