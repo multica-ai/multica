@@ -294,6 +294,13 @@ Multica is a powerful AI-native task management platform where AI agents are fir
   - **Implementation:** Added a "Create Task" button on each review comment. Clicking it bridges the review workflow into the main issue-tracking workflow by popping open the `useModalStore` "Create Issue" dialog.
   - The new sub-task is automatically pre-filled with the comment's content and a context reference back to the original media asset.
 
+### 1.9 UI Premium Polish (Completed 2026-07-07)
+- [x] **Semantic Theming:** Stripped hardcoded `bg-gray-900`/`bg-gray-800` from the layout, sidebar, and empty states. Replaced with Multica's native `bg-background`, `bg-muted`, `border-border` to perfectly respect Light/Dark mode.
+- [x] **Resizable Sidebar:** Wrapped the media player and review sidebar in `@multica/ui`'s `ResizablePanelGroup`, allowing users to drag and expand the sidebar when reading or writing long critiques.
+- [x] **Glassmorphism Controls:** Dropped native HTML5 video `<controls>` in favor of a custom floating control bar with a `backdrop-blur-md` frosted-glass effect.
+- [x] **Native Tooltips:** Wrapped custom player controls (Play, Pause, Frame Step, Fullscreen) with `@multica/ui`'s native Tooltip component for premium micro-interactions.
+- [x] **Scrubber Animations:** Added a glowing `boxShadow` and hover `scale` animation to single-frame comment dots on the video timeline scrubber.
+
 ---
 
 ## Phase 2 — Marketing & Creative Workflow Features

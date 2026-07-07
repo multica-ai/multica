@@ -101,10 +101,10 @@ export function ReviewAssetsList({ workspaceId, issueId, onOpenAsset }: ReviewAs
             isError={uploadAsset.isError}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg p-10 bg-gray-50/50">
-            <Video className="w-10 h-10 text-gray-400 mb-3" />
-            <h3 className="text-sm font-semibold text-gray-700">No media reviews yet</h3>
-            <p className="text-xs text-gray-500 mb-4 text-center max-w-sm">
+          <div className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-10 bg-muted/30">
+            <Video className="w-10 h-10 text-muted-foreground mb-3" />
+            <h3 className="text-sm font-semibold text-foreground">No media reviews yet</h3>
+            <p className="text-xs text-muted-foreground mb-4 text-center max-w-sm">
               Upload a video or image to start a timestamped review and collaborate with your team.
             </p>
             <Button size="sm" onClick={() => fileInputRef.current?.click()}>

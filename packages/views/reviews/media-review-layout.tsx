@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MediaReviewPlayer, type MediaReviewPlayerRef } from "./media-review-player";
 import { ReviewCommentSidebar } from "./review-comment-sidebar";
 import { UploadShowcase } from "./upload-showcase";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import type { UploadPhase } from "./upload-showcase";
 
 interface MediaReviewLayoutProps {
@@ -145,9 +146,9 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-black">
+    <div className="flex flex-col h-full w-full bg-background">
       {/* Review Asset Header */}
-      <div className="h-14 border-b border-gray-800 bg-gray-900 flex items-center justify-between px-4 text-white">
+      <div className="h-14 border-b border-border bg-muted/20 flex items-center justify-between px-4 text-foreground">
         <div className="flex items-center gap-4">
           <div className="font-medium text-sm">{asset.name}</div>
           
@@ -222,8 +223,8 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
       </div>
 
       {/* Review Content */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 relative overflow-auto">
+      <ResizablePanelGroup direction="horizontal" className="flex-1 w-full overflow-hidden">
+        <ResizablePanel defaultSize={75} minSize={50} className="relative bg-black flex flex-col overflow-auto">
           {/* Upload showcase overlaid above player while uploading a new version */}
           {uploadFile && (uploadAsset.isPending || uploadAsset.isSuccess || uploadAsset.isError) && (
             <div className="absolute inset-x-0 top-0 z-20 p-4">
@@ -246,8 +247,11 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
             onSelectComment={setSelectedCommentId}
             onDrawingShapeChange={setDrawingShape}
           />
-        </div>
-        <div className="w-80 h-full border-l border-gray-800 bg-white">
+        </ResizablePanel>
+        
+        <ResizableHandle withHandle className="bg-border" />
+        
+        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="bg-background">
           <ReviewCommentSidebar
             workspaceId={workspaceId}
             asset={asset}
@@ -262,8 +266,8 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
             clearCanvasShapes={clearCanvasShapes}
             drawingShape={drawingShape}
           />
-        </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
         <AlertDialogContent>

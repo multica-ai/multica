@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
+import { Play, Pause, Maximize2, SkipBack, SkipForward } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import type { ReviewAsset, ReviewComment } from "@multica/core/types";
 
 export interface MediaReviewPlayerProps {
@@ -191,23 +193,51 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
     }
   };
 
+  const [isPlaying, setIsPlaying] = useState(false);
+  const handlePlayPause = () => {
+    if (!mediaRef.current || asset.asset_type !== "video") return;
+    const video = mediaRef.current as HTMLVideoElement;
+    if (video.paused) video.play();
+    else video.pause();
+  };
+
+  const handleFullscreen = () => {
+    if (containerRef.current) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        containerRef.current.requestFullscreen();
+      }
+    }
+  };
+
+  const stepFrame = (frames: number) => {
+    if (!mediaRef.current || asset.asset_type !== "video") return;
+    const video = mediaRef.current as HTMLVideoElement;
+    // Assume 30fps for stepping
+    video.currentTime = Math.max(0, Math.min(asset.duration || 0, video.currentTime + (frames * (1/30))));
+  };
+
   return (
-    <div 
-      ref={containerRef} 
-      className="relative w-full h-full bg-gray-950/80 overflow-hidden flex items-center justify-center select-none rounded-md outline-none"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-    >
-      {asset.asset_type === "video" ? (
-        <video
-          ref={mediaRef as React.RefObject<HTMLVideoElement>}
-          src={asset.src_url}
-          className="absolute inset-0 w-full h-full object-contain shadow-lg rounded-sm"
-          controls
-          onLoadedMetadata={calculateTrueLayout}
-          onTimeUpdate={handleTimeUpdate}
-        />
-      ) : (
+    <TooltipProvider>
+      <div 
+        ref={containerRef} 
+        className="relative w-full h-full overflow-hidden flex items-center justify-center select-none rounded-md outline-none bg-black group"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+      >
+        {asset.asset_type === "video" ? (
+          <video
+            ref={mediaRef as React.RefObject<HTMLVideoElement>}
+            src={asset.src_url}
+            className="absolute inset-0 w-full h-full object-contain shadow-lg rounded-sm"
+            onLoadedMetadata={calculateTrueLayout}
+            onTimeUpdate={handleTimeUpdate}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onClick={handlePlayPause}
+          />
+        ) : (
         <img
           ref={mediaRef as React.RefObject<HTMLImageElement>}
           src={asset.src_url}
@@ -295,8 +325,9 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
                   width: `${((comment.end_time! - comment.start_time!) / asset.duration!) * 100}%`,
                   minWidth: '6px',
                   backgroundColor: color,
-                  borderRadius: '2px',
-                  boxShadow: isSelected ? `0 0 12px ${color}` : undefined
+                  borderRadius: '3px',
+                  boxShadow: isSelected ? `0 0 12px ${color}` : `0 0 6px ${color}80`,
+                  transformOrigin: 'bottom'
                 }}
                 title={comment.content}
                 onClick={(e) => {
@@ -309,7 +340,52 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
               />
             )})}
         </div>
+        </div>
+      )}
+
+      {/* Glassmorphism Custom Controls (only for video) */}
+      {asset.asset_type === "video" && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full backdrop-blur-md bg-background/80 border border-border/50 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => stepFrame(-1)} className="p-1.5 hover:bg-muted rounded-full text-foreground transition-colors">
+                <SkipBack className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Frame Back</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={handlePlayPause} className="p-2 bg-foreground text-background hover:scale-105 rounded-full transition-transform">
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{isPlaying ? "Pause" : "Play"}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => stepFrame(1)} className="p-1.5 hover:bg-muted rounded-full text-foreground transition-colors">
+                <SkipForward className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Frame Forward</TooltipContent>
+          </Tooltip>
+
+          <div className="w-px h-4 bg-border mx-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={handleFullscreen} className="p-1.5 hover:bg-muted rounded-full text-foreground transition-colors">
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Fullscreen</TooltipContent>
+          </Tooltip>
+        </div>
       )}
     </div>
+    </TooltipProvider>
   );
 });

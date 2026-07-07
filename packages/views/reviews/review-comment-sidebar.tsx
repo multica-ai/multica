@@ -79,11 +79,12 @@ export function ReviewCommentSidebar({
   };
 
   return (
-    <div className="flex flex-col w-80 border-l border-gray-800 bg-gray-900 h-full overflow-hidden">
-      <div className="p-4 border-b border-gray-800 font-semibold text-gray-200 flex justify-between items-center">
+    <div className="flex flex-col h-full bg-background text-foreground relative">
+      {/* Header */}
+      <div className="p-4 border-b border-border shrink-0 font-semibold flex justify-between items-center">
         <span>Review Comments</span>
         <select 
-          className="text-xs border-gray-700 bg-gray-800 rounded text-gray-300 focus:ring-blue-500"
+          className="text-xs border border-border bg-background rounded p-1"
           value={filter}
           onChange={(e) => setFilter(e.target.value as any)}
         >
