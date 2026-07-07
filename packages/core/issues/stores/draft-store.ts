@@ -13,6 +13,10 @@ interface IssueDraft {
   assigneeId?: string;
   startDate: string | null;
   dueDate: string | null;
+  /** Label IDs chosen in the create dialog. Attached to the issue right
+   *  after it is created (the create endpoint takes no labels), so they are
+   *  kept as a plain id list rather than full Label objects. */
+  labelIds: string[];
   attachments: Attachment[];
 }
 
@@ -25,6 +29,7 @@ const EMPTY_DRAFT: IssueDraft = {
   assigneeId: undefined,
   startDate: null,
   dueDate: null,
+  labelIds: [],
   attachments: [],
 };
 

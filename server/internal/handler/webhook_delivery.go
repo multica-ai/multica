@@ -227,6 +227,9 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if !h.requireAutopilotWrite(w, r, autopilot, workspaceID) {
+		return
+	}
 	original, ok := h.loadDeliveryForAutopilot(w, r, autopilot, deliveryID)
 	if !ok {
 		return

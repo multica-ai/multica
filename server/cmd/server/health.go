@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -163,7 +164,17 @@ func (h *serverHealth) computeReadiness(parent context.Context) (readinessRespon
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Buffer the payload so we can emit an accurate Content-Length; encoding
+	// straight into the ResponseWriter after WriteHeader would force chunked
+	// transfer encoding and drop the header.
+	body, err := json.Marshal(v)
+	if err != nil {
+		body = []byte(`{"error":"failed to encode response"}`)
+		status = http.StatusInternalServerError
+	}
+	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body)
 }

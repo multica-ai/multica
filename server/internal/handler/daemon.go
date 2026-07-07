@@ -20,8 +20,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1228,6 +1230,22 @@ func requestHasDaemonCapability(r *http.Request, capability string) bool {
 	return false
 }
 
+func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtimeapps.ConnectedApp {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var apps []runtimeapps.ConnectedApp
+	if err := json.Unmarshal(raw, &apps); err != nil {
+		slog.Warn("daemon claim: unmarshal runtime_connected_apps failed",
+			"task_id", uuidToString(taskID),
+			"error", err,
+		)
+		return nil
+	}
+	return apps
+}
+
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
 // The response includes the agent's name and skills, fetched fresh from the DB.
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
@@ -1286,6 +1304,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
+	composioMCPEnabled := h.composioMCPAppsEnabled(r.Context())
+	if composioMCPEnabled {
+		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
+	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasDaemonCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
@@ -1303,6 +1325,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		var mcpConfig json.RawMessage
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
+		// Layer the per-task overlay (set at enqueue from the initiator
+		// user's active integrations — currently Composio) on top of the
+		// agent's saved mcp_config. Overlay wins on server-name collisions
+		// because it carries the live user-scoped session URL. Errors are
+		// logged but never fail the claim: a broken overlay must not prevent
+		// the agent from running with its base config.
+		if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
+			if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+				slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
+			} else {
+				mcpConfig = merged
+			}
 		}
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
@@ -1384,16 +1419,45 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
+			// Squad-leader briefing injection: keyed off the task being a
+			// leader-task (is_leader_task) carrying a squad_id — NOT off the
+			// issue being assigned to a squad. The task flag is stamped at
+			// enqueue time and is true for every ISSUE-BOUND path that routes
+			// work to a squad leader: direct assign-to-squad, comment
+			// @squad-mention (even when the issue itself is assigned to a
+			// plain agent — the MUL-3724 case), sub-issue done callback,
+			// autopilot squad-assignee, and retry-clone inheritance. The old
+			// issue.AssigneeType=="squad" gate missed the comment-mention
+			// path, so the leader booted with zero squad context and
+			// degraded into doing the work itself instead of orchestrating.
+			//
+			// NOTE: quick-create tasks do NOT reach this block — they have a
+			// NULL issue_id (so the enclosing `task.IssueID.Valid` is false)
+			// and do NOT carry is_leader_task / squad_id columns. They route
+			// their squad through the task CONTEXT JSON (QuickCreateContext.
+			// SquadID) and get their briefing from the separate quick-create
+			// branch further below (search `qc.SquadID`). Do not "unify" the
+			// two by deleting that branch: it also sets resp.SquadID /
+			// resp.SquadName so the new issue defaults to the squad assignee,
+			// and there is no issue row to hang this column-based path on.
+			//
+			// We resolve the squad directly from task.SquadID rather than
+			// reverse-looking-up "which squad is this agent the leader of",
+			// which is ambiguous when one agent leads multiple squads. The
+			// uuidToString(squad.LeaderID) == resp.Agent.ID re-check is kept
+			// as a defensive gate: if the squad's leader was swapped after the
+			// task was enqueued, we never feed a stale briefing to a
+			// non-leader. It also doubles as the dangling-squad_id guard: a
+			// squad hard-deleted after enqueue makes GetSquadInWorkspace
+			// return no row (err != nil) — we skip injection silently, which
+			// is exactly the same observable result as "condition not
+			// matched". Claim still succeeds; no stale briefing is emitted.
+			// (No FK on squad_id — see migration 127.) We append (not replace)
+			// so per-agent instructions stay authoritative; the squad briefing
 			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+			if resp.Agent != nil && task.IsLeaderTask && task.SquadID.Valid {
 				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
+					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
@@ -1565,6 +1629,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// Flag a channel-backed session so the daemon makes the agent aware
+			// it is operating inside Slack — read this conversation's history
+			// from the channel via `multica chat history` / `multica chat thread`,
+			// not from Multica (MUL-3871). Empty for a web-only chat session.
+			// ChatInThread tells the agent which command to start with: the
+			// latest trigger was a thread reply iff its reply-target thread
+			// (last_thread_id) differs from its own message id (a top-level
+			// @mention records its own ts as both).
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+				ChatSessionID: cs.ID,
+				ChannelType:   string(slack.TypeSlack),
+			}); berr == nil {
+				resp.ChatChannelType = string(slack.TypeSlack)
+				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+					binding.LastThreadID.String != binding.LastMessageID.String
+			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -2302,6 +2382,24 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
+		// Surface prompt-cache effectiveness per run so cache hit rates are
+		// observable in logs, not just queryable from runtime_usage. The ratio
+		// is cached input over total input-side tokens; a persistently low
+		// value flags a prompt prefix that is not being reused across runs
+		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
+		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+			slog.Info("task prompt-cache usage",
+				"task_id", taskID,
+				"provider", provider,
+				"model", u.Model,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+				"cache_read_tokens", u.CacheReadTokens,
+				"cache_write_tokens", u.CacheWriteTokens,
+				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+			)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

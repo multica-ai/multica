@@ -301,26 +301,200 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
   });
 
-  it("invalidates myAll when the assignee changes (membership may shift)", () => {
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+  it("removes the card from an assignee-filtered list when the assignee changes (membership-aware, no blanket refetch)", () => {
+    const assignedKey = issueKeys.myListSorted(
+      WS_ID,
+      "assigned",
+      { assignee_id: "user-1" },
+      undefined,
+    );
+    const mine: Issue = { ...issueA, assignee_type: "member", assignee_id: "user-1" };
+    qc.setQueryData<ListIssuesCache>(assignedKey, makeListCache(mine));
 
     onIssueUpdated(
       qc,
       WS_ID,
-      { ...issueA, assignee_type: "member", assignee_id: "user-2" },
+      { ...mine, assignee_type: "member", assignee_id: "user-2" },
       { assigneeChanged: true },
+    );
+
+    // The card LEAVES the loaded list surgically — the fix for the residue
+    // that used to wait on a refetch (and on the mutation path never came).
+    const list = qc.getQueryData<ListIssuesCache>(assignedKey);
+    expect(list?.byStatus.todo?.issues).toEqual([]);
+    expect(list?.byStatus.todo?.total).toBe(0);
+    expect(qc.getQueryState(assignedKey)?.isInvalidated).toBe(false);
+  });
+
+  it("flags union-scope (my:all) lists stale on an assignee change instead of guessing membership", () => {
+    const myAllListKey = issueKeys.myListSorted(WS_ID, "all", {}, undefined);
+    const mine: Issue = { ...issueA, assignee_type: "member", assignee_id: "user-1" };
+    qc.setQueryData<ListIssuesCache>(myAllListKey, makeListCache(mine));
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...mine, assignee_type: "member", assignee_id: "user-2" },
+      { assigneeChanged: true },
+    );
+
+    // Union membership (assigned ∪ created ∪ involved) is server knowledge:
+    // the card is patched in place and the list refetches to reconcile.
+    const list = qc.getQueryData<ListIssuesCache>(myAllListKey);
+    expect(list?.byStatus.todo?.issues[0]?.assignee_id).toBe("user-2");
+    expectInvalidated(qc, myAllListKey);
+  });
+
+  it("moves the card out of the old project's list and flags the loaded target list (legacy diff fallback, no server flag)", () => {
+    // issueA.project_id is null; moving it into project-9 must reconcile both
+    // ends. No server flag here — this exercises the legacy cache-diff
+    // fallback that keeps a new frontend working against an older backend.
+    const targetKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-9",
+      { project_id: "project-9" },
+      undefined,
+    );
+    qc.setQueryData<ListIssuesCache>(targetKey, makeListCache());
+
+    onIssueUpdated(qc, WS_ID, { ...issueA, project_id: "project-9" });
+
+    // Never hard-inserted (its page/slot is server knowledge) — the loaded
+    // target list is refetched instead.
+    expect(
+      qc.getQueryData<ListIssuesCache>(targetKey)?.byStatus.todo?.issues,
+    ).toEqual([]);
+    expectInvalidated(qc, targetKey);
+  });
+
+  it("drops the card from the old project's list on a server project_changed flag even when the cached project_id already matches", () => {
+    // Reproduces the drift state behind MUL-3669: the detail cache already
+    // carries the NEW project (e.g. a local optimistic write), so a cache
+    // diff would compute projectChanged=false — the authoritative server
+    // flag must still drive the membership reconcile for any list where the
+    // card lingers.
+    const moved: Issue = { ...issueA, project_id: "project-9" };
+    const oldProjectKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-1",
+      { project_id: "project-1" },
+      undefined,
+    );
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, moved.id), moved);
+    qc.setQueryData<ListIssuesCache>(oldProjectKey, makeListCache(moved));
+
+    onIssueUpdated(qc, WS_ID, moved, { projectChanged: true });
+
+    expect(
+      qc.getQueryData<ListIssuesCache>(oldProjectKey)?.byStatus.todo?.issues,
+    ).toEqual([]);
+  });
+
+  it("does NOT touch project lists when the server flag says project_changed=false (flag overrides the legacy diff)", () => {
+    // No detail/list cache for the issue, so the legacy diff would resolve
+    // oldProjectId=null and fire on the non-null incoming project_id. An explicit
+    // false flag from the server is authoritative and must suppress that.
+    const projectKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-9",
+      { project_id: "project-9" },
+      undefined,
+    );
+    qc.setQueryData<ListIssuesCache>(projectKey, makeListCache());
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...issueA, project_id: "project-9" },
+      { projectChanged: false },
+    );
+
+    expect(qc.getQueryState(projectKey)?.isInvalidated).toBe(false);
+  });
+});
+
+// A board column header shows `byStatus[status].total`. On a status change the
+// surgical patch shifts both bucket totals — but only if it can find the card in
+// a loaded page. A paginated column loads just its first page, so an off-screen
+// issue (very common when an agent flips the status of something the viewer
+// never scrolled to) is absent: patchIssueInBuckets no-ops and the count would
+// silently drift, with no refetch to recover it. The status-changed no-op has to
+// fall back to a single-list refetch.
+describe("onIssueUpdated — off-screen status change reconciles column counts", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("refetches the workspace list when a status-changed issue is not in the loaded page", () => {
+    // First page only: the totals say these columns have items, but the issues
+    // arrays are the loaded window — the moved issue lives beyond it.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
+    );
+
+    expectInvalidated(qc, issueKeys.list(WS_ID));
+  });
+
+  it("refetches the filtered myAll list under the same condition", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
     );
 
     expectInvalidated(qc, issueKeys.myAll(WS_ID));
   });
 
-  it("invalidates myAll when the project changes (Project board membership)", () => {
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+  it("does NOT refetch when the status-changed issue is loaded (surgical patch suffices)", () => {
+    const loaded: Issue = { ...baseIssue, id: "loaded", status: "in_review" };
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [loaded], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
 
-    // issueA.project_id is null; moving it into a project shifts Project-board membership.
-    onIssueUpdated(qc, WS_ID, { ...issueA, project_id: "project-9" });
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...loaded, status: "done" },
+      { statusChanged: true },
+    );
 
-    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.done?.total).toBe(61);
+    // Reconciled in place — the no-flicker fast path from #4415 must hold.
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+
+  it("does NOT refetch an absent issue when the status did not change", () => {
+    // A title/label edit of an off-screen issue cannot affect any count, so it
+    // must not trigger a fallback refetch.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(qc, WS_ID, { id: "off-screen", title: "renamed" });
+
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
   });
 });
 

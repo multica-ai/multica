@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -16,15 +16,21 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
-import { useCreateFeedback, useFeedbackDraftStore } from "@multica/core/feedback";
+import {
+  useCreateFeedback,
+  useFeedbackDraftStore,
+  FEEDBACK_KINDS,
+  type FeedbackKind,
+} from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { captureFeedbackOpened } from "@multica/core/analytics";
 import { useT } from "../i18n";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 
 const MAX_MESSAGE_LEN = 10000;
+
+const FEEDBACK_KIND_SET = new Set<FeedbackKind>(FEEDBACK_KINDS);
 
 function composeFeedbackInitialMessage(draftMessage: string, incomingInitialMessage: string) {
   const draft = draftMessage.trim();
@@ -57,6 +63,9 @@ export function FeedbackModal({
   const editorRef = useRef<ContentEditorRef>(null);
   const incomingInitialMessage =
     initialMessage ?? (typeof data?.initialMessage === "string" ? data.initialMessage : "");
+  const kind = typeof data?.kind === "string" && FEEDBACK_KIND_SET.has(data.kind as FeedbackKind)
+    ? (data.kind as FeedbackKind)
+    : undefined;
   const seededMessage = composeFeedbackInitialMessage(draft.message, incomingInitialMessage);
   const [message, setMessage] = useState(seededMessage);
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -64,15 +73,6 @@ export function FeedbackModal({
   });
   const { uploadWithToast } = useFileUpload(api);
   const mutation = useCreateFeedback();
-
-  // Fire the "modal opened" analytics event once per mount. Pairs with
-  // the backend's `feedback_submitted` to give a funnel completion rate.
-  // Workspace id is captured from the closure at mount time — the modal
-  // is short-lived, so there's no meaningful workspace switch to track.
-  useEffect(() => {
-    captureFeedbackOpened("help_menu", workspace?.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const canSubmit =
     message.trim().length > 0 &&
@@ -99,6 +99,7 @@ export function FeedbackModal({
         message: latest,
         url: typeof window !== "undefined" ? window.location.href : undefined,
         workspace_id: workspace?.id,
+        kind,
       });
       clearDraft();
       toast.success(t(($) => $.feedback.toast_sent));
@@ -153,6 +154,7 @@ export function FeedbackModal({
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
           <FileUploadButton
             size="sm"
+            multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>

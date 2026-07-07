@@ -91,6 +91,24 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("searchIssues", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ issues: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("searchProjects", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ projects: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "roadmap" });
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+  });
+
   describe("listAutopilots", () => {
     const baseAutopilot = {
       id: "ap-1",
@@ -160,6 +178,7 @@ describe("ApiClient schema fallback", () => {
         daemon_server_url: { wrong: "shape" },
         daemon_app_url: 123,
         workspace_creation_disabled: false,
+        feature_flags: { composio_mcp_apps: true },
       });
       const client = new ApiClient("https://api.example.test");
       const config = await client.getConfig();
@@ -167,6 +186,7 @@ describe("ApiClient schema fallback", () => {
       expect(config.allow_signup).toBe(true);
       expect(config.daemon_server_url).toBeUndefined();
       expect(config.daemon_app_url).toBeUndefined();
+      expect(config.feature_flags?.composio_mcp_apps).toBe(true);
     });
   });
 

@@ -123,23 +123,17 @@ func (s stubReplierQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Ag
 	return s.agent, nil
 }
 
-// stubBindingMint is a minimal TxStarter stand-in: the real
-// BindingTokenService.Mint calls qx.CreateLarkBindingToken on the
-// non-tx queries handle when no transaction is started by the caller.
-// We bypass that path by constructing a BindingTokenService with a
-// fake DB query interface — but since BindingTokenService is a
-// concrete struct around *db.Queries, the cleanest seam in tests is
-// to swap the replier's bindingSvc field for a fake that satisfies
-// the narrow Mint method via an in-package alias.
+type fakeBindingMinter struct {
+	raw string
+	err error
+}
 
-// fakeBindingMinter substitutes for BindingTokenService.Mint in tests
-// — we cannot construct a real BindingTokenService without a live
-// *db.Queries, but the replier only calls .Mint on it, so a typed
-// wrapper around a function works.
-//
-// We monkey-patch by exposing a package-level seam on the replier in
-// the test file: the production path uses bindingSvc directly; the
-// test path wraps the replier so Reply can be exercised end-to-end.
+func (f fakeBindingMinter) Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, openID OpenID) (BindingToken, error) {
+	if f.err != nil {
+		return BindingToken{}, f.err
+	}
+	return BindingToken{Raw: f.raw}, nil
+}
 
 // TestLarkOutcomeReplierFallsBackToNoopWhenStubAPI ensures the
 // production replier downgrades to noop when the supplied APIClient
@@ -154,7 +148,7 @@ func TestLarkOutcomeReplierFallsBackToNoopWhenStubAPI(t *testing.T) {
 		BindingSvc:  &BindingTokenService{}, // not nil so we exercise the IsConfigured guard
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 	if _, isNoop := rep.(*noopReplier); !isNoop {
@@ -195,7 +189,7 @@ func TestLarkOutcomeReplierAgentOfflineSendsCard(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{agent: db.Agent{Name: "Trump"}},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 	inst := Installation{AppID: "cli_x"}
@@ -230,7 +224,7 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_chat_arch"}
@@ -255,7 +249,7 @@ func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_x"}
@@ -280,7 +274,7 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 	// Should NOT panic.
@@ -291,6 +285,48 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 // engine Router skips reply scheduling entirely when no OutboundReplier is
 // registered (boot registers one only when larkClient.IsConfigured()), and
 // NewLarkOutcomeReplier still falls back to its own noop when unconfigured.
+
+func TestLarkOutcomeReplierUsesAppURLForWebLinks(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  fakeBindingMinter{raw: "token with space"},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		AppURL:      "https://app.multica.test/",
+		Logger:      log,
+	})
+
+	inst := Installation{AppID: "cli_x"}
+	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
+	inst.WorkspaceID = mustUUID("33333333-3333-3333-3333-333333333333")
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat", SenderOpenID: "ou_user"},
+		DispatchResult{Outcome: OutcomeNeedsBinding, SenderOpenID: "ou_user"})
+	rep.Reply(context.Background(), inst, InboundMessage{ChatID: "oc_chat", SenderOpenID: "ou_user"},
+		DispatchResult{
+			Outcome:         OutcomeIngested,
+			IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+			IssueNumber:     42,
+			IssueIdentifier: "MUL-42",
+		})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.bindingCalls) != 1 {
+		t.Fatalf("expected one binding prompt, got %d", len(stub.bindingCalls))
+	}
+	if got := stub.bindingCalls[0].BindURL; got != "https://app.multica.test/lark/bind?token=token+with+space" {
+		t.Fatalf("binding URL should use AppURL; got %q", got)
+	}
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one issue-created text, got %d", len(stub.textOut))
+	}
+	if !strings.Contains(stub.textOut[0].Text, "https://app.multica.test/issues/MUL-42") {
+		t.Fatalf("issue-created text should use AppURL; got %q", stub.textOut[0].Text)
+	}
+}
 
 // TestLarkOutcomeReplierIssueCreatedSendsConfirmation pins the
 // recovered /issue confirmation path. Before the plain-text refactor
@@ -310,7 +346,7 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 
@@ -364,7 +400,7 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 
@@ -398,7 +434,7 @@ func TestLarkOutcomeReplierIssueCreatedThreadFallback(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 
@@ -435,7 +471,7 @@ func TestLarkOutcomeReplierIssueCreatedNoFallbackOnAmbiguous(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 
@@ -467,7 +503,7 @@ func TestLarkOutcomeReplierNoticeThreadFallback(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{agent: db.Agent{Name: "Trump"}},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 
@@ -497,7 +533,7 @@ func TestLarkOutcomeReplierNoticeNoFallbackOnAmbiguous(t *testing.T) {
 		BindingSvc:  &BindingTokenService{},
 		Credentials: stubCredentialsResolver{secret: "s"},
 		Queries:     stubReplierQueries{},
-		PublicURL:   "https://multica.test",
+		AppURL:      "https://multica.test",
 		Logger:      log,
 	})
 

@@ -229,7 +229,8 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 - `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
   —— 已派发一次 run。
 - `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
-  —— 受派智能体的 runtime 离线，记为 `skipped` run。
+  —— 对 `run_only` Autopilot，受派智能体的 runtime 离线且不会入队；
+  `create_issue` Autopilot 仍会创建可追踪 issue，等 runtime 回来后继续认领。
 - `{"status":"ignored","reason":"trigger_disabled"}` —— 触发器已禁用。
 - `{"status":"ignored","reason":"autopilot_paused"}` —— Autopilot 已暂停。
 - `{"status":"ignored","reason":"autopilot_archived"}` —— Autopilot 已归档。

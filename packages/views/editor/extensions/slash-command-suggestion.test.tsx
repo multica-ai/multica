@@ -59,6 +59,8 @@ function agent(overrides: Partial<Agent>): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [{ target_type: "workspace", target_id: null }],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
@@ -86,7 +88,11 @@ function fakeQc(data: {
 
 function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   const config = createSlashCommandSuggestion(qc);
-  return config.items!({ query, editor: {} as never }) as SlashCommandItem[];
+  return config.items!({
+    query,
+    editor: {} as never,
+    signal: new AbortController().signal,
+  }) as SlashCommandItem[];
 }
 
 describe("slash command suggestion items", () => {
@@ -228,6 +234,8 @@ describe("slash command suggestion items", () => {
         agent({
           id: "private-agent",
           visibility: "private",
+          permission_mode: "private",
+          invocation_targets: [],
           owner_id: "u2",
           skills: [{ id: "private-skill", name: "secret", description: "" }],
         }),
@@ -305,6 +313,54 @@ describe("SlashCommandList keyboard handling", () => {
       }),
     ).toBe(true);
     expect(command).toHaveBeenCalledWith(selectableItems[0]);
+  });
+
+  // MUL-3685: plain Tab accepts the highlighted item like Enter; Shift+Tab and
+  // modifier+Tab fall through so reverse focus / OS switching are preserved.
+  it("accepts the highlighted item on plain Tab, ignoring Shift/modifier+Tab", () => {
+    const ref = createRef<SlashCommandListRef>();
+    const command = vi.fn();
+    const selectableItems: SlashCommandItem[] = [
+      { id: "s1", label: "deploy", description: "Ship changes" },
+      { id: "s2", label: "review", description: "Review code" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <SlashCommandList
+          ref={ref}
+          items={selectableItems}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) =>
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+
+    expect(press({ key: "Tab", shiftKey: true })).toBe(false);
+    expect(press({ key: "Tab", metaKey: true })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+
+    expect(press({ key: "Tab" })).toBe(true);
+    expect(command).toHaveBeenCalledWith(selectableItems[0]);
+  });
+
+  it("lets Tab fall through when there are no selectable items, like Enter", () => {
+    const ref = createRef<SlashCommandListRef>();
+
+    render(
+      <I18nWrapper>
+        <SlashCommandList ref={ref} items={[]} query="" command={vi.fn()} />
+      </I18nWrapper>,
+    );
+
+    expect(
+      ref.current?.onKeyDown({
+        event: new KeyboardEvent("keydown", { key: "Tab" }),
+      }),
+    ).toBe(false);
   });
 });
 

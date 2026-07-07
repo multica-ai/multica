@@ -15,14 +15,18 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  InboxWorkspaceUnread,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
   Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
+import type { CreateFeedbackResponse } from "../feedback/types";
 
 export interface AppConfigResponse {
   cdn_domain: string;
@@ -39,6 +43,7 @@ export interface AppConfigResponse {
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+  feature_flags?: Record<string, boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +173,14 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
     z.boolean().default(fallback),
   );
 
+const FeatureFlagsSchema = z.preprocess(
+  (value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : undefined,
+  z.record(z.string(), BooleanWithDefaultSchema(false)).default({}),
+);
+
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
   cdn_signed: BooleanWithDefaultSchema(false),
@@ -179,6 +192,7 @@ export const AppConfigSchema = z.object({
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  feature_flags: FeatureFlagsSchema,
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -189,6 +203,17 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+  feature_flags: {},
+};
+
+export const CreateFeedbackResponseSchema = z.object({
+  id: z.string(),
+  created_at: z.string(),
+}).loose();
+
+export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
+  id: "",
+  created_at: "",
 };
 
 export const CommentSchema = z.object({
@@ -272,6 +297,55 @@ export const ListIssuesResponseSchema = z.object({
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
+  total: 0,
+};
+
+const SearchIssueResultSchema = IssueSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+  matched_description_snippet: z.string().optional(),
+  matched_comment_snippet: z.string().optional(),
+}).loose();
+
+export const SearchIssuesResponseSchema = z.object({
+  issues: z.array(SearchIssueResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
+  issues: [],
+  total: 0,
+};
+
+const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  icon: z.string().nullable(),
+  status: z.string(),
+  priority: z.string(),
+  lead_type: z.string().nullable(),
+  lead_id: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  issue_count: z.number().default(0),
+  done_count: z.number().default(0),
+  resource_count: z.number().default(0),
+}).loose();
+
+const SearchProjectResultSchema = ProjectSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+}).loose();
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
   total: 0,
 };
 
@@ -573,13 +647,45 @@ export const EMPTY_AGENT_TEMPLATE_DETAIL: AgentTemplate = {
   instructions: "",
 };
 
+// ---------------------------------------------------------------------------
+// Agent invocation permissions (MUL-3963)
+//
+// Full agent request/response payloads are NOT zod-validated today — the API
+// client returns them typed directly (see client.ts `listAgents` /
+// `getAgent` / `createAgent`), so there is no `AgentSchema` /
+// `CreateAgentRequestSchema` / `UpdateAgentRequestSchema` to extend here.
+// These lenient, exported fragments encode the new permission fields so any
+// future agent schema — and the from-template minimal agent below — can reuse
+// them. Per this file's convention the enum stays lenient (a future
+// server-side value degrades to the strict default rather than failing the
+// parse), and the target array defaults to `[]`.
+// ---------------------------------------------------------------------------
+
+export const AgentPermissionModeSchema = z
+  .enum(["private", "public_to"])
+  .catch("private");
+
+export const AgentInvocationTargetSchema = z
+  .object({
+    target_type: z.string(),
+    target_id: z.string().nullable().optional().transform((v) => v ?? null),
+  })
+  .loose();
+
+export const AgentInvocationTargetsSchema = z
+  .array(AgentInvocationTargetSchema)
+  .default([]);
+
 // `agent` is a full Agent record — schematising every field would duplicate
 // a 50-field interface and bit-rot fast. We keep it loose and require only
 // `id`, the one field the create-from-template flow consumes (used to
 // navigate to the new agent's detail page). Downstream code already
-// optional-chains the rest.
+// optional-chains the rest. The permission fields are parsed leniently when
+// present so the from-template response carries a well-formed access shape.
 const MinimalAgentSchema = z.object({
   id: z.string(),
+  permission_mode: AgentPermissionModeSchema.optional(),
+  invocation_targets: AgentInvocationTargetsSchema.optional(),
 }).loose();
 
 export const CreateAgentFromTemplateResponseSchema = z.object({
@@ -788,6 +894,10 @@ const AutopilotListItemSchema = z.object({
   trigger_kinds: z.array(z.string()).optional(),
   next_run_at: z.string().nullable().optional(),
   last_run_status: z.string().nullable().optional(),
+  // Per-caller write capability; absent on older servers (treated as unknown).
+  can_write: z.boolean().optional(),
+  // Narrower per-caller access-management capability (detail endpoint only).
+  can_manage_access: z.boolean().optional(),
 }).loose();
 
 export const ListAutopilotsResponseSchema = z.object({
@@ -862,6 +972,25 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+// ---------------------------------------------------------------------------
+// Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).
+// One entry per workspace the user belongs to that has unread items; the
+// sidebar derives the workspace-switcher dot from it. Lenient per the usual
+// rules so a future field addition can't blank the dot — on malformed JSON
+// parseWithFallback returns the empty list, which simply hides the dot.
+// ---------------------------------------------------------------------------
+
+export const InboxUnreadSummarySchema = z.array(
+  z
+    .object({
+      workspace_id: z.string(),
+      count: z.number(),
+    })
+    .loose(),
+);
+
+export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
 // ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)

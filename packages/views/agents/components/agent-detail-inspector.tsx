@@ -45,8 +45,9 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
-import { VisibilityPicker } from "./inspector/visibility-picker";
+import { AccessPicker } from "./inspector/access-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
+import { SlackAgentBindButton } from "../../settings/components/slack-tab";
 
 interface InspectorProps {
   agent: Agent;
@@ -150,10 +151,22 @@ export function AgentDetailInspector({
           onChange={(v) => update({ thinking_level: v })}
         />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-          <VisibilityPicker
-            value={agent.visibility}
-            canEdit={canEdit}
-            onChange={(v) => update({ visibility: v })}
+          <AccessPicker
+            permissionMode={agent.permission_mode}
+            invocationTargets={agent.invocation_targets}
+            visibility={agent.visibility}
+            members={members}
+            // Access is OWNER-ONLY (MUL-3963): a workspace admin can edit other
+            // agent properties (canEdit) but NOT who may run the agent. Gate the
+            // picker on ownership specifically so non-owners get the read-only
+            // state instead of a control the backend would reject with 403.
+            canEdit={
+              currentUserId !== null && agent.owner_id === currentUserId
+            }
+            hasComposioAllowlist={
+              (agent.composio_toolkit_allowlist ?? []).length > 0
+            }
+            onChange={(next) => update(next)}
           />
         </PropRow>
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
@@ -215,13 +228,12 @@ export function AgentDetailInspector({
       </div>
 
       {/* Integrations — surfaces external-channel bind entry points
-          (Lark Bot today; Slack / Discord in the future). The bind
-          button self-hides when the server-side device-flow install
-          capability gate is closed, so this section may render empty
-          on deployments without a configured Lark app — that's
-          intentional and matches the "don't surface a flow that will
-          fail" guarantee. We only mount it for editors: viewers
-          shouldn't see a CTA they can't action. */}
+          (Lark + Slack today; Discord in the future). Each bind button
+          self-hides when its server-side install capability gate is
+          closed, so this section may render empty on deployments without
+          a configured channel — that's intentional and matches the
+          "don't surface a flow that will fail" guarantee. We only mount
+          it for editors: viewers shouldn't see a CTA they can't action. */}
       {canEdit && (
         <div className="flex flex-col px-5 py-4">
           <div className="mb-2 flex items-center gap-2">
@@ -231,6 +243,11 @@ export function AgentDetailInspector({
           </div>
           <div className="flex flex-wrap gap-2">
             <LarkAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              onShowConnectedDetails={onShowIntegrations}
+            />
+            <SlackAgentBindButton
               agentId={agent.id}
               agentName={agent.name}
               onShowConnectedDetails={onShowIntegrations}

@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAutopilotCollaborator = `-- name: AddAutopilotCollaborator :one
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (autopilot_id, user_type, user_id)
+    DO UPDATE SET granted_by = EXCLUDED.granted_by
+RETURNING autopilot_id, user_type, user_id, granted_by, created_at
+`
+
+type AddAutopilotCollaboratorParams struct {
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	UserType    string      `json:"user_type"`
+	UserID      pgtype.UUID `json:"user_id"`
+	GrantedBy   pgtype.UUID `json:"granted_by"`
+}
+
+// Re-granting an existing collaborator is a no-op that refreshes granted_by,
+// so the call is idempotent from the API boundary.
+func (q *Queries) AddAutopilotCollaborator(ctx context.Context, arg AddAutopilotCollaboratorParams) (AutopilotCollaborator, error) {
+	row := q.db.QueryRow(ctx, addAutopilotCollaborator,
+		arg.AutopilotID,
+		arg.UserType,
+		arg.UserID,
+		arg.GrantedBy,
+	)
+	var i AutopilotCollaborator
+	err := row.Scan(
+		&i.AutopilotID,
+		&i.UserType,
+		&i.UserID,
+		&i.GrantedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const addAutopilotSubscriber = `-- name: AddAutopilotSubscriber :exec
 INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
 VALUES ($1, $2, $3)
@@ -43,6 +78,17 @@ type AdvanceTriggerNextRunParams struct {
 
 func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerNextRunParams) error {
 	_, err := q.db.Exec(ctx, advanceTriggerNextRun, arg.ID, arg.NextRunAt)
+	return err
+}
+
+const archiveAutopilot = `-- name: ArchiveAutopilot :exec
+UPDATE autopilot
+SET status = 'archived', updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, archiveAutopilot, id)
 	return err
 }
 
@@ -176,7 +222,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps
 `
 
 type CreateAutopilotTaskParams struct {
@@ -229,6 +275,12 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.InitiatorUserID,
 		&i.HandoffNote,
 		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
 	)
 	return i, err
 }
@@ -292,12 +344,30 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 	return i, err
 }
 
-const deleteAutopilot = `-- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1
+const deleteAutopilotCollaborator = `-- name: DeleteAutopilotCollaborator :exec
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1 AND user_type = $2 AND user_id = $3
 `
 
-func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAutopilot, id)
+type DeleteAutopilotCollaboratorParams struct {
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	UserType    string      `json:"user_type"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteAutopilotCollaborator(ctx context.Context, arg DeleteAutopilotCollaboratorParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotCollaborator, arg.AutopilotID, arg.UserType, arg.UserID)
+	return err
+}
+
+const deleteAutopilotCollaboratorsForAutopilot = `-- name: DeleteAutopilotCollaboratorsForAutopilot :exec
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1
+`
+
+// Application-layer cleanup run inside the autopilot delete transaction.
+func (q *Queries) DeleteAutopilotCollaboratorsForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotCollaboratorsForAutopilot, autopilotID)
 	return err
 }
 
@@ -584,6 +654,88 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 	return i, err
 }
 
+const isAutopilotCollaborator = `-- name: IsAutopilotCollaborator :one
+SELECT EXISTS (
+    SELECT 1 FROM autopilot_collaborator
+    WHERE autopilot_id = $1 AND user_type = 'member' AND user_id = $2
+) AS is_collaborator
+`
+
+type IsAutopilotCollaboratorParams struct {
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) IsAutopilotCollaborator(ctx context.Context, arg IsAutopilotCollaboratorParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isAutopilotCollaborator, arg.AutopilotID, arg.UserID)
+	var is_collaborator bool
+	err := row.Scan(&is_collaborator)
+	return is_collaborator, err
+}
+
+const listAutopilotCollaborators = `-- name: ListAutopilotCollaborators :many
+
+SELECT autopilot_id, user_type, user_id, granted_by, created_at FROM autopilot_collaborator
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC
+`
+
+// =====================
+// Autopilot Collaborators
+// =====================
+// ORDER BY created_at keeps row rendering stable across refreshes.
+func (q *Queries) ListAutopilotCollaborators(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotCollaborator, error) {
+	rows, err := q.db.Query(ctx, listAutopilotCollaborators, autopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotCollaborator{}
+	for rows.Next() {
+		var i AutopilotCollaborator
+		if err := rows.Scan(
+			&i.AutopilotID,
+			&i.UserType,
+			&i.UserID,
+			&i.GrantedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAutopilotIDsForCollaborator = `-- name: ListAutopilotIDsForCollaborator :many
+SELECT autopilot_id FROM autopilot_collaborator
+WHERE user_type = 'member' AND user_id = $1
+`
+
+// Powers the per-row can_write flag on the list endpoint without an N+1.
+func (q *Queries) ListAutopilotIDsForCollaborator(ctx context.Context, userID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAutopilotIDsForCollaborator, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var autopilot_id pgtype.UUID
+		if err := rows.Scan(&autopilot_id); err != nil {
+			return nil, err
+		}
+		items = append(items, autopilot_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at FROM autopilot_run
 WHERE autopilot_id = $1
@@ -738,7 +890,10 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND ($2::text IS NULL OR a.status = $2)
+  AND (
+    ($2::text IS NULL AND a.status <> 'archived')
+    OR a.status = $2
+  )
 ORDER BY a.created_at DESC
 `
 
@@ -836,7 +991,8 @@ type ListSchedulableAutopilotTriggersRow struct {
 // last_fired_at is read so the planner hook can anchor cold-start
 // enumeration on the most recent successful fire (set by either the
 // legacy goroutine before the new scheduler took over, or the new
-// scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+// scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+// back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
 // a trigger that was created days ago and fired by the legacy code
 // looks like a brand-new trigger to the new scheduler on first tick
 // and the half-open `(created_at, now]` enumeration replays the most

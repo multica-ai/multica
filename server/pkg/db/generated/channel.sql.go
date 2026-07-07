@@ -191,9 +191,9 @@ func (q *Queries) CreateChannelBindingToken(ctx context.Context, arg CreateChann
 const createChannelChatSessionBinding = `-- name: CreateChannelChatSessionBinding :one
 
 INSERT INTO channel_chat_session_binding (
-    chat_session_id, installation_id, channel_type, channel_chat_id, chat_type
+    chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at
 `
@@ -204,11 +204,18 @@ type CreateChannelChatSessionBindingParams struct {
 	ChannelType    string      `json:"channel_type"`
 	ChannelChatID  string      `json:"channel_chat_id"`
 	ChatType       string      `json:"chat_type"`
+	Config         []byte      `json:"config"`
 }
 
 // =====================
 // channel_chat_session_binding
 // =====================
+// channel_chat_id is the session-isolation key (one chat_session per
+// (installation_id, channel_chat_id)): Feishu passes the chat id; Slack passes
+// a stable key that, for channels, includes the thread root so each @bot thread
+// is its own session. config carries any platform-specific outbound routing the
+// key alone does not (e.g. Slack's real channel_id when the key is composite);
+// it is opaque to the shared session service.
 func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg CreateChannelChatSessionBindingParams) (ChannelChatSessionBinding, error) {
 	row := q.db.QueryRow(ctx, createChannelChatSessionBinding,
 		arg.ChatSessionID,
@@ -216,6 +223,7 @@ func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg Creat
 		arg.ChannelType,
 		arg.ChannelChatID,
 		arg.ChatType,
+		arg.Config,
 	)
 	var i ChannelChatSessionBinding
 	err := row.Scan(
@@ -342,6 +350,22 @@ func (q *Queries) CreateChannelUserBinding(ctx context.Context, arg CreateChanne
 	return i, err
 }
 
+const deleteChannelBindingTokensByInstallation = `-- name: DeleteChannelBindingTokensByInstallation :exec
+DELETE FROM channel_binding_token
+WHERE installation_id = $1
+`
+
+// Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+// every pending binding token for an installation that is being hard-deleted.
+// A token stays redeemable for up to 15 min; without this a user who clicks a
+// still-unexpired bind link right after the bot was rebound to another agent
+// would consume the token and get a "bound" result written against a deleted
+// installation — a link that never actually reaches the live bot.
+func (q *Queries) DeleteChannelBindingTokensByInstallation(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelBindingTokensByInstallation, installationID)
+	return err
+}
+
 const deleteChannelChatSessionBindingBySession = `-- name: DeleteChannelChatSessionBindingBySession :exec
 DELETE FROM channel_chat_session_binding
 WHERE chat_session_id = $1
@@ -351,6 +375,46 @@ WHERE chat_session_id = $1
 // CASCADE): drop the binding when its chat_session is deleted.
 func (q *Queries) DeleteChannelChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteChannelChatSessionBindingBySession, chatSessionID)
+	return err
+}
+
+const deleteChannelChatSessionBindingsByInstallation = `-- name: DeleteChannelChatSessionBindingsByInstallation :exec
+DELETE FROM channel_chat_session_binding
+WHERE installation_id = $1 AND channel_type = $2
+`
+
+type DeleteChannelChatSessionBindingsByInstallationParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelType    string      `json:"channel_type"`
+}
+
+// Retire every chat-session binding for an installation. Used when an
+// installation is re-pointed to a different agent (Slack re-connect): each
+// existing chat_session is permanently tied to the agent it was created under,
+// so reusing it would keep routing the conversation to the OLD agent. Dropping
+// the bindings forces the next inbound message to create a fresh session under
+// the new agent. The chat_session rows are preserved for history; only the
+// channel binding is removed.
+func (q *Queries) DeleteChannelChatSessionBindingsByInstallation(ctx context.Context, arg DeleteChannelChatSessionBindingsByInstallationParams) error {
+	_, err := q.db.Exec(ctx, deleteChannelChatSessionBindingsByInstallation, arg.InstallationID, arg.ChannelType)
+	return err
+}
+
+const deleteChannelUserBindingsByInstallation = `-- name: DeleteChannelUserBindingsByInstallation :exec
+DELETE FROM channel_user_binding
+WHERE installation_id = $1
+`
+
+// Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+// every member account link for an installation that is being hard-deleted.
+// Rebinding a Feishu bot to a DIFFERENT agent starts a fresh installation, so
+// old links do not follow — a different agent is a distinct connection and
+// members re-establish their link on first contact. The rows could never be
+// reused anyway (every Feishu identity lookup is installation_id-scoped, and
+// FindReusableChannelUserBinding is Slack-only), so removing them just keeps
+// dead rows from accumulating.
+func (q *Queries) DeleteChannelUserBindingsByInstallation(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelUserBindingsByInstallation, installationID)
 	return err
 }
 
@@ -370,6 +434,114 @@ type DeleteChannelUserBindingsByWorkspaceMemberParams struct {
 func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context, arg DeleteChannelUserBindingsByWorkspaceMemberParams) error {
 	_, err := q.db.Exec(ctx, deleteChannelUserBindingsByWorkspaceMember, arg.WorkspaceID, arg.MulticaUserID)
 	return err
+}
+
+const deleteRevokedChannelInstallationByAppID = `-- name: DeleteRevokedChannelInstallationByAppID :one
+DELETE FROM channel_installation
+WHERE channel_type = $1
+  AND config ->> 'app_id' = $2::text
+  AND workspace_id = $3
+  AND agent_id <> $4
+  AND status = 'revoked'
+RETURNING id
+`
+
+type DeleteRevokedChannelInstallationByAppIDParams struct {
+	ChannelType string      `json:"channel_type"`
+	AppID       string      `json:"app_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+// Hard-delete a REVOKED installation that belongs to a DIFFERENT agent, keyed
+// by its platform app identity, and RETURN the deleted id. When a Feishu/Lark
+// Bot is disconnected from agent A (status → 'revoked') and the same Bot (same
+// app_id) is later bound to a DIFFERENT agent B, agent A's revoked row still
+// occupies the (channel_type, config->>'app_id') unique slot and blocks the
+// UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
+// the upsert create a fresh row for the new agent.
+//
+// The `agent_id <> arg` fence is load-bearing: re-connecting the SAME agent
+// must NOT delete its own revoked row. UpsertChannelInstallation conflicts on
+// (workspace_id, agent_id, channel_type), so the same agent's revoked row is
+// reactivated in place (status → 'active') with its installation_id — and every
+// channel_user_binding / channel_chat_session_binding hanging off it —
+// preserved. Deleting it here would force an INSERT with a fresh installation_id
+// and orphan all of that agent's member links and chat sessions.
+//
+// Fenced to one workspace AND status='revoked' so an active installation can
+// never be silently deleted through this path.
+//
+// This DELETE is the atomic gate for the whole rebind cleanup: the caller keys
+// its dependent-row cleanup off the RETURNING id, so cleanup runs ONLY for a row
+// this statement actually removed. Under READ COMMITTED, a concurrent same-agent
+// reconnect that reactivates the row to 'active' first makes the WHERE re-check
+// fail (EvalPlanQual), this deletes nothing (pgx.ErrNoRows), and no dependents
+// are touched — closing the read-then-delete TOCTOU where a stale "it was
+// revoked" read could wipe the bindings of a since-reactivated installation.
+func (q *Queries) DeleteRevokedChannelInstallationByAppID(ctx context.Context, arg DeleteRevokedChannelInstallationByAppIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteRevokedChannelInstallationByAppID,
+		arg.ChannelType,
+		arg.AppID,
+		arg.WorkspaceID,
+		arg.AgentID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.channel_type = $2
+  AND b.channel_user_id = $3
+  AND ci.config ->> 'team_id' = $4::text
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindReusableChannelUserBindingParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChannelType   string      `json:"channel_type"`
+	ChannelUserID string      `json:"channel_user_id"`
+	TeamID        string      `json:"team_id"`
+}
+
+// Cross-installation account-link reuse (MUL-3911). When a platform user
+// messages an installation they have NOT linked, but the SAME user id is already
+// bound to ANOTHER installation in the SAME Multica workspace + SAME Slack team,
+// the inbound identity step reuses that link instead of re-prompting. Slack user
+// ids are stable within a team, so an identical channel_user_id denotes the same
+// human across that team's apps. The match is fenced to one workspace AND one
+// team (installation config->>'team_id'): a Slack team can be connected to two
+// different Multica workspaces, and a user may hold different Multica accounts in
+// each, so reuse must cross neither boundary. Most-recently-bound wins. The
+// caller re-checks membership and materializes a fresh per-installation binding.
+//
+// team_id is pinned ::text so sqlc types the arg as a string instead of
+// attributing the bare param to the JSONB config column (mirrors
+// GetChannelInstallationByAppID's app_id cast).
+func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindReusableChannelUserBindingParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findReusableChannelUserBinding,
+		arg.WorkspaceID,
+		arg.ChannelType,
+		arg.ChannelUserID,
+		arg.TeamID,
+	)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
 }
 
 const getChannelChatSessionBinding = `-- name: GetChannelChatSessionBinding :one
@@ -821,6 +993,23 @@ func (q *Queries) MarkChannelInboundDedupProcessed(ctx context.Context, arg Mark
 	return result.RowsAffected(), nil
 }
 
+const nullChannelInboundAuditInstallationID = `-- name: NullChannelInboundAuditInstallationID :exec
+UPDATE channel_inbound_audit
+SET installation_id = NULL
+WHERE installation_id = $1
+`
+
+// Application-layer stand-in for the old ON DELETE SET NULL (MUL-3515 §4,
+// migration 124 keeps installation_id nullable for exactly this): before an
+// installation row is hard-deleted, detach its inbound-audit rows by NULLing
+// installation_id. The drop-audit history is preserved (channel_type,
+// chat/message ids, drop_reason stay) without a dangling reference to a
+// removed installation.
+func (q *Queries) NullChannelInboundAuditInstallationID(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, nullChannelInboundAuditInstallationID, installationID)
+	return err
+}
+
 const purgeChannelInboundDedup = `-- name: PurgeChannelInboundDedup :exec
 DELETE FROM channel_inbound_message_dedup
 WHERE received_at < $1
@@ -1054,6 +1243,76 @@ type UpsertChannelInstallationParams struct {
 // reset here — the inbound hub owns lease lifecycle.
 func (q *Queries) UpsertChannelInstallation(ctx context.Context, arg UpsertChannelInstallationParams) (ChannelInstallation, error) {
 	row := q.db.QueryRow(ctx, upsertChannelInstallation,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.ChannelType,
+		arg.Config,
+		arg.InstallerUserID,
+	)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertChannelInstallationByAppID = `-- name: UpsertChannelInstallationByAppID :one
+INSERT INTO channel_installation (
+    workspace_id, agent_id, channel_type, config, installer_user_id
+) VALUES (
+    $1, $2, $3, $4, $5
+)
+ON CONFLICT (channel_type, (config ->> 'app_id')) DO UPDATE SET
+    agent_id          = EXCLUDED.agent_id,
+    config            = EXCLUDED.config,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status            = 'active',
+    installed_at      = now(),
+    updated_at        = now()
+WHERE channel_installation.workspace_id = EXCLUDED.workspace_id
+RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type UpsertChannelInstallationByAppIDParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ChannelType     string      `json:"channel_type"`
+	Config          []byte      `json:"config"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+// Team-keyed install / re-install for channels whose natural identity is the
+// platform workspace, not the (agent) pairing. Slack: one Slack workspace
+// (team_id, stored as config->>'app_id') maps to exactly one installation, so
+// re-connecting it — even to represent a DIFFERENT agent in the SAME Multica
+// workspace — UPDATES the existing row (moving agent_id) instead of colliding
+// with the (channel_type, app_id) unique index. Contrast UpsertChannelInstallation,
+// whose conflict key is (workspace_id, agent_id, channel_type): right for Feishu
+// (one app per agent), wrong for Slack.
+//
+// The `WHERE channel_installation.workspace_id = EXCLUDED.workspace_id` fences
+// the conflict update to the SAME Multica workspace: a team already owned by a
+// DIFFERENT workspace updates no row and RETURNING is empty (pgx.ErrNoRows),
+// which the caller maps to ErrTeamOwnedByAnotherWorkspace. This is the ATOMIC
+// cross-workspace guard — a plain SELECT before the upsert cannot stop two
+// workspaces racing to OAuth the same team (both read no rows, then one inserts
+// and the other's conflict-update would silently steal it). A re-connect that
+// would move the team to an agent already holding a different Slack install in
+// the same workspace still trips the (workspace_id, agent_id, channel_type)
+// unique constraint — a genuine conflict the OAuth callback turns into a redirect.
+func (q *Queries) UpsertChannelInstallationByAppID(ctx context.Context, arg UpsertChannelInstallationByAppIDParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, upsertChannelInstallationByAppID,
 		arg.WorkspaceID,
 		arg.AgentID,
 		arg.ChannelType,

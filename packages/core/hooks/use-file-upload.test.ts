@@ -100,3 +100,116 @@ describe("useFileUpload — markdownLink picks the durable URL with three-layer 
     expect(api.uploadFile as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 });
+
+// MUL-3339 — `uploading` is an in-flight counter, not a single boolean.
+// The single-boolean shape silently regressed the quick-create multi-image
+// attach flow: callers fire N concurrent uploads (drag-drop, multi-image
+// paste), the first upload's `finally` would flip `uploading` back to false
+// while N-1 are still in flight, and the submit gate (which only reads
+// `uploading`) would unblock — `stripBlobUrls` then erased the still-pending
+// images from the markdown and their attachment ids never reached the
+// server. The fix tracks an in-flight counter and exposes
+// `uploading = count > 0`, so callers see "uploading" as long as ANY upload
+// is in flight.
+describe("useFileUpload — concurrent uploads (MUL-3339 regression)", () => {
+  it("keeps uploading=true until ALL concurrent uploads resolve", async () => {
+    // Hand-rolled deferreds so the test controls resolve order.
+    const att1 = makeAttachment({ id: "att-1" });
+    const att2 = makeAttachment({ id: "att-2" });
+    let resolve1: (v: Attachment) => void = () => {};
+    let resolve2: (v: Attachment) => void = () => {};
+    const p1 = new Promise<Attachment>((r) => {
+      resolve1 = r;
+    });
+    const p2 = new Promise<Attachment>((r) => {
+      resolve2 = r;
+    });
+    const uploadFile = vi
+      .fn<(file: File) => Promise<Attachment>>()
+      .mockReturnValueOnce(p1)
+      .mockReturnValueOnce(p2);
+    const api = { uploadFile } as unknown as ApiClient;
+
+    const { result } = renderHook(() => useFileUpload(api));
+    expect(result.current.uploading).toBe(false);
+
+    // Fire both uploads concurrently — same shape as the quick-create
+    // drag-drop path (`files.forEach((f) => editorRef.current?.uploadFile(f))`).
+    let pending1: Promise<UploadResult | null> = Promise.resolve(null);
+    let pending2: Promise<UploadResult | null> = Promise.resolve(null);
+    await act(async () => {
+      pending1 = result.current.upload(
+        new File(["1"], "a.png", { type: "image/png" }),
+      );
+      pending2 = result.current.upload(
+        new File(["2"], "b.png", { type: "image/png" }),
+      );
+    });
+    expect(result.current.uploading).toBe(true);
+
+    // Resolve the FIRST upload only. With the old single-boolean shape this
+    // would flip `uploading` back to false — that's the production bug.
+    // With the in-flight counter, `uploading` stays true because upload 2
+    // is still pending.
+    await act(async () => {
+      resolve1(att1);
+      await pending1;
+    });
+    expect(result.current.uploading).toBe(true);
+
+    // Now resolve the second upload — only at this point should the gate open.
+    await act(async () => {
+      resolve2(att2);
+      await pending2;
+    });
+    expect(result.current.uploading).toBe(false);
+  });
+
+  it("decrements correctly when one of the concurrent uploads throws", async () => {
+    // The `finally` block runs on rejection too — the counter must still
+    // decrement so a failed upload never leaves the flag stuck "uploading".
+    const att = makeAttachment();
+    let resolveOk: (v: Attachment) => void = () => {};
+    let rejectBad: (e: Error) => void = () => {};
+    const ok = new Promise<Attachment>((r) => {
+      resolveOk = r;
+    });
+    const bad = new Promise<Attachment>((_, j) => {
+      rejectBad = j;
+    });
+    const uploadFile = vi
+      .fn<(file: File) => Promise<Attachment>>()
+      .mockReturnValueOnce(ok)
+      .mockReturnValueOnce(bad);
+    const api = { uploadFile } as unknown as ApiClient;
+
+    const { result } = renderHook(() => useFileUpload(api));
+    let okPending: Promise<UploadResult | null> = Promise.resolve(null);
+    let badPending: Promise<UploadResult | null> = Promise.resolve(null);
+    await act(async () => {
+      okPending = result.current.upload(
+        new File(["a"], "a.png", { type: "image/png" }),
+      );
+      // uploadWithToast swallows errors via onError; we test the raw `upload`
+      // so the caller sees the rejection. Wrap in a catch so vitest doesn't
+      // surface an unhandled rejection from the act() boundary.
+      badPending = result.current.upload(
+        new File(["b"], "b.png", { type: "image/png" }),
+      ).catch(() => null);
+    });
+    expect(result.current.uploading).toBe(true);
+
+    await act(async () => {
+      rejectBad(new Error("boom"));
+      await badPending;
+    });
+    // One still in flight — must remain uploading.
+    expect(result.current.uploading).toBe(true);
+
+    await act(async () => {
+      resolveOk(att);
+      await okPending;
+    });
+    expect(result.current.uploading).toBe(false);
+  });
+});

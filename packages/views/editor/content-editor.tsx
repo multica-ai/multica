@@ -26,7 +26,7 @@
  * 3. PREPROCESSING is minimal: only legacy mention shortcode migration and
  *    URL linkification (preprocessMarkdown). No HTML conversion.
  *
- * Tech: Tiptap v3.22.1 (ProseMirror wrapper), @tiptap/markdown for
+ * Tech: Tiptap v3 (ProseMirror wrapper), @tiptap/markdown for
  * bidirectional Markdown ↔ ProseMirror JSON conversion.
  */
 
@@ -54,6 +54,7 @@ import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { repairEmptyListItems } from "./utils/repair-list-items";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
@@ -304,7 +305,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const editor = useEditor({
       immediatelyRender: false,
-      // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
@@ -326,6 +326,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             });
           }
         }
+        // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
+        // after typing `1.`) parses into a caretless, schema-invalid item;
+        // repair it so the mounted editor has a real cursor in the list.
+        repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
       },
       content: mountChunked ? "" : initialContent,
@@ -468,13 +472,17 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
       }
 
-      // Clamp prior selection to the new doc size so the caret doesn't snap
-      // to position 0 after ProseMirror replaces the document.
-      const docSize = editor.state.doc.content.size;
-      editor.commands.setTextSelection({
-        from: Math.min(from, docSize),
-        to: Math.min(to, docSize),
-      });
+      // An empty list item in the incoming markdown parses into a caretless,
+      // schema-invalid node; repair it and let it own the caret. Otherwise clamp
+      // the prior selection to the new doc size so the caret doesn't snap to
+      // position 0 after ProseMirror replaces the document.
+      if (!repairEmptyListItems(editor, { from, to })) {
+        const docSize = editor.state.doc.content.size;
+        editor.commands.setTextSelection({
+          from: Math.min(from, docSize),
+          to: Math.min(to, docSize),
+        });
+      }
 
       lastEmittedRef.current = normalizeEditorMarkdown(editor);
     }, [defaultValue, editor]);

@@ -15,7 +15,6 @@
     "unpin": "ピン留め解除",
     "delete": "削除",
     "no_matches": "該当するプロジェクトはありません",
-    "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"
   },
@@ -132,7 +131,6 @@
   "toolbar": {
     "result_count_title": "該当プロジェクト / すべてのプロジェクト",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_status": "ステータス",

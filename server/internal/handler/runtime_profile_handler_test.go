@@ -138,6 +138,52 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 }
 
+func TestDeleteRuntimeProfile_MissingProfileWithOrphanRuntimesCleansUp(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Orphaned Profile Cleanup", "codex", "orphaned-profile-codex")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "Orphaned Profile Runtime", "codex")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned runtime row deleted, found %d", rtRows)
+	}
+}
+
+func TestDeleteRuntimeProfile_MissingProfileNoOrphansStillReturns404(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	missingProfileID := "00000000-0000-0000-0000-000000415800"
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+missingProfileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", missingProfileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestCreateRuntimeProfile_ForcesWorkspaceVisibility is the regression guard
 // for the visibility leak: visibility=private is not user-settable in v1
 // because the read paths don't enforce it. A client that POSTs

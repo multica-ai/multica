@@ -110,11 +110,28 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second},
+		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
 		bundleClient: &http.Client{},
 		platform:     "daemon",
 		os:           normalizeGOOS(runtime.GOOS),
 	}
+}
+
+func cloneDefaultTransport() http.RoundTripper {
+	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+		return transport.Clone()
+	}
+	return http.DefaultTransport
+}
+
+// CloseIdleConnections drops pooled control-plane HTTP connections. The
+// daemon calls this after repeated heartbeat transport failures so a stale
+// keep-alive socket from a server restart cannot delay recovery indefinitely.
+func (c *Client) CloseIdleConnections() {
+	if c == nil || c.client == nil {
+		return
+	}
+	c.client.CloseIdleConnections()
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary

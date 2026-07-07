@@ -2,52 +2,30 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
-import { useQuery, type QueryKey } from "@tanstack/react-query";
+import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import {
-  myIssueAssigneeGroupsOptions,
-  myIssueListOptions,
-  projectGanttIssuesOptions,
-  childIssueProgressOptions,
-  type AssigneeGroupedIssuesFilter,
-  type IssueSortParam,
-  type MyIssuesFilter,
-} from "@multica/core/issues/queries";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
-import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
-import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
-import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
-import { IssuesHeader } from "../../issues/components/issues-header";
-import { BoardView } from "../../issues/components/board-view";
-import { ListView } from "../../issues/components/list-view";
-import { GanttView } from "../../issues/components/gantt-view";
-import { SwimLaneView } from "../../issues/components/swimlane-view";
-import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
+import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -114,303 +92,6 @@ function PropRow({
 }
 
 // ---------------------------------------------------------------------------
-// Project Issues — reuses the existing issues list/board components
-// ---------------------------------------------------------------------------
-
-const projectViewStore = createIssueViewStore("project_issues_view");
-
-function ProjectIssuesContent({
-  projectId,
-  projectIssues,
-  assigneeGroups,
-  assigneeGroupQueryKey,
-  assigneeGroupFilter,
-  scope,
-  filter,
-  sort,
-  ganttIssues,
-}: {
-  projectId: string;
-  projectIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  scope: string;
-  filter: MyIssuesFilter;
-  sort?: IssueSortParam;
-  ganttIssues: Issue[];
-}) {
-  const { t } = useT("projects");
-  const wsId = useWorkspaceId();
-  const viewMode = useViewStore((s) => s.viewMode);
-  const statusFilters = useViewStore((s) => s.statusFilters);
-  const priorityFilters = useViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const labelFilters = useViewStore((s) => s.labelFilters);
-  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
-
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const runningIssueIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const task of snapshot) {
-      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
-    }
-    return ids;
-  }, [snapshot]);
-
-  const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
-  );
-
-  // Status-unfiltered companion for Swimlane.
-  const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
-  );
-
-  const activeFilters = useMemo(() => ({
-    priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
-    creatorFilters,
-    projectFilters: [],
-    includeNoProject: false,
-    labelFilters,
-    agentRunningFilter,
-  }), [
-    priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
-    creatorFilters,
-    labelFilters,
-    agentRunningFilter,
-  ]);
-
-  // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
-  // to wait for every status bucket to paginate in. View-store filters still
-  // apply so toggling priority / assignee / label hides the same bars.
-  const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
-  );
-
-  const filteredAssigneeGroups = useMemo(
-    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
-    [assigneeGroups, agentRunningFilter, runningIssueIds],
-  );
-
-  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
-
-  const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    return BOARD_STATUSES;
-  }, [statusFilters]);
-
-  const hiddenStatuses = useMemo(
-    () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
-    [visibleStatuses],
-  );
-
-  const updateIssueMutation = useUpdateIssue();
-  const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
-      updateIssueMutation.mutate(
-        { id: issueId, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.detail.toast_move_issue_failed),
-            ),
-          onSettled: () => onSettled?.(),
-        },
-      );
-    },
-    [updateIssueMutation, t],
-  );
-
-  // Gantt and Swimlane have their own data sources and empty states —
-  // we never short-circuit them here, otherwise an unscheduled/unparented
-  // but non-empty project would surface a misleading "no issues" CTA.
-  // For Board/List the bucketed cache really is the ground truth,
-  // so an empty result means an empty project.
-  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-        <p className="text-sm">{t(($) => $.detail.empty_issues_title)}</p>
-        <p className="text-xs">{t(($) => $.detail.empty_issues_hint)}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-1"
-          onClick={() =>
-            useModalStore.getState().open("create-issue", { project_id: projectId })
-          }
-        >
-          <Plus className="size-3.5 mr-1.5" />
-          {t(($) => $.detail.empty_issues_new_button)}
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" && (
-        <BoardView
-          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
-          assigneeGroups={filteredAssigneeGroups}
-          assigneeGroupQueryKey={assigneeGroupQueryKey}
-          assigneeGroupFilter={assigneeGroupFilter}
-          visibleStatuses={visibleStatuses}
-          hiddenStatuses={hiddenStatuses}
-          onMoveIssue={handleMoveIssue}
-          childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
-          sort={sort}
-          projectId={projectId}
-        />
-      )}
-      {viewMode === "list" && (
-        <ListView
-          issues={issues}
-          visibleStatuses={visibleStatuses}
-          childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
-          sort={sort}
-          projectId={projectId}
-          onMoveIssue={handleMoveIssue}
-        />
-      )}
-      {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
-      {viewMode === "swimlane" && (
-        <SwimLaneView
-          issues={issues}
-          unfilteredIssues={swimlaneIssues}
-          activeFilters={activeFilters}
-          visibleStatuses={visibleStatuses}
-          hiddenStatuses={hiddenStatuses}
-          onMoveIssue={handleMoveIssue}
-          childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
-          sort={sort}
-          projectId={projectId}
-        />
-      )}
-    </div>
-  );
-}
-
-function ProjectIssuesSurface({
-  projectId,
-  scope,
-  filter,
-}: {
-  projectId: string;
-  scope: string;
-  filter: MyIssuesFilter;
-}) {
-  const wsId = useWorkspaceId();
-  const viewMode = useViewStore((s) => s.viewMode);
-  const grouping = useViewStore((s) => s.grouping);
-  const sortBy = useViewStore((s) => s.sortBy);
-  const sortDirection = useViewStore((s) => s.sortDirection);
-  const statusFilters = useViewStore((s) => s.statusFilters);
-  const priorityFilters = useViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const labelFilters = useViewStore((s) => s.labelFilters);
-  const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
-  const usesGantt = viewMode === "gantt";
-
-  const sort = useMemo(
-    () => ({
-      sort_by: sortBy,
-      sort_direction: sortBy !== "position" ? sortDirection : undefined,
-    } as const),
-    [sortBy, sortDirection],
-  );
-
-  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...filter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      label_ids: labelFilters,
-    }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
-  );
-  const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
-    wsId,
-    scope,
-    assigneeGroupFilter,
-    undefined,
-    sort,
-  );
-  // Each view owns exactly one data source. Board/List ride the bucketed
-  // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
-  // endpoint; Gantt has its own scheduled-only fetch. We gate `enabled` on
-  // the current view so switching to Gantt doesn't re-trigger the full
-  // per-status fetch in the background.
-  const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
-    enabled: !usesAssigneeBoard && !usesGantt,
-  });
-  const assigneeGroupsQuery = useQuery({
-    ...assigneeGroupsOptions,
-    enabled: usesAssigneeBoard,
-  });
-  // Gantt has its own data source — a single (paginated) fetch of every
-  // scheduled issue in the project. Independent from the bucketed Board/List
-  // cache so it isn't bottlenecked by per-status pagination and reacts in
-  // isolation to WS updates that move issues into or out of the scheduled
-  // set.
-  const ganttIssuesQuery = useQuery({
-    ...projectGanttIssuesOptions(wsId, projectId),
-    enabled: usesGantt,
-  });
-  const bucketedIssues = usesAssigneeBoard
-    ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
-    : (statusIssuesQuery.data ?? []);
-  const ganttIssues = ganttIssuesQuery.data ?? [];
-  // What the header empty-state check looks at depends on the view: Gantt
-  // would otherwise be blamed for an empty Board cache, even though it has
-  // its own (potentially non-empty) scheduled cache.
-  const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
-
-  return (
-    <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt />
-      <ProjectIssuesContent
-        projectId={projectId}
-        projectIssues={projectIssues}
-        assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
-        assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
-        assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
-        scope={scope}
-        filter={filter}
-        sort={sort}
-        ganttIssues={ganttIssues}
-      />
-      <BatchActionToolbar issues={projectIssues} />
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // ProjectDetail
 // ---------------------------------------------------------------------------
 
@@ -436,9 +117,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       });
     }
   }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
-  const projectScope = `project:${projectId}`;
-  const projectFilter = useMemo<MyIssuesFilter>(
-    () => ({ project_id: projectId }),
+  const issueScope = useMemo(
+    () => ({ type: "project" as const, projectId }),
     [projectId],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -854,13 +534,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             }
           />
 
-          <ViewStoreProvider store={projectViewStore}>
-              <ProjectIssuesSurface
-                projectId={projectId}
-                scope={projectScope}
-                filter={projectFilter}
-              />
-            </ViewStoreProvider>
+          <IssueSurface
+            scope={issueScope}
+            modes={["board", "list", "swimlane", "gantt"]}
+          />
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

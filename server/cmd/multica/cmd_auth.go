@@ -74,7 +74,11 @@ func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}
-	if inAgentExecutionContext() {
+	// Inside a daemon-managed task, never fall back to the user-global config
+	// token: that silent fallback is how agent writes land as the wrong actor.
+	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
+	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
+	if inDaemonManagedExecutionContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)

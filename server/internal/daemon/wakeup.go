@@ -18,6 +18,14 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
+const taskWakeupMaxBackoff = 30 * time.Second
+
+var (
+	taskWakeupPongWait          = 60 * time.Second
+	taskWakeupWriteWait         = 10 * time.Second
+	taskWakeupBackoffResetAfter = 10 * time.Second
+)
+
 type taskWakeup struct {
 	runtimeID string
 }
@@ -36,13 +44,16 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWake
 			continue
 		}
 
-		err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
+		connectedFor, err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
 		if ctx.Err() != nil {
 			return
 		}
 		if errors.Is(err, errRuntimeSetChanged) {
 			backoff = time.Second
 			continue
+		}
+		if shouldResetTaskWakeupBackoff(connectedFor) {
+			backoff = time.Second
 		}
 		if err != nil {
 			d.logger.Debug("task wakeup websocket unavailable; polling fallback remains active", "error", err, "retry_in", backoff)
@@ -51,13 +62,20 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWake
 		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), runtimeSetCh); err != nil {
 			return
 		}
-		if backoff < 30*time.Second {
+		if backoff < taskWakeupMaxBackoff {
 			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
+			if backoff > taskWakeupMaxBackoff {
+				backoff = taskWakeupMaxBackoff
 			}
 		}
 	}
+}
+
+func shouldResetTaskWakeupBackoff(connectedFor time.Duration) bool {
+	if connectedFor <= 0 {
+		return false
+	}
+	return taskWakeupBackoffResetAfter <= 0 || connectedFor >= taskWakeupBackoffResetAfter
 }
 
 func jitterDuration(d time.Duration) time.Duration {
@@ -72,10 +90,10 @@ func jitterDuration(d time.Duration) time.Duration {
 	return d + delta
 }
 
-func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- taskWakeup, runtimeSetCh <-chan struct{}) error {
+func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- taskWakeup, runtimeSetCh <-chan struct{}) (time.Duration, error) {
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	headers := http.Header{}
@@ -95,8 +113,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	connectedAt := time.Now()
+	uptime := func() time.Duration { return time.Since(connectedAt) }
 	defer conn.Close()
 	// HTTP heartbeats resume the moment WS detaches so the freshness window
 	// from a previous connection cannot keep them silenced past disconnect.
@@ -104,6 +124,16 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
+	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
+	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
+	// observe the wakeup channel, so anything the server changed during the
+	// WS gap — task cancellation, runtime/repo updates — stays invisible to
+	// them until the next tick. The reconcile broadcaster nudges those loops
+	// to re-check immediately. broadcast() debounces back-to-back calls so a
+	// flapping connection cannot fan out into a request stampede.
+	if d.reconcile != nil {
+		d.reconcile.broadcast()
+	}
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
@@ -151,11 +181,11 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return uptime(), ctx.Err()
 	case <-runtimeSetCh:
-		return errRuntimeSetChanged
+		return uptime(), errRuntimeSetChanged
 	case err := <-errCh:
-		return err
+		return uptime(), err
 	}
 }
 
@@ -260,10 +290,13 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 }
 
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- taskWakeup) error {
-	conn.SetReadLimit(64 * 1024)
+	d.configureTaskWakeupReadLiveness(conn)
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
+			return err
+		}
+		if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
 			return err
 		}
 		var msg protocol.Message
@@ -304,6 +337,26 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			d.handleWSHeartbeatAck(context.Background(), &ack)
 		}
 	}
+}
+
+func (d *Daemon) configureTaskWakeupReadLiveness(conn *websocket.Conn) {
+	conn.SetReadLimit(64 * 1024)
+	if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
+		d.logger.Debug("task wakeup websocket read deadline failed", "error", err)
+	}
+	conn.SetPongHandler(func(string) error {
+		return d.extendTaskWakeupReadDeadline(conn)
+	})
+	conn.SetPingHandler(func(appData string) error {
+		if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
+			return err
+		}
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(taskWakeupWriteWait))
+	})
+}
+
+func (d *Daemon) extendTaskWakeupReadDeadline(conn *websocket.Conn) error {
+	return conn.SetReadDeadline(time.Now().Add(taskWakeupPongWait))
 }
 
 func (d *Daemon) handleRuntimeProfilesChanged(payload protocol.RuntimeProfilesChangedPayload) {

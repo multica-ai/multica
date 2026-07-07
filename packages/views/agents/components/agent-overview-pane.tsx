@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  Blocks,
   BookOpenText,
   FileText,
   KeyRound,
@@ -15,8 +16,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { slackInstallationsOptions } from "@multica/core/slack";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +37,7 @@ import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
+import { AgentMcpTab } from "./tabs/agent-mcp-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
@@ -46,10 +51,11 @@ export type DetailTab =
   | "env"
   | "custom_args"
   | "mcp_config"
+  | "composio_mcp"
   | "integrations"
   | "runtime_config";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "composio_mcp" | "integrations" | "runtime_config"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -57,6 +63,7 @@ const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "
   env: "environment",
   custom_args: "custom_args",
   mcp_config: "mcp_config",
+  composio_mcp: "composio_mcp",
   integrations: "integrations",
   runtime_config: "runtime_config",
 };
@@ -72,6 +79,7 @@ const detailTabs: {
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
   { id: "mcp_config", icon: Plug },
+  { id: "composio_mcp", icon: Blocks },
   { id: "integrations", icon: Webhook },
   { id: "runtime_config", icon: Router },
 ];
@@ -80,6 +88,13 @@ interface AgentOverviewPaneProps {
   agent: Agent;
   runtimes: AgentRuntime[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * The viewer's user id. Gates the creator-only MCP tab — the tab entry is
+   * only rendered when the viewer is the agent owner (`agent.owner_id`),
+   * matching the backend's owner-only read/write of the toolkit allowlist
+   * (MUL-3870). `null` while auth is still loading hides the tab.
+   */
+  currentUserId?: string | null;
   /**
    * One-shot request from a sibling (the inspector's compact Lark status
    * row) to focus a specific tab. Routed through the same `requestTabChange`
@@ -117,11 +132,13 @@ export function AgentOverviewPane({
   agent,
   runtimes,
   onUpdate,
+  currentUserId,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const composioMCPAppsEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
   const [activeTab, setActiveTab] = useState<DetailTab>("activity");
   const [activeDirty, setActiveDirty] = useState(false);
   // Holds the destination when a tab change is intercepted by the dirty
@@ -141,16 +158,24 @@ export function AgentOverviewPane({
     enabled: !!wsId,
   });
   const larkConfigured = larkListing?.configured === true;
+  const { data: slackListing } = useQuery({
+    ...slackInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const slackConfigured = slackListing?.configured === true;
+  // The Integrations tab appears once EITHER channel is wired on the
+  // deployment, so a Slack-only deployment (no Lark) still surfaces it.
+  const integrationsConfigured = larkConfigured || slackConfigured;
 
   // The MCP tab is only shown when the agent's runtime backend actually
   // consumes mcp_config — see providerSupportsMcpConfig. We default to
   // showing it when the runtime row hasn't loaded yet so a slow fetch
   // can't transiently flicker the tab off and then on.
   //
-  // The Integrations tab only appears once the deployment has Lark wired
+  // The Integrations tab appears once the deployment has Lark OR Slack wired
   // (configured). Unlike MCP we default to HIDING while the listing loads:
-  // deployments without Lark are the common case, so flashing the tab on
-  // then off would be the worse flicker.
+  // deployments without either channel are the common case, so flashing the
+  // tab on then off would be the worse flicker.
   //
   // The Runtime Config tab is openclaw-only today (gateway mode lives there,
   // issue #3260). Other providers' runtime_config is freeform JSONB that no
@@ -159,13 +184,23 @@ export function AgentOverviewPane({
   const visibleTabs = useMemo(() => {
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
+    // The Composio MCP tab is creator-only: it edits the agent owner's own
+    // toolkit allowlist, which the backend reads/writes for the owner alone
+    // (redacted + write-dropped for everyone else — MUL-3870 / MUL-3869).
+    // Hide the entry entirely for non-owners, and while auth is still loading.
+    const showComposioMcp =
+      composioMCPAppsEnabled &&
+      !!currentUserId &&
+      !!agent.owner_id &&
+      agent.owner_id === currentUserId;
     return detailTabs.filter((tab) => {
       if (tab.id === "mcp_config") return showMcp;
-      if (tab.id === "integrations") return larkConfigured;
+      if (tab.id === "composio_mcp") return showComposioMcp;
+      if (tab.id === "integrations") return integrationsConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
       return true;
     });
-  }, [runtime, larkConfigured]);
+  }, [runtime, integrationsConfigured, composioMCPAppsEnabled, currentUserId, agent.owner_id]);
 
   // If the active tab disappears (e.g. user just switched the agent's
   // runtime to one that doesn't read mcp_config), fall back to Activity
@@ -276,6 +311,11 @@ export function AgentOverviewPane({
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
+          </TabContent>
+        )}
+        {effectiveTab === "composio_mcp" && (
+          <TabContent>
+            <AgentMcpTab agent={agent} />
           </TabContent>
         )}
         {effectiveTab === "integrations" && (

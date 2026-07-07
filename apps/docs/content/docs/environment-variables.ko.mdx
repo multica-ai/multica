@@ -157,6 +157,7 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `REDIS_URL` | 비어 있음 | Redis 연결 URL (예: `redis://localhost:6379/0`). 설정하지 않으면 auth 엔드포인트의 속도 제한이 비활성화됩니다. 동일한 Redis는 실시간 허브 fan-out, PAT 캐시, 데몬 토큰 캐시에서도 사용됩니다 — 설정하지 않으면 모두 인메모리 / 직접 DB 모드로 폴백합니다 |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | `true`로 설정하면 모든 Redis 연결에서 `CLIENT SETNAME` 핸드셰이크를 건너뜁니다. `CLIENT` 명령을 차단하는 관리형 Redis 제공자(GCP Memorystore 또는 ACL이 제한된 AWS ElastiCache 등)를 사용할 때 **필수**입니다. 활성화하면 `CLIENT LIST` 출력에서 연결의 설명 이름이 사라지지만, 제한된 제공자와의 호환성을 얻을 수 있습니다 |
 | `RATE_LIMIT_AUTH` | `5` | `/auth/send-code` 및 `/auth/google`에 대한 IP당 분당 최대 요청 수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | `/auth/verify-code`에 대한 IP당 분당 최대 요청 수 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 비어 있음 | 리미터가 그 `X-Forwarded-For` 헤더를 신뢰하도록 허용하는, 쉼표로 구분된 CIDR. 비어 있음(기본값)은 **XFF를 절대 신뢰하지 않음**을 의미합니다 — 리미터는 직접 연결의 `RemoteAddr`만 사용합니다 |

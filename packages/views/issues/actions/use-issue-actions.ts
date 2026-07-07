@@ -13,6 +13,7 @@ import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;
@@ -21,6 +22,7 @@ export interface UseIssueActionsResult {
   copyLink: () => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
+  removeParent: () => void;
   openAddChild: () => void;
   openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
 }
@@ -50,6 +52,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
 
   const updateIssue = useUpdateIssue();
+  const surfaceActions = useIssueSurfaceActionsOptional();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const openModal = useModalStore((s) => s.open);
@@ -85,19 +88,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         });
         return;
       }
-      updateIssue.mutate(
-        { id: issueId, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.detail.update_failed),
-            ),
-        },
-      );
+      if (surfaceActions) {
+        surfaceActions.updateIssue(issueId, updates, {
+          errorMessage: t(($) => $.detail.update_failed),
+        });
+      } else {
+        updateIssue.mutate(
+          { id: issueId, ...updates },
+          {
+            onError: (err) =>
+              toast.error(
+                err instanceof Error && err.message
+                  ? err.message
+                  : t(($) => $.detail.update_failed),
+              ),
+          },
+        );
+      }
     },
-    [issueId, issueStatus, updateIssue, openModal, t],
+    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
   );
 
   const togglePin = useCallback(() => {
@@ -133,6 +142,43 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("issue-set-parent", { issueId });
   }, [openModal, issueId]);
 
+  // Detach from the parent and promote to a standalone issue. Reversible
+  // (Set parent re-links it), non-destructive, and mirrors the clear-date
+  // actions — so it applies directly instead of a confirm modal. `stage`
+  // only orders sub-issues under a parent, so clear it in the same write to
+  // avoid an orphaned value on a standalone issue. The success toast fires
+  // from onSuccess, not eagerly after mutate() — otherwise a request that
+  // fails on permission/network/validation would flash "removed" before the
+  // error toast and the optimistic rollback (false confirmation).
+  const removeParent = useCallback(() => {
+    if (!issueId) return;
+    if (surfaceActions) {
+      surfaceActions.updateIssue(
+        issueId,
+        { parent_issue_id: null, stage: null },
+        {
+          onSuccess: () =>
+            toast.success(t(($) => $.actions.remove_parent_issue_success)),
+          errorMessage: t(($) => $.detail.update_failed),
+        },
+      );
+    } else {
+      updateIssue.mutate(
+        { id: issueId, parent_issue_id: null, stage: null },
+        {
+          onSuccess: () =>
+            toast.success(t(($) => $.actions.remove_parent_issue_success)),
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            ),
+        },
+      );
+    }
+  }, [issueId, surfaceActions, updateIssue, t]);
+
   const openAddChild = useCallback(() => {
     if (!issueId) return;
     openModal("issue-add-child", { issueId });
@@ -157,6 +203,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     copyLink,
     openCreateSubIssue,
     openSetParent,
+    removeParent,
     openAddChild,
     openDeleteConfirm,
   };

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +47,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			return nil, err
 		}
 		mcpConfigPath = path
-		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
@@ -64,6 +65,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -127,7 +132,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		if mcpConfigPath != "" {
-			defer os.Remove(mcpConfigPath)
+			defer cleanupMcpConfigTemp(mcpConfigPath)
 		}
 
 		startTime := time.Now()
@@ -648,6 +653,44 @@ func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
 }
 
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
@@ -785,28 +828,62 @@ func stripSurroundingQuotes(s string) (string, bool) {
 	return s, false
 }
 
-// writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns
-// its path. The caller is responsible for removing the file when done.
+// writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns
+// its path. The caller is responsible for removing it via cleanupMcpConfigTemp.
 func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
-	f, err := os.CreateTemp("", "multica-mcp-*.json")
+	dir, err := os.MkdirTemp("", "multica-mcp-*")
 	if err != nil {
-		return "", fmt.Errorf("create mcp config temp file: %w", err)
+		return "", fmt.Errorf("create mcp config temp dir: %w", err)
 	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+	data, err := hardenBrowserMcpConfig(raw, dir)
+	if err != nil {
+		cleanupMcpConfigTemp(filepath.Join(dir, "mcp-config.json"))
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cleanupMcpConfigTemp(path)
 		return "", fmt.Errorf("write mcp config temp file: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("close mcp config temp file: %w", err)
-	}
-	return f.Name(), nil
+	return path, nil
 }
 
+func cleanupMcpConfigTemp(path string) {
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if strings.HasPrefix(filepath.Base(dir), "multica-mcp-") {
+		_ = os.RemoveAll(dir)
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// detectVersionTimeout bounds a single `<cli> --version` probe. Version
+// detection runs inside the daemon's blocking preflight (registerRuntimesForWorkspace),
+// so a CLI that never returns from `--version` — e.g. a brew-installed claude
+// wedged by a bun regression (MUL-3812) — would otherwise stall the whole
+// registration loop, the daemon would never flip /health from "starting" to
+// "running", and *every* runtime on the host would appear disconnected. A real
+// `--version` returns well under this bound even on a cold cache or with
+// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
+// in isolation so the remaining runtimes still register. A var (not const) so
+// tests can shrink it without waiting out the real bound.
+var detectVersionTimeout = 10 * time.Second
+
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, execPath, "--version")
 	hideAgentWindow(cmd)
+	// exec.CommandContext only kills the direct child on timeout. A broken CLI
+	// (node/bun shim) can leave grandchildren that inherited and still hold our
+	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
+	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
+	// reaps shortly after the context fires so this call always returns.
+	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

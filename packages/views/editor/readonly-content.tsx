@@ -76,6 +76,10 @@ const sanitizeSchema = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
+    // Permit inline data-URI images (QR codes, charts, base64 screenshots).
+    // The scheme gate only allows `data:` through here; attributes.img below
+    // narrows it to image/* so non-image data URIs are still rejected.
+    src: [...(defaultSchema.protocols?.src ?? []), "data"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -92,8 +96,17 @@ const sanitizeSchema = {
       ["className", /^hljs/],
     ],
     img: [
-      ...(defaultSchema.attributes?.img ?? []),
+      // Drop the default plain `src` entry so the value allow-list below is the
+      // one findDefinition resolves — it returns the first match by name, so a
+      // bare `src` string would otherwise shadow (and disable) the allow-list.
+      ...(defaultSchema.attributes?.img ?? []).filter(
+        (attr) => (typeof attr === "string" ? attr : attr[0]) !== "src",
+      ),
       "alt",
+      // Allow inline data:image/* URIs while leaving every other src form
+      // (http/https/site-relative) exactly as before: the negative lookahead
+      // keeps all non-data values, and data: is narrowed to images only.
+      ["src", /^data:image\//i, /^(?!data:)/i],
     ],
   },
 };
@@ -105,6 +118,11 @@ const sanitizeSchema = {
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
   if (url.startsWith("slash://skill/")) return url;
+  // Allow inline data:image/* URIs — defaultUrlTransform strips every data: URL
+  // to '', which would blank the src even after rehype-sanitize keeps it. Kept
+  // in sync with the image/* narrowing in sanitizeSchema (protocols.src +
+  // attributes.img) so both gates agree on what a valid inline image is.
+  if (/^data:image\//i.test(url)) return url;
   return defaultUrlTransform(url);
 }
 
@@ -425,21 +443,36 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
   const components = useMemo(() => buildComponents(), []);
 
+  // Memoize the whole react-markdown subtree on its only real inputs
+  // (`processed` + `components`). Unrelated parent re-renders (e.g. a sibling
+  // agent task streaming over WebSocket fires one every ~100ms) would otherwise
+  // re-run react-markdown, which hands `<code>` a fresh `dangerouslySetInnerHTML`
+  // object each time; React then rewrites the highlighted innerHTML even though
+  // the HTML string is byte-identical, tearing down and rebuilding every hljs
+  // <span> — which collapses any active text selection inside a code block
+  // (MUL-3621). A stable element reference lets React bail out of the subtree.
+  const markdown = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        urlTransform={urlTransform}
+        components={components}
+      >
+        {processed}
+      </ReactMarkdown>
+    ),
+    [processed, components],
+  );
+
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
-        <ReactMarkdown
-          remarkPlugins={[
-            [remarkMath, { singleDollarTextMath: false }],
-            remarkBreaks,
-            [remarkGfm, { singleTilde: false }],
-          ]}
-          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-          urlTransform={urlTransform}
-          components={components}
-        >
-          {processed}
-        </ReactMarkdown>
+        {markdown}
         <LinkHoverCard {...hover} />
       </div>
     </AttachmentDownloadProvider>

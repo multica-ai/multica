@@ -95,11 +95,17 @@ export interface IssueCreatedPayload {
 export interface IssueUpdatedPayload {
   issue: Issue;
   // The server stamps issue:updated with which fields actually changed
-  // (server/internal/handler/issue.go publish). Only assignee_changed is read
-  // today: it lets the realtime layer keep filtered myList caches in place on a
-  // non-membership change instead of refetching. Other change flags are present
-  // on the wire too and can be surfaced here when needed.
+  // (server/internal/handler/issue.go publish). assignee_changed lets the
+  // realtime layer keep filtered myList caches in place on a non-membership
+  // change instead of refetching; status_changed lets it reconcile board column
+  // counts when a status change lands on an off-screen (unloaded) issue;
+  // project_changed lets it drop a moved issue from the old project's filtered
+  // list (the client-side cache diff is unreliable after an optimistic local
+  // move — MUL-3669 / #4548). Other change flags are present on the wire too and
+  // can be surfaced here when needed.
   assignee_changed?: boolean;
+  status_changed?: boolean;
+  project_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {

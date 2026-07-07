@@ -163,9 +163,9 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
-    expect(screen.getByText("More")).toBeInTheDocument();
+    expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-    // Relationship actions are hidden inside the "More" submenu by default.
+    // Relationship actions are hidden inside the "Relations" submenu by default.
     expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
@@ -192,6 +192,41 @@ describe("IssueActionsDropdown", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
     expect(await screen.findByText("Test User")).toBeInTheDocument();
+  });
+
+  it("shows 'Remove parent issue' in the Relations submenu only when the issue has a parent", async () => {
+    const childIssue = { ...mockIssue, parent_issue_id: "parent-1" } as Issue;
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={childIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Relations"));
+
+    expect(await screen.findByText("Remove parent issue")).toBeInTheDocument();
+  });
+
+  it("hides 'Remove parent issue' when the issue has no parent", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Relations"));
+
+    // The sibling "Set parent issue..." proves the submenu opened.
+    expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
+    expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {

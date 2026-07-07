@@ -21,6 +21,7 @@ import {
   PinOff,
   Plus,
   Tag,
+  Unlink,
   Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -89,6 +90,8 @@ import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import { useInPageFind } from "../hooks/use-in-page-find";
+import { FindBar } from "./find-bar";
 import {
   AnimatedRightSidebar,
   getAnimatedRightSidebarInitialOpen,
@@ -1026,6 +1029,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timelineView.groups, expandedResolved],
   );
 
+  // In-page find (Cmd/Ctrl+F). `items.length` is the content signal that
+  // triggers a match recompute when comments are added/removed; text edits
+  // are caught by the hook's own MutationObserver. Opening find forces the
+  // timeline to render flat below so every comment is in the DOM to match.
+  const find = useInPageFind({
+    container: scrollContainerEl,
+    contentKey: items.length,
+    enabled: !!issue,
+  });
+  // Close the bar (and drop highlights) when navigating to another issue —
+  // the web route reuses this component instead of remounting.
+  const closeFind = find.closeFind;
+  useEffect(() => {
+    closeFind();
+  }, [id, closeFind]);
+
   // ID of the trailing activity block — the only one expanded by default.
   const lastActivityGroupId = useMemo(() => {
     for (let i = timelineView.groups.length - 1; i >= 0; i--) {
@@ -1215,27 +1234,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       clearTimeout(fade);
     };
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
-
-  // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
-  // the viewport — off-screen comments are invisible to browser find-in-page.
-  // Intercept once per (session, issue) when the list is long enough that the
-  // user might actually try; let the keystroke pass through on short lists.
-  // Real fix is in-app search (separate PR); this is the toast stopgap.
-  useEffect(() => {
-    if (items.length <= 30) return;
-    const flagKey = `multica_cmdF_warned:${id}`;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "f" || !(e.metaKey || e.ctrlKey)) return;
-      if (sessionStorage.getItem(flagKey)) return;
-      e.preventDefault();
-      sessionStorage.setItem(flagKey, "1");
-      toast.message(t(($) => $.detail.cmdf_toast_title), {
-        description: t(($) => $.detail.cmdf_toast_description),
-      });
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [id, items.length, t]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -1573,14 +1571,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            <div className="flex items-center gap-0.5 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors group">
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-xs"
+              >
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+              </AppLink>
+              <button
+                type="button"
+                title={t(($) => $.actions.remove_parent_issue)}
+                aria-label={t(($) => $.actions.remove_parent_issue)}
+                onClick={() => actions.removeParent()}
+                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Unlink className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>}
         </div>
       )}
@@ -1784,7 +1793,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
+        {/* In-page find bar — floats over the top-right of the content column
+            (below the breadcrumb header), outside the scroll container so it
+            stays put while the timeline scrolls and its own text isn't walked. */}
+        {find.open && (
+          <FindBar find={find} className="absolute right-4 top-14 z-20" />
+        )}
         <BreadcrumbHeader
           segments={breadcrumbSegments}
           leaf={
@@ -1973,6 +1988,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <FileUploadButton
                 size="sm"
+                multiple
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
               />
             </div>
@@ -2160,6 +2176,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               //     proportional to items.length (markdown + lowlight per
               //     comment), which is acceptable in the deep-link case —
               //     the user has explicit intent to land on a specific item.
+              //   - `find.open` (in-page Cmd/Ctrl+F) → also render flat, so
+              //     every comment is in the DOM for the find walk to match
+              //     and highlight. Same explicit-intent cold-mount trade-off.
               //   - otherwise → Virtuoso. Browsing mode, virtualization
               //     wins on first-paint perf for long timelines.
               //
@@ -2167,7 +2186,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // on a target" have fundamentally opposed contracts (estimated
               // heights vs real heights). Trying to satisfy both in one
               // path is what produced the bug history this PR closes.
-              !highlightCommentId ? (
+              !highlightCommentId && !find.open ? (
                 !scrollContainerEl ? (
                   // Skeleton while the callback ref populates so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't
