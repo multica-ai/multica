@@ -7,7 +7,7 @@ export { ChannelTypingIndicator } from "./channel-typing-indicator";
 export type { ChannelTypingIndicatorProps } from "./channel-typing-indicator";
 export { useChannelFavoritesStore, actorKey, channelKey } from "./favorites-store";
 export type { ActorKey, ChannelKey, FavoriteKey } from "./favorites-store";
-export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
+export { useArchiveChannel, useUnarchiveChannel, archivedChannelsOptions } from "./archive-mutations";
 // TECH-3758 — leave a channel (remove own subscription) / delete it for all.
 export { useLeaveChannel, useDeleteChannel } from "./leave-delete-mutations";
 // TECH-3352 — open-time auto-mark-read for channels/DMs (replaces the inline

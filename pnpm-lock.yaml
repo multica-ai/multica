@@ -2625,6 +2625,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@multica/cerebro-channels':
+        specifier: workspace:*
+        version: link:../cerebro-channels
       '@multica/cerebro-chat':
         specifier: workspace:*
         version: link:../cerebro-chat

@@ -2632,8 +2632,15 @@ export class ApiClient {
   // CEREBRO-PATCH(channel-list-include-archived): TECH-3758 — the Chat roster
   // passes include_archived so inbox-archived channels still show in the chat
   // interface (archive only hides them from the inbox feed, not the roster).
-  async listChannels(params?: { include_archived?: boolean }): Promise<Channel[]> {
-    const qs = params?.include_archived ? "?include_archived=true" : "";
+  // CEREBRO-PATCH(channel-list-include-archived): FIR-2791 — archived_only
+  // returns ONLY the caller's archived channels/DMs (backs the Archived
+  // block + archived view in the inbox).
+  async listChannels(params?: { include_archived?: boolean; archived_only?: boolean }): Promise<Channel[]> {
+    const qs = params?.archived_only
+      ? "?archived_only=true"
+      : params?.include_archived
+        ? "?include_archived=true"
+        : "";
     return this.fetch(`/api/channels${qs}`);
   }
 
