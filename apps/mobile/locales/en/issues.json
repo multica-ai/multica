@@ -180,5 +180,60 @@
         "search_placeholder": "Search projects"
       }
     }
+  },
+  "comment": {
+    "card": {
+      "edited_suffix": "(edited)",
+      "resolved_bar_message": "Resolved · {{count}} message by {{authors}}",
+      "resolved_bar_messages": "Resolved · {{count}} messages by {{authors}}",
+      "resolved_bar_accessibility_message": "Resolved thread by {{authors}}, {{count}} message. Tap to expand.",
+      "resolved_bar_accessibility_messages": "Resolved thread by {{authors}}, {{count}} messages. Tap to expand.",
+      "resolved_by": "Resolved by",
+      "collapse": "Collapse",
+      "collapse_accessibility_label": "Collapse resolved thread",
+      "send_failed": "Couldn't send",
+      "retry": "Retry",
+      "retry_accessibility_label": "Retry sending comment",
+      "discard": "Discard",
+      "discard_accessibility_label": "Discard failed comment"
+    },
+    "menu": {
+      "reply": "Reply",
+      "react": "React…",
+      "copy": "Copy",
+      "select_text": "Select Text",
+      "copy_link": "Copy Link",
+      "resolve_thread": "Resolve Thread",
+      "unresolve_thread": "Unresolve Thread",
+      "delete": "Delete",
+      "delete_confirm": {
+        "title": "Delete comment?",
+        "message": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete"
+      }
+    },
+    "reaction": {
+      "more_reactions": "More reactions…"
+    },
+    "attachment": {
+      "open_accessibility_label": "Open {{filename}}"
+    },
+    "composer": {
+      "placeholder": "Add a comment…",
+      "pill_label": "Add a comment, @ to mention…"
+    },
+    "mention": {
+      "everyone": "Everyone",
+      "no_matches": "No matches.",
+      "section_recent": "Recent",
+      "section_my_issues": "My issues",
+      "badge": {
+        "all": "All",
+        "member": "Member",
+        "agent": "Agent",
+        "squad": "Squad"
+      }
+    }
   }
 }

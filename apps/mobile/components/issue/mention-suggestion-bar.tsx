@@ -25,6 +25,7 @@
 import { useMemo } from "react";
 import { FlatList, Pressable, View } from "react-native";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type { Agent, Issue, MemberWithUser, Squad } from "@multica/core/types";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { Text } from "@/components/ui/text";
@@ -73,6 +74,7 @@ export function MentionSuggestionBar({
   onSelect,
   mode = "comment",
 }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const isChat = mode === "chat";
 
@@ -137,11 +139,14 @@ export function MentionSuggestionBar({
 
       const out: Row[] = [];
       if (matchedRecent.length > 0) {
-        out.push({ kind: "section", label: "Recent" });
+        out.push({ kind: "section", label: t("comment.mention.section_recent") });
         for (const i of matchedRecent) out.push({ kind: "issue", issue: i });
       }
       if (matchedMine.length > 0) {
-        out.push({ kind: "section", label: "My issues" });
+        out.push({
+          kind: "section",
+          label: t("comment.mention.section_my_issues"),
+        });
         for (const i of matchedMine) out.push({ kind: "issue", issue: i });
       }
       if (out.length === 0) out.push({ kind: "empty" });
@@ -178,20 +183,39 @@ export function MentionSuggestionBar({
     const out: Row[] = [];
     if (showAll) out.push({ kind: "all" });
     if (matchedMembers.length > 0) {
-      out.push({ kind: "section", label: "Members" });
+      out.push({
+        kind: "section",
+        label: t("picker_body.mention.section_people"),
+      });
       for (const m of matchedMembers) out.push({ kind: "member", member: m });
     }
     if (matchedAgents.length > 0) {
-      out.push({ kind: "section", label: "Agents" });
+      out.push({
+        kind: "section",
+        label: t("picker_body.mention.section_agents"),
+      });
       for (const a of matchedAgents) out.push({ kind: "agent", agent: a });
     }
     if (matchedSquads.length > 0) {
-      out.push({ kind: "section", label: "Squads" });
+      out.push({
+        kind: "section",
+        label: t("picker_body.mention.section_squads"),
+      });
       for (const s of matchedSquads) out.push({ kind: "squad", squad: s });
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId]);
+  }, [
+    isChat,
+    query,
+    recentIssues,
+    myIssuesAll,
+    members,
+    agents,
+    squads,
+    userId,
+    t,
+  ]);
 
   if (!visible) return null;
 
@@ -241,7 +265,7 @@ export function MentionSuggestionBar({
             return (
               <View className="px-3 py-3">
                 <Text className="text-xs text-muted-foreground">
-                  No matches.
+                  {t("comment.mention.no_matches")}
                 </Text>
               </View>
             );
@@ -258,9 +282,9 @@ export function MentionSuggestionBar({
                   <Text className="text-xs font-medium text-brand">@</Text>
                 </View>
                 <Text className="flex-1 text-sm text-foreground">
-                  Everyone
+                  {t("comment.mention.everyone")}
                 </Text>
-                <Badge label="All" />
+                <Badge label={t("comment.mention.badge.all")} />
               </Pressable>
             );
           }
@@ -284,7 +308,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.member.name}
                 </Text>
-                <Badge label="Member" />
+                <Badge label={t("comment.mention.badge.member")} />
               </Pressable>
             );
           }
@@ -304,7 +328,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.agent.name}
                 </Text>
-                <Badge label="Agent" tone="brand" />
+                <Badge label={t("comment.mention.badge.agent")} tone="brand" />
               </Pressable>
             );
           }
@@ -324,7 +348,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.squad.name}
                 </Text>
-                <Badge label="Squad" tone="outline" />
+                <Badge label={t("comment.mention.badge.squad")} tone="outline" />
               </Pressable>
             );
           }

@@ -24,6 +24,7 @@
 import { useMemo } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Attachment } from "@multica/core/types";
 import { MarkdownImage } from "@/lib/markdown/markdown-image";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
@@ -105,6 +106,7 @@ function FileCard({
   attachment: Attachment;
   theme: typeof THEME["light"];
 }) {
+  const { t } = useTranslation("issues");
   const sizeLabel = formatBytes(attachment.size_bytes);
   return (
     <Pressable
@@ -125,7 +127,9 @@ function FileCard({
         }
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${attachment.filename}`}
+      accessibilityLabel={t("comment.attachment.open_accessibility_label", {
+        filename: attachment.filename,
+      })}
       className="flex-row items-center gap-2 px-3 py-2 rounded-md bg-secondary/60 active:opacity-80"
     >
       <Ionicons

@@ -180,5 +180,60 @@
         "search_placeholder": "搜索项目"
       }
     }
+  },
+  "comment": {
+    "card": {
+      "edited_suffix": "（已编辑）",
+      "resolved_bar_message": "已解决 · {{authors}} 的 {{count}} 条消息",
+      "resolved_bar_messages": "已解决 · {{authors}} 的 {{count}} 条消息",
+      "resolved_bar_accessibility_message": "{{authors}} 的已解决话题，{{count}} 条消息。点按以展开。",
+      "resolved_bar_accessibility_messages": "{{authors}} 的已解决话题，{{count}} 条消息。点按以展开。",
+      "resolved_by": "已由",
+      "collapse": "收起",
+      "collapse_accessibility_label": "收起已解决的话题",
+      "send_failed": "发送失败",
+      "retry": "重试",
+      "retry_accessibility_label": "重新发送评论",
+      "discard": "丢弃",
+      "discard_accessibility_label": "丢弃发送失败的评论"
+    },
+    "menu": {
+      "reply": "回复",
+      "react": "添加表情回应…",
+      "copy": "复制",
+      "select_text": "选择文本",
+      "copy_link": "复制链接",
+      "resolve_thread": "解决话题",
+      "unresolve_thread": "取消解决话题",
+      "delete": "删除",
+      "delete_confirm": {
+        "title": "删除评论？",
+        "message": "此评论将被永久删除，话题中的回复也将一并移除，此操作无法撤销。",
+        "cancel": "取消",
+        "confirm": "删除"
+      }
+    },
+    "reaction": {
+      "more_reactions": "更多表情回应…"
+    },
+    "attachment": {
+      "open_accessibility_label": "打开 {{filename}}"
+    },
+    "composer": {
+      "placeholder": "添加评论…",
+      "pill_label": "添加评论，输入 @ 提及"
+    },
+    "mention": {
+      "everyone": "所有人",
+      "no_matches": "没有匹配结果。",
+      "section_recent": "最近",
+      "section_my_issues": "我的 issue",
+      "badge": {
+        "all": "全部",
+        "member": "成员",
+        "agent": "智能体",
+        "squad": "小队"
+      }
+    }
   }
 }
