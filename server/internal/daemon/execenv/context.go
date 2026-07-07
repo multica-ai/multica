@@ -28,6 +28,46 @@ type taskContextMarkerFile struct {
 	IssueID   string `json:"issue_id,omitempty"`
 }
 
+// EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
+// {workspacesRoot}/.multica/daemon_task_context.json.
+//
+// The per-workdir marker only protects `multica` invocations whose cwd is
+// inside the workdir, because the CLI discovers markers by walking *up* from
+// cwd. A sandboxed subprocess that lost every MULTICA_* env var and escaped
+// to the workdir's parent directory sits above that marker, finds no daemon
+// signal, and would fall back to the user's config PAT — a confirmed
+// impersonation path. Every directory under workspacesRoot is daemon-owned,
+// so a marker at the root puts the entire tree back under the fail-closed
+// guard without touching any directory a user works in.
+//
+// A pre-existing matching marker is left as is; a foreign file at the marker
+// path is never clobbered and reported as an error instead.
+func EnsureWorkspacesRootMarker(workspacesRoot string) error {
+	if strings.TrimSpace(workspacesRoot) == "" {
+		return errors.New("execenv: workspaces root is required")
+	}
+	path := filepath.Join(workspacesRoot, TaskContextMarkerRelPath)
+	if existing, err := os.ReadFile(path); err == nil {
+		var marker taskContextMarkerFile
+		if json.Unmarshal(existing, &marker) == nil && marker.ManagedBy == TaskContextMarkerManagedBy {
+			return nil
+		}
+		return fmt.Errorf("foreign file at workspaces root marker path %s; refusing to overwrite", path)
+	}
+	payload := taskContextMarkerFile{ManagedBy: TaskContextMarkerManagedBy}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal workspaces root marker: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create workspaces root marker dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write workspaces root marker: %w", err)
+	}
+	return nil
+}
+
 // writeContextFiles renders and writes .agent_context/issue_context.md and
 // skills into the appropriate provider-native location.
 //
