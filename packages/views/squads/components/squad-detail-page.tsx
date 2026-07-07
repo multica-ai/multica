@@ -53,6 +53,7 @@ import {
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ContentEditor } from "../../editor/content-editor";
+import { ReadonlyContent } from "../../editor";
 import {
   PickerItem,
   PickerSection,
@@ -233,10 +234,14 @@ export function SquadDetailPage() {
           </>
         }
         actions={
-          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
-            <Trash2 className="size-3.5 mr-1" />
-            {t(($) => $.inspector.archive_button)}
-          </Button>
+          // Archiving a squad is workspace owner/admin only (DeleteSquad
+          // backend gate), so plain members never see the trigger.
+          isWorkspaceAdmin ? (
+            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
+              <Trash2 className="size-3.5 mr-1" />
+              {t(($) => $.inspector.archive_button)}
+            </Button>
+          ) : undefined
         }
       />
 
@@ -246,6 +251,7 @@ export function SquadDetailPage() {
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <SquadDetailInspector
           squad={squad}
+          canManage={isWorkspaceAdmin}
           memberCount={members.length}
           leaderName={getEntityName("agent", squad.leader_id)}
           creatorName={getEntityName("member", squad.creator_id)}
@@ -257,12 +263,13 @@ export function SquadDetailPage() {
 
         <SquadOverviewPane
           squad={squad}
+          canManage={isWorkspaceAdmin}
           members={members}
           memberStatusById={memberStatusById}
           isLeader={isLeader}
           isArchived={isArchived}
           getEntityName={getEntityName}
-          onAddMemberClick={() => setShowAddMember(true)}
+          onAddMemberClick={isWorkspaceAdmin ? () => setShowAddMember(true) : undefined}
           onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
@@ -390,17 +397,43 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
 function SquadAvatarEditor({
   squad,
   initials,
+  canManage,
   uploading,
   onUpload,
 }: {
   squad: Squad;
   initials: string;
+  canManage: boolean;
   uploading: boolean;
   onUpload: (url: string) => Promise<unknown>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading: fileUploading } = useFileUpload(api);
   const busy = uploading || fileUploading;
+
+  const avatarFace = squad.avatar_url ? (
+    <ActorAvatarBase
+      name={squad.name}
+      initials={initials}
+      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
+      size={64}
+      className="rounded-none"
+    />
+  ) : (
+    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+      <Users className="h-7 w-7" />
+    </div>
+  );
+
+  // Read-only variant for non-managers: same square avatar, no click-to-upload
+  // affordance.
+  if (!canManage) {
+    return (
+      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+        {avatarFace}
+      </div>
+    );
+  }
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -425,19 +458,7 @@ function SquadAvatarEditor({
         disabled={busy}
         aria-label="Change squad avatar"
       >
-        {squad.avatar_url ? (
-          <ActorAvatarBase
-            name={squad.name}
-            initials={initials}
-            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-            size={64}
-            className="rounded-none"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-            <Users className="h-7 w-7" />
-          </div>
-        )}
+        {avatarFace}
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
           {busy ? (
             <Loader2 className="h-4 w-4 animate-spin text-white" />
@@ -462,11 +483,20 @@ function SquadAvatarEditor({
 // in the agent inspector.
 function SquadNameEditor({
   value,
+  canManage,
   onSave,
 }: {
   value: string;
+  canManage: boolean;
   onSave: (next: string) => Promise<void>;
 }) {
+  if (!canManage) {
+    return (
+      <span className="self-start px-1 text-lg font-semibold leading-tight">
+        {value}
+      </span>
+    );
+  }
   return (
     <InlineEditPopover
       value={value}
@@ -740,13 +770,21 @@ function AddMemberDialog({
 // click (or click the placeholder when empty) to swap in an input that
 // commits on blur / Enter and cancels on Escape. Avoids opening a modal
 // for what is usually a one-word change.
-function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) => Promise<void> }) {
+function RoleEditor({ value, canManage, onSave }: { value: string; canManage: boolean; onSave: (next: string) => Promise<void> }) {
   const { t } = useT("squads");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  // Read-only variant for non-managers: role text only, no click-to-edit.
+  // Empty role renders nothing so the row stays clean.
+  if (!canManage) {
+    return value ? (
+      <div className="text-xs text-muted-foreground mt-0.5">{value}</div>
+    ) : null;
+  }
 
   const commit = async () => {
     const next = draft.trim();
@@ -799,6 +837,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
 // ---------------------------------------------------------------------------
 function SquadDetailInspector({
   squad,
+  canManage,
   memberCount,
   leaderName,
   creatorName,
@@ -808,6 +847,9 @@ function SquadDetailInspector({
   onUpdateDescription,
 }: {
   squad: Squad;
+  // Identity edits (avatar / name / description) hit UpdateSquad, which is
+  // workspace owner/admin only. Non-managers see read-only variants.
+  canManage: boolean;
   memberCount: number;
   leaderName: string;
   creatorName: string;
@@ -832,13 +874,15 @@ function SquadDetailInspector({
         <SquadAvatarEditor
           squad={squad}
           initials={initials}
+          canManage={canManage}
           uploading={uploadingAvatar}
           onUpload={onUploadAvatar}
         />
         <div className="flex flex-col gap-1">
-          <SquadNameEditor value={squad.name} onSave={onRename} />
+          <SquadNameEditor value={squad.name} canManage={canManage} onSave={onRename} />
           <SquadDescriptionEditor
             value={squad.description ?? ""}
+            canManage={canManage}
             onSave={onUpdateDescription}
           />
         </div>
@@ -892,13 +936,28 @@ function InspectorRow({ label, children }: { label: string; children: ReactNode 
 // the current value (or a placeholder) with a hover-revealed Pencil.
 function SquadDescriptionEditor({
   value,
+  canManage,
   onSave,
 }: {
   value: string;
+  canManage: boolean;
   onSave: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
   const [open, setOpen] = useState(false);
+  if (!canManage) {
+    return (
+      <span className="self-start px-1 text-xs leading-relaxed">
+        {value ? (
+          <span className="text-muted-foreground">{value}</span>
+        ) : (
+          <span className="italic text-muted-foreground/50">
+            {t(($) => $.description_dialog.placeholder_empty)}
+          </span>
+        )}
+      </span>
+    );
+  }
   return (
     <>
       <button
@@ -1001,6 +1060,7 @@ const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileTex
 
 function SquadOverviewPane({
   squad,
+  canManage,
   members,
   memberStatusById,
   isLeader,
@@ -1015,15 +1075,19 @@ function SquadOverviewPane({
   setLeaderPending,
 }: {
   squad: Squad;
+  // Member-list edits (role / leader / remove) and instructions edits all
+  // hit owner/admin-gated endpoints. Non-managers get a read-only view.
+  canManage: boolean;
   members: SquadMember[];
   memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
-  onAddMemberClick: () => void;
   // Optional — only passed when the current user can manage the squad
-  // (workspace owner/admin). Hidden otherwise so plain members don't
-  // see a button they can't action.
+  // (workspace owner/admin). AddSquadMember and agent create are both
+  // owner/admin-gated server-side, so plain members never see a button
+  // they can't action.
+  onAddMemberClick?: () => void;
   onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
@@ -1075,6 +1139,7 @@ function SquadOverviewPane({
           <div className="flex h-full flex-col p-4 md:p-6">
             <SquadMembersTab
               members={members}
+              canManage={canManage}
               memberStatusById={memberStatusById}
               isLeader={isLeader}
               isArchived={isArchived}
@@ -1092,6 +1157,7 @@ function SquadOverviewPane({
           <div className="flex h-full flex-col p-4 md:p-6">
             <SquadInstructionsTab
               squad={squad}
+              canManage={canManage}
               onSave={onSaveInstructions}
               onDirtyChange={setActiveDirty}
             />
@@ -1138,6 +1204,7 @@ const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
 // Members tab body — re-uses the existing list/role editing patterns.
 function SquadMembersTab({
   members,
+  canManage,
   memberStatusById,
   isLeader,
   isArchived,
@@ -1150,12 +1217,14 @@ function SquadMembersTab({
   setLeaderPending,
 }: {
   members: SquadMember[];
+  // Gates the per-row leader / remove actions and inline role editing.
+  canManage: boolean;
   memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
-  onAddMemberClick: () => void;
-  // Hidden for non-admins — see SquadOverviewPane.
+  // Both hidden for non-admins — see SquadOverviewPane.
+  onAddMemberClick?: () => void;
   onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
@@ -1181,10 +1250,12 @@ function SquadMembersTab({
               {t(($) => $.members_tab.create_agent_button)}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={onAddMemberClick}>
-            <Plus className="size-3.5 mr-1.5" />
-            {t(($) => $.members_tab.add_member_button)}
-          </Button>
+          {onAddMemberClick && (
+            <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+              <Plus className="size-3.5 mr-1.5" />
+              {t(($) => $.members_tab.add_member_button)}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1240,6 +1311,7 @@ function SquadMembersTab({
                 </div>
                 <RoleEditor
                   value={m.role ?? ""}
+                  canManage={canManage}
                   onSave={async (next) => { await onUpdateRole(m, next); }}
                 />
                 {primaryIssue && (
@@ -1290,7 +1362,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
+              {canManage && m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1311,7 +1383,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {!isLeader(m) && (
+              {canManage && !isLeader(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1345,10 +1417,14 @@ function SquadMembersTab({
 // (server/internal/handler/daemon.go).
 function SquadInstructionsTab({
   squad,
+  canManage,
   onSave,
   onDirtyChange,
 }: {
   squad: Squad;
+  // Editing instructions hits UpdateSquad (owner/admin only). Non-managers
+  // get a read-only Markdown render with no editor or Save button.
+  canManage: boolean;
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -1375,6 +1451,25 @@ function SquadInstructionsTab({
       setSaving(false);
     }
   };
+
+  if (!canManage) {
+    return (
+      <div className="flex h-full flex-col gap-4">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.instructions_tab.description)}
+        </p>
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3">
+          {squad.instructions ? (
+            <ReadonlyContent content={squad.instructions} />
+          ) : (
+            <span className="text-xs italic text-muted-foreground/50">
+              {t(($) => $.instructions_tab.description)}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col gap-4">

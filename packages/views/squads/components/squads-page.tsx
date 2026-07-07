@@ -887,17 +887,21 @@ export function SquadsPage() {
           )}
         </div>
         {/* Quiet chrome button (outline, icon-only below md) — primary is
-            reserved for the empty state. */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_button)}
-          onClick={() => useModalStore.getState().open("create-squad")}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_button)}</span>
-        </Button>
+            reserved for the empty state. Creating a squad is workspace
+            owner/admin only (CreateSquad backend gate), so plain members
+            never see the trigger. */}
+        {isWorkspaceAdmin && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.page.new_button)}
+            onClick={() => useModalStore.getState().open("create-squad")}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">{t(($) => $.page.new_button)}</span>
+          </Button>
+        )}
       </PageHeader>
 
       {isLoading ? (
@@ -908,13 +912,15 @@ export function SquadsPage() {
           <p className="text-sm text-muted-foreground">
             {t(($) => $.page.empty_no_squads)}
           </p>
-          <Button
-            size="sm"
-            onClick={() => useModalStore.getState().open("create-squad")}
-          >
-            <Plus className="size-3.5" />
-            {t(($) => $.page.new_button)}
-          </Button>
+          {isWorkspaceAdmin && (
+            <Button
+              size="sm"
+              onClick={() => useModalStore.getState().open("create-squad")}
+            >
+              <Plus className="size-3.5" />
+              {t(($) => $.page.new_button)}
+            </Button>
+          )}
         </div>
       ) : (
         <>

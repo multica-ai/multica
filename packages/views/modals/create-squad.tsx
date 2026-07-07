@@ -469,8 +469,11 @@ function AdditionalMembersPicker({
         {/* render={<div role="combobox" />} — chips contain their own remove
             <button>, so the trigger cannot itself be a <button> without
             nesting interactive content. Base UI injects click/keyboard/ARIA
-            wiring into the rendered element. */}
+            wiring into the rendered element. nativeButton={false} tells Base
+            UI the rendered element is not a native <button> so it keeps the
+            correct button semantics without warning. */}
         <PopoverTrigger
+          nativeButton={false}
           render={
             <div
               role="combobox"
