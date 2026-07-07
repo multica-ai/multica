@@ -24,6 +24,7 @@
     "status": "ステータス",
     "progress": "進捗",
     "lead": "リード",
+    "workdir": "作業ディレクトリ",
     "created": "作成日",
     "issues": "Issue 数"
   },
@@ -113,6 +114,15 @@
     "local_validate_not_readable": "ディレクトリを読み取れません。",
     "local_validate_not_writable": "ディレクトリに書き込めません。",
     "local_validate_unsupported": "ローカルディレクトリはデスクトップアプリでのみ選択できます。"
+  },
+  "workdir": {
+    "not_set": "未設定",
+    "advisory_badge": "参考",
+    "title": "優先作業ディレクトリ",
+    "description": "エージェントはこのプロジェクトパスを参考情報として受け取ります。ファイルシステムのサンドボックスを強制するものではありません。",
+    "placeholder": "/Users/name/code/project",
+    "clear": "クリア",
+    "save": "保存"
   },
   "delete_dialog": {
     "title": "プロジェクトを削除",

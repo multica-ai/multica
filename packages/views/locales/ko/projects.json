@@ -24,6 +24,7 @@
     "status": "상태",
     "progress": "진행률",
     "lead": "리드",
+    "workdir": "작업 디렉터리",
     "created": "생성일",
     "issues": "이슈 수"
   },
@@ -113,6 +114,15 @@
     "local_validate_not_readable": "디렉터리를 읽을 수 없습니다.",
     "local_validate_not_writable": "디렉터리에 쓸 수 없습니다.",
     "local_validate_unsupported": "로컬 디렉터리는 데스크톱 앱에서만 선택할 수 있습니다."
+  },
+  "workdir": {
+    "not_set": "설정되지 않음",
+    "advisory_badge": "참고용",
+    "title": "선호 작업 디렉터리",
+    "description": "에이전트는 이 프로젝트 경로를 참고 정보로 받습니다. 파일 시스템 샌드박스를 강제하지는 않습니다.",
+    "placeholder": "/Users/name/code/project",
+    "clear": "지우기",
+    "save": "저장"
   },
   "delete_dialog": {
     "title": "프로젝트 삭제",
