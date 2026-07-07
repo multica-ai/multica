@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
+import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import {
@@ -23,22 +24,27 @@ export function ChatFab() {
   const toggle = useChatStore((s) => s.toggle);
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
+  const inboxUnread = useInboxUnreadCount(wsId);
 
   if (isOpen) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
   const isRunning = (pending?.tasks ?? []).length > 0;
+  // Aggregate the things waiting on the user: unread chat sessions plus
+  // unread inbox notifications. Pending chat tasks already pulse the button
+  // itself, so they are not double-counted in the numeric badge.
+  const badgeCount = unreadSessionCount + inboxUnread;
 
   const handleClick = () => {
-    logger.info("fab.click (open chat)", { unreadSessionCount, isRunning });
+    logger.info("fab.click (open chat)", { unreadSessionCount, inboxUnread, isRunning });
     toggle();
   };
 
   // Tooltip text communicates the state that isn't carried by the icon/badge.
   const tooltip = isRunning
     ? t(($) => $.fab.running)
-    : unreadSessionCount > 0
-      ? t(($) => $.fab.unread, { count: unreadSessionCount })
+    : badgeCount > 0
+      ? t(($) => $.fab.unread, { count: badgeCount })
       : t(($) => $.fab.default);
 
   return (
@@ -53,9 +59,9 @@ export function ChatFab() {
         )}
       >
         <MessageCircle className="size-5" />
-        {unreadSessionCount > 0 && (
+        {badgeCount > 0 && (
           <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex min-w-4 h-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold leading-none text-background">
-            {unreadSessionCount > 9 ? "9+" : unreadSessionCount}
+            {badgeCount > 9 ? "9+" : badgeCount}
           </span>
         )}
       </TooltipTrigger>
