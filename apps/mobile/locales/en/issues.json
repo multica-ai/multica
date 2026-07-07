@@ -55,5 +55,56 @@
     "reset": "Reset",
     "status_section": "Status",
     "priority_section": "Priority"
+  },
+  "detail": {
+    "header_default_title": "Issue",
+    "header_back_title": "Back",
+    "actions_accessibility_label": "Issue actions",
+    "error": {
+      "load_prefix": "Failed to load issue:",
+      "not_found": "not found",
+      "retry": "Retry"
+    },
+    "menu": {
+      "cancel": "Cancel",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "edit_details": "Edit details",
+      "copy_link": "Copy link",
+      "open_on_web": "Open on web",
+      "delete_issue": "Delete issue"
+    },
+    "delete_confirm": {
+      "title": "Delete issue?",
+      "message": "{{identifier}} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    }
+  },
+  "edit": {
+    "loading": "Loading...",
+    "title_field": {
+      "label": "Title",
+      "placeholder": "Issue title"
+    },
+    "description_field": {
+      "label": "Description"
+    },
+    "saving": "Saving...",
+    "discard_confirm": {
+      "title": "Discard changes?",
+      "message": "Your edits to this issue will be lost.",
+      "keep_editing": "Keep editing",
+      "discard": "Discard"
+    },
+    "save_error": {
+      "title": "Failed to save",
+      "unknown": "Unknown error"
+    }
+  },
+  "runs": {
+    "header_title": "Agent Runs",
+    "section_active": "Active",
+    "section_past": "Past"
   }
 }

@@ -21,6 +21,7 @@ import { useActionSheet } from "@expo/react-native-action-sheet";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
+import { useTranslation } from "react-i18next";
 import type { Issue } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,7 @@ export default function IssueDetail() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const qc = useQueryClient();
   const { showActionSheetWithOptions } = useActionSheet();
+  const { t } = useTranslation("issues");
 
   const detail = useQuery(issueDetailOptions(wsId, id));
   const timeline = useQuery(issueTimelineOptions(wsId, id));
@@ -117,12 +119,19 @@ export default function IssueDetail() {
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;
-    const options: string[] = ["Cancel"];
-    options.push(isPinned ? "Unpin" : "Pin");
-    options.push("Edit details");
-    if (issueLink) options.push("Copy link");
-    if (issueLink) options.push("Open on web");
-    options.push("Delete issue");
+    const cancelLabel = t("detail.menu.cancel");
+    const pinLabel = t("detail.menu.pin");
+    const unpinLabel = t("detail.menu.unpin");
+    const editDetailsLabel = t("detail.menu.edit_details");
+    const copyLinkLabel = t("detail.menu.copy_link");
+    const openOnWebLabel = t("detail.menu.open_on_web");
+    const deleteIssueLabel = t("detail.menu.delete_issue");
+    const options: string[] = [cancelLabel];
+    options.push(isPinned ? unpinLabel : pinLabel);
+    options.push(editDetailsLabel);
+    if (issueLink) options.push(copyLinkLabel);
+    if (issueLink) options.push(openOnWebLabel);
+    options.push(deleteIssueLabel);
     const destructiveIndex = options.length - 1;
     showActionSheetWithOptions(
       {
@@ -134,18 +143,18 @@ export default function IssueDetail() {
       (i) => {
         if (i === undefined) return;
         const label = options[i];
-        if (label === "Pin") {
+        if (label === pinLabel) {
           createPin.mutate({ item_type: "issue", item_id: issue.id });
-        } else if (label === "Unpin") {
+        } else if (label === unpinLabel) {
           deletePin.mutate({ itemType: "issue", itemId: issue.id });
-        } else if (label === "Edit details") {
+        } else if (label === editDetailsLabel) {
           if (wsSlug) router.push(`/${wsSlug}/issue/${issue.id}/edit`);
-        } else if (label === "Copy link" && issueLink) {
+        } else if (label === copyLinkLabel && issueLink) {
           Clipboard.setStringAsync(issueLink);
-        } else if (label === "Open on web" && issueLink) {
+        } else if (label === openOnWebLabel && issueLink) {
           Linking.openURL(issueLink);
-        } else if (label === "Delete issue") {
-          confirmDelete(issue, () =>
+        } else if (label === deleteIssueLabel) {
+          confirmDelete(issue, t, () =>
             deleteIssue.mutate(issue.id, {
               onSuccess: () => router.back(),
             }),
@@ -161,14 +170,15 @@ export default function IssueDetail() {
     createPin,
     deletePin,
     showActionSheetWithOptions,
+    t,
   ]);
 
   return (
     <View className="flex-1 bg-background">
       <Stack.Screen
         options={{
-          title: issue?.identifier ?? "Issue",
-          headerBackTitle: "Back",
+          title: issue?.identifier ?? t("detail.header_default_title"),
+          headerBackTitle: t("detail.header_back_title"),
           headerRight: issue
             ? () => (
                 <View className="flex-row items-center gap-2">
@@ -179,7 +189,7 @@ export default function IssueDetail() {
                   <IconButton
                     name="ellipsis-horizontal"
                     onPress={onPressMore}
-                    accessibilityLabel="Issue actions"
+                    accessibilityLabel={t("detail.actions_accessibility_label")}
                   />
                 </View>
               )
@@ -193,13 +203,13 @@ export default function IssueDetail() {
       ) : detail.error || !issue ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
-            Failed to load issue:{" "}
+            {t("detail.error.load_prefix")}{" "}
             {detail.error instanceof Error
               ? detail.error.message
-              : "not found"}
+              : t("detail.error.not_found")}
           </Text>
           <Button variant="outline" onPress={() => detail.refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("detail.error.retry")}</Text>
           </Button>
         </View>
       ) : (
@@ -220,13 +230,21 @@ export default function IssueDetail() {
   );
 }
 
-function confirmDelete(issue: Issue, onConfirm: () => void) {
+function confirmDelete(
+  issue: Issue,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  onConfirm: () => void,
+) {
   Alert.alert(
-    "Delete issue?",
-    `${issue.identifier} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone.`,
+    t("detail.delete_confirm.title"),
+    t("detail.delete_confirm.message", { identifier: issue.identifier }),
     [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: onConfirm },
+      { text: t("detail.delete_confirm.cancel"), style: "cancel" },
+      {
+        text: t("detail.delete_confirm.confirm"),
+        style: "destructive",
+        onPress: onConfirm,
+      },
     ],
   );
 }

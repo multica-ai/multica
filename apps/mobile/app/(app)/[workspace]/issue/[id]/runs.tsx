@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { ScrollView, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { RunRow } from "@/components/issue/run-row";
@@ -37,6 +38,7 @@ const PAST_STATUS_ORDER: Record<AgentTask["status"], number> = {
 export default function IssueRunsRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useTranslation("issues");
   const { data: activeTasks = [] } = useQuery(
     issueActiveTasksOptions(wsId, id),
   );
@@ -68,20 +70,20 @@ export default function IssueRunsRoute() {
     <View className="flex-1">
       <View className="px-4 pt-4 pb-3">
         <Text className="text-base font-semibold text-foreground">
-          Agent Runs
+          {t("runs.header_title")}
         </Text>
       </View>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View className="px-4 gap-3 pb-4">
           {active.length > 0 ? (
-            <Section title="Active">
+            <Section title={t("runs.section_active")}>
               {active.map((task) => (
                 <RunRow key={task.id} task={task} issueId={id} />
               ))}
             </Section>
           ) : null}
           {past.length > 0 ? (
-            <Section title="Past">
+            <Section title={t("runs.section_past")}>
               {past.map((task) => (
                 <RunRow key={task.id} task={task} issueId={id} />
               ))}

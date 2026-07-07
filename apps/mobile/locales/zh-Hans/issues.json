@@ -55,5 +55,56 @@
     "reset": "重置",
     "status_section": "状态",
     "priority_section": "优先级"
+  },
+  "detail": {
+    "header_default_title": "Issue",
+    "header_back_title": "返回",
+    "actions_accessibility_label": "issue 操作",
+    "error": {
+      "load_prefix": "加载 issue 失败：",
+      "not_found": "未找到",
+      "retry": "重试"
+    },
+    "menu": {
+      "cancel": "取消",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "edit_details": "编辑详情",
+      "copy_link": "复制链接",
+      "open_on_web": "在网页中打开",
+      "delete_issue": "删除 issue"
+    },
+    "delete_confirm": {
+      "title": "删除 issue？",
+      "message": "{{identifier}} 及其评论、表情回应和附件将被永久删除，此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除"
+    }
+  },
+  "edit": {
+    "loading": "加载中...",
+    "title_field": {
+      "label": "标题",
+      "placeholder": "issue 标题"
+    },
+    "description_field": {
+      "label": "描述"
+    },
+    "saving": "保存中...",
+    "discard_confirm": {
+      "title": "放弃修改？",
+      "message": "你对此 issue 的修改将会丢失。",
+      "keep_editing": "继续编辑",
+      "discard": "放弃"
+    },
+    "save_error": {
+      "title": "保存失败",
+      "unknown": "未知错误"
+    }
+  },
+  "runs": {
+    "header_title": "智能体运行记录",
+    "section_active": "进行中",
+    "section_past": "历史"
   }
 }
