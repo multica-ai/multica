@@ -895,14 +895,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     },
   });
 
-  // Fullscreen mode for workflow issues — default to fullscreen so the
-  // execution panorama fills the available space. Toggle to detail mode
-  // reveals description, sub-issues, and activity.
+  // Workflow issues can toggle between detail mode and fullscreen mode.
+  // Default to detail mode so description, sub-issues, and activity are shown.
   const hasWorkflow = issue?.assignee_type === "workflow" && !!issue?.assignee_id;
-  const [isFullscreen, setIsFullscreen] = useState(hasWorkflow);
-  useEffect(() => {
-    setIsFullscreen(hasWorkflow);
-  }, [hasWorkflow]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
