@@ -3,10 +3,10 @@ import type { ChatTimelineItem } from "@multica/core/chat";
 
 /**
  * Split an assistant timeline into three regions for the conductor-style fold:
- *   preface — text items before the first thinking/tool/error item
- *   middle  — everything from the first to the last non-text item (inclusive),
- *             including any text items sandwiched between them
- *   final   — text items after the last non-text item
+ *   preface — text items before the first process item
+ *   middle  — everything from the first to the last process item (inclusive),
+ *             including thinking/tool/error rows and explicit commentary text
+ *   final   — text items after the last process item
  *
  * UI renders preface above the outer fold, middle inside the fold (with each
  * row keeping its existing inner Collapsible), and final below the fold.
@@ -18,18 +18,21 @@ export function splitTimeline(items: ChatTimelineItem[]): {
   middle: ChatTimelineItem[];
   final: ChatTimelineItem[];
 } {
-  const firstNonTextIdx = items.findIndex((i) => i.type !== "text");
-  if (firstNonTextIdx === -1) {
+  const isProcessItem = (item: ChatTimelineItem) =>
+    item.type !== "text" || item.text_phase === "commentary";
+
+  const firstProcessIdx = items.findIndex(isProcessItem);
+  if (firstProcessIdx === -1) {
     return { preface: [], middle: [], final: items };
   }
-  let lastNonTextIdx = items.length - 1;
-  while (lastNonTextIdx >= 0 && items[lastNonTextIdx]!.type === "text") {
-    lastNonTextIdx--;
+  let lastProcessIdx = items.length - 1;
+  while (lastProcessIdx >= 0 && !isProcessItem(items[lastProcessIdx]!)) {
+    lastProcessIdx--;
   }
   return {
-    preface: items.slice(0, firstNonTextIdx),
-    middle: items.slice(firstNonTextIdx, lastNonTextIdx + 1),
-    final: items.slice(lastNonTextIdx + 1),
+    preface: items.slice(0, firstProcessIdx),
+    middle: items.slice(firstProcessIdx, lastProcessIdx + 1),
+    final: items.slice(lastProcessIdx + 1),
   };
 }
 

@@ -185,6 +185,67 @@ func TestPiExecuteRetainsOnlyLastTurnOutput(t *testing.T) {
 	}
 }
 
+func TestPiExecutePreservesTextPhase(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","phase":"commentary","delta":"checking context"}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","phase":"final_answer","delta":"final answer"}}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","usage":{"input":1,"output":1}}}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScript(events)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var messages []Message
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for msg := range session.Messages {
+			if msg.Type == MessageText {
+				messages = append(messages, msg)
+			}
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+	<-done
+
+	byPhase := map[string]string{}
+	for _, msg := range messages {
+		byPhase[msg.TextPhase] += msg.Content
+	}
+	if byPhase["commentary"] != "checking context" {
+		t.Fatalf("commentary text = %q (all messages %#v)", byPhase["commentary"], messages)
+	}
+	if byPhase["final_answer"] != "final answer" {
+		t.Fatalf("final text = %q (all messages %#v)", byPhase["final_answer"], messages)
+	}
+}
+
 func TestStripPiToolCallMarkup(t *testing.T) {
 	tests := map[string]string{
 		`before call:bash{command:<|"|>cd repo/path && ls -F<|"|>}<tool_call|> after`:                           "before  after",

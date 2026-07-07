@@ -98,6 +98,7 @@ const (
 type Message struct {
 	Type      MessageType
 	Content   string         // text content (Text, Error, Log)
+	TextPhase string         // text phase for MessageText (e.g. commentary, final_answer)
 	Tool      string         // tool name (ToolUse, ToolResult)
 	CallID    string         // tool call ID (ToolUse, ToolResult)
 	Input     map[string]any // tool input (ToolUse)

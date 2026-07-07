@@ -12,19 +12,20 @@ import (
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+INSERT INTO task_message (task_id, seq, type, text_phase, tool, content, input, output)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, task_id, seq, type, text_phase, tool, content, input, output, created_at
 `
 
 type CreateTaskMessageParams struct {
-	TaskID  pgtype.UUID `json:"task_id"`
-	Seq     int32       `json:"seq"`
-	Type    string      `json:"type"`
-	Tool    pgtype.Text `json:"tool"`
-	Content pgtype.Text `json:"content"`
-	Input   []byte      `json:"input"`
-	Output  pgtype.Text `json:"output"`
+	TaskID    pgtype.UUID `json:"task_id"`
+	Seq       int32       `json:"seq"`
+	Type      string      `json:"type"`
+	TextPhase pgtype.Text `json:"text_phase"`
+	Tool      pgtype.Text `json:"tool"`
+	Content   pgtype.Text `json:"content"`
+	Input     []byte      `json:"input"`
+	Output    pgtype.Text `json:"output"`
 }
 
 func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
@@ -32,6 +33,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		arg.TaskID,
 		arg.Seq,
 		arg.Type,
+		arg.TextPhase,
 		arg.Tool,
 		arg.Content,
 		arg.Input,
@@ -43,6 +45,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		&i.TaskID,
 		&i.Seq,
 		&i.Type,
+		&i.TextPhase,
 		&i.Tool,
 		&i.Content,
 		&i.Input,
@@ -63,7 +66,7 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, text_phase, tool, content, input, output, created_at FROM task_message
 WHERE task_id = $1
 ORDER BY seq ASC
 `
@@ -82,6 +85,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 			&i.TaskID,
 			&i.Seq,
 			&i.Type,
+			&i.TextPhase,
 			&i.Tool,
 			&i.Content,
 			&i.Input,
@@ -99,7 +103,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 }
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, text_phase, tool, content, input, output, created_at FROM task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC
 `
@@ -123,6 +127,7 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 			&i.TaskID,
 			&i.Seq,
 			&i.Type,
+			&i.TextPhase,
 			&i.Tool,
 			&i.Content,
 			&i.Input,

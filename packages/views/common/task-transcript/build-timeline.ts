@@ -5,6 +5,7 @@ import { redactSecrets } from "./redact";
 export interface TimelineItem {
   seq: number;
   type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  text_phase?: string;
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;
@@ -13,7 +14,11 @@ export interface TimelineItem {
 }
 
 function canMergeStreamingText(prev: TimelineItem, next: TimelineItem): boolean {
-  return (prev.type === "thinking" || prev.type === "text") && prev.type === next.type;
+  return (
+    (prev.type === "thinking" || prev.type === "text") &&
+    prev.type === next.type &&
+    prev.text_phase === next.text_phase
+  );
 }
 
 /** Merge adjacent text/thinking fragments that were split only by daemon flush timing. */
@@ -56,6 +61,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
     items.push({
       seq: msg.seq,
       type: msg.type,
+      text_phase: msg.text_phase,
       tool: msg.tool,
       content: msg.content,
       input: msg.input,

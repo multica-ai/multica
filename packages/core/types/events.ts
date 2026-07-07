@@ -231,6 +231,7 @@ export interface TaskMessagePayload {
   chat_session_id?: string;
   seq: number;
   type: "text" | "thinking" | "tool_use" | "tool_result" | "error";
+  text_phase?: string;
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;

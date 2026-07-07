@@ -4397,9 +4397,26 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		var seq atomic.Int32
 		var mu sync.Mutex
 		var pendingText strings.Builder
+		var pendingTextPhase string
 		var pendingThinking strings.Builder
 		var batch []TaskMessageData
 		callIDToTool := map[string]string{}
+
+		appendPendingTextLocked := func() {
+			if pendingText.Len() == 0 {
+				pendingTextPhase = ""
+				return
+			}
+			s := seq.Add(1)
+			batch = append(batch, TaskMessageData{
+				Seq:       int(s),
+				Type:      "text",
+				TextPhase: pendingTextPhase,
+				Content:   pendingText.String(),
+			})
+			pendingText.Reset()
+			pendingTextPhase = ""
+		}
 
 		flush := func() {
 			mu.Lock()
@@ -4412,15 +4429,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				})
 				pendingThinking.Reset()
 			}
-			if pendingText.Len() > 0 {
-				s := seq.Add(1)
-				batch = append(batch, TaskMessageData{
-					Seq:     int(s),
-					Type:    "text",
-					Content: pendingText.String(),
-				})
-				pendingText.Reset()
-			}
+			appendPendingTextLocked()
 			toSend := batch
 			batch = nil
 			mu.Unlock()
@@ -4544,6 +4553,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					if msg.Content != "" {
 						taskLog.Debug("agent", "text", truncateLog(msg.Content, 200))
 						mu.Lock()
+						if pendingText.Len() > 0 && pendingTextPhase != msg.TextPhase {
+							appendPendingTextLocked()
+						}
+						pendingTextPhase = msg.TextPhase
 						pendingText.WriteString(msg.Content)
 						mu.Unlock()
 					}

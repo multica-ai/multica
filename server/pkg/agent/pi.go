@@ -267,6 +267,14 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		// partial on each delta), so give the scanner generous headroom.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
 		var textBuffer strings.Builder
+		var textBufferPhase string
+		flushText := func() {
+			if d := flushPiTextBuffer(&textBuffer); d != "" {
+				output.WriteString(d)
+				trySend(msgCh, Message{Type: MessageText, Content: d, TextPhase: textBufferPhase})
+			}
+			textBufferPhase = ""
+		}
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -285,6 +293,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "turn_start":
 				output.Reset()
 				textBuffer.Reset()
+				textBufferPhase = ""
 
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
@@ -292,9 +301,14 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				}
 				switch evt.AssistantMessageEvent.Type {
 				case "text_delta":
+					phase := evt.AssistantMessageEvent.textPhase(evt)
+					if textBuffer.Len() > 0 && textBufferPhase != phase {
+						flushText()
+					}
+					textBufferPhase = phase
 					if d := drainPiTextBuffer(&textBuffer, evt.AssistantMessageEvent.Delta); d != "" {
 						output.WriteString(d)
-						trySend(msgCh, Message{Type: MessageText, Content: d})
+						trySend(msgCh, Message{Type: MessageText, Content: d, TextPhase: phase})
 					}
 				case "thinking_delta":
 					if d := evt.AssistantMessageEvent.Delta; d != "" {
@@ -357,10 +371,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				}
 			}
 		}
-		if d := flushPiTextBuffer(&textBuffer); d != "" {
-			output.WriteString(d)
-			trySend(msgCh, Message{Type: MessageText, Content: d})
-		}
+		flushText()
 
 		waitErr := cmd.Wait()
 		duration := time.Since(startTime)
@@ -402,6 +413,9 @@ type piStreamEvent struct {
 
 	// message_update
 	AssistantMessageEvent *piAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
+	Phase                 string                   `json:"phase,omitempty"`
+	Kind                  string                   `json:"kind,omitempty"`
+	TextPhase             string                   `json:"textPhase,omitempty"`
 
 	// tool_execution_start / tool_execution_end
 	ToolCallID string          `json:"toolCallId,omitempty"`
@@ -419,8 +433,29 @@ type piStreamEvent struct {
 }
 
 type piAssistantMessageEvent struct {
-	Type  string `json:"type"`
-	Delta string `json:"delta,omitempty"`
+	Type      string `json:"type"`
+	Delta     string `json:"delta,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	TextPhase string `json:"textPhase,omitempty"`
+	TextKind  string `json:"textKind,omitempty"`
+}
+
+func (e *piAssistantMessageEvent) textPhase(parent piStreamEvent) string {
+	for _, phase := range []string{
+		e.Phase,
+		e.TextPhase,
+		e.Kind,
+		e.TextKind,
+		parent.Phase,
+		parent.TextPhase,
+		parent.Kind,
+	} {
+		if strings.TrimSpace(phase) != "" {
+			return strings.TrimSpace(phase)
+		}
+	}
+	return ""
 }
 
 type piMessage struct {

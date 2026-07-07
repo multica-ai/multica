@@ -2466,12 +2466,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type TaskMessageRequest struct {
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`
-	Tool    string         `json:"tool,omitempty"`
-	Content string         `json:"content,omitempty"`
-	Input   map[string]any `json:"input,omitempty"`
-	Output  string         `json:"output,omitempty"`
+	Seq       int            `json:"seq"`
+	Type      string         `json:"type"`
+	TextPhase string         `json:"text_phase,omitempty"`
+	Tool      string         `json:"tool,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	Output    string         `json:"output,omitempty"`
 }
 
 type TaskMessageBatchRequest struct {
@@ -2521,13 +2522,14 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
 		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
-			TaskID:  parseUUID(taskID),
-			Seq:     int32(msg.Seq),
-			Type:    msg.Type,
-			Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
-			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
-			Input:   inputJSON,
-			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
+			TaskID:    parseUUID(taskID),
+			Seq:       int32(msg.Seq),
+			Type:      msg.Type,
+			TextPhase: pgtype.Text{String: msg.TextPhase, Valid: msg.TextPhase != ""},
+			Tool:      pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
+			Content:   pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
+			Input:     inputJSON,
+			Output:    pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
 		})
 		if createErr != nil {
 			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
@@ -2558,6 +2560,7 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		IssueID:   issueID,
 		Seq:       int(m.Seq),
 		Type:      m.Type,
+		TextPhase: m.TextPhase.String,
 		Tool:      m.Tool.String,
 		Content:   m.Content.String,
 		Input:     input,
