@@ -106,5 +106,24 @@
     "header_title": "Agent Runs",
     "section_active": "Active",
     "section_past": "Past"
+  },
+  "picker": {
+    "emoji": {
+      "title": "Add Reaction"
+    },
+    "assignee": {
+      "search_placeholder": "Search people"
+    },
+    "due_date": {
+      "title": "Due date",
+      "clear": "Clear",
+      "done": "Done"
+    },
+    "label": {
+      "search_placeholder": "Search labels"
+    },
+    "project": {
+      "search_placeholder": "Search projects"
+    }
   }
 }

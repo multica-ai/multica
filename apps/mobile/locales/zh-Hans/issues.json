@@ -106,5 +106,24 @@
     "header_title": "智能体运行记录",
     "section_active": "进行中",
     "section_past": "历史"
+  },
+  "picker": {
+    "emoji": {
+      "title": "添加表情回应"
+    },
+    "assignee": {
+      "search_placeholder": "搜索成员"
+    },
+    "due_date": {
+      "title": "截止日期",
+      "clear": "清除",
+      "done": "完成"
+    },
+    "label": {
+      "search_placeholder": "搜索标签"
+    },
+    "project": {
+      "search_placeholder": "搜索项目"
+    }
   }
 }

@@ -7,6 +7,7 @@
 import { useRef } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { LabelPickerBody } from "@/components/issue/pickers/label-picker-body";
 import { issueDetailOptions } from "@/data/queries/issues";
 import {
@@ -24,7 +25,10 @@ export default function IssueLabelPickerRoute() {
   const attachLabel = useAttachLabel(id);
   const detachLabel = useDetachLabel(id);
   const createLabel = useCreateLabel();
-  const query = useNativeSearchBar("Search labels", { autoFocus: true });
+  const { t } = useTranslation("issues");
+  const query = useNativeSearchBar(t("picker.label.search_placeholder"), {
+    autoFocus: true,
+  });
 
   // Synchronous lock to prevent double-submit on rapid taps on the Create
   // row before React state updates — mirrors web's `creatingRef` pattern in

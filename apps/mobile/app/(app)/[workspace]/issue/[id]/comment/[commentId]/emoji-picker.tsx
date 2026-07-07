@@ -19,6 +19,7 @@ import { useCallback, useMemo } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { EmojiKeyboard, type EmojiType } from "rn-emoji-keyboard";
 import type { Reaction } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
@@ -38,6 +39,7 @@ export default function CommentEmojiPickerRoute() {
   const userId = useAuthStore((s) => s.user?.id);
   const toggle = useToggleCommentReaction(id);
   const { colorScheme } = useColorScheme();
+  const { t } = useTranslation("issues");
 
   const { data: timeline = [] } = useQuery(issueTimelineOptions(wsId, id));
   const entry = useMemo(
@@ -70,7 +72,7 @@ export default function CommentEmojiPickerRoute() {
     <View className="flex-1">
       <View className="px-4 pt-3 pb-2">
         <Text className="text-lg font-semibold text-foreground">
-          Add Reaction
+          {t("picker.emoji.title")}
         </Text>
       </View>
       <View className="flex-1">

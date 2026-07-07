@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ProjectPickerBody } from "@/components/issue/pickers/project-picker-body";
 import { issueDetailOptions } from "@/data/queries/issues";
 import { findProject, projectListOptions } from "@/data/queries/projects";
@@ -19,7 +20,10 @@ export default function IssueProjectPickerRoute() {
   const { data: issue } = useQuery(issueDetailOptions(wsId, id));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const updateIssue = useUpdateIssue(id);
-  const query = useNativeSearchBar("Search projects", { autoFocus: true });
+  const { t } = useTranslation("issues");
+  const query = useNativeSearchBar(t("picker.project.search_placeholder"), {
+    autoFocus: true,
+  });
 
   const project = useMemo(
     () => findProject(projects, issue?.project_id ?? null),
