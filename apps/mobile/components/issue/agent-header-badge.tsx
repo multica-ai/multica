@@ -17,6 +17,7 @@
 import { Pressable } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { AvatarStack, type StackActor } from "@/components/ui/avatar-stack";
 import { PulseDot } from "@/components/ui/pulse-dot";
 import { issueActiveTasksOptions } from "@/data/queries/issues";
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function AgentHeaderBadge({ issueId }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { data: active = [] } = useQuery(
@@ -50,7 +52,7 @@ export function AgentHeaderBadge({ issueId }: Props) {
         });
       }}
       hitSlop={8}
-      accessibilityLabel="Agent working — open runs"
+      accessibilityLabel={t("activity.agent_row.header_badge_accessibility_label")}
       className="flex-row items-center gap-1.5 px-2 py-1 active:opacity-60"
     >
       <AvatarStack actors={actors} max={2} size={20} />

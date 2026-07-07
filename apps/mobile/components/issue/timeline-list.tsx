@@ -87,6 +87,7 @@ import {
 } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { IssueHeaderCard } from "./issue-header-card";
@@ -143,6 +144,7 @@ export function TimelineList({
   highlightCommentId,
   highlightNonce,
 }: Props) {
+  const { t } = useTranslation("issues");
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to comment cards / chip rows / reactions normally.
@@ -331,7 +333,7 @@ export function TimelineList({
       <IssueReactionRow issue={issue} />
       <View className="px-4 pt-4 pb-2 border-t border-border">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Activity
+          {t("activity.section_title")}
         </Text>
       </View>
       {timelineLoading && (!entries || entries.length === 0) ? (
@@ -465,11 +467,12 @@ function RowSeparator() {
  * disappears the next time the user scrolls past and unmounts the screen).
  */
 function UnreadDivider() {
+  const { t } = useTranslation("issues");
   return (
     <View className="flex-row items-center gap-2 px-4">
       <View className="flex-1 h-px bg-destructive/40" />
       <Text className="text-[10px] uppercase tracking-wider font-medium text-destructive">
-        New
+        {t("activity.unread_divider")}
       </Text>
       <View className="flex-1 h-px bg-destructive/40" />
     </View>
@@ -494,14 +497,23 @@ function NewCommentChip({
   count: number;
   onPress: () => void;
 }) {
+  const { t } = useTranslation("issues");
   const { colorScheme } = useColorScheme();
   const fg = THEME[colorScheme].primaryForeground;
+  // Chinese doesn't inflect for count, but English does ("message" vs
+  // "messages") — select the key manually rather than i18next's `_one`/
+  // `_other` suffix convention, matching the pattern already established
+  // in comment-card.tsx's resolved-thread-bar accessibility label.
+  const unitSuffix = count === 1 ? "message" : "messages";
   return (
     <Pressable
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={`Jump to ${count} new ${count === 1 ? "message" : "messages"}`}
+      accessibilityLabel={t(
+        `activity.new_chip.accessibility_label_${unitSuffix}`,
+        { count },
+      )}
       style={{
         // shadow comes from system, not Tailwind — keeps the chip readable
         // against either light or dark timeline content beneath.
@@ -514,7 +526,7 @@ function NewCommentChip({
     >
       <Ionicons name="arrow-down" size={14} color={fg} />
       <Text className="text-xs font-semibold text-primary-foreground">
-        {count} new
+        {t("activity.new_chip.label", { count })}
       </Text>
     </Pressable>
   );

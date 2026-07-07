@@ -7,6 +7,7 @@
  */
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -16,12 +17,13 @@ interface Props {
 }
 
 export function SubmitIssueButton({ disabled, onPress, loading }: Props) {
+  const { t } = useTranslation("issues");
   const interactive = !disabled && !loading;
   return (
     <Pressable
       onPress={interactive ? onPress : undefined}
       hitSlop={8}
-      accessibilityLabel="Create issue"
+      accessibilityLabel={t("new_issue.submit_accessibility_label")}
       accessibilityState={{ disabled: !interactive, busy: loading }}
       className={cn(interactive && "active:opacity-60")}
     >

@@ -16,6 +16,7 @@ import { Pressable, View } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { AvatarStack, type StackActor } from "@/components/ui/avatar-stack";
 import { PulseDot } from "@/components/ui/pulse-dot";
@@ -87,20 +88,26 @@ export function AgentActivityRow({ issueId }: Props) {
 }
 
 function ActiveContent({ actors }: { actors: StackActor[] }) {
+  const { t } = useTranslation("issues");
   return (
     <View className="flex-1 flex-row items-center gap-2">
       <AvatarStack actors={actors} max={3} size={24} />
       <PulseDot />
-      <Text className="text-sm font-medium text-foreground">Working</Text>
+      <Text className="text-sm font-medium text-foreground">
+        {t("activity.agent_row.working")}
+      </Text>
     </View>
   );
 }
 
 function IdleContent({ count, mutedFg }: { count: number; mutedFg: string }) {
+  const { t } = useTranslation("issues");
   return (
     <View className="flex-1 flex-row items-center gap-2">
       <Ionicons name="time-outline" size={16} color={mutedFg} />
-      <Text className="text-sm text-foreground">Runs · {count}</Text>
+      <Text className="text-sm text-foreground">
+        {t("activity.agent_row.runs_count", { count })}
+      </Text>
     </View>
   );
 }

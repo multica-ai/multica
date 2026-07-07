@@ -181,6 +181,71 @@
       }
     }
   },
+  "activity": {
+    "section_title": "动态",
+    "agent_row": {
+      "working": "进行中",
+      "runs_count": "运行记录 · {{count}}",
+      "header_badge_accessibility_label": "智能体正在工作 — 打开运行记录"
+    },
+    "run_row": {
+      "status": {
+        "queued": "排队中",
+        "dispatched": "启动中",
+        "waiting_local_directory": "等待目录",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      },
+      "failure_reason": {
+        "agent_error": "智能体错误",
+        "timeout": "超时",
+        "codex_semantic_inactivity": "Codex 无响应",
+        "runtime_offline": "运行时离线",
+        "runtime_recovery": "运行时恢复中",
+        "manual": "手动"
+      },
+      "fallback_summary": {
+        "comment": "评论任务",
+        "autopilot": "自动化运行",
+        "chat": "聊天任务",
+        "quick_create": "快速创建",
+        "default": "任务"
+      },
+      "cancel_button": "取消",
+      "cancel_confirm": {
+        "title": "取消任务？",
+        "message": "智能体将在完成当前步骤后停止。",
+        "keep_running": "继续运行",
+        "confirm": "取消任务"
+      }
+    },
+    "new_chip": {
+      "label": "{{count}} 条新消息",
+      "accessibility_label_message": "跳转到 {{count}} 条新消息",
+      "accessibility_label_messages": "跳转到 {{count}} 条新消息"
+    },
+    "unread_divider": "新消息"
+  },
+  "attribute": {
+    "assignee_placeholder": "负责人",
+    "assignee_unknown": "未知",
+    "priority_placeholder": "优先级",
+    "label_placeholder": "标签",
+    "project_placeholder": "项目",
+    "due_date_placeholder": "截止日期"
+  },
+  "description": {
+    "placeholder": "描述…（输入 @ 提及）",
+    "empty": "暂无描述。"
+  },
+  "composer_attachment": {
+    "remove_mention_accessibility_label": "移除提及 {{name}}",
+    "retry_upload_accessibility_label": "重新上传 {{filename}}",
+    "open_accessibility_label": "打开 {{filename}}",
+    "remove_attachment_accessibility_label": "移除 {{filename}}"
+  },
   "comment": {
     "card": {
       "edited_suffix": "（已编辑）",

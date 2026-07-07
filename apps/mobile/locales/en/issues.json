@@ -181,6 +181,71 @@
       }
     }
   },
+  "activity": {
+    "section_title": "Activity",
+    "agent_row": {
+      "working": "Working",
+      "runs_count": "Runs · {{count}}",
+      "header_badge_accessibility_label": "Agent working — open runs"
+    },
+    "run_row": {
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Starting",
+        "waiting_local_directory": "Waiting for directory",
+        "running": "Running",
+        "completed": "Done",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "failure_reason": {
+        "agent_error": "Agent error",
+        "timeout": "Timeout",
+        "codex_semantic_inactivity": "Codex inactivity",
+        "runtime_offline": "Runtime offline",
+        "runtime_recovery": "Runtime recovery",
+        "manual": "Manual"
+      },
+      "fallback_summary": {
+        "comment": "Comment task",
+        "autopilot": "Autopilot run",
+        "chat": "Chat task",
+        "quick_create": "Quick create",
+        "default": "Task"
+      },
+      "cancel_button": "Cancel",
+      "cancel_confirm": {
+        "title": "Cancel task?",
+        "message": "The agent will stop after the current step.",
+        "keep_running": "Keep running",
+        "confirm": "Cancel task"
+      }
+    },
+    "new_chip": {
+      "label": "{{count}} new",
+      "accessibility_label_message": "Jump to {{count}} new message",
+      "accessibility_label_messages": "Jump to {{count}} new messages"
+    },
+    "unread_divider": "New"
+  },
+  "attribute": {
+    "assignee_placeholder": "Assignee",
+    "assignee_unknown": "Unknown",
+    "priority_placeholder": "Priority",
+    "label_placeholder": "Label",
+    "project_placeholder": "Project",
+    "due_date_placeholder": "Due date"
+  },
+  "description": {
+    "placeholder": "Description… (type @ to mention)",
+    "empty": "No description."
+  },
+  "composer_attachment": {
+    "remove_mention_accessibility_label": "Remove mention {{name}}",
+    "retry_upload_accessibility_label": "Retry upload of {{filename}}",
+    "open_accessibility_label": "Open {{filename}}",
+    "remove_attachment_accessibility_label": "Remove {{filename}}"
+  },
   "comment": {
     "card": {
       "edited_suffix": "(edited)",
