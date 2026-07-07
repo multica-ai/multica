@@ -61,5 +61,42 @@
       "title": "Save failed",
       "message": "Could not update profile."
     }
+  },
+  "notifications": {
+    "error": "Failed to load notification preferences.",
+    "inbox_section": {
+      "title": "Inbox notifications",
+      "description": "Which events show up in your inbox."
+    },
+    "groups": {
+      "assignments": {
+        "label": "Assignments",
+        "description": "When you're assigned an issue or removed as assignee."
+      },
+      "status_changes": {
+        "label": "Status changes",
+        "description": "When an issue's status changes."
+      },
+      "comments": {
+        "label": "Comments",
+        "description": "New comments on issues you're subscribed to."
+      },
+      "updates": {
+        "label": "Issue updates",
+        "description": "Edits to title, description, labels, priority, or due date."
+      },
+      "agent_activity": {
+        "label": "Agent activity",
+        "description": "When an agent picks up, runs, or completes a task."
+      }
+    },
+    "system_section": {
+      "title": "System",
+      "description": "Multica-wide announcements and important account events."
+    },
+    "system_notifications": {
+      "label": "System notifications",
+      "description": "Account changes, security alerts, product updates."
+    }
   }
 }

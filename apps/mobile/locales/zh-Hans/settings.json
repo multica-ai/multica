@@ -61,5 +61,42 @@
       "title": "保存失败",
       "message": "个人资料更新失败。"
     }
+  },
+  "notifications": {
+    "error": "加载通知设置失败。",
+    "inbox_section": {
+      "title": "收件箱通知",
+      "description": "哪些事件会显示在你的收件箱中。"
+    },
+    "groups": {
+      "assignments": {
+        "label": "分配",
+        "description": "当你被分配为 issue 负责人，或被移除负责人身份时。"
+      },
+      "status_changes": {
+        "label": "状态变更",
+        "description": "当 issue 的状态发生变化时。"
+      },
+      "comments": {
+        "label": "评论",
+        "description": "你订阅的 issue 有新评论时。"
+      },
+      "updates": {
+        "label": "issue 更新",
+        "description": "标题、描述、标签、优先级或截止日期的修改。"
+      },
+      "agent_activity": {
+        "label": "智能体活动",
+        "description": "当智能体认领、运行或完成一个 task 时。"
+      }
+    },
+    "system_section": {
+      "title": "系统",
+      "description": "Multica 范围内的公告和重要的账号事件。"
+    },
+    "system_notifications": {
+      "label": "系统通知",
+      "description": "账号变更、安全提醒、产品更新。"
+    }
   }
 }
