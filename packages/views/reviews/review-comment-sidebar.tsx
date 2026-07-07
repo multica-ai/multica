@@ -11,6 +11,7 @@ import {
 import type { ReviewAsset } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace";
 import { ContentEditor, type ContentEditorRef } from "../editor";
+import { Clock, Pencil } from "lucide-react";
 
 interface ReviewCommentSidebarProps {
   workspaceId: string;
@@ -148,22 +149,44 @@ export function ReviewCommentSidebar({
                   onClick={() => onSelectComment?.(comment.id)}
                 >
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-medium text-sm text-foreground">
-                        {getActorName("member", comment.author_id)}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {comment.resolved && <span className="text-xs text-green-500 font-medium">Resolved</span>}
+                    <div className="flex flex-col gap-1 mb-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold text-[13px] text-foreground leading-none">
+                          {getActorName("member", comment.author_id)}
+                        </span>
+                        {comment.resolved && <span className="text-[11px] text-green-500 font-medium leading-none">Resolved</span>}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {comment.start_time !== undefined && comment.start_time !== null && (
-                          <span 
-                            className="text-xs text-primary bg-primary/10 px-1.5 rounded cursor-pointer hover:bg-primary/20"
+                          <button
+                            className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[11px] font-mono text-primary hover:bg-primary/25 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onSeek(comment.start_time);
+                              onSeek(comment.start_time!);
                             }}
+                            title="Jump to timecode"
                           >
-                            {new Date(comment.start_time * 1000).toISOString().substring(14, 19)} - {new Date(comment.end_time * 1000).toISOString().substring(14, 19)}
-                          </span>
+                            <Clock className="w-2.5 h-2.5" />
+                            {new Date(comment.start_time * 1000).toISOString().substring(14, 19)}
+                            {comment.end_time !== null && comment.end_time !== undefined && comment.end_time !== comment.start_time && (
+                              <> — {new Date(comment.end_time * 1000).toISOString().substring(14, 19)}</>
+                            )}
+                          </button>
+                        )}
+                        {comment.shapes && comment.shapes.length > 0 && (
+                          <button
+                            className="inline-flex items-center justify-center h-5 w-5 rounded text-purple-400/70 hover:text-purple-400 hover:bg-purple-500/15 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectComment?.(comment.id);
+                              if (comment.start_time !== undefined && comment.start_time !== null) {
+                                onSeek(comment.start_time);
+                              }
+                            }}
+                            title="Show annotation"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
                         )}
                       </div>
                     </div>
