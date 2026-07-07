@@ -27,5 +27,39 @@
       "system": "跟随系统"
     }
   },
-  "sign_out_message": "退出后需要重新登录才能使用 Multica。"
+  "sign_out_message": "退出后需要重新登录才能使用 Multica。",
+  "profile": {
+    "your_avatar_alt": "你的头像",
+    "tap_to_change_photo": "点击更换头像",
+    "name_label": "姓名",
+    "name_placeholder": "你的姓名",
+    "email_label": "邮箱",
+    "email_hint": "邮箱在注册时设置，此处无法修改。",
+    "saving": "保存中…",
+    "avatar_actions": {
+      "take_photo": "拍照",
+      "choose_library": "从相册选择",
+      "remove_photo": "移除头像"
+    },
+    "camera_permission": {
+      "title": "需要权限",
+      "message": "拍照需要访问相机的权限。"
+    },
+    "image_too_large": {
+      "title": "图片过大",
+      "message": "请选择小于 5 MB 的图片。"
+    },
+    "upload_failed": {
+      "title": "上传失败",
+      "message": "头像上传失败。"
+    },
+    "remove_failed": {
+      "title": "移除失败",
+      "message": "头像移除失败。"
+    },
+    "save_failed": {
+      "title": "保存失败",
+      "message": "个人资料更新失败。"
+    }
+  }
 }

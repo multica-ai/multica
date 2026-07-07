@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/data/auth-store";
 import { api } from "@/data/api";
 import type { FileAsset } from "@/data/api";
@@ -50,6 +51,8 @@ export default function ProfileSettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const { showActionSheetWithOptions } = useActionSheet();
+  const { t } = useTranslation("settings");
+  const { t: tCommon } = useTranslation("common");
 
   // Resync if `user` updates from outside (avatar upload, refetch, login as
   // different user). Without this the form would render stale init forever.
@@ -60,7 +63,12 @@ export default function ProfileSettingsScreen() {
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
   const handleAvatarPick = () => {
-    const options = ["Take Photo", "Choose from Library", "Remove Photo", "Cancel"];
+    const options = [
+      t("profile.avatar_actions.take_photo"),
+      t("profile.avatar_actions.choose_library"),
+      t("profile.avatar_actions.remove_photo"),
+      tCommon("cancel"),
+    ];
     const removeIndex = user?.avatar_url ? 2 : -1;
     const cancelIndex = user?.avatar_url ? 3 : 2;
     const visibleOptions = user?.avatar_url ? options : options.filter((_, i) => i !== 2);
@@ -83,7 +91,10 @@ export default function ProfileSettingsScreen() {
   const pickFromCamera = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert("Permission needed", "Camera access is required to take a photo.");
+      Alert.alert(
+        t("profile.camera_permission.title"),
+        t("profile.camera_permission.message"),
+      );
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -107,7 +118,10 @@ export default function ProfileSettingsScreen() {
 
   const uploadAvatar = async (asset: ImagePicker.ImagePickerAsset) => {
     if (asset.fileSize && asset.fileSize > MAX_AVATAR_BYTES) {
-      Alert.alert("Image too large", "Pick an image under 5 MB.");
+      Alert.alert(
+        t("profile.image_too_large.title"),
+        t("profile.image_too_large.message"),
+      );
       return;
     }
     const fileAsset: FileAsset = {
@@ -125,8 +139,8 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Upload failed",
-        err instanceof Error ? err.message : "Could not upload avatar.",
+        t("profile.upload_failed.title"),
+        err instanceof Error ? err.message : t("profile.upload_failed.message"),
       );
     } finally {
       setUploading(false);
@@ -140,8 +154,8 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Remove failed",
-        err instanceof Error ? err.message : "Could not remove avatar.",
+        t("profile.remove_failed.title"),
+        err instanceof Error ? err.message : t("profile.remove_failed.message"),
       );
     } finally {
       setUploading(false);
@@ -156,8 +170,8 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Save failed",
-        err instanceof Error ? err.message : "Could not update profile.",
+        t("profile.save_failed.title"),
+        err instanceof Error ? err.message : t("profile.save_failed.message"),
       );
     } finally {
       setSaving(false);
@@ -172,7 +186,7 @@ export default function ProfileSettingsScreen() {
     >
       <View className="items-center gap-3">
         <Pressable onPress={handleAvatarPick} disabled={uploading}>
-          <Avatar alt={user?.name ?? "Your avatar"} className="size-24">
+          <Avatar alt={user?.name ?? t("profile.your_avatar_alt")} className="size-24">
             {user?.avatar_url ? (
               <AvatarImage source={{ uri: user.avatar_url }} />
             ) : null}
@@ -187,7 +201,7 @@ export default function ProfileSettingsScreen() {
           <ActivityIndicator />
         ) : (
           <Text className="text-xs text-muted-foreground">
-            Tap to change photo
+            {t("profile.tap_to_change_photo")}
           </Text>
         )}
       </View>
@@ -196,31 +210,31 @@ export default function ProfileSettingsScreen() {
 
       <View className="gap-4">
         <View>
-          <Text className="text-xs text-muted-foreground mb-1.5">Name</Text>
+          <Text className="text-xs text-muted-foreground mb-1.5">{t("profile.name_label")}</Text>
           <TextField
             value={name}
             onChangeText={setName}
-            placeholder="Your name"
+            placeholder={t("profile.name_placeholder")}
             autoCapitalize="words"
             autoCorrect={false}
             returnKeyType="done"
           />
         </View>
         <View>
-          <Text className="text-xs text-muted-foreground mb-1.5">Email</Text>
+          <Text className="text-xs text-muted-foreground mb-1.5">{t("profile.email_label")}</Text>
           <View className="rounded-md border border-border bg-muted px-3 py-2.5">
             <Text className="text-base text-muted-foreground">
               {user?.email ?? "—"}
             </Text>
           </View>
           <Text className="text-xs text-muted-foreground mt-1.5">
-            Email is set at sign-up and can&apos;t be changed here.
+            {t("profile.email_hint")}
           </Text>
         </View>
       </View>
 
       <Button onPress={handleSave} disabled={!dirty || saving}>
-        <Text>{saving ? "Saving…" : "Save"}</Text>
+        <Text>{saving ? t("profile.saving") : tCommon("save")}</Text>
       </Button>
     </ScrollView>
   );

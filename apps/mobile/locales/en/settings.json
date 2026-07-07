@@ -27,5 +27,39 @@
       "system": "System"
     }
   },
-  "sign_out_message": "You'll need to sign in again to use Multica on this device."
+  "sign_out_message": "You'll need to sign in again to use Multica on this device.",
+  "profile": {
+    "your_avatar_alt": "Your avatar",
+    "tap_to_change_photo": "Tap to change photo",
+    "name_label": "Name",
+    "name_placeholder": "Your name",
+    "email_label": "Email",
+    "email_hint": "Email is set at sign-up and can't be changed here.",
+    "saving": "Saving…",
+    "avatar_actions": {
+      "take_photo": "Take Photo",
+      "choose_library": "Choose from Library",
+      "remove_photo": "Remove Photo"
+    },
+    "camera_permission": {
+      "title": "Permission needed",
+      "message": "Camera access is required to take a photo."
+    },
+    "image_too_large": {
+      "title": "Image too large",
+      "message": "Pick an image under 5 MB."
+    },
+    "upload_failed": {
+      "title": "Upload failed",
+      "message": "Could not upload avatar."
+    },
+    "remove_failed": {
+      "title": "Remove failed",
+      "message": "Could not remove avatar."
+    },
+    "save_failed": {
+      "title": "Save failed",
+      "message": "Could not update profile."
+    }
+  }
 }
