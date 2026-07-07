@@ -4,7 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
+import { chatSessionsOptions, hasPendingChatTasksOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import {
@@ -22,12 +22,19 @@ export function ChatFab() {
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
+  // FAB only needs a boolean "is anything running", and only while the window
+  // is closed (when open, ChatWindow owns the detailed pending query). Gating
+  // on `enabled: !isOpen` keeps the minimised button off the per-message
+  // aggregate hot path entirely (MUL-4159).
+  const { data: hasPending } = useQuery({
+    ...hasPendingChatTasksOptions(wsId),
+    enabled: !isOpen,
+  });
 
   if (isOpen) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
-  const isRunning = (pending?.tasks ?? []).length > 0;
+  const isRunning = hasPending?.has_pending ?? false;
 
   const handleClick = () => {
     logger.info("fab.click (open chat)", { unreadSessionCount, isRunning });

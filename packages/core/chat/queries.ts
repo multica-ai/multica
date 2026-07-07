@@ -22,6 +22,13 @@ export const chatKeys = {
   pendingTask: (sessionId: string) => [...chatKeys.pendingTaskAll(), sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
+  /**
+   * Boolean "does the user have any in-flight chat task" — the FAB's cheap
+   * running indicator. Separate cache from the detailed `pendingTasks` list so
+   * the FAB (closed-window) and ChatWindow (open) can subscribe independently.
+   */
+  pendingTasksHasAny: (wsId: string) =>
+    [...chatKeys.all(wsId), "pending-tasks", "has-any"] as const,
   /** Per-task execution messages — shared with issue agent cards. */
   taskMessagesAll: () => ["task-messages"] as const,
   taskMessages: (taskId: string) => [...chatKeys.taskMessagesAll(), taskId] as const,
@@ -132,6 +139,21 @@ export function pendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasks(wsId),
     queryFn: () => api.listPendingChatTasks(),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Boolean "is any chat task running for me right now" — the cheap sibling of
+ * pendingChatTasksOptions. The FAB uses this (with `enabled: !isOpen`) so the
+ * minimised chat button never fetches or holds the full task list; the
+ * detailed list is reserved for the open ChatWindow (history + stop flows).
+ * Both caches are kept in sync by the task-lifecycle WS handlers.
+ */
+export function hasPendingChatTasksOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.pendingTasksHasAny(wsId),
+    queryFn: () => api.hasAnyPendingChatTasks(),
     staleTime: Infinity,
   });
 }

@@ -159,13 +159,43 @@ LIMIT 1;
 -- Aggregate view of all in-flight chat tasks owned by a given creator in a
 -- workspace. Drives the FAB's "running" indicator when the chat window is
 -- closed and no single session's query is active.
-SELECT atq.id AS task_id, atq.status, atq.chat_session_id
+--
+-- Returns cs.agent_id so the handler can filter tasks belonging to private
+-- agents the caller has lost access to using the already-loaded `allowed`
+-- set — no second ListAllChatSessionsByCreator scan on the hot path.
+--
+-- atq.chat_session_id IS NOT NULL is redundant given the JOIN, but stated
+-- explicitly so the planner can prove the query predicate is a subset of the
+-- idx_agent_task_queue_chat_pending_v2 partial-index predicate and use it.
+SELECT atq.id AS task_id, atq.status, atq.chat_session_id, cs.agent_id
 FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
-WHERE cs.workspace_id = $1
-  AND cs.creator_id = $2
+WHERE atq.chat_session_id IS NOT NULL
   AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND cs.workspace_id = $1
+  AND cs.creator_id = $2
 ORDER BY atq.created_at DESC;
+
+-- name: HasPendingChatTasksByCreator :one
+-- Boolean fast-path for the FAB's "running" indicator. Returns a single
+-- EXISTS row instead of the full task list, so the planner can stop at the
+-- first matching in-flight task (LIMIT 1 semantics via EXISTS).
+--
+-- Permission filtering is baked into the query: agent_id = ANY($3) restricts
+-- the result to the agents the caller may currently see, so a member who lost
+-- access to a private agent never gets a true from a task they can no longer
+-- reach. The handler must pass its resolved accessible-agent id set as $3;
+-- an empty array yields false.
+SELECT EXISTS (
+  SELECT 1
+  FROM agent_task_queue atq
+  JOIN chat_session cs ON cs.id = atq.chat_session_id
+  WHERE atq.chat_session_id IS NOT NULL
+    AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    AND cs.workspace_id = sqlc.arg(workspace_id)
+    AND cs.creator_id = sqlc.arg(creator_id)
+    AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
+) AS has_pending;
 
 -- name: MarkChatSessionRead :exec
 -- Clears unread_since, dropping the session's unread count to 0.
