@@ -113,5 +113,47 @@
       "message": "将相关的 issue 归入同一个项目，追踪进度并指定负责人。",
       "create": "创建项目"
     }
+  },
+  "header_card": {
+    "add_description": "添加描述",
+    "progress": "进度"
+  },
+  "properties": {
+    "status": "状态",
+    "priority": "优先级",
+    "lead": "负责人",
+    "unassigned": "未指定"
+  },
+  "related_issues": {
+    "error": {
+      "load_prefix": "加载 issue 失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "empty": "暂无 issue。"
+  },
+  "resources": {
+    "title": "资源",
+    "add": "添加",
+    "empty": "尚未关联任何资源。",
+    "detach_confirm": {
+      "title": "取消关联资源？",
+      "cancel": "取消",
+      "confirm": "取消关联"
+    }
+  },
+  "picker_body": {
+    "lead": {
+      "unassigned": "未指定",
+      "agent_tag": "智能体",
+      "no_matches": "没有匹配结果。",
+      "empty": "此工作区中还没有成员或智能体。"
+    },
+    "priority": {
+      "title": "优先级"
+    },
+    "status": {
+      "title": "状态"
+    }
   }
 }

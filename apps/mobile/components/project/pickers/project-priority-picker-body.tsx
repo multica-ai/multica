@@ -6,6 +6,7 @@
 import { Pressable, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type { ProjectPriority } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectPriorityIcon } from "@/components/ui/project-priority-icon";
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function ProjectPriorityPickerBody({ value, onChange }: Props) {
+  const { t } = useTranslation("projects");
   const { colorScheme } = useColorScheme();
   const checkColor =
     colorScheme === "dark" ? THEME.dark.primary : THEME.light.primary;
@@ -28,7 +30,9 @@ export function ProjectPriorityPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Priority</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {t("picker_body.priority.title")}
+        </Text>
       </View>
       <View className="px-2">
         {PROJECT_PRIORITIES.map((priority) => {

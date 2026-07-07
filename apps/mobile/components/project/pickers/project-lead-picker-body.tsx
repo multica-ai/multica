@@ -15,6 +15,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
@@ -52,6 +53,7 @@ function isRowSelected(value: LeadValue | null, row: Row): boolean {
 }
 
 export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
+  const { t } = useTranslation("projects");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -141,14 +143,16 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
             numberOfLines={1}
           >
             {item.kind === "unassigned"
-              ? "Unassigned"
+              ? t("picker_body.lead.unassigned")
               : item.kind === "member"
                 ? item.member.name
                 : item.agent.name}
           </Text>
           {/* Inline type tag — Apple UITableViewCellStyleValue1. */}
           {item.kind === "agent" ? (
-            <Text className="text-sm text-muted-foreground">Agent</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("picker_body.lead.agent_tag")}
+            </Text>
           ) : null}
           {isRowSelected(value, item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -159,8 +163,8 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No members or agents in this workspace yet."}
+              ? t("picker_body.lead.no_matches")
+              : t("picker_body.lead.empty")}
           </Text>
         </View>
       }

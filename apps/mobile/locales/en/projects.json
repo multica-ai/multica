@@ -113,5 +113,47 @@
       "message": "Group related issues into a project to track progress and assign a lead.",
       "create": "Create project"
     }
+  },
+  "header_card": {
+    "add_description": "Add a description",
+    "progress": "Progress"
+  },
+  "properties": {
+    "status": "Status",
+    "priority": "Priority",
+    "lead": "Lead",
+    "unassigned": "Unassigned"
+  },
+  "related_issues": {
+    "error": {
+      "load_prefix": "Failed to load issues:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "empty": "No issues yet."
+  },
+  "resources": {
+    "title": "Resources",
+    "add": "Add",
+    "empty": "No resources attached.",
+    "detach_confirm": {
+      "title": "Detach resource?",
+      "cancel": "Cancel",
+      "confirm": "Detach"
+    }
+  },
+  "picker_body": {
+    "lead": {
+      "unassigned": "Unassigned",
+      "agent_tag": "Agent",
+      "no_matches": "No matches.",
+      "empty": "No members or agents in this workspace yet."
+    },
+    "priority": {
+      "title": "Priority"
+    },
+    "status": {
+      "title": "Status"
+    }
   }
 }
