@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { conditionIsEmpty, summarizeCondition } from "./tool-policy-table";
+import { GROUP_ARG } from "./group-scope";
 import type { ToolCondition } from "../core/tool-policy";
 
 const base: ToolCondition = { host_allowlist: [], actions: [], arg_allowlist: [], expr: "" };
@@ -16,6 +17,12 @@ describe("conditionIsEmpty with arg_allowlist", () => {
       conditionIsEmpty({ ...base, arg_allowlist: [{ arg: "data_source_id", values: [] }] }),
     ).toBe(true);
   });
+
+  it("treats a group allowlist with values as non-empty", () => {
+    expect(
+      conditionIsEmpty({ ...base, arg_allowlist: [{ arg: GROUP_ARG, values: ["g1"] }] }),
+    ).toBe(false);
+  });
 });
 
 describe("summarizeCondition with arg_allowlist", () => {
@@ -29,6 +36,18 @@ describe("summarizeCondition with arg_allowlist", () => {
     expect(
       summarizeCondition({ ...base, arg_allowlist: [{ arg: "data_source_id", values: ["a"] }] }),
     ).toBe("1 source");
+  });
+
+  it("summarizes a single-group scope", () => {
+    expect(
+      summarizeCondition({ ...base, arg_allowlist: [{ arg: GROUP_ARG, values: ["g1"] }] }),
+    ).toBe("1 group");
+  });
+
+  it("summarizes a multi-group scope", () => {
+    expect(
+      summarizeCondition({ ...base, arg_allowlist: [{ arg: GROUP_ARG, values: ["g1", "g2"] }] }),
+    ).toBe("2 groups");
   });
 
   it("combines arg with other terms", () => {

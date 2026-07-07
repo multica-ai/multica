@@ -6,6 +6,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockListAutopilots = vi.hoisted(() => vi.fn());
+const mockListCerebroGroups = vi.hoisted(() => vi.fn());
 const mockUseFeatureFlag = vi.hoisted(() => vi.fn((_key: string) => false));
 
 vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => {
@@ -19,7 +20,11 @@ vi.mock("@multica/core/api", async () => {
   );
   return {
     ...actual,
-    api: { cerebroRequest: mockCerebroRequest, listAutopilots: mockListAutopilots },
+    api: {
+      cerebroRequest: mockCerebroRequest,
+      listAutopilots: mockListAutopilots,
+      listCerebroGroups: mockListCerebroGroups,
+    },
   };
 });
 
@@ -164,6 +169,8 @@ beforeEach(() => {
   // picker); the mock stays defined so the api shape is complete.
   mockListAutopilots.mockReset();
   mockListAutopilots.mockResolvedValue({ autopilots: [] });
+  mockListCerebroGroups.mockReset();
+  mockListCerebroGroups.mockResolvedValue([]);
   // Credentials feature is OFF by default; the credential-specific tests opt in.
   mockUseFeatureFlag.mockReset();
   mockUseFeatureFlag.mockReturnValue(false);
@@ -773,6 +780,69 @@ describe("ToolPolicyTable (Condition editor)", () => {
       const body = JSON.parse((put![1] as RequestInit).body as string);
       expect(body).toMatchObject({ tool_key: "web_fetch", layer: "agent", setting: "allow" });
       expect(body.condition).toBeNull();
+    });
+  });
+
+  it("uses a group picker for Manage group permissions and writes group_id", async () => {
+    const user = userEvent.setup();
+    mockListCerebroGroups.mockResolvedValue([
+      {
+        id: "group-finance",
+        workspace_id: "ws-1",
+        name: "Finance",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+      {
+        id: "group-support",
+        workspace_id: "ws-1",
+        name: "Customer service",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+    ]);
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "manage_group_overrides",
+          title: "Manage group permissions",
+          category: "Permissions",
+          source: "platform",
+          enforced_conditions: ["arg", "cel"],
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          conditions: { workspace: null, runtime: null, agent: null, user: null },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-manage_group_overrides");
+    await user.click(within(row).getByTestId("condition-control-manage_group_overrides"));
+    const editor = within(await screen.findByTestId("condition-editor-manage_group_overrides"));
+
+    expect(await editor.findByLabelText("Search groups")).toBeInTheDocument();
+    expect(editor.getByText("Groups")).toBeInTheDocument();
+    await user.click(await editor.findByRole("button", { name: /Finance/ }));
+    await user.click(editor.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        tool_key: "manage_group_overrides",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "allow",
+      });
+      expect(body.condition.arg_allowlist).toEqual([
+        { arg: "group_id", values: ["group-finance"] },
+      ]);
     });
   });
 });

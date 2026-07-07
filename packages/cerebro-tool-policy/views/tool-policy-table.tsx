@@ -41,6 +41,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   SlidersHorizontal,
+  UsersRound,
   X,
 } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -100,6 +101,7 @@ import {
   type ScopeConfig,
   type ScopeOption,
 } from "./data-source-scope";
+import { GROUP_ARG, useGroupScopeOptions } from "./group-scope";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
 import { ConnectionToolList } from "./connection-config-sheet";
@@ -1357,9 +1359,11 @@ export function CatalogDecisionControl({
   const current = conditionForLayer(row, editLayer);
   const active = !conditionIsEmpty(current);
   const facets = conditionFacets(row);
-  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
   const meaningful =
-    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+    facets.host || facets.actions.length > 0 || facets.cel || showArg || showGroupArg;
   const showWhen = editLayer !== "group" && (meaningful || active);
 
   return (
@@ -1486,6 +1490,7 @@ function argSummary(list: ToolCondition["arg_allowlist"]): string | null {
   const entry = (list ?? []).find((a) => a.values.length > 0);
   if (!entry) return null;
   const n = entry.values.length;
+  if (entry.arg === GROUP_ARG) return n === 1 ? "1 group" : `${n} groups`;
   if (entry.arg === FOLDER_ARG) return n === 1 ? "1 folder" : `${n} folders`;
   return n === 1 ? "1 source" : `${n} sources`;
 }
@@ -1696,6 +1701,8 @@ export function ConditionEditorBody({
   const [argMode, setArgMode] = useState<"folder" | "source">("source");
   const [argValues, setArgValues] = useState<string[]>([]);
   const [argSearch, setArgSearch] = useState("");
+  const [groupValues, setGroupValues] = useState<string[]>([]);
+  const [groupSearch, setGroupSearch] = useState("");
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
   const current = conditionForLayer(row, editLayer);
@@ -1703,7 +1710,9 @@ export function ConditionEditorBody({
   const facets = conditionFacets(row);
   // The arg picker shows only when the row is arg-scoped AND a scope binding
   // (connection + options source) was resolved for the workspace.
-  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
 
   // Lazily fetch the scope options only while the editor is open (one cached
   // registry round-trip per edit session, not on every table render).
@@ -1711,6 +1720,10 @@ export function ConditionEditorBody({
     wsId ?? "",
     showArg ? argScopeConfig ?? null : null,
     enabled && showArg,
+  );
+  const { options: groupOptions, loading: groupLoading } = useGroupScopeOptions(
+    wsId ?? "",
+    enabled && showGroupArg,
   );
 
   // Seed the form from the persisted condition each time the editor opens, so an
@@ -1723,6 +1736,10 @@ export function ConditionEditorBody({
     setHostDraft("");
     setHostError(null);
     setArgSearch("");
+    setGroupSearch("");
+    setGroupValues(
+      current?.arg_allowlist?.find((a) => a.arg === GROUP_ARG)?.values ?? [],
+    );
     // Seed the arg picker from the stored allowlist: a folder_id entry → folder
     // mode, otherwise the data_source_id entry → source mode.
     const folderEntry = current?.arg_allowlist?.find(
@@ -1759,6 +1776,12 @@ export function ConditionEditorBody({
     );
   }
 
+  function toggleGroupValue(id: string) {
+    setGroupValues((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
   function addHost() {
     const h = normalizeHost(hostDraft);
     if (!h) return;
@@ -1782,9 +1805,11 @@ export function ConditionEditorBody({
     // One arg-allowlist entry per condition: the gate ANDs entries, so a folder
     // OR source rule is expressed as a single entry on the chosen axis.
     const arg_allowlist =
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [];
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [];
     const next: ToolCondition = {
       host_allowlist: hosts,
       actions,
@@ -1804,9 +1829,11 @@ export function ConditionEditorBody({
     host_allowlist: hosts,
     actions,
     arg_allowlist:
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [],
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [],
     expr,
   });
 
@@ -1897,6 +1924,17 @@ export function ConditionEditorBody({
             />
           )}
 
+          {showGroupArg && (
+            <GroupScopePicker
+              values={groupValues}
+              onToggle={toggleGroupValue}
+              options={groupOptions}
+              loading={groupLoading}
+              search={groupSearch}
+              onSearch={setGroupSearch}
+            />
+          )}
+
           {facets.cel && (
             <div className="flex flex-col gap-1">
               <button
@@ -1952,6 +1990,83 @@ export function ConditionEditorBody({
             </div>
           </div>
         </div>
+  );
+}
+
+function GroupScopePicker({
+  values,
+  onToggle,
+  options,
+  loading,
+  search,
+  onSearch,
+}: {
+  values: string[];
+  onToggle: (id: string) => void;
+  options: ScopeOption[];
+  loading: boolean;
+  search: string;
+  onSearch: (s: string) => void;
+}) {
+  const q = search.trim().toLowerCase();
+  const rows = options.filter((o) => !q || o.name.toLowerCase().includes(q));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="flex items-center gap-1.5 text-xs">
+        <UsersRound className="size-3.5" /> Groups
+      </Label>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search groups…"
+          className="h-8 pl-7"
+          aria-label="Search groups"
+        />
+      </div>
+
+      <div className="max-h-52 overflow-y-auto rounded-md border">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Loading…
+          </div>
+        ) : options.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups available.
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups match.
+          </p>
+        ) : (
+          <ul className="divide-y">
+            {rows.map((o) => {
+              const selected = values.includes(o.id);
+              return (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => onToggle(o.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <Checkbox checked={selected} className="pointer-events-none" />
+                    <span className="flex-1 truncate">{o.name}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Allows only the selected groups. None selected means every group.
+      </p>
+    </div>
   );
 }
 
