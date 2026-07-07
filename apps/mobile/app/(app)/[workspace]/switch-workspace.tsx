@@ -28,6 +28,7 @@ import {
 import { Image as ExpoImage } from "expo-image";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { WorkspaceAvatar } from "@/components/workspace/workspace-avatar";
@@ -40,18 +41,20 @@ import { cn } from "@/lib/utils";
 export default function SwitchWorkspaceRoute() {
   const activeSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
-  const t = THEME[colorScheme];
+  const theme = THEME[colorScheme];
   const { data, isLoading } = useQuery(workspaceListOptions());
+  const { t } = useTranslation("auth");
+  const { t: tCommon } = useTranslation("common");
 
   const onSelect = (ws: Workspace) => {
     if (ws.slug === activeSlug) return;
     Alert.alert(
-      "Switch workspace",
-      `Switch to "${ws.name}"?`,
+      t("switch_workspace.confirm_title"),
+      t("switch_workspace.confirm_message", { name: ws.name }),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: tCommon("cancel"), style: "cancel" },
         {
-          text: "Switch",
+          text: t("switch_workspace.switch_button"),
           onPress: () => {
             router.dismiss();
             router.replace(`/${ws.slug}/inbox`);
@@ -65,7 +68,7 @@ export default function SwitchWorkspaceRoute() {
     <View className="flex-1">
       <View className="px-4 pt-4 pb-3">
         <Text className="text-base font-semibold text-foreground">
-          Switch workspace
+          {t("switch_workspace.title")}
         </Text>
       </View>
       {isLoading ? (
@@ -80,7 +83,8 @@ export default function SwitchWorkspaceRoute() {
               workspace={ws}
               active={ws.slug === activeSlug}
               onPress={() => onSelect(ws)}
-              iconTint={t.foreground}
+              iconTint={theme.foreground}
+              t={t}
             />
           ))}
         </ScrollView>
@@ -94,11 +98,13 @@ function WorkspaceRow({
   active,
   onPress,
   iconTint,
+  t,
 }: {
   workspace: Workspace;
   active: boolean;
   onPress: () => void;
   iconTint: string;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   return (
     <Pressable
@@ -106,8 +112,8 @@ function WorkspaceRow({
       disabled={active}
       accessibilityLabel={
         active
-          ? `${workspace.name}, current workspace`
-          : `Switch to ${workspace.name}`
+          ? t("switch_workspace.current_workspace_a11y", { name: workspace.name })
+          : t("switch_workspace.switch_to_a11y", { name: workspace.name })
       }
       className={cn(
         "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
