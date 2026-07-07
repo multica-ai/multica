@@ -23,6 +23,7 @@ import {
   TextInput,
 } from "react-native";
 import { Stack, router } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { SubmitIssueButton } from "@/components/issue/submit-issue-button";
 import { CreateFormAttributeRow } from "@/components/issue/create-form-attribute-row";
 import { MentionSuggestionBar } from "@/components/issue/mention-suggestion-bar";
@@ -33,6 +34,7 @@ import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
 import { useMentionInput } from "@/lib/use-mention-input";
 
 export default function NewIssueModal() {
+  const { t } = useTranslation("issues");
   const [title, setTitle] = useState("");
   const description = useMentionInput();
   // Attribute chips (status / priority / assignee / due date / project)
@@ -78,8 +80,8 @@ export default function NewIssueModal() {
       router.back();
     } catch (err) {
       Alert.alert(
-        "Failed to create issue",
-        err instanceof Error ? err.message : "Unknown error",
+        t("new_issue.create_error.title"),
+        err instanceof Error ? err.message : t("new_issue.create_error.unknown"),
       );
     }
   }, [
@@ -91,6 +93,7 @@ export default function NewIssueModal() {
     dueDate,
     project,
     createIssue,
+    t,
   ]);
 
   const headerRight = useCallback(
@@ -119,7 +122,7 @@ export default function NewIssueModal() {
           <TextInput
             value={title}
             onChangeText={setTitle}
-            placeholder="Issue title"
+            placeholder={t("new_issue.title_placeholder")}
             placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
             className="text-2xl font-semibold text-foreground py-2"
             autoFocus

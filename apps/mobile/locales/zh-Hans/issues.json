@@ -125,5 +125,26 @@
     "project": {
       "search_placeholder": "搜索项目"
     }
+  },
+  "new_issue": {
+    "title_placeholder": "issue 标题",
+    "submit_accessibility_label": "创建 issue",
+    "create_error": {
+      "title": "创建 issue 失败",
+      "unknown": "未知错误"
+    },
+    "picker": {
+      "assignee": {
+        "search_placeholder": "搜索成员"
+      },
+      "due_date": {
+        "title": "截止日期",
+        "clear": "清除",
+        "done": "完成"
+      },
+      "project": {
+        "search_placeholder": "搜索项目"
+      }
+    }
   }
 }

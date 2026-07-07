@@ -125,5 +125,26 @@
     "project": {
       "search_placeholder": "Search projects"
     }
+  },
+  "new_issue": {
+    "title_placeholder": "Issue title",
+    "submit_accessibility_label": "Create issue",
+    "create_error": {
+      "title": "Failed to create issue",
+      "unknown": "Unknown error"
+    },
+    "picker": {
+      "assignee": {
+        "search_placeholder": "Search people"
+      },
+      "due_date": {
+        "title": "Due date",
+        "clear": "Clear",
+        "done": "Done"
+      },
+      "project": {
+        "search_placeholder": "Search projects"
+      }
+    }
   }
 }
