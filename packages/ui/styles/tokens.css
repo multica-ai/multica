@@ -51,44 +51,42 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.141 0.005 285.823);
+    /* Delivery brand identity — light mode.
+       Values converted from the delivery hex palette to OKLCH manually. */
+    --background: oklch(0.970 0.004 271.37);
+    --foreground: oklch(0.230 0.012 264.29);
     --card: oklch(1 0 0);
-    --card-foreground: oklch(0.141 0.005 285.823);
+    --card-foreground: oklch(0.230 0.012 264.29);
     --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.141 0.005 285.823);
-    --primary: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.230 0.012 264.29);
+    --primary: oklch(0.517 0.154 272.51);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.967 0.001 286.375);
-    --muted-foreground: oklch(0.552 0.016 285.938);
-    --accent: oklch(0.967 0.001 286.375);
-    --accent-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.949 0.006 264.53);
+    --secondary-foreground: oklch(0.230 0.012 264.29);
+    --muted: oklch(0.949 0.006 264.53);
+    --muted-foreground: oklch(0.494 0.025 261.70);
+    --accent: oklch(0.949 0.006 264.53);
+    --accent-foreground: oklch(0.230 0.012 264.29);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.004 286.32);
-    --input: oklch(0.92 0.004 286.32);
-    --ring: oklch(0.705 0.015 286.067);
-    /* Brand-derived blue gradient (h=255 = brand hue). chart-1 equals brand
-       so the most important series visually anchors to the product colour;
-       chart-2..5 step lighter + less saturated so a stacked bar reads
-       "primary → secondary → tertiary" at a glance instead of fighting
-       for attention as five equally-weighted greys. */
-    --chart-1: oklch(0.55 0.16 255);
-    --chart-2: oklch(0.66 0.13 255);
-    --chart-3: oklch(0.76 0.10 255);
-    --chart-4: oklch(0.85 0.06 255);
-    --chart-5: oklch(0.92 0.03 255);
+    --border: oklch(0.923 0.007 247.90);
+    --input: oklch(0.923 0.007 247.90);
+    --ring: oklch(0.517 0.154 272.51 / 22%);
+    /* Brand-derived gradient (h = 272.5 = delivery primary hue). */
+    --chart-1: oklch(0.55 0.16 272.51);
+    --chart-2: oklch(0.66 0.13 272.51);
+    --chart-3: oklch(0.76 0.10 272.51);
+    --chart-4: oklch(0.85 0.06 272.51);
+    --chart-5: oklch(0.92 0.03 272.51);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.141 0.005 285.823);
-    --sidebar-primary: oklch(0.21 0.006 285.885);
+    --sidebar: oklch(0.970 0.004 271.37);
+    --sidebar-foreground: oklch(0.230 0.012 264.29);
+    --sidebar-primary: oklch(0.517 0.154 272.51);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.95 0.002 286.375);
-    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-    --sidebar-border: oklch(0.92 0.004 286.32);
-    --sidebar-ring: oklch(0.705 0.015 286.067);
-    --brand: oklch(0.55 0.16 255);
+    --sidebar-accent: oklch(0.949 0.006 264.53);
+    --sidebar-accent-foreground: oklch(0.230 0.012 264.29);
+    --sidebar-border: oklch(0.923 0.007 247.90);
+    --sidebar-ring: oklch(0.517 0.154 272.51 / 22%);
+    --brand: oklch(0.517 0.154 272.51);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
@@ -96,51 +94,46 @@
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
-    /* In-page find (Cmd/Ctrl+F) match tints, painted via the CSS Custom
-       Highlight API. Bright fill + dark text so matches stay legible in
-       both themes; the active match steps to orange. */
     --find-match: oklch(0.92 0.15 100);
     --find-match-active: oklch(0.82 0.17 62);
     --find-match-foreground: oklch(0.22 0.03 92);
 }
 
 .dark {
-    --background: oklch(0.18 0.005 285.823);
+    /* Delivery brand identity — dark mode (coherent extrapolation). */
+    --background: oklch(0.180 0.005 271.37);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.21 0.006 285.885);
+    --card: oklch(0.210 0.006 271.37);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.21 0.006 285.885);
+    --popover: oklch(0.210 0.006 271.37);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.92 0.004 286.32);
-    --primary-foreground: oklch(0.21 0.006 285.885);
-    --secondary: oklch(0.274 0.006 286.033);
+    --primary: oklch(0.650 0.160 272.51);
+    --primary-foreground: oklch(0.210 0.006 271.37);
+    --secondary: oklch(0.274 0.006 271.37);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.274 0.006 286.033);
-    --muted-foreground: oklch(0.705 0.015 286.067);
-    --accent: oklch(0.274 0.006 286.033);
+    --muted: oklch(0.274 0.006 271.37);
+    --muted-foreground: oklch(0.705 0.015 271.37);
+    --accent: oklch(0.274 0.006 271.37);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.552 0.016 285.938);
-    /* Dark mode mirrors light mode's "primary → secondary" gradient on the
-       brand hue, but flips the lightness curve: the most important series
-       is the brightest (so it pops on the dark background) and trailing
-       series get progressively darker / less saturated. */
-    --chart-1: oklch(0.72 0.16 255);
-    --chart-2: oklch(0.62 0.13 255);
-    --chart-3: oklch(0.52 0.10 255);
-    --chart-4: oklch(0.42 0.06 255);
-    --chart-5: oklch(0.32 0.03 255);
-    --sidebar: oklch(0.21 0.006 285.885);
+    --ring: oklch(0.650 0.160 272.51 / 40%);
+    /* Dark mode flips the lightness curve so the primary series pops. */
+    --chart-1: oklch(0.72 0.16 272.51);
+    --chart-2: oklch(0.62 0.13 272.51);
+    --chart-3: oklch(0.52 0.10 272.51);
+    --chart-4: oklch(0.42 0.06 272.51);
+    --chart-5: oklch(0.32 0.03 272.51);
+    --sidebar: oklch(0.210 0.006 271.37);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary: oklch(0.650 0.160 272.51);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.274 0.006 286.033);
+    --sidebar-accent: oklch(0.274 0.006 271.37);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.552 0.016 285.938);
-    --brand: oklch(0.65 0.16 255);
+    --sidebar-ring: oklch(0.650 0.160 272.51 / 40%);
+    --brand: oklch(0.650 0.160 272.51);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.65 0.15 145);
     --warning: oklch(0.70 0.16 85);
