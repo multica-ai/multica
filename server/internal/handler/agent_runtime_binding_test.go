@@ -18,14 +18,20 @@ func TestAgentRuntimeBinding_EndToEnd(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args
 		)
 		VALUES ($1, 'runtime-binding-test-agent', '', 'cloud', '{}'::jsonb,
-			$2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+			$2, 'workspace', 'public_to', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id
 	`, testWorkspaceID, testRuntimeID, testUserID).Scan(&agentID); err != nil {
 		t.Fatalf("create workspace-visible agent: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+		VALUES ($1, 'workspace', $2)
+	`, agentID, testWorkspaceID); err != nil {
+		t.Fatalf("grant workspace agent access: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)

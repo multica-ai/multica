@@ -141,11 +141,22 @@ function renderPane(runtimes: AgentRuntime[]) {
           <AgentOverviewPane
             agent={baseAgent}
             runtime={runtimes[0] ?? null}
+            runtimeBinding={{
+              agent_id: baseAgent.id,
+              user_id: "user-1",
+              runtime_id: null,
+              effective_runtime_id: baseAgent.runtime_id,
+              bound: false,
+              created_at: null,
+              updated_at: null,
+            }}
             owner={null}
             runtimes={runtimes}
             members={[]}
             onUpdate={vi.fn().mockResolvedValue(undefined)}
             canEdit
+            onRuntimeBindingChange={vi.fn().mockResolvedValue(undefined)}
+            onRuntimeBindingClear={vi.fn().mockResolvedValue(undefined)}
           />
         </QueryClientProvider>
       </NavigationProvider>
