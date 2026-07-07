@@ -81,6 +81,17 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 	return err
 }
 
+const archiveAutopilot = `-- name: ArchiveAutopilot :exec
+UPDATE autopilot
+SET status = 'archived', updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, archiveAutopilot, id)
+	return err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -331,15 +342,6 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		&i.EventFilters,
 	)
 	return i, err
-}
-
-const deleteAutopilot = `-- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1
-`
-
-func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAutopilot, id)
-	return err
 }
 
 const deleteAutopilotCollaborator = `-- name: DeleteAutopilotCollaborator :exec
@@ -888,7 +890,10 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND ($2::text IS NULL OR a.status = $2)
+  AND (
+    ($2::text IS NULL AND a.status <> 'archived')
+    OR a.status = $2
+  )
 ORDER BY a.created_at DESC
 `
 
