@@ -11,7 +11,7 @@ import {
 import type { ReviewAsset } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace";
 import { ContentEditor, type ContentEditorRef } from "../editor";
-import { Clock, Pencil } from "lucide-react";
+import { Clock, Pencil, Smile, Globe, ChevronDown, Send, X } from "lucide-react";
 
 interface ReviewCommentSidebarProps {
   workspaceId: string;
@@ -333,16 +333,18 @@ export function ReviewCommentSidebar({
         })()}
       </div>
 
-      <div className="p-4 border-t border-border bg-background">
+      <div className="p-4 border-t border-border bg-background shrink-0">
         {replyingTo && (
-          <div className="flex justify-between items-center mb-2 bg-primary/10 p-2 rounded border border-primary/20">
-            <span className="text-xs text-primary">Replying to thread</span>
-            <button onClick={() => setReplyingTo(null)} className="text-xs text-primary hover:text-primary/80">Cancel</button>
+          <div className="flex justify-between items-center mb-2 bg-accent/5 p-2 rounded border border-accent/10 text-xs text-accent">
+            <span>Replying to thread</span>
+            <button onClick={() => setReplyingTo(null)} className="text-muted-foreground hover:text-foreground transition-colors">
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div 
-            className="min-h-[80px] rounded border bg-card transition-colors cursor-text" 
+            className="flex items-start gap-0 rounded-lg border border-border bg-card focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all cursor-text min-h-[46px]" 
             style={{ 
               borderColor: drawingShape?.color || 'hsl(var(--border))',
               boxShadow: drawingShape?.color ? `0 0 0 1px ${drawingShape.color}40` : undefined
@@ -350,59 +352,73 @@ export function ReviewCommentSidebar({
             onFocus={onDrawStart}
             onClick={() => editorRef.current?.focus()}
           >
-            <ContentEditor
-              ref={editorRef}
-              defaultValue={draftContent}
-              placeholder="Add a review comment... (type @ to tag)"
-              onUpdate={(md) => setDraftContent(md)}
-              enableSlashCommands
-              mentionMode="context"
-              submitOnEnter
-              onSubmit={() => {
-                const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
-                handleSubmit(fakeEvent);
-              }}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
             {asset.asset_type === "video" && (
-              <div className="flex justify-between items-center bg-muted p-2 rounded border border-border">
-                <span className="text-xs text-muted-foreground font-medium">
-                  {new Date(currentTime * 1000).toISOString().substring(14, 19)}
-                </span>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={duration > 0} 
-                      onChange={(e) => setDuration(e.target.checked ? 3 : 0)}
-                      className="rounded bg-background border-border text-primary w-3 h-3 cursor-pointer"
-                    />
-                    Range
-                  </label>
-                  {duration > 0 && (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="1"
-                        max="60"
-                        value={duration}
-                        onChange={(e) => setDuration(Number(e.target.value))}
-                        className="w-12 text-xs border border-border bg-background rounded px-1.5 py-0.5 text-foreground focus:outline-none focus:border-primary"
-                      />
-                      <span className="text-xs text-muted-foreground">s</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <span className="shrink-0 ml-2.5 mt-[11px] rounded bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] text-amber-500 leading-none select-none">
+                {new Date(currentTime * 1000).toISOString().substring(11, 19).replace(/^00:/, '')}
+              </span>
             )}
-            <div className="flex justify-end">
+            <div className="flex-1 min-w-0 pt-0.5 pb-0.5">
+              <ContentEditor
+                ref={editorRef}
+                defaultValue={draftContent}
+                placeholder={replyingTo ? "Write a reply..." : "Leave your comment..."}
+                onUpdate={(md) => setDraftContent(md)}
+                enableSlashCommands
+                mentionMode="context"
+                submitOnEnter
+                onSubmit={() => {
+                  const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                  handleSubmit(fakeEvent);
+                }}
+              />
+            </div>
+          </div>
+          
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              {asset.asset_type === "video" && (
+                <button
+                  type="button"
+                  className="p-1.5 rounded transition-colors text-amber-500 bg-amber-500/10 hover:bg-amber-500/20"
+                  title="Timecode attached"
+                >
+                  <Clock className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onDrawStart}
+                className={`p-1.5 rounded transition-colors ${drawingShape ? "text-purple-400 bg-purple-500/15" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title={drawingShape ? "Drawing active" : "Draw on frame"}
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Add emoji"
+              >
+                <Smile className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-muted-foreground border border-border rounded hover:bg-muted transition-colors"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                Public
+                <ChevronDown className="w-3.5 h-3.5 opacity-50" />
+              </button>
               <button
                 type="submit"
                 disabled={isCreating || !draftContent.trim()}
-                className="px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-primary/90 disabled:opacity-50"
+                className="w-8 h-8 flex items-center justify-center bg-primary text-primary-foreground rounded-full hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                title="Send comment"
               >
-                Comment
+                <Send className="w-3.5 h-3.5 -ml-0.5" />
               </button>
             </div>
           </div>
