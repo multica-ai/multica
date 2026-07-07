@@ -115,11 +115,32 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 // on a different machine is a different resource. The optional label is a
 // human-readable hint used by the UI; the row-level project_resource.label
 // column remains the generic column for any resource type.
+//
+// Mode selects how the daemon binds tasks to the underlying path. The default
+// "in_place" (or empty for backward compat) keeps the historical behaviour:
+// every task locks the shared real path and runs directly in the user's
+// directory. "worktree_pool" opts into MUL-3483's parallel mode — the daemon
+// creates a per-task `git worktree add` under PoolRoot (bounded by
+// MaxParallel) so sibling tasks on the same repo actually run concurrently
+// instead of serialising on one working tree. PoolRoot and MaxParallel are
+// hints; the daemon substitutes safe defaults when they are empty / 0.
 type localDirectoryRef struct {
-	LocalPath string `json:"local_path"`
-	DaemonID  string `json:"daemon_id"`
-	Label     string `json:"label,omitempty"`
+	LocalPath   string `json:"local_path"`
+	DaemonID    string `json:"daemon_id"`
+	Label       string `json:"label,omitempty"`
+	Mode        string `json:"mode,omitempty"`         // "in_place" (default) | "worktree_pool"
+	PoolRoot    string `json:"pool_root,omitempty"`    // absolute directory under daemon control; empty → daemon default
+	MaxParallel int    `json:"max_parallel,omitempty"` // 0 → daemon default
 }
+
+// localDirectoryModeInPlace / localDirectoryModeWorktreePool are the only
+// values the server accepts for `mode`. Kept as private constants because
+// clients build the JSON directly; the daemon has its own copy of the same
+// strings to avoid an import cycle between handler and daemon.
+const (
+	localDirectoryModeInPlace      = "in_place"
+	localDirectoryModeWorktreePool = "worktree_pool"
+)
 
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	var payload localDirectoryRef
@@ -138,6 +159,27 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, errors.New("local_directory: daemon_id is required")
 	}
 	payload.Label = strings.TrimSpace(payload.Label)
+	payload.Mode = strings.TrimSpace(payload.Mode)
+	switch payload.Mode {
+	case "", localDirectoryModeInPlace:
+		// Preserve the historical shape on the wire: never emit `mode`
+		// when the request meant "default". This keeps existing rows and
+		// clients that never learnt about `mode` byte-for-byte identical
+		// after a round-trip.
+		payload.Mode = ""
+		payload.PoolRoot = ""
+		payload.MaxParallel = 0
+	case localDirectoryModeWorktreePool:
+		payload.PoolRoot = strings.TrimSpace(payload.PoolRoot)
+		if payload.PoolRoot != "" && !isAbsoluteLocalPath(payload.PoolRoot) {
+			return nil, errors.New("local_directory: pool_root must be an absolute path when provided")
+		}
+		if payload.MaxParallel < 0 {
+			return nil, errors.New("local_directory: max_parallel must be non-negative")
+		}
+	default:
+		return nil, fmt.Errorf("local_directory: unsupported mode %q (want %q or %q)", payload.Mode, localDirectoryModeInPlace, localDirectoryModeWorktreePool)
+	}
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

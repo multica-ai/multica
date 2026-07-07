@@ -29,7 +29,11 @@ A project's `description` is also durable context: when an issue (or a quick-cre
 Common resource types:
 
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
-- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
+- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label. Two extra optional fields opt into MUL-3483's parallel mode:
+  - `mode` (`"in_place"` default | `"worktree_pool"`).
+  - `pool_root` — absolute directory where per-task `git worktree` checkouts live. Defaults to `<parent-of-local_path>/.multica-worktrees/<local_path-basename>` (next to the repo, NOT inside it — the daemon needs write permission on that parent). Users mixing multiple projects should point each ref at a distinct `pool_root` under an explicit daemon-owned tree if they want centralised cleanup.
+  - `max_parallel` — cap on concurrent worktrees per base repo (defaults to 4). The N+1th task parks with `wait_reason = "worktree_pool saturated ..."` until a slot frees.
+  Worktrees stay on branch `multica/<task-uuid>`. Dirty worktrees are preserved on disk after task exit; users clean them via `git worktree remove` or manual `rm -rf` + `git worktree prune`. Repos with initialised submodules currently refuse `worktree_pool` mode.
 
 ## CLI
 
