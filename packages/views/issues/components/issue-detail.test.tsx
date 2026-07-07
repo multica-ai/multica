@@ -545,14 +545,24 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
-  it("renders issue title and description after loading", async () => {
+  it("renders issue title and readonly description after loading", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
     });
 
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.getByText("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Add JWT auth to the backend")).not.toBeInTheDocument();
+  });
+
+  it("mounts the description editor only after user intent", async () => {
+    renderIssueDetail();
+
+    const readonlyDescription = await screen.findByText("Add JWT auth to the backend");
+    fireEvent.click(readonlyDescription);
+
+    expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
   it("opts the description editor into the unmount flush", async () => {
@@ -563,6 +573,8 @@ describe("IssueDetail (shared)", () => {
     // markdown and its attachment_ids bind (MUL-3254). The flush behavior
     // itself is covered in content-editor.test.tsx; this pins the wiring.
     renderIssueDetail();
+
+    fireEvent.click(await screen.findByText("Add JWT auth to the backend"));
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
@@ -1275,11 +1287,9 @@ describe("IssueDetail (shared)", () => {
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
-    });
+    fireEvent.click(await screen.findByText("Add JWT auth to the backend"));
 
-    const editor = screen.getByPlaceholderText("Add description...");
+    const editor = await screen.findByPlaceholderText("Add description...");
     fireEvent.change(editor, { target: { value: "" } });
 
     await waitFor(() => {

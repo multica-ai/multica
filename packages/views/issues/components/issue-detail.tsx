@@ -30,7 +30,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -1236,8 +1236,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const [descEditing, setDescEditing] = useState(false);
+  const descFocusPendingRef = useRef(false);
+  const descQueuedUploadsRef = useRef<File[]>([]);
+  const openDescriptionEditor = useCallback((focus = false) => {
+    descFocusPendingRef.current = descFocusPendingRef.current || focus;
+    setDescEditing(true);
+  }, []);
+  const uploadDescriptionFile = useCallback(
+    (file: File) => {
+      if (descEditorRef.current) {
+        descEditorRef.current.uploadFile(file);
+        return;
+      }
+      descQueuedUploadsRef.current = [...descQueuedUploadsRef.current, file];
+      openDescriptionEditor(true);
+    },
+    [openDescriptionEditor],
+  );
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => files.forEach(uploadDescriptionFile),
   });
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
@@ -1266,8 +1284,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   useEffect(() => {
     descPendingAttachmentsRef.current = [];
+    descQueuedUploadsRef.current = [];
+    descFocusPendingRef.current = false;
     setDescPendingAttachments([]);
+    setDescEditing(false);
   }, [id]);
+
+  useEffect(() => {
+    if (!descEditing || !descEditorRef.current) return;
+    if (descFocusPendingRef.current) {
+      descFocusPendingRef.current = false;
+      descEditorRef.current.focus();
+    }
+    const queued = descQueuedUploadsRef.current;
+    if (queued.length === 0) return;
+    descQueuedUploadsRef.current = [];
+    queued.forEach((file) => descEditorRef.current?.uploadFile(file));
+  }, [descEditing]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -1941,43 +1974,76 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                //
-                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
-                // the editor persists the durable `markdownLink`
-                // (`/api/attachments/<id>/download` / `markdown_url`) into the
-                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
-                // therefore never matches, so the upload is never linked via
-                // `attachment_ids`. After reload it's absent from
-                // `issueAttachments`, the renderer can't resolve it to a
-                // freshly-signed `download_url`, and the persisted auth-gated
-                // download endpoint fails to load as a native <img> on clients
-                // whose origin isn't the API host (Desktop/Electron, mobile
-                // webview) — while still working on web via the cookie/proxy.
-                // This mirrors the comment/reply/chat composers, which already
-                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
-                const ids = descPendingAttachmentsRef.current
-                  .filter((a) => contentReferencesAttachment(md, a))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
-              }}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              // Closing the issue modal must save what the user last saw —
-              // without the flush, a paste followed by a quick close loses
-              // the image markdown and its attachment_ids bind (MUL-3254).
-              flushPendingOnUnmount
-              currentIssueId={id}
-              attachments={descEditorAttachments}
-            />
+            {descEditing ? (
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Bind any pending uploads still referenced in the markdown
+                  // so they appear in `issueAttachments` after refresh and the
+                  // editor's text/code preview keeps working past reload.
+                  //
+                  // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                  // the editor persists the durable `markdownLink`
+                  // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                  // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                  // therefore never matches, so the upload is never linked via
+                  // `attachment_ids`. After reload it's absent from
+                  // `issueAttachments`, the renderer can't resolve it to a
+                  // freshly-signed `download_url`, and the persisted auth-gated
+                  // download endpoint fails to load as a native <img> on clients
+                  // whose origin isn't the API host (Desktop/Electron, mobile
+                  // webview) — while still working on web via the cookie/proxy.
+                  // This mirrors the comment/reply/chat composers, which already
+                  // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                  const ids = descPendingAttachmentsRef.current
+                    .filter((a) => contentReferencesAttachment(md, a))
+                    .map((a) => a.id);
+                  handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                }}
+                onUploadFile={handleDescriptionUpload}
+                debounceMs={1500}
+                // Closing the issue modal must save what the user last saw —
+                // without the flush, a paste followed by a quick close loses
+                // the image markdown and its attachment_ids bind (MUL-3254).
+                flushPendingOnUnmount
+                currentIssueId={id}
+                attachments={descEditorAttachments}
+              />
+            ) : (
+              <div
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "min-h-10 rounded-md px-3 py-2 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                  !issue.description && "text-sm text-muted-foreground",
+                )}
+                onClick={(event) => {
+                  const target = event.target;
+                  if (
+                    target instanceof HTMLElement &&
+                    target.closest("a,button,input,textarea,select")
+                  ) {
+                    return;
+                  }
+                  openDescriptionEditor(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openDescriptionEditor(true);
+                  }
+                }}
+              >
+                {issue.description ? (
+                  <ReadonlyContent content={issue.description} attachments={descEditorAttachments} />
+                ) : (
+                  t(($) => $.detail.desc_placeholder)
+                )}
+              </div>
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
@@ -1989,7 +2055,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <FileUploadButton
                 size="sm"
                 multiple
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                onSelect={uploadDescriptionFile}
               />
             </div>
             {descDragOver && <FileDropOverlay />}
