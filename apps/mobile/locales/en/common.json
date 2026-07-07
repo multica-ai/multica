@@ -1,5 +1,10 @@
 {
   "cancel": "Cancel",
   "save": "Save",
-  "sign_out": "Sign out"
+  "sign_out": "Sign out",
+  "tabs": {
+    "my_issues": "My Issues",
+    "chat": "Chat",
+    "more": "More"
+  }
 }

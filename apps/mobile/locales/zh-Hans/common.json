@@ -1,5 +1,10 @@
 {
   "cancel": "取消",
   "save": "保存",
-  "sign_out": "退出登录"
+  "sign_out": "退出登录",
+  "tabs": {
+    "my_issues": "我的 issue",
+    "chat": "聊天",
+    "more": "更多"
+  }
 }
