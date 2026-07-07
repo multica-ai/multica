@@ -1,11 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
-import { workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  workspaceKeys,
+  workspaceListOptions,
+} from "@multica/core/workspace/queries";
 import {
   paths,
   resolvePostAuthDestination,
@@ -77,11 +80,21 @@ function LoginPageContent() {
   const [desktopError, setDesktopError] = useState("");
   const hasOnboarded = useHasOnboarded();
 
-  // Already authenticated — honor ?next= or fall back to first workspace
-  // (or /onboarding if the user has none). Skip this entire path when
-  // the user arrived to authorize the CLI.
+  // Latched once auth has been observed settled as logged-out on this page.
+  // Any `user` that appears afterwards came from the login form in this
+  // session — not from an existing session found on arrival.
+  const settledLoggedOutRef = useRef(false);
+
+  // Already authenticated ON ARRIVAL — honor ?next= or fall back to first
+  // workspace (or /onboarding if the user has none). Skip this entire path
+  // when the user arrived to authorize the CLI.
   useEffect(() => {
-    if (isLoading || !user || cliCallbackRaw) return;
+    if (isLoading) return;
+    if (!user) {
+      settledLoggedOutRef.current = true;
+      return;
+    }
+    if (cliCallbackRaw) return;
     if (isDesktopHandoff) {
       // Desktop opened the browser for login but the web session is already
       // authenticated — mint a bearer token from the cookie session and hand
@@ -101,14 +114,26 @@ function LoginPageContent() {
         });
       return;
     }
+    // Fresh form login (issue #5009): `user` was written by verifyCode while
+    // handleVerify was still fetching the workspace list, so this effect used
+    // to read the not-yet-seeded list cache and race handleSuccess with a
+    // replace to /workspaces/new. handleSuccess owns post-login navigation;
+    // this effect only serves visitors who arrived already authenticated.
+    if (settledLoggedOutRef.current) return;
     if (nextUrl) {
       router.replace(nextUrl);
       return;
     }
-    const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
-      router.replace(dest),
-    );
+    // Fetch instead of reading the cache: on a fresh page load the cache is
+    // cold, and `getQueryData() ?? []` would misroute a user who does have
+    // workspaces to /workspaces/new. On fetch failure fall back to [] —
+    // same destination the cold-cache read produced, rather than trapping
+    // the user on the login page.
+    void qc
+      .ensureQueryData(workspaceListOptions())
+      .catch(() => [] as Workspace[])
+      .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
+      .then((dest) => router.replace(dest));
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
   const handleSuccess = async () => {

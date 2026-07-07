@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -262,9 +263,23 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Marshal the body up front so we can advertise an accurate Content-Length
+	// header. Streaming straight into the ResponseWriter after WriteHeader forces
+	// net/http into chunked transfer encoding, which omits Content-Length; buffering
+	// first lets clients (and proxies) see the exact body size.
+	body, err := json.Marshal(v)
+	if err != nil {
+		// Fall back to a minimal, self-describing error payload rather than leaving
+		// the client with a half-written response.
+		body = []byte(`{"error":"failed to encode response"}`)
+		status = http.StatusInternalServerError
+	}
+	// Match the trailing newline that json.Encoder.Encode historically appended.
+	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body)
 }
 
 // writeMeasuredJSON behaves like writeJSON but returns the encoded body size so
@@ -278,6 +293,7 @@ func writeMeasuredJSON(w http.ResponseWriter, status int, v any) (int, error) {
 	}
 	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		return len(body), err

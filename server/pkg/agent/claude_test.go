@@ -331,6 +331,48 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	}
 }
 
+func TestArgsRequestBypassPermissions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "permission mode bypass",
+			args: []string{"--permission-mode", "bypassPermissions"},
+			want: true,
+		},
+		{
+			name: "dangerous skip permissions",
+			args: []string{"--dangerously-skip-permissions"},
+			want: true,
+		},
+		{
+			name: "neither",
+			args: []string{"--model", "sonnet"},
+			want: false,
+		},
+		{
+			name: "permission mode default",
+			args: []string{"--permission-mode", "default"},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := argsRequestBypassPermissions(tc.args); got != tc.want {
+				t.Fatalf("argsRequestBypassPermissions(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 
@@ -604,6 +646,82 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	}
 }
 
+func TestEnvHasSandbox(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		env  []string
+		want bool
+	}{
+		{name: "one", env: []string{"IS_SANDBOX=1"}, want: true},
+		{name: "true", env: []string{"IS_SANDBOX=true"}, want: true},
+		{name: "yes", env: []string{"IS_SANDBOX=yes"}, want: true},
+		{name: "on", env: []string{"IS_SANDBOX=on"}, want: true},
+		{name: "zero", env: []string{"IS_SANDBOX=0"}, want: false},
+		{name: "false", env: []string{"IS_SANDBOX=false"}, want: false},
+		{name: "empty", env: []string{"IS_SANDBOX="}, want: false},
+		{name: "absent", env: []string{"PATH=/usr/bin"}, want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := envHasSandbox(tc.env); got != tc.want {
+				t.Fatalf("envHasSandbox(%v) = %v, want %v", tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaudeRootSudoPreflight(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sandbox bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			[]string{"IS_SANDBOX=1"},
+		)
+		if err != nil {
+			t.Fatalf("expected sandboxed bypass to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("non bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "default"},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("expected non-bypass args to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("root bypass without sandbox errors", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() != 0 {
+			t.Skip("root-only preflight assertion")
+		}
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected root bypass without sandbox to fail preflight")
+		}
+		if !strings.Contains(err.Error(), "IS_SANDBOX") || !strings.Contains(err.Error(), "non-root") {
+			t.Fatalf("expected actionable root guidance, got %q", err.Error())
+		}
+	})
+}
+
 func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	t.Parallel()
 
@@ -744,7 +862,11 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -796,7 +918,11 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}

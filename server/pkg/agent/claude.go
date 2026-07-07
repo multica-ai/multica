@@ -65,6 +65,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -647,6 +651,44 @@ func resolveSessionID(requestedResume, emitted string, failed bool) string {
 
 func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
+}
+
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func mergeEnv(base []string, extra map[string]string) []string {

@@ -1247,6 +1247,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
 
 			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
 			// resolves to its own chat session; no session/channel id is passed, so

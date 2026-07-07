@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -485,6 +487,22 @@ func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
 }
 
+func (h *Handler) runtimeHasLiveProfile(ctx context.Context, rt db.AgentRuntime) (bool, error) {
+	if !rt.ProfileID.Valid {
+		return false, nil
+	}
+	if _, err := h.Queries.GetRuntimeProfileForWorkspace(ctx, db.GetRuntimeProfileForWorkspaceParams{
+		ID:          rt.ProfileID,
+		WorkspaceID: rt.WorkspaceID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // canUseRuntimeForAgent reports whether a workspace member is allowed to
 // bind a new agent to — or move an existing agent onto — the given runtime.
 // Mirrors canEditRuntime but layers on the runtime's visibility flag so a
@@ -568,12 +586,24 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 
-	if rt.ProfileID.Valid {
+	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
+		return
+	}
+	if hasLiveProfile {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
 			"code":  "runtime_profile_instance_delete_unsupported",
 		})
 		return
+	}
+	if rt.ProfileID.Valid {
+		slog.Warn("deleting orphaned profile-backed runtime instance",
+			"runtime_id", uuidToString(rt.ID),
+			"profile_id", uuidToString(rt.ProfileID),
+			"workspace_id", wsID,
+			"deleted_by", userID)
 	}
 
 	// Check if any active (non-archived) agents are bound to this runtime.
@@ -761,12 +791,24 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	}
 	userID := uuidToString(member.UserID)
 
-	if rt.ProfileID.Valid {
+	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
+		return
+	}
+	if hasLiveProfile {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
 			"code":  "runtime_profile_instance_delete_unsupported",
 		})
 		return
+	}
+	if rt.ProfileID.Valid {
+		slog.Warn("deleting orphaned profile-backed runtime instance via cascade",
+			"runtime_id", uuidToString(rt.ID),
+			"profile_id", uuidToString(rt.ProfileID),
+			"workspace_id", wsID,
+			"deleted_by", userID)
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
