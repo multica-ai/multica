@@ -23,7 +23,8 @@
 import { useRef } from "react";
 import { Tabs } from "expo-router";
 import { Image } from "expo-image";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -42,6 +43,33 @@ import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
 const BADGE_STYLE = {
   backgroundColor: THEME.light.brand,
 };
+
+// SF Symbols (the `sf:` source prefix expo-image resolves) only render on
+// iOS — Android silently shows nothing for that source string. Route to
+// Ionicons (already used elsewhere in this app, e.g. settings.tsx's
+// chevron) on Android instead of losing tab icons there entirely.
+function TabIcon({
+  sfSymbol,
+  ionicon,
+  color,
+  size,
+}: {
+  sfSymbol: string;
+  ionicon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  size: number;
+}) {
+  if (Platform.OS === "ios") {
+    return (
+      <Image
+        source={sfSymbol}
+        tintColor={color}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return <Ionicons name={ionicon} size={size} color={color} />;
+}
 
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
@@ -82,10 +110,11 @@ export default function TabsLayout() {
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:tray.fill" : "sf:tray"}
+                ionicon={focused ? "file-tray" : "file-tray-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -95,10 +124,11 @@ export default function TabsLayout() {
           options={{
             title: "My Issues",
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:checklist" : "sf:checklist.unchecked"}
+                ionicon={focused ? "checkbox" : "checkbox-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -110,10 +140,11 @@ export default function TabsLayout() {
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
+                ionicon={focused ? "chatbubble" : "chatbubble-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -123,10 +154,11 @@ export default function TabsLayout() {
           options={{
             title: "More",
             tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                sfSymbol="sf:ellipsis"
+                ionicon="ellipsis-horizontal"
+                color={color}
+                size={size}
               />
             ),
           }}
