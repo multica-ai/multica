@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -254,7 +255,7 @@ func (h *Handler) CreateApproval(w http.ResponseWriter, r *http.Request) {
 		if member, err := h.Queries.GetMember(r.Context(), approverID); err == nil {
 			if user, err := h.Queries.GetUser(r.Context(), member.UserID); err == nil && user.Email != "" {
 				if issue, err := h.Queries.GetIssue(r.Context(), issueID); err == nil {
-					issueUrl := fmt.Sprintf("/%s/issues/%s", wsIDStr, issue.Identifier)
+					issueUrl := fmt.Sprintf("/%s/issues/%s", wsIDStr, uuidToString(issue.ID))
 					go h.EmailService.SendApprovalRequestEmail(user.Email, issue.Title, issueUrl)
 				}
 			}
@@ -367,8 +368,8 @@ func (h *Handler) handleApprovalDecision(w http.ResponseWriter, r *http.Request,
 	if h.EmailService != nil && a.RequesterType == "member" {
 		if member, err := h.Queries.GetMember(r.Context(), a.RequesterID); err == nil {
 			if user, err := h.Queries.GetUser(r.Context(), member.UserID); err == nil && user.Email != "" {
-				if issue, err := h.Queries.GetIssue(r.Context(), a.IssueID.Bytes); err == nil {
-					issueUrl := fmt.Sprintf("/%s/issues/%s", wsIDStr, issue.Identifier)
+				if issue, err := h.Queries.GetIssue(r.Context(), a.IssueID); err == nil {
+					issueUrl := fmt.Sprintf("/%s/issues/%s", wsIDStr, uuidToString(issue.ID))
 					go h.EmailService.SendApprovalDecisionEmail(user.Email, issue.Title, issueUrl, action)
 				}
 			}
