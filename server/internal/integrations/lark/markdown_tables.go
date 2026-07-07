@@ -44,12 +44,14 @@ func isMarkdownFence(line string) bool {
 
 func isMarkdownTableRow(line string) bool {
 	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "|") && strings.HasSuffix(trimmed, "|") && strings.Count(trimmed, "|") >= 2
+	if !strings.Contains(trimmed, "|") {
+		return false
+	}
+	return len(markdownTableCells(trimmed)) >= 2
 }
 
 func isMarkdownTableSeparator(line string) bool {
-	trimmed := strings.Trim(strings.TrimSpace(line), "|")
-	cells := strings.Split(trimmed, "|")
+	cells := markdownTableCells(line)
 	if len(cells) < 2 {
 		return false
 	}
@@ -62,4 +64,12 @@ func isMarkdownTableSeparator(line string) bool {
 		}
 	}
 	return true
+}
+
+func markdownTableCells(line string) []string {
+	trimmed := strings.Trim(strings.TrimSpace(line), "|")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "|")
 }

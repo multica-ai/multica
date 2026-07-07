@@ -607,6 +607,15 @@ func TestDowngradeMarkdownTablesForLarkLeavesFencedCodeAlone(t *testing.T) {
 	}
 }
 
+func TestDowngradeMarkdownTablesForLarkHandlesTablesWithoutOuterPipes(t *testing.T) {
+	in := "Before\n\nCol A | Col B\n--- | ---\n1 | 2\n\nAfter"
+	got := downgradeMarkdownTablesForLark(in)
+
+	if !strings.Contains(got, "```text\nCol A | Col B\n--- | ---\n1 | 2\n```") {
+		t.Fatalf("markdown table without outer pipes should be downgraded to a text code block, got:\n%s", got)
+	}
+}
+
 // TestHTTPClient_SendTextMessage_EncodesSpecialCharacters guards the
 // inner JSON envelope's escaping. Lark's spec is "content MUST be a
 // JSON-encoded string", which means newlines and quotes have to be
