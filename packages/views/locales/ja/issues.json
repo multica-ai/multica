@@ -412,7 +412,7 @@
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
-    "more": "その他",
+    "relations": "関係",
     "create_sub_issue": "サブイシューを作成",
     "set_parent_issue": "親イシューを設定...",
     "remove_parent_issue": "親イシューを解除",

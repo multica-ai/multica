@@ -412,7 +412,7 @@
     "unpin_from_sidebar": "从侧边栏取消固定",
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
-    "more": "更多",
+    "relations": "关系",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
     "remove_parent_issue": "移除父 issue",

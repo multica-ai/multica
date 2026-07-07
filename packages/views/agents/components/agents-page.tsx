@@ -78,8 +78,12 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
-import { AgentListToolbar } from "./agent-list-toolbar";
+import {
+  AgentListToolbar,
+  countActiveFilterDimensions,
+} from "./agent-list-toolbar";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -163,6 +167,17 @@ function lastActiveDaysAgo(activity: AgentActivity | null): number | null {
     if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
   }
   return null;
+}
+
+function matchesAgentSearch(row: AgentListRow, query: string): boolean {
+  if (!query) return true;
+  const { agent } = row;
+  return (
+    agent.name.toLowerCase().includes(query) ||
+    matchesPinyin(agent.name, query) ||
+    (agent.description?.toLowerCase().includes(query) ?? false) ||
+    (agent.description ? matchesPinyin(agent.description, query) : false)
+  );
 }
 
 export interface AgentsPageProps {
@@ -820,6 +835,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  const [search, setSearch] = useState("");
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -926,9 +942,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     isWorkspaceAdmin,
   ]);
 
-  // Visible rows: filters, then sort.
+  // Visible rows: local search + filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
+    const q = search.trim().toLowerCase();
     const filtered = scopeRows.filter((row) => {
+      if (!matchesAgentSearch(row, q)) return false;
       if (
         filters.availability.length > 0 &&
         (!row.presence ||
@@ -984,7 +1002,25 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, search, filters, sortField, sortDirection]);
+
+  const noMatchText = useMemo(() => {
+    const query = search.trim();
+    if (query) {
+      if (scope === "archived") {
+        return t(($) => $.no_matches.search_archived, { query });
+      }
+      if (countActiveFilterDimensions(filters) > 0) {
+        return t(($) => $.no_matches.search_active_filtered, { query });
+      }
+      return t(($) => $.no_matches.search_active, { query });
+    }
+    if (scope === "archived") return t(($) => $.no_matches.no_archived);
+    if (countActiveFilterDimensions(filters) > 0) {
+      return t(($) => $.no_matches.no_filter_match);
+    }
+    return t(($) => $.no_matches.title);
+  }, [filters, scope, search, t]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -1077,6 +1113,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             scope={scope}
             onScopeChange={setScope}
             scopeCounts={scopeCounts}
+            search={search}
+            onSearchChange={setSearch}
             filters={filters}
             onToggleFilter={toggleFilter}
             onClearFilters={clearFilters}
@@ -1116,7 +1154,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
               >
                 {rows.length === 0 && (
                   <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
-                    {t(($) => $.no_matches.title)}
+                    {noMatchText}
                   </div>
                 )}
                 {virtualItems.map((vi) => {

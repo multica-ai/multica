@@ -412,7 +412,7 @@
     "unpin_from_sidebar": "사이드바 고정 해제",
     "copy_link": "링크 복사",
     "copy_workdir_path": "로컬 작업 디렉터리 경로 복사",
-    "more": "더 보기",
+    "relations": "관계",
     "create_sub_issue": "하위 이슈 만들기",
     "set_parent_issue": "상위 이슈 설정...",
     "remove_parent_issue": "상위 이슈 제거",

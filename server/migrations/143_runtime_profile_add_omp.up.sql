@@ -3,8 +3,9 @@ ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_f
 -- Widen the whitelist to include OMP (oh-my-pi) so users can base a custom
 -- runtime profile on the existing OMP backend (launches `<command> acp --yolo`
 -- over the standard ACP transport) instead of misrouting through another ACP
--- family with incompatible arguments. NOT VALID mirrors migration 126/134 so a
--- historical Gemini row it intentionally tolerated does not block the upgrade.
+-- family with incompatible arguments. NOT VALID mirrors migration 126/134/136
+-- so a historical Gemini row they intentionally tolerated does not block the
+-- upgrade.
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
     CHECK (protocol_family IN (
         'claude',
@@ -20,5 +21,6 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'kiro',
         'antigravity',
         'qoder',
+        'traecli',
         'omp'
     )) NOT VALID;

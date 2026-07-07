@@ -137,12 +137,14 @@ type Config struct {
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
-// migration 134 to add qoder and migration 135 to add omp): a custom runtime
-// profile may only be based on a backend Multica officially supports. qoder is
-// exposed here so Qoder CN (`qoderclicn`) users can point the Qoder backend at
-// a non-default binary instead of misrouting through Kiro/ACP with incompatible
-// arguments (#4883). omp is exposed the same way so users can pin a non-default
-// oh-my-pi binary.
+// migration 134 to add qoder, migration 136 to add traecli, and migration 143
+// to add omp): a custom runtime profile may only be based on a backend Multica
+// officially supports. qoder is exposed here so Qoder CN (`qoderclicn`) users
+// can point the Qoder backend at a non-default binary instead of misrouting
+// through Kiro/ACP with incompatible arguments (#4883). traecli (Trae) has a New
+// backend, launch header and provider branding but was previously missing from
+// this whitelist, so the family picker rejected it (#4945). omp is exposed the
+// same way so users can pin a non-default oh-my-pi binary.
 var SupportedTypes = []string{
 	"claude",
 	"codebuddy",
@@ -157,6 +159,7 @@ var SupportedTypes = []string{
 	"kiro",
 	"antigravity",
 	"qoder",
+	"traecli",
 	"omp",
 }
 

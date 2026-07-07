@@ -118,7 +118,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi という12種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI という14種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、12種類の対応コーディングツール(Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、14種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -193,7 +193,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi の12種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI の14種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -269,6 +269,35 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.3.39",
+          date: "2026-07-06",
+          title: "Qoder と TRAE CLI がカスタム ランタイム ベースに、スクワッドと安定性の修正",
+          changes: [],
+          features: [
+            "Qoder をベースにしたカスタム ランタイムが作れるようになりました。Qoder CN のユーザーもそのまま使えます。",
+            "ByteDance TRAE CLI もカスタム ランタイムのベースとして選べます。",
+          ],
+          improvements: [
+            "ランタイム プロバイダー ページと公開ドキュメントを、Qoder と TRAE CLI を含む現行の内蔵ランタイム一覧に更新し、全言語サイトへ反映しました。",
+          ],
+          fixes: [
+            "プライベート リーダーのスクワッドで、サブ Issue がエージェントによってクローズされたとき、複数ステージのフローが最初のステージで止まらなくなりました。",
+            "親 Issue の「サブ タスク完了」通知が、途中のステージを「最終ステージ」と誤って表示しなくなり、リーダーは「次のステージに進む」「まとめる」を自分で選べます。",
+            "スクワッド リーダーが仕上げの間、ローカル リポジトリのロックを保持しなくなり、同じリポジトリで複数のエージェントが並行して動けるようになりました。",
+            "長時間動く エージェント タスク（リサーチ、学習、コード生成）が、ローカル デーモンが生きている限りサーバー側で落とされなくなりました。",
+            "セルフホスト環境の検索がフリーズしなくなりました。大きなワークスペースでも最初のクエリからすぐ結果が返ります。",
+            "Issue やコメントのエディターに長いスタックトレースや異常に長い文字列を貼り付けても、画面が固まらなくなりました。",
+            "Claude と同居しているマシンで Antigravity エージェントが起動失敗しなくなりました。",
+            "Windows でも Browser MCP が正常に起動します。",
+            "Codex エージェントの MCP 設定が再び正しく読み込まれます。",
+            "Pi エージェントのタスク結果に途中の思考が混ざらず、最終回答だけが表示されます。",
+            "オートパイロットが、実行が長引いた際に同じ Issue を続けて 2 回起動しないようになりました。",
+            "Issue の PR 一覧には、その Issue を実際に対象にしている PR だけが表示され、本文で「Related to MUL-…」と触れているだけの PR は非表示になりました。",
+            "Issue アクション メニューの入れ子だった「More」項目が「Relations（関係）」に改名され、開かなくても中身が分かるようになりました。",
+            "チャット、Issue 作成、Issue 説明、フィードバックなど全ての添付アップロード ボタンで、システムのファイル ダイアログから複数ファイルを一度に選べるようになりました。",
+          ],
+        },
         {
           version: "0.3.36",
           date: "2026-07-03",

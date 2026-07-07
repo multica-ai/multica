@@ -44,16 +44,18 @@ func writeHeader(b *strings.Builder) {
 
 // writeBackgroundTaskSafetySlim is the slim analogue of
 // writeBackgroundTaskSafetyInstructions (legacy). Drops the verbose
-// preamble and keeps the three behaviour pins (the same ones tests
-// assert): "Do NOT end your turn while background tasks",
-// "wait for a future notification/reminder", "run the work synchronously
-// instead".
+// preamble but keeps the same hard behaviour pins the tests assert:
+// "Do NOT end your turn while background tasks", "wait for a future
+// notification/reminder", "run the work synchronously instead", the
+// no-background-and-yield rule, and the no-"standing by" sign-off rule.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal when your top-level turn exits — any background work still running may be orphaned and its result lost.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
-	b.WriteString("- If a tool response says to wait for a future notification/reminder, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
-	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n\n")
+	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any background work still running is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification or wakeup to resume — it will not arrive.\n")
+	b.WriteString("- Do every wait synchronously inside one foreground tool call that blocks to completion (e.g. `gh run watch`, a blocking test command); never split \"start the wait\" and \"collect the result\" across turns.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder, or that it is running in the background so you can keep working, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
+	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n")
+	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the

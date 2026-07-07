@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 14개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 14개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,35 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.3.39",
+          date: "2026-07-06",
+          title: "Qoder·TRAE CLI를 커스텀 런타임 베이스로, 스쿼드와 안정성 수정",
+          changes: [],
+          features: [
+            "Qoder를 베이스로 한 커스텀 런타임을 만들 수 있습니다. Qoder CN 사용자도 바로 이용할 수 있습니다.",
+            "ByteDance TRAE CLI도 커스텀 런타임의 베이스로 선택할 수 있습니다.",
+          ],
+          improvements: [
+            "런타임 프로바이더 페이지와 공개 문서를 Qoder·TRAE CLI를 포함한 현재 내장 런타임 전체 목록으로 갱신했고, 모든 언어 사이트에 반영했습니다.",
+          ],
+          fixes: [
+            "프라이빗 리더 스쿼드에서 하위 Issue가 에이전트에 의해 종료될 때, 다단계 스쿼드 흐름이 첫 단계에서 멈추지 않습니다.",
+            "상위 Issue의 '하위 완료' 알림이 중간 단계를 최종 단계로 잘못 표기하지 않고, 리더가 '다음 단계 이어가기'와 '마무리' 중에서 직접 고를 수 있습니다.",
+            "스쿼드 리더가 마무리 작업을 하는 동안 로컬 저장소 잠금을 잡지 않도록 바뀌어, 같은 저장소에서 여러 에이전트가 동시에 작업할 수 있습니다.",
+            "장시간 실행되는 에이전트 태스크(리서치·훈련·코드 생성)가 로컬 데몬이 살아 있는 한 서버 측에서 중단되지 않습니다.",
+            "셀프호스트 환경의 검색이 멈추지 않고, 큰 워크스페이스에서도 첫 검색부터 결과를 빠르게 돌려줍니다.",
+            "Issue·코멘트 에디터에 긴 스택트레이스나 비정상적으로 긴 문자열을 붙여 넣어도 화면이 얼지 않습니다.",
+            "Claude와 함께 설치된 환경에서 Antigravity 에이전트가 실행에 실패하지 않습니다.",
+            "Windows 에이전트에서도 Browser MCP가 정상적으로 실행됩니다.",
+            "Codex 에이전트의 MCP 설정이 다시 정확히 적용됩니다.",
+            "Pi 에이전트의 태스크 결과에 중간 사고가 섞이지 않고 최종 답변만 표시됩니다.",
+            "오토파일럿이 실행이 예상보다 오래 걸릴 때 같은 Issue를 연속으로 두 번 실행하지 않습니다.",
+            "Issue의 PR 목록에는 실제로 그 Issue를 대상으로 삼는 PR만 표시되고, 본문에서 'Related to MUL-…' 정도로만 언급한 PR은 숨겨집니다.",
+            "Issue 액션 메뉴의 중첩되어 있던 'More' 항목이 'Relations(관계)'로 이름이 바뀌어, 열어 보지 않아도 안에 무엇이 있는지 알 수 있습니다.",
+            "채팅, Issue 생성, Issue 본문, 피드백 등 모든 첨부 업로드 버튼에서 시스템 파일 대화상자로 여러 파일을 한 번에 선택할 수 있습니다.",
+          ],
+        },
         {
           version: "0.3.36",
           date: "2026-07-03",
