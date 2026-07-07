@@ -362,28 +362,19 @@ func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
 	}
 }
 
-func TestClient_DownloadAttachmentDownloadsRelativeURLWithAuthHeaders(t *testing.T) {
+func TestClient_DownloadAttachmentUsesDownloadEndpointWithAuthHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/attachments/att-1":
+		case "/api/attachments/att-1/download":
 			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-				t.Errorf("metadata request Authorization = %q, want Bearer tok", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"id":           "att-1",
-				"download_url": "/download/att-1",
-				"filename":     "shot.png",
-				"content_type": "image/png",
-			})
-		case "/download/att-1":
-			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-				t.Errorf("download request Authorization = %q, want Bearer tok", got)
+				t.Errorf("attachment download Authorization = %q, want Bearer tok", got)
 			}
 			if got := r.Header.Get("X-Client-Platform"); got != "daemon" {
-				t.Errorf("download request X-Client-Platform = %q, want daemon", got)
+				t.Errorf("attachment download X-Client-Platform = %q, want daemon", got)
 			}
 			w.Write([]byte("png-bytes"))
+		case "/api/attachments/att-1":
+			t.Fatal("DownloadAttachment must not fetch member-scoped attachment metadata")
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -398,7 +389,7 @@ func TestClient_DownloadAttachmentDownloadsRelativeURLWithAuthHeaders(t *testing
 	if err != nil {
 		t.Fatalf("DownloadAttachment: %v", err)
 	}
-	if meta.Filename != "shot.png" || meta.ContentType != "image/png" {
+	if meta.ID != "att-1" {
 		t.Fatalf("unexpected attachment metadata: %+v", meta)
 	}
 	if string(data) != "png-bytes" {

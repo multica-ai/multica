@@ -1117,15 +1117,7 @@ func TestClaudeInitialImagesDownloadsImageAttachments(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/attachments/img-1":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"id":           "img-1",
-				"download_url": "/files/img-1",
-				"filename":     "server-shot.png",
-				"content_type": "image/png",
-			})
-		case "/files/img-1":
+		case "/api/attachments/img-1/download":
 			w.Write([]byte("image-bytes"))
 		default:
 			http.NotFound(w, r)
@@ -1145,8 +1137,49 @@ func TestClaudeInitialImagesDownloadsImageAttachments(t *testing.T) {
 		t.Fatalf("initial images length = %d, want 1", len(images))
 	}
 	got := images[0]
-	if got.Filename != "server-shot.png" || got.MediaType != "image/png" || string(got.Data) != "image-bytes" {
+	if got.Filename != "client-shot.png" || got.MediaType != "image/png" || string(got.Data) != "image-bytes" {
 		t.Fatalf("unexpected initial image: %+v data=%q", got, string(got.Data))
+	}
+}
+
+func TestClaudeInitialImagesSkipsUnsupportedImageTypes(t *testing.T) {
+	t.Parallel()
+
+	var downloadCalled atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloadCalled.Store(true)
+		w.Write([]byte("image-bytes"))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	images := d.claudeInitialImages(context.Background(), Task{
+		IssueAttachments: []AttachmentMeta{
+			{ID: "svg-1", Filename: "diagram.svg", ContentType: "image/svg+xml"},
+			{ID: "bmp-1", Filename: "bitmap.bmp", ContentType: "image/bmp"},
+			{ID: "ico-1", Filename: "favicon.ico", ContentType: "image/x-icon"},
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if len(images) != 0 {
+		t.Fatalf("initial images length = %d, want 0", len(images))
+	}
+	if downloadCalled.Load() {
+		t.Fatal("unsupported image attachments should be skipped before download")
+	}
+}
+
+func TestShouldSeedClaudeInitialImagesOnlyForColdClaudeTasks(t *testing.T) {
+	t.Parallel()
+
+	if !shouldSeedClaudeInitialImages("claude", Task{}) {
+		t.Fatal("cold Claude task should seed initial images")
+	}
+	if shouldSeedClaudeInitialImages("claude", Task{PriorSessionID: "sess-123"}) {
+		t.Fatal("resumed Claude task should not seed initial images")
+	}
+	if shouldSeedClaudeInitialImages("codex", Task{}) {
+		t.Fatal("non-Claude task should not seed initial images")
 	}
 }
 

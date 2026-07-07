@@ -3512,6 +3512,10 @@ const (
 	maxClaudeInitialImageBytes = 10 * 1024 * 1024
 )
 
+func shouldSeedClaudeInitialImages(provider string, task Task) bool {
+	return provider == "claude" && task.PriorSessionID == ""
+}
+
 func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *slog.Logger) []agent.InputImage {
 	attachments := make([]AttachmentMeta, 0, len(task.IssueAttachments)+len(task.ChatMessageAttachments))
 	attachments = append(attachments, task.IssueAttachments...)
@@ -3525,10 +3529,10 @@ func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *sl
 		if len(images) >= maxClaudeInitialImages {
 			break
 		}
-		if attachment.ID == "" || !strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/") {
+		if attachment.ID == "" || !isClaudeInitialImageMediaType(attachment.ContentType) {
 			continue
 		}
-		meta, data, err := d.client.DownloadAttachment(ctx, attachment.ID)
+		_, data, err := d.client.DownloadAttachment(ctx, attachment.ID)
 		if err != nil {
 			taskLog.Warn("claude initial image download failed", "attachment_id", attachment.ID, "error", err)
 			continue
@@ -3538,16 +3542,7 @@ func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *sl
 			continue
 		}
 		mediaType := attachment.ContentType
-		if meta != nil && meta.ContentType != "" {
-			mediaType = meta.ContentType
-		}
-		if !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
-			continue
-		}
 		filename := attachment.Filename
-		if meta != nil && meta.Filename != "" {
-			filename = meta.Filename
-		}
 		images = append(images, agent.InputImage{
 			Filename:  filename,
 			MediaType: mediaType,
@@ -3555,6 +3550,15 @@ func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *sl
 		})
 	}
 	return images
+}
+
+func isClaudeInitialImageMediaType(mediaType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }
 
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
@@ -4440,7 +4444,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThinkingLevel:  thinkingLevel,
 		OpenclawMode:   openclawMode,
 	}
-	if provider == "claude" {
+	if shouldSeedClaudeInitialImages(provider, task) {
 		execOpts.InitialImages = d.claudeInitialImages(ctx, task, taskLog)
 	}
 	// Some providers do not reliably load the per-task runtime config files we

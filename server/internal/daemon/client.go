@@ -934,18 +934,12 @@ type AttachmentResponse struct {
 }
 
 func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string) (*AttachmentResponse, []byte, error) {
-	var att AttachmentResponse
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/attachments/%s", attachmentID), &att); err != nil {
-		return nil, nil, err
-	}
-	if att.DownloadURL == "" {
-		return nil, nil, fmt.Errorf("attachment %s has no download_url", attachmentID)
-	}
-	data, err := c.downloadFile(ctx, att.DownloadURL)
+	path := fmt.Sprintf("/api/attachments/%s/download", attachmentID)
+	data, err := c.downloadFile(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
-	return &att, data, nil
+	return &AttachmentResponse{ID: attachmentID}, data, nil
 }
 
 func (c *Client) downloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
