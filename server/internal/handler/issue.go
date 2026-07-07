@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -870,15 +871,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:    wsUUID,
-			Priority:       priorityFilter,
-			AssigneeID:     assigneeFilter,
-			AssigneeIds:    assigneeIdsFilter,
-			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
-			InvolvesUserID: involvesUserFilter,
+			WorkspaceID:       wsUUID,
+			Priority:          priorityFilter,
+			AssigneeID:        assigneeFilter,
+			AssigneeIds:       assigneeIdsFilter,
+			CreatorID:         creatorFilter,
+			ProjectID:         projectFilter,
+			InvolvesUserID:    involvesUserFilter,
 			PendingApproverID: pendingApproverFilter,
-			MetadataFilter: metadataFilter,
+			MetadataFilter:    metadataFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1084,9 +1085,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 
+	// count(*) OVER() folds the pagination total into the same round trip
+	// as the page itself instead of a second COUNT query.
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata,
+       count(*) OVER() AS total_count
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1100,6 +1104,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	}
 	defer rows.Close()
 
+	var total int64
 	var issues []db.ListIssuesRow
 	for rows.Next() {
 		var row db.ListIssuesRow
@@ -1123,6 +1128,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&total,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1136,13 +1142,16 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		return
 	}
 
-	// Get the true total count for pagination awareness.
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM issue i WHERE %s`, whereSql)
-	// Count query uses the same args minus the OFFSET and LIMIT params (last two added).
-	countArgs := args[:len(args)-2]
-	var total int64
-	if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		total = int64(len(issues))
+	// An empty page can't carry the window count. offset=0 means the set is
+	// truly empty; a nonzero offset past the last row still needs the real
+	// total, so only that rare path pays a second COUNT round trip.
+	if len(issues) == 0 && offset > 0 {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM issue i WHERE %s`, whereSql)
+		// Same args minus the OFFSET and LIMIT params (last two added).
+		countArgs := args[:len(args)-2]
+		if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+			total = 0
+		}
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
@@ -1150,8 +1159,21 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	for i, issue := range issues {
 		ids[i] = issue.ID
 	}
-	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-	assigneesMap := h.assigneesByIssueIDs(ctx, ids)
+	// Labels and assignees are independent batched lookups — overlap their
+	// round trips instead of paying for them back to back.
+	var labelsMap map[string][]LabelResponse
+	var assigneesMap map[string][]IssueAssigneeResponse
+	var hydrate sync.WaitGroup
+	hydrate.Add(2)
+	go func() {
+		defer hydrate.Done()
+		labelsMap = h.labelsByIssue(ctx, wsUUID, ids)
+	}()
+	go func() {
+		defer hydrate.Done()
+		assigneesMap = h.assigneesByIssueIDs(ctx, ids)
+	}()
+	hydrate.Wait()
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
@@ -2376,23 +2398,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
+		WorkspaceID:   wsUUID,
+		Title:         req.Title,
+		Description:   ptrToText(req.Description),
+		Status:        status,
+		Priority:      priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   creatorType,
+		CreatorID:     parseUUID(actualCreatorID),
+		ParentIssueID: parentIssueID,
+		ProjectID:     projectID,
+		StartDate:     startDate,
+		DueDate:       dueDate,
+		OriginType:    originType,
+		OriginID:      originID,
+		Stage:         ptrToInt4(req.Stage),
+		AttachmentIDs: attachmentIDs,
 		Assignees: func() []service.IssueAssigneeInput {
 			var out []service.IssueAssigneeInput
 			for _, a := range req.Assignees {
@@ -2451,18 +2473,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
-	Priority      *string  `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	Position      *float64 `json:"position"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	Title         *string               `json:"title"`
+	Description   *string               `json:"description"`
+	Status        *string               `json:"status"`
+	Priority      *string               `json:"priority"`
+	AssigneeType  *string               `json:"assignee_type"`
+	AssigneeID    *string               `json:"assignee_id"`
+	Position      *float64              `json:"position"`
+	StartDate     *string               `json:"start_date"`
+	DueDate       *string               `json:"due_date"`
+	ParentIssueID *string               `json:"parent_issue_id"`
+	ProjectID     *string               `json:"project_id"`
+	Stage         *int32                `json:"stage"`
 	Assignees     *[]IssueAssigneeInput `json:"assignees,omitempty"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the

@@ -283,4 +283,21 @@ func TestListIssues_LimitClamp(t *testing.T) {
 			t.Fatalf("total: want %d, got %d", seeded, resp.Total)
 		}
 	})
+
+	// An empty page must still report the true total. This is the edge a
+	// windowed count (count(*) OVER()) gets wrong without a fallback: when
+	// OFFSET lands past the last row there are no rows to carry the window
+	// value, so the handler must compute the total another way.
+	t.Run("offset beyond the last row still reports the true total", func(t *testing.T) {
+		code, resp, body := call("&limit=50&offset=500")
+		if code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", code, body)
+		}
+		if got := len(resp.Issues); got != 0 {
+			t.Fatalf("offset past end: want 0 issues, got %d", got)
+		}
+		if resp.Total != seeded {
+			t.Fatalf("total: want %d, got %d", seeded, resp.Total)
+		}
+	})
 }
