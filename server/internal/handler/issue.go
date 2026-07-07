@@ -2770,7 +2770,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
 		}
 	}
+	finalProjectID := prevIssue.ProjectID
+	projectTouched := false
 	if _, ok := rawFields["project_id"]; ok {
+		projectTouched = true
 		if req.ProjectID != nil {
 			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 			if !ok {
@@ -2783,16 +2786,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "project not found in this workspace")
 				return
 			}
-			// Invariant: the issue's space joins the project's space set. The
-			// UI confirms this with a dialog before sending; headless and
-			// dialog-confirmed paths both land here.
-			if err := service.EnsureProjectHasSpace(r.Context(), h.Queries, prevIssue.WorkspaceID, projectUUID, prevIssue.SpaceID); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to update project spaces")
-				return
-			}
 			params.ProjectID = projectUUID
+			finalProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
+			finalProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 	if _, ok := rawFields["stage"]; ok {
@@ -2832,6 +2830,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// keep resolving. Everything else (project, parent, labels) is left
 	// untouched — those associations only bind at creation time.
 	spaceChanged := false
+	finalSpaceID := prevIssue.SpaceID
 	if _, ok := rawFields["space_id"]; ok {
 		if req.SpaceID == nil {
 			writeError(w, http.StatusBadRequest, "space_id cannot be null")
@@ -2841,6 +2840,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		finalSpaceID = newSpaceID
 		if newSpaceID != prevIssue.SpaceID {
 			if _, err := service.ValidateActiveSpace(r.Context(), h.Queries, prevIssue.WorkspaceID, newSpaceID); err != nil {
 				if !writeSpaceResolveError(w, err) {
@@ -2848,29 +2848,37 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			tx, err := h.TxStarter.Begin(r.Context())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to move issue to space")
-				return
-			}
-			defer tx.Rollback(r.Context())
-			qtx := h.Queries.WithTx(tx)
+			spaceChanged = true
+		}
+	}
+
+	var issue db.Issue
+	if projectTouched || spaceChanged {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update issue")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+
+		if spaceChanged {
 			newNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
-				ID:          newSpaceID,
+				ID:          finalSpaceID,
 				WorkspaceID: prevIssue.WorkspaceID,
 			})
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 				return
 			}
-			newPosition, err := issueposition.NextTopPositionForSpace(r.Context(), tx, prevIssue.WorkspaceID, newSpaceID, prevIssue.Status)
+			newPosition, err := issueposition.NextTopPositionForSpace(r.Context(), tx, prevIssue.WorkspaceID, finalSpaceID, prevIssue.Status)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to position issue")
 				return
 			}
 			if _, err := qtx.MoveIssueToSpace(r.Context(), db.MoveIssueToSpaceParams{
 				ID:       prevIssue.ID,
-				SpaceID:  newSpaceID,
+				SpaceID:  finalSpaceID,
 				Number:   newNumber,
 				Position: newPosition,
 			}); err != nil {
@@ -2895,25 +2903,33 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// The moved issue keeps its project — the target space joins the
-			// project's space set to uphold the space∈project invariant.
-			if err := service.EnsureProjectHasSpace(r.Context(), qtx, prevIssue.WorkspaceID, prevIssue.ProjectID, newSpaceID); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to update project spaces")
-				return
-			}
-			if err := tx.Commit(r.Context()); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to move issue to space")
-				return
-			}
-			spaceChanged = true
 		}
-	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
-	if err != nil {
-		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
-		return
+		issue, err = qtx.UpdateIssue(r.Context(), params)
+		if err != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+			return
+		}
+		// Ensure exactly the final issue/project pair is represented. For combined
+		// project+space patches this avoids adding old-space→new-project or
+		// new-space→old-project associations.
+		if err := service.EnsureProjectHasSpace(r.Context(), qtx, prevIssue.WorkspaceID, finalProjectID, finalSpaceID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project spaces")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update issue")
+			return
+		}
+	} else {
+		var err error
+		issue, err = h.Queries.UpdateIssue(r.Context(), params)
+		if err != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+			return
+		}
 	}
 
 	if len(attachmentIDs) > 0 {

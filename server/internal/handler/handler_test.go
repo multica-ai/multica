@@ -511,6 +511,127 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano() % 1_000_000
+	oldSpaceKey := fmt.Sprintf("OA%05d", suffix%100000)
+	targetSpaceKey := fmt.Sprintf("TB%05d", suffix%100000)
+
+	var oldSpaceID, targetSpaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, $2, $3, 1, false, $4)
+		RETURNING id
+	`, testWorkspaceID, "Old Space", oldSpaceKey, testUserID).Scan(&oldSpaceID); err != nil {
+		t.Fatalf("insert old space: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, $2, $3, 10, false, $4)
+		RETURNING id
+	`, testWorkspaceID, "Target Space", targetSpaceKey, testUserID).Scan(&targetSpaceID); err != nil {
+		t.Fatalf("insert target space: %v", err)
+	}
+
+	var oldProjectID, targetProjectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, priority)
+		VALUES ($1, $2, 'none')
+		RETURNING id
+	`, testWorkspaceID, "Old Project").Scan(&oldProjectID); err != nil {
+		t.Fatalf("insert old project: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, priority)
+		VALUES ($1, $2, 'none')
+		RETURNING id
+	`, testWorkspaceID, "Target Project").Scan(&targetProjectID); err != nil {
+		t.Fatalf("insert target project: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_space (workspace_id, project_id, space_id)
+		VALUES ($1, $2, $3), ($1, $4, $5)
+	`, testWorkspaceID, oldProjectID, oldSpaceID, targetProjectID, targetSpaceID); err != nil {
+		t.Fatalf("insert project spaces: %v", err)
+	}
+
+	var issueID string
+	var oldNumber int32
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, space_id, project_id, title, status, priority,
+			creator_type, creator_id, number, position
+		)
+		VALUES ($1, $2, $3, 'move issue final pair test', 'todo', 'none', 'member', $4, 1, 0)
+		RETURNING id, number
+	`, testWorkspaceID, oldSpaceID, oldProjectID, testUserID).Scan(&issueID, &oldNumber); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_identifier_alias WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id IN ($1, $2)`, oldProjectID, targetProjectID)
+		testPool.Exec(context.Background(), `DELETE FROM workspace_space WHERE id IN ($1, $2)`, oldSpaceID, targetSpaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/issues/"+issueID, map[string]any{
+		"project_id": targetProjectID,
+		"space_id":   targetSpaceID,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if updated.ProjectID == nil || *updated.ProjectID != targetProjectID {
+		t.Fatalf("project_id = %v, want %s", updated.ProjectID, targetProjectID)
+	}
+	if updated.SpaceID == nil || *updated.SpaceID != targetSpaceID {
+		t.Fatalf("space_id = %v, want %s", updated.SpaceID, targetSpaceID)
+	}
+
+	projectSpaceCount := func(projectID, spaceID string) int {
+		t.Helper()
+		var count int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM project_space
+			WHERE workspace_id = $1 AND project_id = $2 AND space_id = $3
+		`, testWorkspaceID, projectID, spaceID).Scan(&count); err != nil {
+			t.Fatalf("count project_space %s/%s: %v", projectID, spaceID, err)
+		}
+		return count
+	}
+	if got := projectSpaceCount(targetProjectID, targetSpaceID); got != 1 {
+		t.Fatalf("target project/target space count = %d, want 1", got)
+	}
+	if got := projectSpaceCount(targetProjectID, oldSpaceID); got != 0 {
+		t.Fatalf("target project/old space count = %d, want 0", got)
+	}
+	if got := projectSpaceCount(oldProjectID, targetSpaceID); got != 0 {
+		t.Fatalf("old project/target space count = %d, want 0", got)
+	}
+	if got := projectSpaceCount(oldProjectID, oldSpaceID); got != 1 {
+		t.Fatalf("old project/old space count = %d, want 1", got)
+	}
+
+	var aliasCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM issue_identifier_alias
+		WHERE workspace_id = $1 AND space_key_lower = lower($2) AND number = $3 AND issue_id = $4
+	`, testWorkspaceID, oldSpaceKey, oldNumber, issueID).Scan(&aliasCount); err != nil {
+		t.Fatalf("count identifier alias: %v", err)
+	}
+	if aliasCount != 1 {
+		t.Fatalf("identifier alias count = %d, want 1", aliasCount)
+	}
+}
+
 func TestResolveIssueByIdentifierFallsBackToDefaultSpaceForNullSpaceIssue(t *testing.T) {
 	// Migration 132 makes issue.space_id NOT NULL, so a null-space issue can no
 	// longer be inserted to exercise the identifier fallback. The production
