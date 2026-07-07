@@ -224,7 +224,7 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
 
       {/* Review Content */}
       <ResizablePanelGroup orientation="horizontal" className="flex-1 w-full overflow-hidden">
-        <ResizablePanel defaultSize={75} minSize={50} className="relative bg-black flex flex-col overflow-auto">
+        <ResizablePanel defaultSize="75" minSize="50" className="relative bg-black flex flex-col overflow-auto">
           {/* Upload showcase overlaid above player while uploading a new version */}
           {uploadFile && (uploadAsset.isPending || uploadAsset.isSuccess || uploadAsset.isError) && (
             <div className="absolute inset-x-0 top-0 z-20 p-4">
@@ -251,7 +251,7 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
         
         <ResizableHandle withHandle className="bg-border" />
         
-        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="bg-background">
+        <ResizablePanel defaultSize="25" minSize="20" maxSize="40" className="bg-background">
           <ReviewCommentSidebar
             workspaceId={workspaceId}
             asset={asset}
