@@ -234,6 +234,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		engine.Config{},
 	)
 
+	// Per-platform readers behind the unified `multica chat history` / `thread`
+	// commands (MUL-3871, MUL-4166). Each integration block below registers its
+	// reader by channel type; after both, h.ChatHistory is a channel-type
+	// dispatcher over whatever is configured (nil when neither is).
+	chatHistoryReaders := map[string]handler.ChatChannelHistoryReader{}
+
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
 	// the InstallationService refuses to fall back to plaintext storage
 	// for app_secret, and the BindingTokenService cannot mint usable
@@ -286,6 +292,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				cs := lark.NewChannelStore(queries)
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
+
+				// On-demand history reader behind the unified `multica chat`
+				// commands (MUL-4166): pull the session's Feishu conversation when
+				// the agent asks, the same pull model Slack uses — replacing the
+				// enricher's force-assembled <recent_context> block (disabled
+				// below). Reuses the channel store's binding/installation lookups
+				// and the shared APIClient.
+				chatHistoryReaders[string(channel.TypeFeishu)] = lark.NewHistory(cs, installSvc, larkClient, slog.Default())
 
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
@@ -473,7 +487,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// On-demand history reader behind the unified `multica chat history`
 			// command (MUL-3871): pull the session's Slack conversation when the
 			// agent asks, instead of force-assembling it on every inbound.
-			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
+			chatHistoryReaders[string(slack.TypeSlack)] = slack.NewHistory(queries, box.Open, slog.Default())
 
 			// `/issue` slash command (MUL-3908): a real Slack slash command,
 			// delivered over the same Socket Mode connection. It is a quick-create
@@ -510,6 +524,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
+
+	// Dispatch `multica chat history` / `thread` to the reader for the session's
+	// channel type. NewChatHistoryRouter returns nil when no reader is
+	// configured, so GetChatChannelHistory reports "no channel integration".
+	h.ChatHistory = handler.NewChatHistoryRouter(queries, chatHistoryReaders)
 
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
@@ -1328,13 +1347,19 @@ func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.API
 		}
 		return creds, nil
 	})
-	// Inbound enricher: expands quoted replies / forwarded bundles AND
-	// prefetches a window of surrounding group history (MUL-3084) into the
-	// agent's body via the IM API before dispatch. It shares the
-	// connector's resolved credentials and runs under the connector's
-	// EnrichTimeout so it cannot overrun the Lark long-conn ACK budget.
+	// Inbound enricher: expands quoted replies / forwarded bundles the user
+	// EXPLICITLY attached to the trigger message (not recoverable from channel
+	// history), before dispatch. It shares the connector's resolved credentials
+	// and runs under the connector's EnrichTimeout so it cannot overrun the Lark
+	// long-conn ACK budget.
+	//
+	// RecentContextSize is 0 (recent-history prefetch disabled): surrounding
+	// group context is now PULLED on demand via `multica chat history`
+	// (MUL-4166), the same model Slack uses, instead of force-assembling a
+	// <recent_context> block into every inbound. Quote/forward expansion stays —
+	// it is trigger-specific content the history pull cannot reconstruct.
 	enricher := lark.NewInboundEnricher(apiClient, lark.InboundEnricherConfig{
-		RecentContextSize: lark.DefaultRecentContextSize,
+		RecentContextSize: 0,
 		Logger:            slog.Default(),
 	})
 	conn, err := lark.NewWSLongConnConnector(lark.WSConnectorConfig{

@@ -192,12 +192,14 @@ type Handler struct {
 	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is
 	// configured (MULTICA_SLACK_SECRET_KEY set).
 	SlackBindingTokens *slack.BindingTokenService
-	// SlackHistory backs the agent-facing `multica chat history` command: it
-	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
-	// unless Slack is configured; GetChatChannelHistory then reports "no channel
-	// integration". A future platform satisfies the same reader interface.
-	SlackHistory ChatChannelHistoryReader
-	cfg          Config
+	// ChatHistory backs the agent-facing `multica chat history` / `multica chat
+	// thread` commands: it reads a chat session's bound IM conversation on
+	// demand (MUL-3871, MUL-4166). In production it is a channel-type dispatcher
+	// (NewChatHistoryRouter) over the per-platform readers (Slack, Feishu). Nil
+	// when no channel integration is configured; GetChatChannelHistory then
+	// reports "no channel integration".
+	ChatHistory ChatChannelHistoryReader
+	cfg         Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

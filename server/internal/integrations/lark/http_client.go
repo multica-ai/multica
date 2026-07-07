@@ -654,6 +654,73 @@ func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds Installation
 	return out, nil
 }
 
+// ListContainerMessages lists one page of messages in a chat or a topic via
+// GET /open-apis/im/v1/messages, newest-first, with page_token cursoring. It
+// backs the on-demand `multica chat` history reader (MUL-4166): unlike
+// ListChatMessages (a single time-anchored page for the inbound enricher),
+// this pages to older messages via Lark's page_token and reports whether an
+// older page exists. Note Lark rejects start_time/end_time for
+// container_id_type=thread, so this method never sends them — page_token is
+// the sole cursor, valid for both container types.
+func (c *httpAPIClient) ListContainerMessages(ctx context.Context, creds InstallationCredentials, p ListContainerParams) (ListContainerResult, error) {
+	if p.ContainerType != larkContainerTypeChat && p.ContainerType != larkContainerTypeThread {
+		return ListContainerResult{}, fmt.Errorf("lark http client: invalid container_id_type %q", p.ContainerType)
+	}
+	if p.ContainerID == "" {
+		return ListContainerResult{}, errors.New("lark http client: missing container_id")
+	}
+	size := p.PageSize
+	if size <= 0 {
+		size = 1
+	} else if size > larkListMessagesMaxPageSize {
+		size = larkListMessagesMaxPageSize
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return ListContainerResult{}, err
+	}
+	q := url.Values{}
+	q.Set("container_id_type", p.ContainerType)
+	q.Set("container_id", p.ContainerID)
+	q.Set("sort_type", "ByCreateTimeDesc")
+	q.Set("page_size", strconv.Itoa(size))
+	q.Set("user_id_type", "open_id")
+	if p.PageToken != "" {
+		q.Set("page_token", p.PageToken)
+	}
+	path := "/open-apis/im/v1/messages?" + q.Encode()
+
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			HasMore   bool                  `json:"has_more"`
+			PageToken string                `json:"page_token"`
+			Items     []larkRESTMessageItem `json:"items"`
+		} `json:"data"`
+	}
+	if err := c.doJSON(ctx, c.resolveBaseURL(creds), http.MethodGet, path, token, nil, &resp); err != nil {
+		return ListContainerResult{}, fmt.Errorf("lark http client: list container messages: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(creds.AppID)
+		}
+		return ListContainerResult{}, fmt.Errorf("lark http client: list container messages: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+
+	out := ListContainerResult{Messages: make([]LarkMessage, 0, len(resp.Data.Items))}
+	for _, it := range resp.Data.Items {
+		out.Messages = append(out.Messages, it.normalize())
+	}
+	// Only advertise a cursor when Lark says an older page exists; a page_token
+	// with has_more=false points at nothing.
+	if resp.Data.HasMore {
+		out.PageToken = resp.Data.PageToken
+	}
+	return out, nil
+}
+
 // larkBatchGetUsersMaxIDs is Lark's hard cap on user_ids per
 // contact/v3/users/batch call. We drop the overflow rather than error so
 // a caller asking for more still gets the first 50 resolved.
@@ -790,6 +857,7 @@ type larkRESTMessageItem struct {
 	MessageID      string `json:"message_id"`
 	RootID         string `json:"root_id"`
 	ParentID       string `json:"parent_id"`
+	ThreadID       string `json:"thread_id"`
 	UpperMessageID string `json:"upper_message_id"`
 	MsgType        string `json:"msg_type"`
 	CreateTime     string `json:"create_time"`
@@ -819,6 +887,7 @@ func (it larkRESTMessageItem) normalize() LarkMessage {
 		CreateTime:     it.CreateTime,
 		ParentID:       it.ParentID,
 		RootID:         it.RootID,
+		ThreadID:       it.ThreadID,
 		UpperMessageID: it.UpperMessageID,
 		Deleted:        it.Deleted,
 	}

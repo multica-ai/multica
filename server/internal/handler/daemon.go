@@ -20,7 +20,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -1630,18 +1629,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
 			// Flag a channel-backed session so the daemon makes the agent aware
-			// it is operating inside Slack — read this conversation's history
-			// from the channel via `multica chat history` / `multica chat thread`,
-			// not from Multica (MUL-3871). Empty for a web-only chat session.
-			// ChatInThread tells the agent which command to start with: the
-			// latest trigger was a thread reply iff its reply-target thread
-			// (last_thread_id) differs from its own message id (a top-level
-			// @mention records its own ts as both).
-			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
-				ChatSessionID: cs.ID,
-				ChannelType:   string(slack.TypeSlack),
-			}); berr == nil {
-				resp.ChatChannelType = string(slack.TypeSlack)
+			// it is operating inside its IM channel (Slack, Lark) — read this
+			// conversation's history from the channel via `multica chat history` /
+			// `multica chat thread`, not from Multica (MUL-3871, MUL-4166). Empty
+			// for a web-only chat session. The binding is looked up by session
+			// alone (chat_session_id is UNIQUE) so any wired channel type lights
+			// up the pull path, not just Slack. ChatInThread tells the agent which
+			// command to start with: the latest trigger was a thread reply iff its
+			// reply-target thread (last_thread_id) differs from its own message id
+			// — for Slack a top-level @mention records its own ts as both; for Lark
+			// last_thread_id is set only inside a topic (话题).
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
+				resp.ChatChannelType = binding.ChannelType
 				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
 					binding.LastThreadID.String != binding.LastMessageID.String
 			}

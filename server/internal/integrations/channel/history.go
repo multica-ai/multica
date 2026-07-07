@@ -1,5 +1,14 @@
 package channel
 
+import "errors"
+
+// ErrNoChannelSession reports that a chat session has no channel binding a
+// history reader can serve — a web-only session, or one bound to a platform
+// with no reader wired. Readers and the channel-type dispatcher return it so
+// the unified `multica chat history` / `multica chat thread` commands answer
+// gracefully (an empty read with an explanatory note) rather than failing.
+var ErrNoChannelSession = errors.New("channel: session has no channel binding")
+
 // This file defines the channel-agnostic vocabulary for ON-DEMAND history
 // reads. History is PULLED by the agent through two unified CLI commands —
 // `multica chat history` (the channel OVERVIEW: top-level messages + thread

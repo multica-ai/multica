@@ -270,6 +270,8 @@ func channelDisplayName(channelType string) string {
 	switch channelType {
 	case "slack":
 		return "Slack"
+	case "feishu":
+		return "Lark"
 	default:
 		return channelType
 	}
