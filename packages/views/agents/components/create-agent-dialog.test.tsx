@@ -162,7 +162,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     document.body.innerHTML = "";
   });
 
-  it("disables another member's private runtime in the picker", () => {
+  it("disables another member's Private agent environment in the picker", () => {
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME, visibility: "private" });
     const othersPrivate = makeRuntime({
       id: "rt-others-private",
@@ -184,7 +184,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .closest("button") as HTMLButtonElement;
     expect(disabledRow).not.toBeNull();
     expect(disabledRow.disabled).toBe(true);
-    expect(disabledRow.title).toMatch(/Private runtime/i);
+    expect(disabledRow.title).toMatch(/Private agent environment/i);
   });
 
   it("lets a plain member pick another member's public runtime", () => {
@@ -225,7 +225,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     renderDialog([othersPrivate, mine]);
 
     // The trigger label shows the selected runtime name. The picker must
-    // not seed with the other-owned private runtime even if it sorted
+    // not seed with the other-owned Private agent environment even if it sorted
     // first in the input list.
     expect(screen.queryByText("Others Private", { selector: "span.truncate" })).toBeNull();
     expect(screen.getByText("My Runtime", { selector: "span.truncate" })).toBeInTheDocument();

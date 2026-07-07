@@ -56,7 +56,7 @@ function renderDropdown(
           agentCountByMachine={agentCountByMachine}
           // Default to the sum of per-machine counts so existing tests
           // keep their original assertion semantics; new tests can
-          // override to verify the "All runtimes" badge matches an
+          // override to verify the "All agent environments" badge matches an
           // external in-scope total even when agents are missing from
           // the machine map.
           totalAgentCount={
@@ -76,7 +76,7 @@ describe("RuntimeMachineFilterDropdown", () => {
   beforeEach(() => vi.clearAllMocks());
   // Base UI DropdownMenu renders the menu content into a portal on
   // document.body, so leftover portals from a prior test would surface
-  // duplicate "All runtimes" / "LOCAL" labels. Wipe body between tests.
+  // duplicate "All agent environments" / "LOCAL" labels. Wipe body between tests.
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
@@ -99,9 +99,9 @@ describe("RuntimeMachineFilterDropdown", () => {
 
     renderDropdown(machines, null, vi.fn(), counts);
 
-    // Trigger button uses the "All runtimes" label.
+    // Trigger button uses the "All agent environments" label.
     const trigger = screen.getByTestId("agents-runtime-filter");
-    expect(trigger.textContent).toContain("All runtimes");
+    expect(trigger.textContent).toContain("All agent environments");
     // Sum across machines surfaces as the trigger count.
     expect(trigger.textContent).toContain("7");
   });
@@ -159,7 +159,7 @@ describe("RuntimeMachineFilterDropdown", () => {
     const counts = new Map([["m-local", 1]]);
     const onChange = vi.fn();
 
-    // Pre-select a machine so the "All runtimes" row is the one that
+    // Pre-select a machine so the "All agent environments" row is the one that
     // gets the data-testid="agents-runtime-filter-active" marker.
     renderDropdown(machines, "m-local", onChange, counts);
     fireEvent.click(screen.getByTestId("agents-runtime-filter"));
@@ -168,8 +168,8 @@ describe("RuntimeMachineFilterDropdown", () => {
     // raw <button>.
     const activeRow = screen.getByTestId("agents-runtime-filter-active");
     expect(activeRow.getAttribute("role")).toBe("menuitem");
-    // Click the explicit "All runtimes" menu item by its accessible name.
-    fireEvent.click(screen.getByRole("menuitem", { name: /All runtimes/ }));
+    // Click the explicit "All agent environments" menu item by its accessible name.
+    fireEvent.click(screen.getByRole("menuitem", { name: /All agent environments/ }));
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
@@ -208,7 +208,7 @@ describe("RuntimeMachineFilterDropdown", () => {
 
     const menu = screen.getByRole("menu");
     expect(menu).toBeTruthy();
-    // Both the "All runtimes" row and the per-machine row are items.
+    // Both the "All agent environments" row and the per-machine row are items.
     const items = screen.getAllByRole("menuitem");
     expect(items.length).toBeGreaterThanOrEqual(2);
     expect(items.every((item) => item.getAttribute("role") === "menuitem")).toBe(true);

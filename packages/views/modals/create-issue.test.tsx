@@ -23,7 +23,7 @@ const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
-const mockSetLastAssignee = vi.hoisted(() => vi.fn());
+const mockSetLastAssignees = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
@@ -36,6 +36,7 @@ const mockDraftStore = {
     description: "",
     status: "todo" as const,
     priority: "none" as const,
+    assignees: [] as { type: "agent" | "squad" | "member"; id: string }[],
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
     startDate: null,
@@ -59,11 +60,12 @@ const mockDraftStore = {
       created_at: string;
     }>,
   },
-  lastAssigneeType: undefined,
-  lastAssigneeId: undefined,
+  lastAssignees: [] as { type: "agent" | "squad" | "member"; id: string }[],
+  lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
+  lastAssigneeId: undefined as string | undefined,
   setDraft: mockSetDraft,
   clearDraft: mockClearDraft,
-  setLastAssignee: mockSetLastAssignee,
+  setLastAssignees: mockSetLastAssignees,
 };
 
 const mockQuickCreateStore = {
@@ -378,6 +380,7 @@ describe("CreateIssueModal", () => {
     mockDraftStore.draft.priority = "none";
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
+    mockDraftStore.draft.assignees = [];
     mockDraftStore.draft.assigneeType = undefined;
     mockDraftStore.draft.assigneeId = undefined;
     mockDraftStore.draft.startDate = null;
@@ -393,6 +396,7 @@ describe("CreateIssueModal", () => {
         description: "",
         status: "todo",
         priority: "none",
+        assignees: [],
         assigneeType: mockDraftStore.lastAssigneeType,
         assigneeId: mockDraftStore.lastAssigneeId,
         startDate: null,
@@ -455,7 +459,7 @@ describe("CreateIssueModal", () => {
       });
     });
 
-    expect(mockSetLastAssignee).toHaveBeenCalledWith(undefined, undefined);
+    expect(mockSetLastAssignees).toHaveBeenCalledWith([]);
     expect(mockClearDraft).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
     expect(mockToastCustom).toHaveBeenCalledTimes(1);
@@ -503,15 +507,17 @@ describe("CreateIssueModal", () => {
     });
 
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
-    expect(screen.getByPlaceholderText("Add description...")).toHaveValue("");
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
+      expect(screen.getByPlaceholderText("Add description...")).toHaveValue("");
+    });
     expect(mockSetDraft).toHaveBeenCalledWith({
       title: "",
       description: "",
       status: "todo",
       priority: "none",
-      assigneeType: undefined,
-      assigneeId: undefined,
+      assignees: [],
+      issueTypeId: null,
       startDate: null,
       dueDate: null,
       labelIds: [],
@@ -627,8 +633,7 @@ describe("CreateIssueModal", () => {
   // the agent panel silently falls back to the persisted actor / first
   // visible agent and the user loses the squad they just chose in manual.
   it("forwards the picked squad when switching to agent mode", async () => {
-    mockDraftStore.draft.assigneeType = "squad";
-    mockDraftStore.draft.assigneeId = "squad-1";
+    mockDraftStore.draft.assignees = [{ type: "squad", id: "squad-1" }];
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();
 

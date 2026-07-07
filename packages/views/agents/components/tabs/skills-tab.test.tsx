@@ -92,11 +92,11 @@ describe("SkillsTab", () => {
     // Top informational callout should still render; that's how we know
     // the tab body itself rendered (not stuck in a loading state).
     expect(
-      await screen.findByText(/Local runtime skills are always available/i),
+      await screen.findByText(/Local agent environment skills are always available/i),
     ).toBeInTheDocument();
 
     // The removed section's heading and its trigger button must be gone.
-    expect(screen.queryByText("Local Runtime Skills")).not.toBeInTheDocument();
+    expect(screen.queryByText("Local Agent Environment Skills")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Import to Workspace/i }),
     ).not.toBeInTheDocument();

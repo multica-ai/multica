@@ -30,6 +30,8 @@ interface MediaReviewLayoutProps {
 export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }: MediaReviewLayoutProps) {
   const playerRef = useRef<MediaReviewPlayerRef>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [selectedCommentId, setSelectedCommentId] = useState<string | undefined>();
+  const [drawingShape, setDrawingShape] = useState<any>(null);
 
   const { data: allAssets } = useQuery(listReviewAssetsOptions(workspaceId, asset.issue_id));
   const { data: comments, isLoading: commentsLoading } = useQuery(listReviewCommentsOptions(workspaceId, asset.issue_id, asset.id));
@@ -240,6 +242,9 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
             asset={asset}
             onTimeUpdate={setCurrentTime}
             comments={comments as any[]}
+            selectedCommentId={selectedCommentId}
+            onSelectComment={setSelectedCommentId}
+            onDrawingShapeChange={setDrawingShape}
           />
         </div>
         <div className="w-80 h-full border-l border-gray-800 bg-white">
@@ -249,11 +254,14 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
             comments={comments as any[]}
             isLoading={commentsLoading}
             currentTime={currentTime}
-          onSeek={handleSeek}
-          onDrawStart={handleDrawStart}
-          getCanvasShapes={getCanvasShapes}
-          clearCanvasShapes={clearCanvasShapes}
-        />
+            selectedCommentId={selectedCommentId}
+            onSelectComment={setSelectedCommentId}
+            onSeek={handleSeek}
+            onDrawStart={handleDrawStart}
+            getCanvasShapes={getCanvasShapes}
+            clearCanvasShapes={clearCanvasShapes}
+            drawingShape={drawingShape}
+          />
         </div>
       </div>
 

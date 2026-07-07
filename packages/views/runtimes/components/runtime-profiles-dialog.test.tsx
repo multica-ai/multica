@@ -104,7 +104,7 @@ describe("RuntimeProfilesDialog", () => {
     renderDialog();
 
     expect(
-      screen.getByText("Create your first custom runtime"),
+      screen.getByText("Create your first custom agent environment"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Pick a base protocol family/),
@@ -116,7 +116,7 @@ describe("RuntimeProfilesDialog", () => {
     expect(builtinsToggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("claude")).not.toBeInTheDocument();
     expect(
-      screen.getAllByRole("button", { name: "New custom runtime" }),
+      screen.getAllByRole("button", { name: "New custom agent environment" }),
     ).toHaveLength(2);
   });
 
@@ -125,7 +125,7 @@ describe("RuntimeProfilesDialog", () => {
 
     renderDialog();
 
-    const customTitle = screen.getByText("Custom runtimes (1)");
+    const customTitle = screen.getByText("Custom agent environments (1)");
     const customRow = screen.getByText("Team Codex");
     const builtinsToggle = screen.getByRole("button", {
       name: /Supported base protocols/,
@@ -162,7 +162,7 @@ describe("RuntimeProfilesDialog", () => {
 
     fireEvent.click(builtinsToggle);
 
-    expect(screen.getByText("Select a runtime")).toBeInTheDocument();
+    expect(screen.getByText("Select a agent environment")).toBeInTheDocument();
     expect(
       screen.queryByText(/claude is a built-in protocol family/),
     ).not.toBeInTheDocument();
@@ -172,7 +172,7 @@ describe("RuntimeProfilesDialog", () => {
     renderDialog();
 
     const newRuntimeButtons = screen.getAllByRole("button", {
-      name: "New custom runtime",
+      name: "New custom agent environment",
     });
     expect(newRuntimeButtons[0]).toBeDefined();
     fireEvent.click(newRuntimeButtons[0]!);
@@ -189,7 +189,7 @@ describe("RuntimeProfilesDialog", () => {
     expect(screen.getByText("--model")).toBeInTheDocument();
     expect(screen.getByText("composer-2.5")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create agent environment" }));
 
     await waitFor(() =>
       expect(mutationState.createProfile).toHaveBeenCalledWith({

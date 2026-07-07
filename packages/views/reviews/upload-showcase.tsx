@@ -141,11 +141,18 @@ export function UploadShowcase({
 
           {/* Uploading overlay shimmer */}
           {isPending && (
-            <div className="absolute inset-0 bg-black/30 flex items-end">
-              <div
-                className="h-1 bg-primary transition-all duration-300"
-                style={{ width: `${phase === "uploading" ? progress : phase === "completing" ? 100 : 15}%` }}
-              />
+            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center">
+              {phase === "uploading" && (
+                <div className="text-white font-medium text-lg mb-2">
+                  {Math.round(progress)}%
+                </div>
+              )}
+              <div className="w-full absolute bottom-0 h-1 bg-primary/20">
+                <div
+                  className="h-1 bg-primary transition-all duration-300"
+                  style={{ width: `${phase === "uploading" ? progress : phase === "completing" ? 100 : 15}%` }}
+                />
+              </div>
             </div>
           )}
 

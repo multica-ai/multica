@@ -218,7 +218,7 @@ describe("RuntimeDetail visibility section", () => {
   // used to see a disabled Delete button with only a hover tooltip
   // explaining why. The new contract: the button is always clickable
   // for owner/admin; the dialog now carries the self-heal warning.
-  it("renders an enabled Delete runtime button for an owner on a self-healing local runtime", () => {
+  it("renders an enabled Delete agent environment button for an owner on a self-healing local runtime", () => {
     renderDetail(
       makeRuntime({
         owner_id: "user-me",
@@ -227,12 +227,12 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
     const btn = screen.getByRole("button", {
-      name: /Delete runtime/i,
+      name: /Delete agent environment/i,
     }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
 
-  it("hides the Delete runtime button entirely for callers who cannot edit", () => {
+  it("hides the Delete agent environment button entirely for callers who cannot edit", () => {
     renderDetail(
       makeRuntime({
         owner_id: "someone-else",
@@ -241,7 +241,7 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
     expect(
-      screen.queryByRole("button", { name: /Delete runtime/i }),
+      screen.queryByRole("button", { name: /Delete agent environment/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -259,8 +259,8 @@ describe("RuntimeDetail visibility section", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
-    expect(screen.getByText("Delete custom runtime?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Delete agent environment/i }));
+    expect(screen.getByText("Delete custom agent environment?")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() =>
@@ -280,7 +280,7 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: /Delete runtime/i }),
+      screen.queryByRole("button", { name: /Delete agent environment/i }),
     ).not.toBeInTheDocument();
   });
 });
