@@ -284,6 +284,18 @@ LIMIT 1;
 DELETE FROM channel_user_binding
 WHERE workspace_id = $1 AND multica_user_id = $2;
 
+-- name: DeleteChannelUserBindingsByInstallation :exec
+-- Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+-- every member account link for an installation that is being hard-deleted.
+-- Rebinding a Feishu bot to a DIFFERENT agent starts a fresh installation, so
+-- old links do not follow — a different agent is a distinct connection and
+-- members re-establish their link on first contact. The rows could never be
+-- reused anyway (every Feishu identity lookup is installation_id-scoped, and
+-- FindReusableChannelUserBinding is Slack-only), so removing them just keeps
+-- dead rows from accumulating.
+DELETE FROM channel_user_binding
+WHERE installation_id = $1;
+
 -- =====================
 -- channel_chat_session_binding
 -- =====================
@@ -415,6 +427,17 @@ WHERE installation_id = $1
 ORDER BY received_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: NullChannelInboundAuditInstallationID :exec
+-- Application-layer stand-in for the old ON DELETE SET NULL (MUL-3515 §4,
+-- migration 124 keeps installation_id nullable for exactly this): before an
+-- installation row is hard-deleted, detach its inbound-audit rows by NULLing
+-- installation_id. The drop-audit history is preserved (channel_type,
+-- chat/message ids, drop_reason stay) without a dangling reference to a
+-- removed installation.
+UPDATE channel_inbound_audit
+SET installation_id = NULL
+WHERE installation_id = $1;
+
 -- =====================
 -- channel_outbound_card_message
 -- =====================
@@ -471,3 +494,13 @@ RETURNING *;
 -- name: PurgeExpiredChannelBindingTokens :exec
 DELETE FROM channel_binding_token
 WHERE expires_at < $1;
+
+-- name: DeleteChannelBindingTokensByInstallation :exec
+-- Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+-- every pending binding token for an installation that is being hard-deleted.
+-- A token stays redeemable for up to 15 min; without this a user who clicks a
+-- still-unexpired bind link right after the bot was rebound to another agent
+-- would consume the token and get a "bound" result written against a deleted
+-- installation — a link that never actually reaches the live bot.
+DELETE FROM channel_binding_token
+WHERE installation_id = $1;

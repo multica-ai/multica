@@ -142,16 +142,61 @@ func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertIns
 	return installationFromRow(row)
 }
 
-// RemoveRevokedInstallationByAppID hard-deletes a revoked installation that
-// belongs to a DIFFERENT agent, keyed by its platform app identity. This clears
-// the (channel_type, config->>'app_id') unique slot so the caller can re-install
-// the same Lark/Feishu app against a different agent without tripping the
-// functional unique index. The delete is fenced to one workspace, to
-// status='revoked', and to agent_id <> agentID: the agent being (re)installed is
-// excluded so its own revoked row is reactivated in place by the upsert with all
-// its bindings preserved, never orphaned. An active installation is never removed
-// through this path.
+// RemoveRevokedInstallationByAppID clears a revoked installation that belongs to
+// a DIFFERENT agent in the same workspace and holds the (channel_type,
+// config->>'app_id') unique slot, so the caller can re-install the same
+// Lark/Feishu app against a new agent without tripping the functional unique
+// index. It resolves the single row holding the app_id and acts ONLY when that
+// row is revoked, in this workspace, and owned by another agent:
+//
+//   - the SAME agent's revoked row is left for the upsert to reactivate in place
+//     (installation_id + all bindings preserved);
+//   - an ACTIVE row (bot still connected) is left so the install surfaces as a
+//     conflict instead of silently stealing it;
+//   - a row in ANOTHER workspace is not ours to touch.
+//
+// channel_* has no FK/cascade (MUL-3515 §4), so before hard-deleting the row we
+// must explicitly clear every application-owned row that references it —
+// chat-session bindings, pending binding tokens, member links — and detach
+// inbound-audit rows by NULLing installation_id (the app-layer stand-in for the
+// old ON DELETE SET NULL). Everything runs on the caller's transaction-bound
+// queries, so cleanup + delete + the follow-up upsert commit atomically.
 func (s *ChannelStore) RemoveRevokedInstallationByAppID(ctx context.Context, workspaceID, agentID pgtype.UUID, appID string) error {
+	row, err := s.Queries.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
+		ChannelType: channelTypeFeishu,
+		AppID:       appID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // no row holds this app_id — nothing to clear
+		}
+		return err
+	}
+	if row.Status != string(InstallationRevoked) ||
+		row.WorkspaceID != workspaceID ||
+		row.AgentID == agentID {
+		return nil
+	}
+
+	if err := s.Queries.DeleteChannelChatSessionBindingsByInstallation(ctx, db.DeleteChannelChatSessionBindingsByInstallationParams{
+		InstallationID: row.ID,
+		ChannelType:    channelTypeFeishu,
+	}); err != nil {
+		return err
+	}
+	if err := s.Queries.DeleteChannelBindingTokensByInstallation(ctx, row.ID); err != nil {
+		return err
+	}
+	if err := s.Queries.DeleteChannelUserBindingsByInstallation(ctx, row.ID); err != nil {
+		return err
+	}
+	if err := s.Queries.NullChannelInboundAuditInstallationID(ctx, row.ID); err != nil {
+		return err
+	}
+
+	// Fenced delete (workspace + agent_id <> + status='revoked') as defense in
+	// depth: even if the guard above ever drifted, the SQL can only remove the
+	// exact blocking row.
 	return s.Queries.DeleteChannelInstallationByAppID(ctx, db.DeleteChannelInstallationByAppIDParams{
 		ChannelType: channelTypeFeishu,
 		AppID:       appID,

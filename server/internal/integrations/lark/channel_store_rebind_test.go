@@ -244,3 +244,85 @@ VALUES ($1, $2, 'feishu', 'oc_rb_chat', 'p2p')
 		}
 	})
 }
+
+// TestChannelStore_RebindCleansDependentRows pins the application-layer cleanup:
+// channel_* has no FK/cascade, so hard-deleting the blocking revoked
+// installation of a DIFFERENT agent must also clear every row that references it
+// (chat-session bindings, pending binding tokens, member links) and detach
+// inbound-audit rows by NULLing installation_id — not leave dangling dead rows.
+func TestChannelStore_RebindCleansDependentRows(t *testing.T) {
+	pool := channelScopeTestDB(t)
+	ctx := context.Background()
+	store := NewChannelStore(db.New(pool))
+
+	const (
+		app        = "cli_rb_cleanup"
+		tokenHash  = "rb_token_hash_cleanup"
+		auditEvent = "ev_rb_cleanup"
+	)
+	clean := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, app)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, rbUser)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rbChatSess)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	// A revoked installation for agent A carrying the full spread of dependents.
+	var oldID string
+	if err := pool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'revoked')
+RETURNING id
+`, rbWS, rbAgentA, app, rbInstaller).Scan(&oldID); err != nil {
+		t.Fatalf("insert revoked installation: %v", err)
+	}
+	seed := func(q string, args ...any) {
+		if _, err := pool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("seed dependent row: %v", err)
+		}
+	}
+	seed(`INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
+VALUES ($1, $2, $3, 'feishu', 'ou_rb_user')`, rbWS, rbUser, oldID)
+	seed(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', 'oc_rb_chat', 'p2p')`, rbChatSess, oldID)
+	seed(`INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
+VALUES ($1, $2, $3, 'feishu', 'ou_rb_user', now() + interval '10 minutes')`, tokenHash, rbWS, oldID)
+	seed(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
+VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'revoked_installation')`, oldID, auditEvent)
+
+	// Rebind the app to a DIFFERENT agent.
+	if err := store.RemoveRevokedInstallationByAppID(ctx, util.MustParseUUID(rbWS), util.MustParseUUID(rbAgentB), app); err != nil {
+		t.Fatalf("RemoveRevokedInstallationByAppID: %v", err)
+	}
+
+	count := func(q string, args ...any) int {
+		var n int
+		if err := pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1`, oldID); n != 0 {
+		t.Fatalf("blocking installation not deleted: %d rows remain", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, oldID); n != 0 {
+		t.Fatalf("member links not cleaned: %d dangling rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, oldID); n != 0 {
+		t.Fatalf("chat-session bindings not cleaned: %d dangling rows (outbound patcher would error)", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, oldID); n != 0 {
+		t.Fatalf("binding tokens not cleaned: %d redeemable rows into a deleted installation", n)
+	}
+	// Audit history is preserved but detached: no row still points at the
+	// deleted installation, and our audit row survives with a NULL reference.
+	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE installation_id = $1`, oldID); n != 0 {
+		t.Fatalf("audit rows still reference the deleted installation: %d dangling ids", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id IS NULL`, auditEvent); n != 1 {
+		t.Fatalf("audit row should survive detached (installation_id NULL), got %d", n)
+	}
+}
