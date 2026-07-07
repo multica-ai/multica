@@ -673,15 +673,15 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 7.3 Media Review Player & Annotations (Mobile)
 
-- [ ] **Task 7.3.1:** Install and configure `expo-video` or `expo-av` for native mobile video playback.
-- [ ] **Task 7.3.2:** Implement HLS streaming support (`.m3u8` playlists) for the native video player on both iOS and Android.
-- [ ] **Task 7.3.3:** Build a custom transparent control overlay (play/pause, timestamp, full-screen toggle) using React Native Reanimated for smooth fade in/out interactions.
-- [ ] **Task 7.3.4:** Port the web `MediaScrubber` logic to React Native, using a horizontal `PanGestureHandler` (from `react-native-gesture-handler`) to scrub back and forth precisely on mobile touch screens.
-- [ ] **Task 7.3.5:** Implement the mobile canvas overlay for drawing annotations over the video/image. Use `react-native-svg` to capture touch events (`PanResponder` or `Gesture.Pan()`) and draw SVG paths in real-time.
-- [ ] **Task 7.3.6:** Build a tool palette (pen, arrow, rectangle, color picker) that docks to the side or bottom of the screen while in annotation mode.
-- [ ] **Task 7.3.7:** Ensure coordinate normalization logic perfectly translates touch coordinates (pixels on the physical screen) to the normalized `(0.0-1.0)` format used by the backend.
-- [ ] **Task 7.3.8:** Build the time-stamped comment composer overlay: when the user finishes drawing, pause the video and slide up a bottom-sheet keyboard view to type their review comment.
-- [ ] **Task 7.3.9:** Add the inline comment markers on the mobile video scrubber timeline, allowing users to tap a marker and jump exactly to that timestamp/annotation.
+- [x] **Task 7.3.1:** Install and configure `expo-video` or `expo-av` for native mobile video playback. (Installed `expo-video`)
+- [x] **Task 7.3.2:** Implement HLS streaming support (`.m3u8` playlists) for the native video player on both iOS and Android. (Supported natively by `expo-video` using `useVideoPlayer`)
+- [x] **Task 7.3.3:** Build a custom transparent control overlay (play/pause, timestamp, full-screen toggle) using React Native Reanimated for smooth fade in/out interactions. (Implemented via `MediaReviewPlayer` overlay controls)
+- [x] **Task 7.3.4:** Port the web `MediaScrubber` logic to React Native, using a horizontal `PanGestureHandler` (from `react-native-gesture-handler`) to scrub back and forth precisely on mobile touch screens. (Implemented `MediaScrubber` with `Gesture.Pan`)
+- [x] **Task 7.3.5:** Implement the mobile canvas overlay for drawing annotations over the video/image. Use `react-native-svg` to capture touch events (`PanResponder` or `Gesture.Pan()`) and draw SVG paths in real-time. (Implemented via `react-native-svg` and `GestureDetector`)
+- [x] **Task 7.3.6:** Build a tool palette (pen, arrow, rectangle, color picker) that docks to the side or bottom of the screen while in annotation mode. (Implemented `ToolPalette`)
+- [x] **Task 7.3.7:** Ensure coordinate normalization logic perfectly translates touch coordinates (pixels on the physical screen) to the normalized `(0.0-1.0)` format used by the backend. (Implemented using video intrinsic sizing via `tracksChanged`)
+- [x] **Task 7.3.8:** Build the time-stamped comment composer overlay: when the user finishes drawing, pause the video and slide up a bottom-sheet keyboard view to type their review comment. (Implemented `ReviewComposer` using `KeyboardAvoidingView`)
+- [x] **Task 7.3.9:** Add the inline comment markers on the mobile video scrubber timeline, allowing users to tap a marker and jump exactly to that timestamp/annotation. (Implemented in `MediaScrubber`)
 
 ### 7.4 Cross-Platform Polish & UI/UX 
 
