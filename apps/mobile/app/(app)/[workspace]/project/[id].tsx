@@ -26,6 +26,7 @@ import { useActionSheet } from "@expo/react-native-action-sheet";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -51,6 +52,7 @@ export default function ProjectDetail() {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const qc = useQueryClient();
   const { showActionSheetWithOptions } = useActionSheet();
+  const { t } = useTranslation("projects");
 
   const detail = useQuery(projectDetailOptions(wsId, id));
   const deleteProject = useDeleteProject(id);
@@ -88,12 +90,18 @@ export default function ProjectDetail() {
   const onPressMore = () => {
     if (!project) return;
     const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const cancelLabel = t("detail.menu.cancel");
+    const pinLabel = t("detail.menu.pin");
+    const unpinLabel = t("detail.menu.unpin");
+    const editDetailsLabel = t("detail.menu.edit_details");
+    const openOnWebLabel = t("detail.menu.open_on_web");
+    const deleteProjectLabel = t("detail.menu.delete_project");
     const options = [
-      "Cancel",
-      isPinned ? "Unpin" : "Pin",
-      "Edit details",
-      ...(wsUrl ? ["Open on web"] : []),
-      "Delete",
+      cancelLabel,
+      isPinned ? unpinLabel : pinLabel,
+      editDetailsLabel,
+      ...(wsUrl ? [openOnWebLabel] : []),
+      deleteProjectLabel,
     ];
     const destructiveIndex = options.length - 1;
     showActionSheetWithOptions(
@@ -105,19 +113,19 @@ export default function ProjectDetail() {
       (i) => {
         if (i === undefined) return;
         const label = options[i];
-        if (label === "Pin") {
+        if (label === pinLabel) {
           createPin.mutate({ item_type: "project", item_id: project.id });
           return;
         }
-        if (label === "Unpin") {
+        if (label === unpinLabel) {
           deletePin.mutate({ itemType: "project", itemId: project.id });
           return;
         }
-        if (label === "Edit details") {
+        if (label === editDetailsLabel) {
           if (wsSlug) router.push(`/${wsSlug}/project/${id}/edit`);
           return;
         }
-        if (label === "Open on web" && wsUrl) {
+        if (label === openOnWebLabel && wsUrl) {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }
@@ -130,12 +138,12 @@ export default function ProjectDetail() {
 
   const onDelete = () => {
     Alert.alert(
-      "Delete project?",
-      "This cannot be undone. Issues in this project will become unassigned from any project.",
+      t("detail.delete_confirm.title"),
+      t("detail.delete_confirm.message"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("detail.delete_confirm.cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("detail.delete_confirm.confirm"),
           style: "destructive",
           onPress: () => {
             deleteProject.mutate(undefined, {
@@ -151,14 +159,14 @@ export default function ProjectDetail() {
     <SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
       <Stack.Screen
         options={{
-          title: project?.title || "Project",
-          headerBackTitle: "Back",
+          title: project?.title || t("detail.header_default_title"),
+          headerBackTitle: t("detail.header_back_title"),
           headerRight: project
             ? () => (
                 <IconButton
                   name="ellipsis-horizontal"
                   onPress={onPressMore}
-                  accessibilityLabel="Project actions"
+                  accessibilityLabel={t("detail.actions_accessibility_label")}
                 />
               )
             : undefined,
@@ -171,13 +179,13 @@ export default function ProjectDetail() {
       ) : detail.error || projectMissing ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
-            Failed to load project:{" "}
+            {t("detail.error.load_prefix")}{" "}
             {detail.error instanceof Error
               ? detail.error.message
-              : "not found"}
+              : t("detail.error.not_found")}
           </Text>
           <Button variant="outline" onPress={() => detail.refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("detail.error.retry")}</Text>
           </Button>
         </View>
       ) : (

@@ -1,0 +1,117 @@
+{
+  "detail": {
+    "header_default_title": "Project",
+    "header_back_title": "Back",
+    "actions_accessibility_label": "Project actions",
+    "error": {
+      "load_prefix": "Failed to load project:",
+      "not_found": "not found",
+      "retry": "Retry"
+    },
+    "menu": {
+      "cancel": "Cancel",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "edit_details": "Edit details",
+      "open_on_web": "Open on web",
+      "delete_project": "Delete"
+    },
+    "delete_confirm": {
+      "title": "Delete project?",
+      "message": "This cannot be undone. Issues in this project will become unassigned from any project.",
+      "cancel": "Cancel",
+      "confirm": "Delete"
+    }
+  },
+  "edit": {
+    "loading": "Loading…",
+    "icon_field": {
+      "label": "Icon (emoji)"
+    },
+    "title_field": {
+      "label": "Title",
+      "placeholder": "Project title"
+    },
+    "description_field": {
+      "label": "Description",
+      "placeholder": "What is this project about?"
+    },
+    "saving": "Saving…",
+    "discard_confirm": {
+      "title": "Discard changes?",
+      "message": "Your edits to this project will be lost.",
+      "keep_editing": "Keep editing",
+      "discard": "Discard"
+    },
+    "save_error": {
+      "title": "Failed to save",
+      "unknown": "Unknown error"
+    }
+  },
+  "add_resource": {
+    "header_title": "Attach repository",
+    "attaching": "Attaching…",
+    "attach": "Attach",
+    "url_field": {
+      "label": "Repository URL",
+      "placeholder": "https://github.com/owner/repo"
+    },
+    "label_field": {
+      "label": "Label (optional)",
+      "placeholder": "e.g. Backend"
+    },
+    "attach_error": {
+      "title": "Failed to attach resource",
+      "unknown": "Unknown error"
+    }
+  },
+  "new_project": {
+    "discard_confirm": {
+      "title": "Discard project?",
+      "message": "Your draft will be lost.",
+      "keep_editing": "Keep editing",
+      "discard": "Discard"
+    },
+    "creating": "Creating…",
+    "create": "Create",
+    "create_error": {
+      "title": "Failed to create project",
+      "unknown": "Unknown error"
+    },
+    "icon_field": {
+      "label": "Icon (emoji)"
+    },
+    "title_field": {
+      "label": "Title",
+      "placeholder": "Project title"
+    },
+    "description_field": {
+      "label": "Description",
+      "placeholder": "What is this project about?"
+    },
+    "status_field": {
+      "label": "Status"
+    },
+    "priority_field": {
+      "label": "Priority"
+    }
+  },
+  "picker": {
+    "lead": {
+      "search_placeholder": "Search members or agents"
+    }
+  },
+  "list": {
+    "error": {
+      "load_prefix": "Failed to load projects:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "new_project_accessibility_label": "New project",
+    "empty": {
+      "title": "No projects yet",
+      "message": "Group related issues into a project to track progress and assign a lead.",
+      "create": "Create project"
+    }
+  }
+}
