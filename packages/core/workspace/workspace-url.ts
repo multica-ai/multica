@@ -29,3 +29,19 @@ export function workspaceUrlHost(
     return bare || BRAND_WORKSPACE_HOST;
   }
 }
+
+export function workspaceUrlPrefix(
+  daemonAppUrl: string | null | undefined,
+  publicBasePath: string | null | undefined,
+): string {
+  const host = workspaceUrlHost(daemonAppUrl);
+  const basePath = normalizePublicBasePath(publicBasePath);
+  return `${host}${basePath}/`;
+}
+
+function normalizePublicBasePath(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "/") return "";
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeadingSlash.replace(/\/+$/, "");
+}

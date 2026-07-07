@@ -18,6 +18,7 @@ import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
+import { configStore } from "../config";
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
@@ -31,8 +32,10 @@ function initCore(
   onLogout?: () => void,
   cookieAuth?: boolean,
   identity?: ClientIdentity,
+  publicBasePath = "",
 ) {
   if (initialized) return;
+  configStore.setState({ publicBasePath });
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
@@ -66,6 +69,7 @@ function initCore(
 export function CoreProvider({
   children,
   apiBaseUrl = "",
+  publicBasePath = "",
   wsUrl = "ws://localhost:8080/ws",
   storage = defaultStorage,
   cookieAuth,
@@ -79,7 +83,19 @@ export function CoreProvider({
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
+  useMemo(
+    () =>
+      initCore(
+        apiBaseUrl,
+        storage,
+        onLogin,
+        onLogout,
+        cookieAuth,
+        identity,
+        publicBasePath,
+      ),
+    [],
+  );
 
   // Client-only freeze watchdog — shared by web and desktop. No-op on the
   // server and idempotent, so mounting it here covers both apps in one place.

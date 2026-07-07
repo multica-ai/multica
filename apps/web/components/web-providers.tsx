@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
@@ -16,7 +16,6 @@ import {
   resolveBasePath,
   resolveApiBaseUrl,
 } from "@/config/base-path";
-import { PageviewTracker } from "./pageview-tracker";
 
 const WEB_RUNTIME_ENV = {
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
@@ -94,11 +93,6 @@ export function WebProviders({
       resources={resources}
       localeAdapter={localeAdapter}
     >
-      {/* Suspense boundary is required by Next.js for useSearchParams in
-          a client component mounted this high in the tree. */}
-      <Suspense fallback={null}>
-        <PageviewTracker />
-      </Suspense>
       <WebNavigationProvider>{children}</WebNavigationProvider>
     </CoreProvider>
   );

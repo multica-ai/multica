@@ -18,12 +18,17 @@ const TEST_RESOURCES = {
 type MockConfigState = {
   workspaceCreationDisabled: boolean;
   daemonAppUrl: string;
+  publicBasePath: string;
 };
 
 const mockLogout = vi.hoisted(() => vi.fn());
 const mockUseConfigStore = vi.hoisted(() =>
   vi.fn((selector: (state: MockConfigState) => unknown) =>
-    selector({ workspaceCreationDisabled: false, daemonAppUrl: "" }),
+    selector({
+      workspaceCreationDisabled: false,
+      daemonAppUrl: "",
+      publicBasePath: "",
+    }),
   ),
 );
 
@@ -58,14 +63,16 @@ function renderStep({
   existing,
   disabled,
   daemonAppUrl = "",
+  publicBasePath = "",
 }: {
   existing: Workspace | null;
   disabled: boolean;
   daemonAppUrl?: string;
+  publicBasePath?: string;
 }) {
   mockUseConfigStore.mockImplementation(
     (selector: (state: MockConfigState) => unknown) =>
-      selector({ workspaceCreationDisabled: disabled, daemonAppUrl }),
+      selector({ workspaceCreationDisabled: disabled, daemonAppUrl, publicBasePath }),
   );
   return render(
     <StepWorkspace existing={existing} onCreated={vi.fn()} onBack={vi.fn()} />,

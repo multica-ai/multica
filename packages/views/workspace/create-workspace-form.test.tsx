@@ -38,7 +38,7 @@ function renderForm(onSuccess = vi.fn()) {
 describe("CreateWorkspaceForm", () => {
   beforeEach(() => {
     mockMutate.mockReset();
-    configStore.setState({ daemonAppUrl: "" });
+    configStore.setState({ daemonAppUrl: "", publicBasePath: "" });
   });
 
   it("shows the brand host as the URL prefix when no app URL is configured", () => {
@@ -51,6 +51,15 @@ describe("CreateWorkspaceForm", () => {
     renderForm();
     expect(screen.getByText("multica.example.com/")).toBeInTheDocument();
     expect(screen.queryByText("multica.ai/")).not.toBeInTheDocument();
+  });
+
+  it("includes the public base path in the URL prefix", () => {
+    configStore.setState({
+      daemonAppUrl: "https://multica.example.com",
+      publicBasePath: "/multica",
+    });
+    renderForm();
+    expect(screen.getByText("multica.example.com/multica/")).toBeInTheDocument();
   });
 
   it("auto-generates slug from name until user edits slug", () => {

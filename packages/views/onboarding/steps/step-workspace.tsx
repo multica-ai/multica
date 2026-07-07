@@ -25,7 +25,7 @@ import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { useConfigStore } from "@multica/core/config";
-import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
+import { workspaceUrlPrefix } from "@multica/core/workspace/workspace-url";
 import { DragStrip } from "@multica/views/platform";
 import { useLogout } from "../../auth";
 import { StepHeader } from "../components/step-header";
@@ -84,7 +84,10 @@ export function StepWorkspace({
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
-  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  const urlPrefix = workspaceUrlPrefix(
+    useConfigStore((s) => s.daemonAppUrl),
+    useConfigStore((s) => s.publicBasePath),
+  );
   // Single source of truth for "can the user reach the create path on this
   // instance?" — drives the resume-mode picker, the eyebrow/headline/lede
   // copy, the side panel, and the footer CTA so the disabled state can't
@@ -246,7 +249,7 @@ export function StepWorkspace({
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
-            {`${urlHost}/`}
+            {urlPrefix}
           </span>
           <Input
             id="ws-slug"
@@ -429,7 +432,10 @@ function ExistingWorkspaceCard({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  const urlPrefix = workspaceUrlPrefix(
+    useConfigStore((s) => s.daemonAppUrl),
+    useConfigStore((s) => s.publicBasePath),
+  );
   return (
     <button
       type="button"
@@ -449,7 +455,7 @@ function ExistingWorkspaceCard({
           {workspace.name}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">
-          {`${urlHost}/${workspace.slug}`}
+          {`${urlPrefix}${workspace.slug}`}
         </div>
       </div>
       <RadioMark selected={selected} />
@@ -576,7 +582,10 @@ function WorkspacePreviewCard({
   slug: string;
 }) {
   const { t } = useT("onboarding");
-  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  const urlPrefix = workspaceUrlPrefix(
+    useConfigStore((s) => s.daemonAppUrl),
+    useConfigStore((s) => s.publicBasePath),
+  );
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
@@ -586,7 +595,7 @@ function WorkspacePreviewCard({
             {name}
           </div>
           <div className="truncate font-mono text-[11.5px] text-muted-foreground">
-            {`${urlHost}/${slug}`}
+            {`${urlPrefix}${slug}`}
           </div>
         </div>
         <Lock
