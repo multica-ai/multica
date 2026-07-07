@@ -36,7 +36,8 @@ export interface ReviewComment {
   asset_id: string;
   author_id: string;
   content: string;
-  timestamp?: number;
+  start_time?: number;
+  end_time?: number;
   shapes: AnnotationShape[];
   resolved: boolean;
   resolved_by?: string;

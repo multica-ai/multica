@@ -2423,7 +2423,8 @@ export class ApiClient {
   async createReviewComment(workspaceId: string, issueId: string, payload: {
     asset_id: string;
     content: string;
-    timestamp?: number;
+    start_time?: number;
+    end_time?: number;
     shapes?: any;
     parent_id?: string;
   }): Promise<ReviewComment> {

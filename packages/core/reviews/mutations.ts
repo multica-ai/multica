@@ -7,7 +7,8 @@ interface CreateReviewCommentParams {
   issueId: string;
   assetId: string;
   content: string;
-  timestamp?: number;
+  start_time?: number;
+  end_time?: number;
   shapes?: any;
   parentId?: string;
 }
@@ -20,7 +21,8 @@ export function useCreateReviewComment() {
       return await api.createReviewComment(params.workspaceId, params.issueId, {
         asset_id: params.assetId,
         content: params.content,
-        timestamp: params.timestamp,
+        start_time: params.start_time,
+        end_time: params.end_time,
         shapes: params.shapes,
         parent_id: params.parentId,
       });
