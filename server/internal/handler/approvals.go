@@ -235,6 +235,20 @@ func (h *Handler) CreateApproval(w http.ResponseWriter, r *http.Request) {
 	res := approvalToResponse(a)
 	h.publish(protocol.EventApprovalRequested, wsIDStr, "system", "", res)
 
+	// Create inbox notification for the approver
+	_, _ = h.Queries.CreateInboxItem(r.Context(), db.CreateInboxItemParams{
+		WorkspaceID:   wsID,
+		RecipientType: body.ApproverType,
+		RecipientID:   approverID,
+		Type:          "approval_requested",
+		Severity:      "info",
+		IssueID:       pgtype.UUID{Bytes: issueID.Bytes, Valid: true},
+		Title:         "Approval Requested",
+		Body:          pgtype.Text{String: "You have been requested to review an issue.", Valid: true},
+		ActorType:     pgtype.Text{String: actorType, Valid: true},
+		ActorID:       pgtype.UUID{Bytes: actorID.Bytes, Valid: true},
+	})
+
 	writeJSON(w, http.StatusCreated, res)
 }
 
@@ -318,6 +332,24 @@ func (h *Handler) handleApprovalDecision(w http.ResponseWriter, r *http.Request,
 
 	res := approvalToResponse(updated)
 	h.publish(eventType, wsIDStr, actorType, actorIDStr, res)
+
+	// Create inbox notification for the requester
+	title := "Approval Approved"
+	if action == "reject" {
+		title = "Approval Rejected"
+	}
+	_, _ = h.Queries.CreateInboxItem(r.Context(), db.CreateInboxItemParams{
+		WorkspaceID:   wsID,
+		RecipientType: a.RequesterType,
+		RecipientID:   a.RequesterID,
+		Type:          "approval_" + action,
+		Severity:      "info",
+		IssueID:       pgtype.UUID{Bytes: a.IssueID.Bytes, Valid: true},
+		Title:         title,
+		Body:          pgtype.Text{String: "Your approval request has been " + action + "ed.", Valid: true},
+		ActorType:     pgtype.Text{String: actorType, Valid: true},
+		ActorID:       pgtype.UUID{Bytes: actorID.Bytes, Valid: true},
+	})
 
 	writeJSON(w, http.StatusOK, res)
 }

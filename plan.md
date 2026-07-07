@@ -249,6 +249,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Serialization:** Export shapes to `AnnotationShape[]` JSON for DB storage (and leverage `video-review` code for drawing stores)
 
 ### 1.5 Polish & Edge Cases
+
 - [x] **Thread support:** Handle nested replies (`parent_id`) for complex review discussions.
 - [x] **Board view integration:** Add a visual indicator (e.g., an "eye" icon or "Pending Review" badge) to issue cards on the Kanban board if they contain unresolved review assets.
 - [x] **Timeline markers:** Overlay review comment timestamps as visual dots on the custom video scrubber. at their timestamps
@@ -281,13 +282,13 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 > **Note (Added 2026-07-06):** The initial media review implementation was unsatisfactory. We redesigned it based on the following implementations:
 
 - [x] **Image Review (Google Drive Style):**
-  - **Implementation:** Dropped the complex pencil/drawing tool. Replaced with a simple "Rectangle Select" (bounding box) interaction by default. 
+  - **Implementation:** Dropped the complex pencil/drawing tool. Replaced with a simple "Rectangle Select" (bounding box) interaction by default.
   - Each selection gets a distinct/random color assigned when the drawing starts.
   - The comment card in the right sidebar borders with the exact same color as its corresponding bounding box on the image, making visual correlation instant.
   - **Scaling:** Bounding box coordinates (x, y, width, height) are normalized (0.0 - 1.0) relative to image height/width. When the window resizes, the boxes scale perfectly across devices without shifting.
 - [x] **Video Review (Time Ranges & Single Frames):**
-  - **Implementation:** Replaced the confusing fixed-duration input with a `[x] Range` checkbox. 
-  - By default, leaving a comment sets `duration = 0` (a single frame point-in-time comment). This renders as a single distinct dot on the timeline scrubber. 
+  - **Implementation:** Replaced the confusing fixed-duration input with a `[x] Range` checkbox.
+  - By default, leaving a comment sets `duration = 0` (a single frame point-in-time comment). This renders as a single distinct dot on the timeline scrubber.
   - During video playback, single-frame comments will briefly flash visible for 0.5s so the user doesn't miss them.
   - Toggling `Range` allows setting a specific duration (e.g. 3 seconds), and the annotation shape will only display during that specific time block.
 - [x] **Workflow (Review to Actionable Task):**
@@ -295,6 +296,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
   - The new sub-task is automatically pre-filled with the comment's content and a context reference back to the original media asset.
 
 ### 1.9 UI Premium Polish (Completed 2026-07-07)
+
 - [x] **Semantic Theming:** Stripped hardcoded `bg-gray-900`/`bg-gray-800` from the layout, sidebar, and empty states. Replaced with Multica's native `bg-background`, `bg-muted`, `border-border` to perfectly respect Light/Dark mode.
 - [x] **Resizable Sidebar:** Wrapped the media player and review sidebar in `@multica/ui`'s `ResizablePanelGroup`, allowing users to drag and expand the sidebar when reading or writing long critiques.
 - [x] **Glassmorphism Controls:** Dropped native HTML5 video `<controls>` in favor of a custom floating control bar with a `backdrop-blur-md` frosted-glass effect.
@@ -335,7 +337,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Backend:** Request approval, approve, reject endpoints
 - [ ] **Views:** Approval request UI on issues
 - [ ] **Views:** "Pending My Approval" inbox filter
-- [ ] **Notifications:** Email/in-app notification when approval requested or decision made
+- [x] **Notifications:** In-app notification when approval requested or decision made
 
 ### 2.3 Templates for Non-Dev Workflows
 
@@ -495,17 +497,20 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 > **Dependencies:** Phases 0-4 backend implementations
 
 ### 4.5.1 Multi-Assignee & Terminology (from Phase 0)
+
 - [x] **UI:** Update assignee picker in `packages/views/issues/` to support multi-select and display multiple assignees.
 - [x] **Data:** Migrate existing `assignee_id` data to `issue_assignees` junction table and deprecate the column.
 - [x] **Terminology:** Clean up developer jargon ("Runtime" → "Agent Environment") in `packages/views/locales/`.
 
 ### 4.5.2 Media Review Polish (from Phase 1)
+
 - [x] **Thread support:** Reply to review comments (threaded) and Resolve/Unresolve comments.
 - [x] **Upload UX:** Add upload progress indicator and thumbnail generation.
 - [x] **Board UI:** Add a visual "Pending Review" indicator on issue cards.
 - [x] **Versioning:** Support uploading a new version of an asset.
 
 ### 4.5.3 Marketing Workflows UI (from Phase 2)
+
 - [x] **Issue Types UI:** Issue type selector in create/edit forms, type-based icons/badges on board cards.
 - [ ] **Custom Fields UI:** Render per-type custom fields. (Note: Backend missing)
 - [x] **Approvals UI:** Add a button to request approval on an issue and a "Pending My Approval" filter.
@@ -709,13 +714,13 @@ All new features must follow the existing pattern:
 
 ### For Phase 1 (Media Review)
 
-| Library                     | Purpose                                     | Link                                                                     |
-| --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
-| canvas-drawing-editor       | Canvas drawing/annotation (Vendored)        | [github.com/typsusan-zzz/canvas-drawing-editor](https://github.com/typsusan-zzz/canvas-drawing-editor) |
-| VideoReview                 | Reference: MIT-licensed Next.js/TS review   | [github.com/KirisameMarisa/video-review](https://github.com/KirisameMarisa/video-review) |
-| sm-annotate                 | Architectural Reference only (License block)| [github.com/lifeart/sm-annotate](https://github.com/lifeart/sm-annotate) |
-| OpenFrame                   | Reference: self-hosted Frame.io alternative | [github.com/yusufipk/OpenFrame](https://github.com/yusufipk/OpenFrame)   |
-| Clapshot                    | Reference: collaborative video review       | [github.com/elonen/clapshot](https://github.com/elonen/clapshot)         |
+| Library               | Purpose                                      | Link                                                                                                   |
+| --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| canvas-drawing-editor | Canvas drawing/annotation (Vendored)         | [github.com/typsusan-zzz/canvas-drawing-editor](https://github.com/typsusan-zzz/canvas-drawing-editor) |
+| VideoReview           | Reference: MIT-licensed Next.js/TS review    | [github.com/KirisameMarisa/video-review](https://github.com/KirisameMarisa/video-review)               |
+| sm-annotate           | Architectural Reference only (License block) | [github.com/lifeart/sm-annotate](https://github.com/lifeart/sm-annotate)                               |
+| OpenFrame             | Reference: self-hosted Frame.io alternative  | [github.com/yusufipk/OpenFrame](https://github.com/yusufipk/OpenFrame)                                 |
+| Clapshot              | Reference: collaborative video review        | [github.com/elonen/clapshot](https://github.com/elonen/clapshot)                                       |
 
 ### For Phase 3 (Editor)
 
