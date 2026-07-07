@@ -15,6 +15,7 @@
     "archived_label": "archived"
   },
   "mention_picker": {
+    "title": "Mention",
     "placeholder_chat": "Reference an issue",
     "placeholder_comment": "Search people or issues"
   },

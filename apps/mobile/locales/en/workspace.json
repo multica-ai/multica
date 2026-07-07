@@ -1,8 +1,10 @@
 {
   "agents_placeholder": {
+    "header_title": "Agents",
     "message": "Agents coming soon."
   },
   "pins": {
+    "header_title": "Pinned",
     "error": {
       "load_prefix": "Failed to load pins:",
       "unknown": "unknown error",
@@ -21,6 +23,7 @@
     }
   },
   "search": {
+    "header_title": "Search",
     "placeholder": "Search issues and projects",
     "section": {
       "recent": "Recent",

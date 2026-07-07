@@ -24,6 +24,7 @@
     }
   },
   "edit": {
+    "header_title": "编辑项目",
     "loading": "加载中...",
     "icon_field": {
       "label": "图标（表情符号）"
@@ -66,6 +67,7 @@
     }
   },
   "new_project": {
+    "header_title": "新建项目",
     "discard_confirm": {
       "title": "放弃此项目？",
       "message": "你的草稿将会丢失。",
@@ -102,6 +104,7 @@
     }
   },
   "list": {
+    "header_title": "项目",
     "error": {
       "load_prefix": "加载项目失败：",
       "unknown": "未知错误",

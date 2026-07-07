@@ -35,6 +35,7 @@
     }
   },
   "all_issues": {
+    "header_title": "Issues",
     "scope": {
       "all": "All",
       "members": "Members",
@@ -82,6 +83,7 @@
     }
   },
   "edit": {
+    "header_title": "Edit Issue",
     "loading": "Loading...",
     "title_field": {
       "label": "Title",
@@ -112,6 +114,7 @@
       "title": "Add Reaction"
     },
     "assignee": {
+      "title": "Assignee",
       "search_placeholder": "Search people"
     },
     "due_date": {
@@ -161,6 +164,7 @@
     }
   },
   "new_issue": {
+    "header_title": "New Issue",
     "title_placeholder": "Issue title",
     "submit_accessibility_label": "Create issue",
     "create_error": {
@@ -169,6 +173,7 @@
     },
     "picker": {
       "assignee": {
+        "title": "Assignee",
         "search_placeholder": "Search people"
       },
       "due_date": {

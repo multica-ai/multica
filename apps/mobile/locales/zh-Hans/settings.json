@@ -1,4 +1,5 @@
 {
+  "header_title": "设置",
   "account": {
     "title": "账号",
     "user_avatar_alt": "用户头像",
@@ -29,6 +30,7 @@
   },
   "sign_out_message": "退出后需要重新登录才能使用 Multica。",
   "profile": {
+    "header_title": "个人资料",
     "your_avatar_alt": "你的头像",
     "tap_to_change_photo": "点击更换头像",
     "name_label": "姓名",

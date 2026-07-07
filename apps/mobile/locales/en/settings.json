@@ -1,4 +1,5 @@
 {
+  "header_title": "Settings",
   "account": {
     "title": "Account",
     "user_avatar_alt": "User avatar",
@@ -29,6 +30,7 @@
   },
   "sign_out_message": "You'll need to sign in again to use Multica on this device.",
   "profile": {
+    "header_title": "Profile",
     "your_avatar_alt": "Your avatar",
     "tap_to_change_photo": "Tap to change photo",
     "name_label": "Name",

@@ -1,8 +1,10 @@
 {
   "agents_placeholder": {
+    "header_title": "智能体",
     "message": "智能体功能即将上线。"
   },
   "pins": {
+    "header_title": "固定",
     "error": {
       "load_prefix": "加载固定项失败：",
       "unknown": "未知错误",
@@ -21,6 +23,7 @@
     }
   },
   "search": {
+    "header_title": "搜索",
     "placeholder": "搜索 issue 和项目",
     "section": {
       "recent": "最近",

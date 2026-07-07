@@ -2,6 +2,9 @@
   "cancel": "Cancel",
   "save": "Save",
   "sign_out": "Sign out",
+  "nav": {
+    "back": "Back"
+  },
   "tabs": {
     "my_issues": "My Issues",
     "chat": "Chat",

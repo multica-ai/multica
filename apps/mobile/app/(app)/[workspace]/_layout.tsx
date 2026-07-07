@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { ComponentProps } from "react";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { RealtimeProvider } from "@/data/realtime/realtime-provider";
@@ -104,6 +105,16 @@ export default function WorkspaceLayout() {
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
 
+  // Every namespace referenced by a Stack.Screen header below needs its own
+  // useTranslation() call — this layout owns the static (pre-data-load)
+  // title/headerBackTitle for every pushed route in the workspace navigator.
+  const { t: tIssues } = useTranslation("issues");
+  const { t: tProjects } = useTranslation("projects");
+  const { t: tSettings } = useTranslation("settings");
+  const { t: tWorkspace } = useTranslation("workspace");
+  const { t: tChat } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+
   const matched = workspaces?.find((w) => w.slug === slug);
 
   useEffect(() => {
@@ -135,21 +146,21 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]"
           options={{
-            title: "Issue",
-            headerBackTitle: "Back",
+            title: tIssues("detail.header_default_title"),
+            headerBackTitle: tIssues("detail.header_back_title"),
           }}
         />
         <Stack.Screen
           name="project/[id]"
           options={{
-            title: "Project",
-            headerBackTitle: "Back",
+            title: tProjects("detail.header_default_title"),
+            headerBackTitle: tProjects("detail.header_back_title"),
           }}
         />
         <Stack.Screen
           name="project/[id]/edit"
           options={{
-            title: "Edit Project",
+            title: tProjects("edit.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -157,7 +168,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]/edit"
           options={{
-            title: "Edit Issue",
+            title: tIssues("edit.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -165,7 +176,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="project/new"
           options={{
-            title: "New Project",
+            title: tProjects("new_project.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -195,7 +206,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: tIssues("picker.assignee.title"),
           }}
         />
         <Stack.Screen
@@ -207,7 +218,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Mention",
+            title: tChat("mention_picker.title"),
           }}
         />
         <Stack.Screen
@@ -260,7 +271,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: tIssues("new_issue.picker.assignee.title"),
           }}
         />
         <Stack.Screen
@@ -291,36 +302,57 @@ export default function WorkspaceLayout() {
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="more/issues"
-          options={{ title: "Issues", headerBackTitle: "Back" }}
+          options={{
+            title: tIssues("all_issues.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/projects"
-          options={{ title: "Projects", headerBackTitle: "Back" }}
+          options={{
+            title: tProjects("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/agents"
-          options={{ title: "Agents", headerBackTitle: "Back" }}
+          options={{
+            title: tWorkspace("agents_placeholder.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/pins"
-          options={{ title: "Pinned", headerBackTitle: "Back" }}
+          options={{
+            title: tWorkspace("pins.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/settings"
-          options={{ title: "Settings", headerBackTitle: "Back" }}
+          options={{
+            title: tSettings("header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
         />
         <Stack.Screen
           name="more/settings/profile"
-          options={{ title: "Profile", headerBackTitle: "Settings" }}
+          options={{
+            title: tSettings("profile.header_title"),
+            headerBackTitle: tSettings("header_title"),
+          }}
         />
         <Stack.Screen
           name="more/settings/notifications"
-          options={{ title: "Notifications", headerBackTitle: "Settings" }}
+          options={{
+            title: tSettings("account.notifications_row.title"),
+            headerBackTitle: tSettings("header_title"),
+          }}
         />
         <Stack.Screen
           name="new-issue"
           options={{
-            title: "New Issue",
+            title: tIssues("new_issue.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -328,7 +360,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="search"
           options={{
-            title: "Search",
+            title: tWorkspace("search.header_title"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}

@@ -35,6 +35,7 @@
     }
   },
   "all_issues": {
+    "header_title": "Issues",
     "scope": {
       "all": "全部",
       "members": "成员",
@@ -82,6 +83,7 @@
     }
   },
   "edit": {
+    "header_title": "编辑 issue",
     "loading": "加载中...",
     "title_field": {
       "label": "标题",
@@ -112,6 +114,7 @@
       "title": "添加表情回应"
     },
     "assignee": {
+      "title": "负责人",
       "search_placeholder": "搜索成员"
     },
     "due_date": {
@@ -161,6 +164,7 @@
     }
   },
   "new_issue": {
+    "header_title": "新建 issue",
     "title_placeholder": "issue 标题",
     "submit_accessibility_label": "创建 issue",
     "create_error": {
@@ -169,6 +173,7 @@
     },
     "picker": {
       "assignee": {
+        "title": "负责人",
         "search_placeholder": "搜索成员"
       },
       "due_date": {

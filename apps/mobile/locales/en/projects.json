@@ -24,6 +24,7 @@
     }
   },
   "edit": {
+    "header_title": "Edit Project",
     "loading": "Loading…",
     "icon_field": {
       "label": "Icon (emoji)"
@@ -66,6 +67,7 @@
     }
   },
   "new_project": {
+    "header_title": "New Project",
     "discard_confirm": {
       "title": "Discard project?",
       "message": "Your draft will be lost.",
@@ -102,6 +104,7 @@
     }
   },
   "list": {
+    "header_title": "Projects",
     "error": {
       "load_prefix": "Failed to load projects:",
       "unknown": "unknown error",

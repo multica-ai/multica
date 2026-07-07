@@ -15,6 +15,7 @@
     "archived_label": "已归档"
   },
   "mention_picker": {
+    "title": "提及",
     "placeholder_chat": "引用一个 issue",
     "placeholder_comment": "搜索人员或 issue"
   },
