@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ChevronDown,
   ChevronRight,
@@ -496,7 +497,25 @@ export function ToolPolicyTable({
       clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
       return;
     }
-    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+    setPolicy.mutate(
+      { tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope },
+      {
+        // FIR-2706 follow-up: the server ACCEPTS a write a higher layer then
+        // overrides, so the pill snapped back with no message — a silent
+        // failure to the user. Rejected writes already toast via the hook's
+        // onError; this covers the accepted-but-overridden case by naming the
+        // blocking layer out loud the moment the write lands.
+        onSuccess: () => {
+          const row = rows.find(
+            (r) =>
+              r.tool_key === toolKey && (r.resource_pattern || "") === (resourcePattern || ""),
+          );
+          if (!row) return;
+          const warning = futileWriteWarning(row, editLayer, setting);
+          if (warning) toast.warning(warning, { duration: 8000 });
+        },
+      },
+    );
   }
 
   // Write (or clear) the Condition — the WHEN layer (FIR-1609) — on this page's
@@ -536,11 +555,25 @@ export function ToolPolicyTable({
   }
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
+    let skipped = 0;
     for (const row of filtered) {
       // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
       // skip those instead of firing a silent dead write that reverts on refetch.
-      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) continue;
+      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) {
+        skipped += 1;
+        continue;
+      }
       setPolicy.mutate({ tool_key: row.tool_key, layer: editLayer, subject_id: subjectId, setting });
+    }
+    // Skipping silently looked like the bulk action half-failed (FIR-2706
+    // follow-up) — say how many rows a higher layer holds locked.
+    if (skipped > 0) {
+      toast.info(
+        skipped === 1
+          ? "1 permission was left unchanged — a higher layer locks it. The lock icon on the row names the blocker."
+          : `${skipped} permissions were left unchanged — higher layers lock them. The lock icon on each row names the blocker.`,
+        { duration: 8000 },
+      );
     }
   }
 
@@ -1182,6 +1215,25 @@ function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
   return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
 }
 
+// futileWriteWarning — the message to toast when a write the server ACCEPTED
+// is nonetheless overridden by a layer this page cannot loosen (FIR-2706
+// follow-up: an accepted-but-capped write used to revert with no explanation
+// beyond a hover tooltip). Returns null when the write actually takes effect:
+// tightening (deny/disable) always bites, and so does any choice at or above
+// the effective verdict's restrictiveness. Exported for unit tests.
+export function futileWriteWarning(
+  row: ToolPolicyRow,
+  editLayer: ToolLayer,
+  setting: ToolSetting,
+): string | null {
+  if (setting !== "allow" && setting !== "ask") return null;
+  if (!isLockedFromElsewhere(row, editLayer)) return null;
+  const effective = row.effective.setting;
+  if (SETTING_RANK[setting] >= SETTING_RANK[effective]) return null;
+  const { phrase, hint } = blockerText(row);
+  return `"${SETTING_LABEL[setting]}" was saved on the ${LAYER_LABEL[editLayer]} layer, but it has no effect: the decision stays "${SETTING_LABEL[effective]}" because ${phrase} blocks it. ${hint}`.trim();
+}
+
 // rowAttribution is the single source of truth for what the Origin badge says.
 //
 // TECH-3287 hul 2/4/5 reframes two things WITHOUT touching the established
@@ -1285,6 +1337,15 @@ export function DecisionControl({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
+        {/* FIR-2706 follow-up: the lock explanation lived only in a hover
+            tooltip, so a capped row read as silently broken. Show the reason
+            in the menu itself, right where the user is about to choose. */}
+        {locked && lockTooltip ? (
+          <div className="flex max-w-64 items-start gap-1.5 border-b px-2 py-1.5 text-xs text-muted-foreground">
+            <Lock className="mt-0.5 size-3 shrink-0" />
+            <span>{lockTooltip}</span>
+          </div>
+        ) : null}
         {settingChoicesFor(editLayer).map((choice) => (
           <DropdownMenuItem
             key={choice}
@@ -1387,6 +1448,14 @@ export function CatalogDecisionControl({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-0">
         <div className="flex flex-col">
+          {/* FIR-2706 follow-up: same visible lock explanation as
+              DecisionControl — a hover-only tooltip read as a silent failure. */}
+          {locked && lockTooltip ? (
+            <div className="flex items-start gap-1.5 border-b px-3 py-2 text-xs text-muted-foreground">
+              <Lock className="mt-0.5 size-3 shrink-0" />
+              <span>{lockTooltip}</span>
+            </div>
+          ) : null}
           <div className="flex flex-col gap-0.5 p-1.5">
             <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Decision
