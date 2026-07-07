@@ -1,0 +1,2 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_workspace_project_status_pos;
+DROP INDEX CONCURRENTLY IF EXISTS idx_issue_workspace_project_created;
