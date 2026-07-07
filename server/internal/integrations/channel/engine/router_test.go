@@ -176,6 +176,10 @@ type fakeReader struct {
 	session db.ChatSession
 	ws      db.Workspace
 	sessErr error
+	// Capacity inputs for the flush's OutcomeAgentBusy check. The zero
+	// value (maxConcurrent=0) reads as "no capacity limit".
+	maxConcurrent int32
+	running       int64
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {
@@ -184,6 +188,27 @@ func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSe
 func (f *fakeReader) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspace, error) {
 	return f.ws, nil
 }
+func (f *fakeReader) GetAgent(_ context.Context, _ pgtype.UUID) (db.Agent, error) {
+	return db.Agent{MaxConcurrentTasks: f.maxConcurrent}, nil
+}
+func (f *fakeReader) CountRunningTasks(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return f.running, nil
+}
+
+type fakeUnbinder struct {
+	mu      sync.Mutex
+	existed bool
+	err     error
+	count   int
+}
+
+func (f *fakeUnbinder) UnbindSender(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.count++
+	return f.existed, f.err
+}
+func (f *fakeUnbinder) calls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 
 // ---- harness ----
 
@@ -213,32 +238,34 @@ func p2pMessage(t *testing.T) channel.InboundMessage {
 }
 
 type harness struct {
-	router  *Router
-	inst    *fakeInstaller
-	ident   *fakeIdentity
-	dedup   *fakeDedup
-	binder  *fakeBinder
-	audit   *fakeAuditor
-	replier *fakeReplier
-	typing  *fakeTyping
-	issues  *fakeIssues
-	tasks   *fakeTasks
-	reader  *fakeReader
+	router   *Router
+	inst     *fakeInstaller
+	ident    *fakeIdentity
+	dedup    *fakeDedup
+	binder   *fakeBinder
+	audit    *fakeAuditor
+	replier  *fakeReplier
+	typing   *fakeTyping
+	unbinder *fakeUnbinder
+	issues   *fakeIssues
+	tasks    *fakeTasks
+	reader   *fakeReader
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		inst:    &fakeInstaller{inst: activeResolved(t)},
-		ident:   &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
-		dedup:   &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
-		binder:  &fakeBinder{ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"), appendResult: AppendResult{DedupMarked: true}},
-		audit:   &fakeAuditor{},
-		replier: &fakeReplier{},
-		typing:  &fakeTyping{},
-		issues:  &fakeIssues{},
-		tasks:   &fakeTasks{},
-		reader:  &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
+		inst:     &fakeInstaller{inst: activeResolved(t)},
+		ident:    &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
+		dedup:    &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
+		binder:   &fakeBinder{ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"), appendResult: AppendResult{DedupMarked: true}},
+		audit:    &fakeAuditor{},
+		replier:  &fakeReplier{},
+		typing:   &fakeTyping{},
+		unbinder: &fakeUnbinder{existed: true},
+		issues:   &fakeIssues{},
+		tasks:    &fakeTasks{},
+		reader:   &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
 	}
 	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger()})
 	h.router.Register(channel.TypeFeishu, ResolverSet{
@@ -249,6 +276,7 @@ func newHarness(t *testing.T) *harness {
 		Audit:        h.audit,
 		Replier:      h.replier,
 		Typing:       h.typing,
+		Unbind:       h.unbinder,
 		OriginType:   "lark_chat",
 	})
 	return h
@@ -540,5 +568,62 @@ func TestRouter_EmptyMessageID_SkipsDedup(t *testing.T) {
 	}
 	if !h.tasks.wasCalled() {
 		t.Fatalf("message must still ingest without a dedup key")
+	}
+}
+
+// TestRouter_BareFreshCommand_ConsumedWithoutRun covers the bare /new (or
+// /reset) directive: no chat_message lands, no run is enqueued (an empty
+// prompt would burn a run on nothing), the user gets the confirmation
+// outcome, and the NEXT message's run starts a fresh agent session.
+func TestRouter_BareFreshCommand_ConsumedWithoutRun(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Text = ""
+	msg.ForceFresh = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	h.router.Drain()
+
+	if h.binder.lastAppend.SessionID.Valid {
+		t.Error("bare /new must not append a chat message")
+	}
+	if h.tasks.wasCalled() {
+		t.Error("bare /new must not enqueue a run")
+	}
+	if h.dedup.marks() != 1 {
+		t.Errorf("dedup marks = %d, want 1 (command consumed)", h.dedup.marks())
+	}
+	results := h.replier.calls()
+	if len(results) != 1 || results[0].Outcome != OutcomeFreshSession {
+		t.Fatalf("replier results = %+v, want one OutcomeFreshSession", results)
+	}
+
+	// The next plain message runs fresh exactly once.
+	next := p2pMessage(t)
+	next.EventID, next.MessageID = "evt-2", "om-2"
+	next.Text = "hello again"
+	if err := h.router.Handle(context.Background(), next); err != nil {
+		t.Fatalf("Handle next: %v", err)
+	}
+	h.router.Drain()
+	if !h.tasks.wasCalled() {
+		t.Fatal("next message must enqueue a run")
+	}
+	if !h.tasks.freshArg() {
+		t.Error("next run must carry force_fresh from the consumed /new")
+	}
+
+	// And the mark is consumed: a third message runs without fresh.
+	third := p2pMessage(t)
+	third.EventID, third.MessageID = "evt-3", "om-3"
+	third.Text = "third"
+	if err := h.router.Handle(context.Background(), third); err != nil {
+		t.Fatalf("Handle third: %v", err)
+	}
+	h.router.Drain()
+	if h.tasks.freshArg() {
+		t.Error("pending fresh must be consumed by the previous run")
 	}
 }

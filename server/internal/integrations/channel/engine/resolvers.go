@@ -27,6 +27,23 @@ const (
 	OutcomeIngested      Outcome = "ingested"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeUnbound: the sender issued /unbind and their identity binding
+	// for this installation was removed (or did not exist — see
+	// Result.UnbindExisted). The message is consumed by the command; no
+	// session write, no run trigger.
+	OutcomeUnbound Outcome = "unbound"
+	// OutcomeAgentBusy: the run was enqueued but the agent is already at
+	// max_concurrent_tasks, so the reply will not start immediately. Emitted
+	// from the debounced flush (rate-limited per session) so the user knows
+	// their message is queued rather than lost.
+	OutcomeAgentBusy Outcome = "agent_busy"
+	// OutcomeFreshSession: the sender issued a bare fresh-session directive
+	// (/new or /reset with no prompt). The directive is consumed: the session
+	// is marked so the NEXT message starts a fresh agent session; no
+	// chat_message lands and no run triggers (an empty prompt would burn a
+	// run on nothing, and some providers reject empty input outright). The
+	// replier confirms so the user knows the reset took effect.
+	OutcomeFreshSession Outcome = "fresh_session"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -57,6 +74,10 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// UnbindExisted qualifies OutcomeUnbound: true when a binding row was
+	// actually removed, false when the sender was not bound to begin with
+	// (the replier words the confirmation accordingly).
+	UnbindExisted bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -169,6 +190,15 @@ type Auditor interface {
 	RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason DropReason) error
 }
 
+// SenderUnbinder removes the sender's identity binding for the
+// installation — the /unbind chat command. The adapter keys the delete by
+// its own platform sender id, so a sender can only ever detach the
+// identity they are speaking from. existed=false means no binding row was
+// there (the replier words the confirmation accordingly).
+type SenderUnbinder interface {
+	UnbindSender(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (existed bool, err error)
+}
+
 // OutboundReplier delivers the verdict-driven reply (binding prompt, offline /
 // archived notice, /issue confirmation). Optional; nil disables outbound
 // replies. Driven off the ACK critical path by the Router.
@@ -192,8 +222,9 @@ type TypingNotifier interface {
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
-// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing are
-// optional. OriginType is the issue.origin_type label written for /issue
+// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing/
+// Unbind are optional (a nil Unbind disables the /unbind command for the
+// platform). OriginType is the issue.origin_type label written for /issue
 // commands from this channel (Feishu: "lark_chat").
 type ResolverSet struct {
 	Installation InstallationResolver
@@ -203,6 +234,7 @@ type ResolverSet struct {
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier
+	Unbind       SenderUnbinder
 	OriginType   string
 }
 
@@ -220,7 +252,11 @@ type TaskEnqueuer interface {
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.
 // Shared across platforms; backed by *db.Queries (the channel-backed store).
+// GetAgent/CountRunningTasks feed the flush's at-capacity check for the
+// OutcomeAgentBusy notice.
 type SessionReader interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
+	CountRunningTasks(ctx context.Context, agentID pgtype.UUID) (int64, error)
 }

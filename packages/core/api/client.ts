@@ -120,6 +120,10 @@ import type {
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
+  ListDingTalkInstallationsResponse,
+  BeginDingTalkInstallResponse,
+  DingTalkInstallStatusResponse,
+  RedeemDingTalkBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2363,6 +2367,38 @@ export class ApiClient {
 
   async redeemSlackBindingToken(token: string): Promise<RedeemSlackBindingTokenResponse> {
     return this.fetch(`/api/slack/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  // DingTalk bot integration (scan-to-create device flow)
+  async listDingTalkInstallations(workspaceId: string): Promise<ListDingTalkInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/dingtalk/installations`);
+  }
+
+  async beginDingTalkInstall(workspaceId: string, agentId: string): Promise<BeginDingTalkInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    return this.fetch(`/api/workspaces/${workspaceId}/dingtalk/install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async getDingTalkInstallStatus(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<DingTalkInstallStatusResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/dingtalk/install/${sessionId}/status`);
+  }
+
+  async deleteDingTalkInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/dingtalk/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemDingTalkBindingToken(token: string): Promise<RedeemDingTalkBindingTokenResponse> {
+    return this.fetch(`/api/dingtalk/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });

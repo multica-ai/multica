@@ -134,6 +134,13 @@ export type {
   RedeemSlackBindingTokenResponse,
 } from "./slack";
 export type {
+  DingTalkInstallation,
+  ListDingTalkInstallationsResponse,
+  BeginDingTalkInstallResponse,
+  DingTalkInstallStatusResponse,
+  RedeemDingTalkBindingTokenResponse,
+} from "./dingtalk";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

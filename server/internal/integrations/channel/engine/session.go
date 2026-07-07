@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -149,6 +150,12 @@ type EnsureSessionInput struct {
 	BindingKey     string
 	BindingConfig  []byte
 	ChatType       channel.ChatType
+	// Title, when non-empty, overrides the platform's static SessionTitles
+	// for this session — e.g. the DingTalk adapter passes the group's
+	// conversation title so the session says WHICH group it is, not just
+	// "group chat". The static titles remain the fallback for chats with
+	// no usable platform name (DMs, missing title).
+	Title string
 }
 
 // EnsureSession returns the chat_session.id bound to (installation, BindingKey),
@@ -189,11 +196,15 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
 
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		title = s.titles.forType(in.ChatType)
+	}
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
-		Title:       s.titles.forType(in.ChatType),
+		Title:       title,
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)

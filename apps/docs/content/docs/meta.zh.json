@@ -33,6 +33,7 @@
     "channels",
     "github-integration",
     "lark-bot-integration",
+    "dingtalk-bot-integration",
     "slack-bot-integration",
     "---自部署运维---",
     "environment-variables",

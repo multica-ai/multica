@@ -3,7 +3,8 @@ package lark
 import "strings"
 
 const (
-	newCommandPrefix = "/new"
+	newCommandPrefix   = "/new"
+	resetCommandPrefix = "/reset" // alias for /new
 )
 
 // FreshSessionCommand is the normalized fresh-start directive extracted from a
@@ -60,6 +61,8 @@ func matchedFreshPrefix(line string) (string, bool) {
 	switch {
 	case strings.HasPrefix(line, newCommandPrefix):
 		return newCommandPrefix, true
+	case strings.HasPrefix(line, resetCommandPrefix):
+		return resetCommandPrefix, true
 	default:
 		return "", false
 	}

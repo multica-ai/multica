@@ -207,6 +207,10 @@ type Supervisor struct {
 	// keeps renewals from ping-ponging between replicas.
 	nodeID string
 
+	// kick requests an out-of-band sweep (see Kick). Buffered(1) so a
+	// burst of requests coalesces into one sweep instead of queueing.
+	kick chan struct{}
+
 	mu sync.Mutex
 	// supervisors keys each in-flight supervisor goroutine by
 	// installation_id, alongside the credentials fingerprint the channel
@@ -250,8 +254,23 @@ func NewSupervisor(store InstallationStore, registry *channel.Registry, handler 
 		handler:     handler,
 		cfg:         cfg,
 		nodeID:      newNodeID(),
+		kick:        make(chan struct{}, 1),
 		supervisors: make(map[string]supervisorEntry),
 		stopChan:    make(chan struct{}),
+	}
+}
+
+// Kick requests an immediate sweep instead of waiting for the next
+// PollInterval tick. Callers use it at installation-lifecycle commit
+// points (install, revoke, re-bind): a freshly installed bot otherwise
+// has no connection for up to PollInterval, and platform pushes in that
+// window are silently dropped (Stream/WS transports do not queue for
+// absent subscribers). Non-blocking and safe from any goroutine; a kick
+// while a sweep request is already pending coalesces with it.
+func (s *Supervisor) Kick() {
+	select {
+	case s.kick <- struct{}{}:
+	default:
 	}
 }
 
@@ -279,6 +298,8 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.cancelAll()
 			return
 		case <-t.C:
+			s.sweep(ctx)
+		case <-s.kick:
 			s.sweep(ctx)
 		}
 	}

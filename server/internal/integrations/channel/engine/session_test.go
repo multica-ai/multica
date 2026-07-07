@@ -42,6 +42,7 @@ type fakeSessionQueries struct {
 	touched         int
 	replyTargets    int
 	lastConfig      []byte // config of the most recent CreateChannelChatSessionBinding
+	lastTitle       string // title of the most recent CreateChatSession
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
 	markRows         int64   // MarkChannelInboundDedupProcessed result
@@ -64,9 +65,10 @@ func (f *fakeSessionQueries) GetChannelChatSessionBinding(_ context.Context, arg
 	return db.ChannelChatSessionBinding{}, pgx.ErrNoRows
 }
 
-func (f *fakeSessionQueries) CreateChatSession(_ context.Context, _ db.CreateChatSessionParams) (db.ChatSession, error) {
+func (f *fakeSessionQueries) CreateChatSession(_ context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error) {
 	f.nextSession++
 	f.createdSessions++
+	f.lastTitle = arg.Title
 	return db.ChatSession{ID: uid(f.nextSession)}, nil
 }
 
@@ -133,6 +135,37 @@ func TestEnsureSession_CreateThenReuse(t *testing.T) {
 	}
 	if id1 != id2 {
 		t.Errorf("ids differ: %v vs %v", id1, id2)
+	}
+}
+
+func TestEnsureSession_TitleOverride(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+
+	// A platform-supplied title (e.g. the DingTalk group name) wins.
+	_, err := s.EnsureSession(context.Background(), EnsureSessionInput{
+		InstallationID: uid(1), BindingKey: "chatA",
+		ChatType: channel.ChatTypeGroup, Sender: uid(7),
+		Title: " 项目群 ",
+	})
+	if err != nil {
+		t.Fatalf("EnsureSession: %v", err)
+	}
+	if f.lastTitle != "项目群" {
+		t.Errorf("title = %q, want the trimmed override", f.lastTitle)
+	}
+
+	// Empty/blank override falls back to the static per-type title.
+	_, err = s.EnsureSession(context.Background(), EnsureSessionInput{
+		InstallationID: uid(1), BindingKey: "chatB",
+		ChatType: channel.ChatTypeGroup, Sender: uid(7),
+		Title: "   ",
+	})
+	if err != nil {
+		t.Fatalf("EnsureSession fallback: %v", err)
+	}
+	if f.lastTitle != "G" {
+		t.Errorf("fallback title = %q, want the static group title", f.lastTitle)
 	}
 }
 

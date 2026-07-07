@@ -47,6 +47,7 @@ import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { AccessPicker } from "./inspector/access-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
+import { DingTalkAgentBindButton } from "../../settings/components/dingtalk-tab";
 import { SlackAgentBindButton } from "../../settings/components/slack-tab";
 
 interface InspectorProps {
@@ -248,6 +249,11 @@ export function AgentDetailInspector({
               onShowConnectedDetails={onShowIntegrations}
             />
             <SlackAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              onShowConnectedDetails={onShowIntegrations}
+            />
+            <DingTalkAgentBindButton
               agentId={agent.id}
               agentName={agent.name}
               onShowConnectedDetails={onShowIntegrations}

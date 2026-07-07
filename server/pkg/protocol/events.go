@@ -142,4 +142,12 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// DingTalk installation lifecycle. Same semantics as the Lark/Slack
+	// events: `created` covers both first install (via the scan-to-create
+	// device flow) and re-install, `revoked` flips status without deleting
+	// the row. Front-ends invalidate the DingTalk installations query on
+	// either.
+	EventDingTalkInstallationCreated = "dingtalk_installation:created"
+	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
 )

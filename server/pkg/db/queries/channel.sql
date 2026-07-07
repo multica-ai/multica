@@ -258,6 +258,15 @@ LIMIT 1;
 DELETE FROM channel_user_binding
 WHERE workspace_id = $1 AND multica_user_id = $2;
 
+-- name: DeleteChannelUserBinding :execrows
+-- The explicit self-unbind (/unbind chat command): drop the sender's own
+-- binding on one installation. Keyed the same way as the inbound identity
+-- lookup, so the sender can only ever detach the platform identity they
+-- are speaking from — no cross-user reach. Returns the row count so the
+-- caller can tell "unbound" from "was never bound".
+DELETE FROM channel_user_binding
+WHERE installation_id = $1 AND channel_user_id = $2;
+
 -- =====================
 -- channel_chat_session_binding
 -- =====================
