@@ -126,6 +126,40 @@
       "search_placeholder": "Search projects"
     }
   },
+  "picker_body": {
+    "assignee": {
+      "unassigned": "Unassigned",
+      "agent_tag": "Agent",
+      "squad_tag": "Squad",
+      "no_matches": "No matches."
+    },
+    "label": {
+      "create": "Create “{{name}}”",
+      "no_matches": "No matches.",
+      "empty": "No labels in this workspace yet."
+    },
+    "mention": {
+      "section_people": "People",
+      "section_agents": "Agents",
+      "section_squads": "Squads",
+      "section_issues": "Issues",
+      "everyone": "Everyone (@all)",
+      "agent_tag": "Agent",
+      "squad_tag": "Squad",
+      "no_matches": "No matches."
+    },
+    "priority": {
+      "title": "Priority"
+    },
+    "project": {
+      "no_project": "No project",
+      "no_matches": "No matches.",
+      "empty": "No projects in this workspace yet.\nCreate them on web."
+    },
+    "status": {
+      "title": "Status"
+    }
+  },
   "new_issue": {
     "title_placeholder": "Issue title",
     "submit_accessibility_label": "Create issue",

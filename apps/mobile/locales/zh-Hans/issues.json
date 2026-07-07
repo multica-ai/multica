@@ -126,6 +126,40 @@
       "search_placeholder": "搜索项目"
     }
   },
+  "picker_body": {
+    "assignee": {
+      "unassigned": "未分配",
+      "agent_tag": "智能体",
+      "squad_tag": "小队",
+      "no_matches": "没有匹配结果。"
+    },
+    "label": {
+      "create": "创建“{{name}}”",
+      "no_matches": "没有匹配结果。",
+      "empty": "此工作区还没有标签。"
+    },
+    "mention": {
+      "section_people": "成员",
+      "section_agents": "智能体",
+      "section_squads": "小队",
+      "section_issues": "Issue",
+      "everyone": "所有人（@all）",
+      "agent_tag": "智能体",
+      "squad_tag": "小队",
+      "no_matches": "没有匹配结果。"
+    },
+    "priority": {
+      "title": "优先级"
+    },
+    "project": {
+      "no_project": "无项目",
+      "no_matches": "没有匹配结果。",
+      "empty": "此工作区还没有项目。\n请在网页端创建。"
+    },
+    "status": {
+      "title": "状态"
+    }
+  },
   "new_issue": {
     "title_placeholder": "issue 标题",
     "submit_accessibility_label": "创建 issue",

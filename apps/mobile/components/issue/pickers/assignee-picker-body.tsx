@@ -17,6 +17,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type {
   Agent,
   IssueAssigneeType,
@@ -62,6 +63,7 @@ function isRowSelected(value: AssigneeValue, row: Row): boolean {
 }
 
 export function AssigneePickerBody({ value, query, onChange }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -164,7 +166,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
           )}
           <Text className="flex-1 text-base text-foreground">
             {item.kind === "unassigned"
-              ? "Unassigned"
+              ? t("picker_body.assignee.unassigned")
               : item.kind === "member"
                 ? item.member.name
                 : item.kind === "agent"
@@ -176,9 +178,13 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
               pattern used throughout iOS Settings — type tag in lighter font on
               the same row. Members carry no tag (they're the default actor). */}
           {item.kind === "agent" ? (
-            <Text className="text-sm text-muted-foreground">Agent</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("picker_body.assignee.agent_tag")}
+            </Text>
           ) : item.kind === "squad" ? (
-            <Text className="text-sm text-muted-foreground">Squad</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("picker_body.assignee.squad_tag")}
+            </Text>
           ) : null}
           {isSelected(item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -187,7 +193,9 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
       )}
       ListEmptyComponent={
         <View className="px-3 py-8 items-center">
-          <Text className="text-sm text-muted-foreground">No matches.</Text>
+          <Text className="text-sm text-muted-foreground">
+            {t("picker_body.assignee.no_matches")}
+          </Text>
         </View>
       }
     />

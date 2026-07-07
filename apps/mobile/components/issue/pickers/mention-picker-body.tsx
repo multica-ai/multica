@@ -24,6 +24,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type {
   Agent,
   Issue,
@@ -67,6 +68,7 @@ interface Props {
 }
 
 export function MentionPickerBody({ query, mode = "comment" }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -137,32 +139,41 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((m): Row => ({ kind: "member", member: m }));
       if (memberRows.length > 0) {
-        out.push({ kind: "section", label: "People" }, ...memberRows);
+        out.push(
+          { kind: "section", label: t("picker_body.mention.section_people") },
+          ...memberRows,
+        );
       }
       const agentRows = [...agents]
         .filter((a) => matchName(a.name))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((a): Row => ({ kind: "agent", agent: a }));
       if (agentRows.length > 0) {
-        out.push({ kind: "section", label: "Agents" }, ...agentRows);
+        out.push(
+          { kind: "section", label: t("picker_body.mention.section_agents") },
+          ...agentRows,
+        );
       }
       const squadRows = [...squads]
         .filter((s) => !s.archived_at && matchName(s.name))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((s): Row => ({ kind: "squad", squad: s }));
       if (squadRows.length > 0) {
-        out.push({ kind: "section", label: "Squads" }, ...squadRows);
+        out.push(
+          { kind: "section", label: t("picker_body.mention.section_squads") },
+          ...squadRows,
+        );
       }
     }
 
     if (issueResults.length > 0) {
-      out.push({ kind: "section", label: "Issues" });
+      out.push({ kind: "section", label: t("picker_body.mention.section_issues") });
       for (const i of issueResults) {
         out.push({ kind: "issue", issue: i });
       }
     }
     return out;
-  }, [mode, members, agents, squads, issueResults, query]);
+  }, [mode, members, agents, squads, issueResults, query, t]);
 
   const pick = (row: Row) => {
     let chip: MentionChipDraft | null = null;
@@ -260,7 +271,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             ) : (
               <Text className="flex-1 text-base text-foreground">
                 {item.kind === "all"
-                  ? "Everyone (@all)"
+                  ? t("picker_body.mention.everyone")
                   : item.kind === "member"
                     ? item.member.name
                     : item.kind === "agent"
@@ -269,9 +280,13 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
               </Text>
             )}
             {item.kind === "agent" ? (
-              <Text className="text-sm text-muted-foreground">Agent</Text>
+              <Text className="text-sm text-muted-foreground">
+                {t("picker_body.mention.agent_tag")}
+              </Text>
             ) : item.kind === "squad" ? (
-              <Text className="text-sm text-muted-foreground">Squad</Text>
+              <Text className="text-sm text-muted-foreground">
+                {t("picker_body.mention.squad_tag")}
+              </Text>
             ) : null}
             {isSelected(item) ? (
               <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -281,7 +296,9 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }}
       ListEmptyComponent={
         <View className="px-3 py-8 items-center">
-          <Text className="text-sm text-muted-foreground">No matches.</Text>
+          <Text className="text-sm text-muted-foreground">
+            {t("picker_body.mention.no_matches")}
+          </Text>
         </View>
       }
     />

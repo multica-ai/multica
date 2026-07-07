@@ -18,6 +18,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { useTranslation } from "react-i18next";
 import type { Label } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { labelListOptions } from "@/data/queries/labels";
@@ -46,6 +47,7 @@ export function LabelPickerBody({
   onDetach,
   onCreate,
 }: Props) {
+  const { t } = useTranslation("issues");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: labels = [] } = useQuery(labelListOptions(wsId));
   const listRef = useScrollToTopOnChange(query);
@@ -118,7 +120,7 @@ export function LabelPickerBody({
               style={{ backgroundColor: pickInlineColor(item.name) }}
             />
             <Text className="flex-1 text-base text-foreground">
-              Create &ldquo;{item.name}&rdquo;
+              {t("picker_body.label.create", { name: item.name })}
             </Text>
             <Ionicons name="add" size={20} color={checkColor} />
           </Pressable>
@@ -147,8 +149,8 @@ export function LabelPickerBody({
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No labels in this workspace yet."}
+              ? t("picker_body.label.no_matches")
+              : t("picker_body.label.empty")}
           </Text>
         </View>
       }
