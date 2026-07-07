@@ -400,50 +400,6 @@ func (q *Queries) DeleteChannelChatSessionBindingsByInstallation(ctx context.Con
 	return err
 }
 
-const deleteChannelInstallationByAppID = `-- name: DeleteChannelInstallationByAppID :exec
-DELETE FROM channel_installation
-WHERE channel_type = $1
-  AND config ->> 'app_id' = $2::text
-  AND workspace_id = $3
-  AND agent_id <> $4
-  AND status = 'revoked'
-`
-
-type DeleteChannelInstallationByAppIDParams struct {
-	ChannelType string      `json:"channel_type"`
-	AppID       string      `json:"app_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
-}
-
-// Hard-delete a REVOKED installation that belongs to a DIFFERENT agent,
-// keyed by its platform app identity. When a Feishu/Lark Bot is disconnected
-// from agent A (status → 'revoked') and the same Bot (same app_id) is later
-// bound to a DIFFERENT agent B, agent A's revoked row still occupies the
-// (channel_type, config->>'app_id') unique slot and blocks the
-// UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
-// the upsert create a fresh row for the new agent.
-//
-// The `agent_id <> arg` fence is load-bearing: re-connecting the SAME agent
-// must NOT delete its own revoked row. UpsertChannelInstallation conflicts on
-// (workspace_id, agent_id, channel_type), so the same agent's revoked row is
-// reactivated in place (status → 'active') with its installation_id — and every
-// channel_user_binding / channel_chat_session_binding hanging off it —
-// preserved. Deleting it here would force an INSERT with a fresh installation_id
-// and orphan all of that agent's member links and chat sessions.
-//
-// Fenced to one workspace AND status='revoked' so an active installation can
-// never be silently deleted through this path.
-func (q *Queries) DeleteChannelInstallationByAppID(ctx context.Context, arg DeleteChannelInstallationByAppIDParams) error {
-	_, err := q.db.Exec(ctx, deleteChannelInstallationByAppID,
-		arg.ChannelType,
-		arg.AppID,
-		arg.WorkspaceID,
-		arg.AgentID,
-	)
-	return err
-}
-
 const deleteChannelUserBindingsByInstallation = `-- name: DeleteChannelUserBindingsByInstallation :exec
 DELETE FROM channel_user_binding
 WHERE installation_id = $1
@@ -478,6 +434,61 @@ type DeleteChannelUserBindingsByWorkspaceMemberParams struct {
 func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context, arg DeleteChannelUserBindingsByWorkspaceMemberParams) error {
 	_, err := q.db.Exec(ctx, deleteChannelUserBindingsByWorkspaceMember, arg.WorkspaceID, arg.MulticaUserID)
 	return err
+}
+
+const deleteRevokedChannelInstallationByAppID = `-- name: DeleteRevokedChannelInstallationByAppID :one
+DELETE FROM channel_installation
+WHERE channel_type = $1
+  AND config ->> 'app_id' = $2::text
+  AND workspace_id = $3
+  AND agent_id <> $4
+  AND status = 'revoked'
+RETURNING id
+`
+
+type DeleteRevokedChannelInstallationByAppIDParams struct {
+	ChannelType string      `json:"channel_type"`
+	AppID       string      `json:"app_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+// Hard-delete a REVOKED installation that belongs to a DIFFERENT agent, keyed
+// by its platform app identity, and RETURN the deleted id. When a Feishu/Lark
+// Bot is disconnected from agent A (status → 'revoked') and the same Bot (same
+// app_id) is later bound to a DIFFERENT agent B, agent A's revoked row still
+// occupies the (channel_type, config->>'app_id') unique slot and blocks the
+// UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
+// the upsert create a fresh row for the new agent.
+//
+// The `agent_id <> arg` fence is load-bearing: re-connecting the SAME agent
+// must NOT delete its own revoked row. UpsertChannelInstallation conflicts on
+// (workspace_id, agent_id, channel_type), so the same agent's revoked row is
+// reactivated in place (status → 'active') with its installation_id — and every
+// channel_user_binding / channel_chat_session_binding hanging off it —
+// preserved. Deleting it here would force an INSERT with a fresh installation_id
+// and orphan all of that agent's member links and chat sessions.
+//
+// Fenced to one workspace AND status='revoked' so an active installation can
+// never be silently deleted through this path.
+//
+// This DELETE is the atomic gate for the whole rebind cleanup: the caller keys
+// its dependent-row cleanup off the RETURNING id, so cleanup runs ONLY for a row
+// this statement actually removed. Under READ COMMITTED, a concurrent same-agent
+// reconnect that reactivates the row to 'active' first makes the WHERE re-check
+// fail (EvalPlanQual), this deletes nothing (pgx.ErrNoRows), and no dependents
+// are touched — closing the read-then-delete TOCTOU where a stale "it was
+// revoked" read could wipe the bindings of a since-reactivated installation.
+func (q *Queries) DeleteRevokedChannelInstallationByAppID(ctx context.Context, arg DeleteRevokedChannelInstallationByAppIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteRevokedChannelInstallationByAppID,
+		arg.ChannelType,
+		arg.AppID,
+		arg.WorkspaceID,
+		arg.AgentID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -34,9 +35,9 @@ const (
 )
 
 // TestChannelStore_RemoveRevokedInstallationByAppID guards the WHERE clause of
-// DeleteChannelInstallationByAppID: it must delete ONLY a revoked row that
-// belongs to a DIFFERENT agent in the SAME workspace. The same agent's own
-// revoked row, any active row, and rows in another workspace must survive.
+// the DeleteRevokedChannelInstallationByAppID gate: it must claim ONLY a revoked
+// row that belongs to a DIFFERENT agent in the SAME workspace. The same agent's
+// own revoked row, any active row, and rows in another workspace must survive.
 func TestChannelStore_RemoveRevokedInstallationByAppID(t *testing.T) {
 	pool := channelScopeTestDB(t)
 	ctx := context.Background()
@@ -324,5 +325,130 @@ VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'revoked_installation')`, old
 	}
 	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id IS NULL`, auditEvent); n != 1 {
 		t.Fatalf("audit row should survive detached (installation_id NULL), got %d", n)
+	}
+}
+
+// TestChannelStore_RebindGuardedDeleteRaceWithReactivation exercises the real
+// concurrency the guarded delete protects against. Two transactions race on one
+// revoked installation:
+//
+//   - txReconnect (agent A reconnecting to the SAME agent) reactivates the row
+//     to 'active' but holds the row lock uncommitted;
+//   - txRebind (agent B rebinding to a DIFFERENT agent) runs the full cleanup
+//     via RemoveRevokedInstallationByAppID.
+//
+// The old read-then-clean-then-delete shape would read the still-committed
+// 'revoked' row, wipe its dependents, then no-op on the fenced delete — losing
+// A's bindings even though A's installation survives. The guarded delete instead
+// blocks on A's row lock; once A commits the reactivation it re-checks
+// status='revoked' (EvalPlanQual under READ COMMITTED), claims nothing, and the
+// cleanup keyed off the RETURNING id never runs. The installation and every
+// binding must be intact. The assertion is timing-independent — it holds for the
+// fixed code in every interleaving — so the test can never fail spuriously.
+func TestChannelStore_RebindGuardedDeleteRaceWithReactivation(t *testing.T) {
+	pool := channelScopeTestDB(t)
+	ctx := context.Background()
+	store := NewChannelStore(db.New(pool))
+
+	const (
+		app        = "cli_rb_race"
+		tokenHash  = "rb_token_hash_race"
+		auditEvent = "ev_rb_race"
+	)
+	clean := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, app)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, rbUser)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rbChatSess)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	// A revoked installation for agent A, with the full spread of dependents.
+	var idStr string
+	if err := pool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'revoked')
+RETURNING id
+`, rbWS, rbAgentA, app, rbInstaller).Scan(&idStr); err != nil {
+		t.Fatalf("insert revoked installation: %v", err)
+	}
+	seed := func(q string, args ...any) {
+		if _, err := pool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("seed dependent row: %v", err)
+		}
+	}
+	seed(`INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
+VALUES ($1, $2, $3, 'feishu', 'ou_rb_user')`, rbWS, rbUser, idStr)
+	seed(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', 'oc_rb_chat', 'p2p')`, rbChatSess, idStr)
+	seed(`INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
+VALUES ($1, $2, $3, 'feishu', 'ou_rb_user', now() + interval '10 minutes')`, tokenHash, rbWS, idStr)
+	seed(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
+VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'revoked_installation')`, idStr, auditEvent)
+
+	// txReconnect: agent A reactivates the row and holds the lock uncommitted.
+	txReconnect, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin txReconnect: %v", err)
+	}
+	defer txReconnect.Rollback(ctx)
+	if _, err := txReconnect.Exec(ctx, `UPDATE channel_installation SET status = 'active' WHERE id = $1`, idStr); err != nil {
+		t.Fatalf("reactivate in txReconnect: %v", err)
+	}
+
+	// txRebind: agent B's cleanup runs on its own transaction. Its guarded delete
+	// blocks on txReconnect's row lock.
+	done := make(chan error, 1)
+	go func() {
+		txRebind, err := pool.Begin(ctx)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer txRebind.Rollback(ctx)
+		if err := store.WithTx(txRebind).RemoveRevokedInstallationByAppID(ctx, util.MustParseUUID(rbWS), util.MustParseUUID(rbAgentB), app); err != nil {
+			done <- err
+			return
+		}
+		done <- txRebind.Commit(ctx)
+	}()
+
+	// Let txRebind reach and block on the guarded delete, then let A win the race.
+	time.Sleep(300 * time.Millisecond)
+	if err := txReconnect.Commit(ctx); err != nil {
+		t.Fatalf("commit txReconnect: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("txRebind: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("txRebind did not complete — possible deadlock in the guarded delete")
+	}
+
+	count := func(q string, args ...any) int {
+		var n int
+		if err := pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1 AND status = 'active'`, idStr); n != 1 {
+		t.Fatalf("reactivated installation was deleted by the racing rebind: %d active rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, idStr); n != 1 {
+		t.Fatalf("member link wiped by the racing rebind: got %d, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, idStr); n != 1 {
+		t.Fatalf("chat-session binding wiped by the racing rebind: got %d, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, idStr); n != 1 {
+		t.Fatalf("binding token wiped by the racing rebind: got %d, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE installation_id = $1`, idStr); n != 1 {
+		t.Fatalf("audit reference detached by the racing rebind: got %d, want 1", n)
 	}
 }

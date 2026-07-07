@@ -98,12 +98,12 @@ SELECT * FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
--- name: DeleteChannelInstallationByAppID :exec
--- Hard-delete a REVOKED installation that belongs to a DIFFERENT agent,
--- keyed by its platform app identity. When a Feishu/Lark Bot is disconnected
--- from agent A (status → 'revoked') and the same Bot (same app_id) is later
--- bound to a DIFFERENT agent B, agent A's revoked row still occupies the
--- (channel_type, config->>'app_id') unique slot and blocks the
+-- name: DeleteRevokedChannelInstallationByAppID :one
+-- Hard-delete a REVOKED installation that belongs to a DIFFERENT agent, keyed
+-- by its platform app identity, and RETURN the deleted id. When a Feishu/Lark
+-- Bot is disconnected from agent A (status → 'revoked') and the same Bot (same
+-- app_id) is later bound to a DIFFERENT agent B, agent A's revoked row still
+-- occupies the (channel_type, config->>'app_id') unique slot and blocks the
 -- UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
 -- the upsert create a fresh row for the new agent.
 --
@@ -117,12 +117,21 @@ WHERE channel_type = sqlc.arg('channel_type')
 --
 -- Fenced to one workspace AND status='revoked' so an active installation can
 -- never be silently deleted through this path.
+--
+-- This DELETE is the atomic gate for the whole rebind cleanup: the caller keys
+-- its dependent-row cleanup off the RETURNING id, so cleanup runs ONLY for a row
+-- this statement actually removed. Under READ COMMITTED, a concurrent same-agent
+-- reconnect that reactivates the row to 'active' first makes the WHERE re-check
+-- fail (EvalPlanQual), this deletes nothing (pgx.ErrNoRows), and no dependents
+-- are touched — closing the read-then-delete TOCTOU where a stale "it was
+-- revoked" read could wipe the bindings of a since-reactivated installation.
 DELETE FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text
   AND workspace_id = sqlc.arg('workspace_id')
   AND agent_id <> sqlc.arg('agent_id')
-  AND status = 'revoked';
+  AND status = 'revoked'
+RETURNING id;
 
 -- name: ListChannelInstallationsByWorkspace :many
 -- Scoped by channel_type so a per-channel management surface (e.g. the Lark
