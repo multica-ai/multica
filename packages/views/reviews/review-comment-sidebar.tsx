@@ -54,7 +54,6 @@ export function ReviewCommentSidebar({
   const [draftContent, setDraftContent] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "unresolved" | "resolved">("all");
-  const [duration, setDuration] = useState(3);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
 
@@ -67,7 +66,7 @@ export function ReviewCommentSidebar({
     let end_time = undefined;
     if (asset.asset_type === "video") {
       start_time = currentTime;
-      end_time = currentTime + duration;
+      end_time = currentTime;
     }
 
     createComment({
