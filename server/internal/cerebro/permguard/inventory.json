@@ -2589,12 +2589,32 @@
       "exempt": "local-only — runs the MCP stdio server in this process"
     },
     {
-      "id": "note comments",
+      "id": "note comment add",
+      "gate": "via:POST /api/notes/{id}/comments"
+    },
+    {
+      "id": "note comment list",
       "exempt": "read-only — wraps GET /api/notes/{id}/comments"
+    },
+    {
+      "id": "note comment resolve",
+      "gate": "via:POST /api/notes/{id}/comments/{commentId}/resolve"
+    },
+    {
+      "id": "note comment send",
+      "gate": "via:POST /api/notes/{id}/comments/send"
     },
     {
       "id": "note read",
       "exempt": "read-only — wraps GET /api/notes/{id}"
+    },
+    {
+      "id": "note reference add",
+      "gate": "via:POST /api/notes/{id}/references"
+    },
+    {
+      "id": "note reference list",
+      "exempt": "read-only — wraps GET /api/notes/{id}/references"
     },
     {
       "id": "note search",
