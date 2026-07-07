@@ -6,11 +6,12 @@ import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
-import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { ThemeProvider } from "@react-navigation/native";
 import { PortalHost } from "@rn-primitives/portal";
 import { api } from "@/data/api";
-import { queryClient } from "@/data/query-client";
+import { queryClient, asyncStoragePersister } from "@/data/query-client";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
@@ -63,7 +64,20 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <KeyboardProvider>
-          <QueryClientProvider client={queryClient}>
+          <PersistQueryClientProvider
+            client={queryClient}
+            persistOptions={{ 
+              persister: asyncStoragePersister,
+              maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+              dehydrateOptions: {
+                shouldDehydrateQuery: (query) => query.state.status === "success",
+                shouldDehydrateMutation: (mutation) => mutation.state.isPaused,
+              },
+            }}
+            onSuccess={() => {
+              queryClient.resumePausedMutations().catch(() => {});
+            }}
+          >
             <ThemeProvider value={NAV_THEME[colorScheme]}>
               <AuthInitializer>
                 <LightboxProvider>
@@ -77,7 +91,7 @@ export default function RootLayout() {
                 </LightboxProvider>
               </AuthInitializer>
             </ThemeProvider>
-          </QueryClientProvider>
+          </PersistQueryClientProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

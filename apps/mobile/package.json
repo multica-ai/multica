@@ -22,6 +22,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
     "@multica/core": "workspace:*",
+    "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-community/datetimepicker": "8.6.0",
     "@react-native-community/netinfo": "11.5.2",
     "@react-native-segmented-control/segmented-control": "2.5.7",
@@ -40,7 +41,9 @@
     "@shikijs/langs": "^4.0.2",
     "@shikijs/themes": "^4.0.2",
     "@shopify/flash-list": "2.0.2",
+    "@tanstack/query-async-storage-persister": "^5.101.2",
     "@tanstack/react-query": "^5.96.2",
+    "@tanstack/react-query-persist-client": "^5.101.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "expo": "~55.0.23",

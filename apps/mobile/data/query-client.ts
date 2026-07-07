@@ -17,12 +17,18 @@
 import { focusManager, onlineManager, QueryClient } from "@tanstack/react-query";
 import { AppState, type AppStateStatus } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export const asyncStoragePersister = createAsyncStoragePersister({
+  storage: AsyncStorage,
+});
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60 * 1000, // 1 minute
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      gcTime: 1000 * 60 * 60 * 24 * 7, // 7 days (offline cache limit)
       retry: 1,
       refetchOnWindowFocus: true, // honored via focusManager bridge below
     },

@@ -427,16 +427,37 @@ export function useUpdateIssue(issueId: string) {
     mutationFn: (patch: UpdateIssueRequest) => api.updateIssue(issueId, patch),
     onMutate: async (patch) => {
       const key = issueKeys.detail(wsId, issueId);
-      await qc.cancelQueries({ queryKey: key });
+      const listKey = issueKeys.list(wsId);
+      const myAllKey = issueKeys.myAll(wsId);
+      
+      await Promise.all([
+        qc.cancelQueries({ queryKey: key }),
+        qc.cancelQueries({ queryKey: listKey }),
+        qc.cancelQueries({ queryKey: myAllKey }),
+      ]);
+      
       const prev = qc.getQueryData<Issue>(key);
+      const prevList = qc.getQueryData<Issue[]>(listKey);
+      const prevMy = qc.getQueriesData<Issue[]>({ queryKey: myAllKey });
+      
       if (prev) {
         qc.setQueryData<Issue>(key, { ...prev, ...patch } as any);
       }
-      return { prev, key };
+      qc.setQueryData<Issue[]>(listKey, (old) => 
+        old ? old.map((i) => (i.id === issueId ? ({ ...i, ...patch } as any) : i)) : old
+      );
+      qc.setQueriesData<Issue[]>({ queryKey: myAllKey }, (old) => 
+        old ? old.map((i) => (i.id === issueId ? ({ ...i, ...patch } as any) : i)) : old
+      );
+
+      return { prev, prevList, prevMy, key, listKey, myAllKey };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined && ctx.key) {
-        qc.setQueryData(ctx.key, ctx.prev);
+      if (!ctx) return;
+      if (ctx.prev !== undefined) qc.setQueryData(ctx.key, ctx.prev);
+      if (ctx.prevList !== undefined) qc.setQueryData(ctx.listKey, ctx.prevList);
+      for (const [key, value] of ctx.prevMy) {
+        qc.setQueryData(key, value);
       }
     },
     onSuccess: (server) => {
