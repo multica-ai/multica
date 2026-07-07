@@ -171,7 +171,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, err
 	}
 
-	if err := h.checkSignupAllowed(email, isNew); err != nil {
+	if err := h.checkSignupAllowed(ctx, email, isNew); err != nil {
 		return db.User{}, false, err
 	}
 
@@ -222,7 +222,7 @@ func signupSourceFromRequest(r *http.Request) string {
 	return decoded
 }
 
-func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
+func (h *Handler) checkSignupAllowed(ctx context.Context, email string, isNewUser bool) error {
 	if !isNewUser {
 		return nil // existing users always allowed to log in
 	}
@@ -231,6 +231,12 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 	domain := ""
 	if at := strings.Index(email, "@"); at > 0 {
 		domain = email[at+1:]
+	}
+
+	// 0. If user has a pending workspace invitation, always allow signup
+	hasInvite, _ := h.Queries.HasAnyPendingInvitationByEmail(ctx, email)
+	if hasInvite {
+		return nil
 	}
 
 	// 1. explicit email whitelist always wins
@@ -288,7 +294,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 		// User does not exist → treat as new user
 		isNewUser := true
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
@@ -300,7 +306,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// User already exists → always allowed to login
 		isNewUser := false
-		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+		if err := h.checkSignupAllowed(r.Context(), email, isNewUser); err != nil {
 			// This should rarely happen, but handle it anyway
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
