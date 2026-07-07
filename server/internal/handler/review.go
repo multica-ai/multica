@@ -618,3 +618,101 @@ func (h *Handler) DeleteReviewAssetGroup(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+type UpdateReviewCommentRequest struct {
+	Content   string          `json:"content"`
+	StartTime *float32        `json:"start_time"`
+	EndTime   *float32        `json:"end_time"`
+	Shapes    json.RawMessage `json:"shapes"`
+}
+
+func (h *Handler) UpdateReviewComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	commentUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "commentId"), "commentId")
+	if !ok {
+		return
+	}
+	workspaceIDStr := h.resolveWorkspaceID(r)
+	requester, ok := h.requireWorkspaceRole(w, r, workspaceIDStr, "workspace not found", "owner", "admin", "member")
+	if !ok {
+		return
+	}
+
+	var req UpdateReviewCommentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json payload")
+		return
+	}
+
+	// Fetch existing to check permissions
+	existing, err := h.Queries.GetReviewComment(ctx, commentUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if existing.AuthorID != requester.UserID {
+		writeError(w, http.StatusForbidden, "only the author can edit this comment")
+		return
+	}
+
+	var shapes []byte
+	if len(req.Shapes) > 0 {
+		shapes = req.Shapes
+	} else {
+		shapes = []byte("null")
+	}
+
+	var startTime, endTime pgtype.Float4
+	if req.StartTime != nil {
+		startTime = pgtype.Float4{Float32: *req.StartTime, Valid: true}
+	}
+	if req.EndTime != nil {
+		endTime = pgtype.Float4{Float32: *req.EndTime, Valid: true}
+	}
+
+	updated, err := h.Queries.UpdateReviewComment(ctx, db.UpdateReviewCommentParams{
+		ID:        commentUUID,
+		Content:   req.Content,
+		Shapes:    shapes,
+		StartTime: startTime,
+		EndTime:   endTime,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update comment")
+		return
+	}
+
+	resp := reviewCommentToResponse(updated)
+	// Optionally publish an event
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteReviewComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	commentUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "commentId"), "commentId")
+	if !ok {
+		return
+	}
+	workspaceIDStr := h.resolveWorkspaceID(r)
+	requester, ok := h.requireWorkspaceRole(w, r, workspaceIDStr, "workspace not found", "owner", "admin", "member")
+	if !ok {
+		return
+	}
+
+	existing, err := h.Queries.GetReviewComment(ctx, commentUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if existing.AuthorID != requester.UserID {
+		writeError(w, http.StatusForbidden, "only the author can delete this comment")
+		return
+	}
+
+	if err := h.Queries.DeleteReviewComment(ctx, commentUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

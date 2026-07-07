@@ -2438,7 +2438,27 @@ export class ApiClient {
   async resolveReviewComment(workspaceId: string, issueId: string, commentId: string): Promise<ReviewComment> {
     return this.fetch(`/api/issues/${issueId}/reviews/comments/${commentId}/resolve`, {
       method: "PATCH",
-      headers: { "X-Workspace-ID": workspaceId },
+      headers: { "x-workspace-id": workspaceId },
+    });
+  }
+
+  async updateReviewComment(workspaceId: string, issueId: string, commentId: string, payload: {
+    content: string;
+    shapes?: any;
+    start_time?: number;
+    end_time?: number;
+  }): Promise<ReviewComment> {
+    return this.fetch(`/api/issues/${issueId}/reviews/comments/${commentId}`, {
+      method: "PATCH",
+      headers: { "x-workspace-id": workspaceId },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteReviewComment(workspaceId: string, issueId: string, commentId: string): Promise<void> {
+    return this.fetch(`/api/issues/${issueId}/reviews/comments/${commentId}`, {
+      method: "DELETE",
+      headers: { "x-workspace-id": workspaceId },
     });
   }
 

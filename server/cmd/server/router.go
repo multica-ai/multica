@@ -1006,6 +1006,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						
 						r.Get("/comments", h.ListReviewComments)
 						r.Post("/comments", h.CreateReviewComment)
+						r.Patch("/comments/{commentId}", h.UpdateReviewComment)
+						r.Delete("/comments/{commentId}", h.DeleteReviewComment)
 						r.Patch("/comments/{commentId}/resolve", h.ResolveReviewComment)
 						r.Patch("/comments/{commentId}/unresolve", h.UnresolveReviewComment)
 					})

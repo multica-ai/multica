@@ -1,6 +1,13 @@
 import React, { useState } from "react";
 import { useModalStore } from "@multica/core/modals";
-import { useCreateReviewComment, useResolveReviewComment, useUnresolveReviewComment } from "@multica/core/reviews";
+import { useAuthStore } from "@multica/core/auth";
+import { 
+  useCreateReviewComment, 
+  useResolveReviewComment, 
+  useUnresolveReviewComment,
+  useDeleteReviewComment,
+  useUpdateReviewComment
+} from "@multica/core/reviews";
 import type { ReviewAsset } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace";
 import { ContentEditor, type ContentEditorRef } from "../editor";
@@ -35,14 +42,20 @@ export function ReviewCommentSidebar({
   drawingShape,
 }: ReviewCommentSidebarProps) {
   const editorRef = React.useRef<ContentEditorRef>(null);
+  const currentUserId = useAuthStore(s => s.user?.id);
   const { getActorName } = useActorName();
   const { mutate: createComment, isPending: isCreating } = useCreateReviewComment();
   const { mutate: resolveComment } = useResolveReviewComment();
   const { mutate: unresolveComment } = useUnresolveReviewComment();
+  const { mutate: deleteComment } = useDeleteReviewComment();
+  const { mutate: updateComment } = useUpdateReviewComment();
+  
   const [draftContent, setDraftContent] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "unresolved" | "resolved">("all");
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(3);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +167,30 @@ export function ReviewCommentSidebar({
                         )}
                       </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">{comment.content}</p>
+                    {editingCommentId === comment.id ? (
+                      <div className="flex flex-col gap-2 mt-2">
+                        <textarea 
+                          value={editContent}
+                          onChange={e => setEditContent(e.target.value)}
+                          className="w-full bg-background border border-border rounded text-sm text-foreground p-2 min-h-[60px]"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <button onClick={(e) => { e.stopPropagation(); setEditingCommentId(null); }} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateComment({ workspaceId, issueId: asset.issue_id, commentId: comment.id, assetId: asset.id, content: editContent });
+                              setEditingCommentId(null);
+                            }} 
+                            className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{comment.content}</p>
+                    )}
                   </div>
                   
                   {/* Actions */}
@@ -198,6 +234,31 @@ export function ReviewCommentSidebar({
                         Resolve
                       </button>
                     )}
+                    {currentUserId === comment.author_id && (
+                      <>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditContent(comment.content);
+                            setEditingCommentId(comment.id);
+                          }}
+                          className="hover:text-primary"
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            if (confirm("Are you sure you want to delete this comment?")) {
+                              deleteComment({ workspaceId, issueId: asset.issue_id, commentId: comment.id, assetId: asset.id });
+                            }
+                          }}
+                          className="hover:text-destructive"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -209,7 +270,36 @@ export function ReviewCommentSidebar({
                          <div className="font-medium text-xs text-foreground mb-1">
                            {getActorName("member", reply.author_id)}
                          </div>
-                         <p className="text-muted-foreground text-sm">{reply.content}</p>
+                         {editingCommentId === reply.id ? (
+                            <div className="flex flex-col gap-2 mt-1">
+                              <textarea 
+                                value={editContent}
+                                onChange={e => setEditContent(e.target.value)}
+                                className="w-full bg-background border border-border rounded text-xs text-foreground p-1.5 min-h-[40px]"
+                              />
+                              <div className="flex gap-2 justify-end">
+                                <button onClick={(e) => { e.stopPropagation(); setEditingCommentId(null); }} className="text-[10px] text-muted-foreground hover:text-foreground">Cancel</button>
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateComment({ workspaceId, issueId: asset.issue_id, commentId: reply.id, assetId: asset.id, content: editContent });
+                                    setEditingCommentId(null);
+                                  }} 
+                                  className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                         ) : (
+                           <p className="text-muted-foreground text-sm">{reply.content}</p>
+                         )}
+                         {currentUserId === reply.author_id && editingCommentId !== reply.id && (
+                           <div className="mt-1 flex gap-2 text-[10px] text-muted-foreground">
+                             <button onClick={(e) => { e.stopPropagation(); setEditContent(reply.content); setEditingCommentId(reply.id); }} className="hover:text-primary">Edit</button>
+                             <button onClick={(e) => { e.stopPropagation(); if (confirm("Delete this reply?")) deleteComment({ workspaceId, issueId: asset.issue_id, commentId: reply.id, assetId: asset.id }); }} className="hover:text-destructive">Delete</button>
+                           </div>
+                         )}
                       </div>
                     ))}
                   </div>
