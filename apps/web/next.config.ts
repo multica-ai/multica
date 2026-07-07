@@ -3,6 +3,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { resolveRemoteApiUrl } from "./config/runtime-urls";
 import { createMDX } from "fumadocs-mdx/next";
+// @ts-expect-error next-pwa doesn't have types in version 5.6.0
 import withPWAInit from "next-pwa";
 
 const withPWA = withPWAInit({
@@ -10,6 +11,9 @@ const withPWA = withPWAInit({
   disable: process.env.NODE_ENV === "development",
   register: true,
   skipWaiting: true,
+  fallbacks: {
+    document: "/~offline",
+  }
 });
 
 // Load root .env so REMOTE_API_URL is available to next.config.ts

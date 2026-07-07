@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Trash2, Share2, Link as LinkIcon, X } from "lucide-react";
+import { Trash2, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ReviewAsset } from "@multica/core/types";
 import {

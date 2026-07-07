@@ -275,14 +275,14 @@ export function TabNavigationProvider({
 
   const adapter: NavigationAdapter = useMemo(
     () => ({
-      push: (path: string, opts?: { scroll?: boolean }) => {
+      push: (path: string, _opts?: { scroll?: boolean }) => {
         if (tryRouteToOverlay(path, router)) return;
         if (routerLocationPath(router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
         router.navigate(path);
       },
-      replace: (path: string, opts?: { scroll?: boolean }) => {
+      replace: (path: string, _opts?: { scroll?: boolean }) => {
         if (tryRouteToOverlay(path, router)) return;
         if (tryRouteToOtherWorkspace(path)) return;
         router.navigate(path, { replace: true });

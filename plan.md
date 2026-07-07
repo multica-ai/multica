@@ -649,7 +649,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 7.0 Progressive Web App (PWA) Foundation
 - [x] **PWA Configuration:** Implement `next-pwa` to generate service workers and manifest files.
-- [ ] **Install Prompt:** Add custom UI offering users the option to "Install as App" on their phone's home screen.
+- [x] **Install Prompt:** Added custom UI (`PwaInstallPrompt`) offering users the option to "Install as App" on their phone's home screen, listening to `beforeinstallprompt`.
 - [x] **Offline Resilience:** Ensure the app shell loads offline and leverages the IndexedDB cache (from Phase 11) to show previously loaded issues without a network connection.
 
 ### 7.1 Mobile Feature Parity Audit

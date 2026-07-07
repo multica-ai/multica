@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Lock, ArrowRight } from "lucide-react";
 
-export default function GuestReviewPage({ params }: { params: { id: string } }) {
+export default async function GuestReviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const resolvedParams = await params;
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center bg-background text-foreground relative overflow-hidden">
       {/* Background gradients for a premium feel */}
@@ -29,7 +30,7 @@ export default function GuestReviewPage({ params }: { params: { id: string } }) 
             <ArrowRight className="w-4 h-4" />
           </Link>
           <p className="text-[11px] text-muted-foreground">
-            Asset ID: <span className="font-mono text-muted-foreground/70">{params.id}</span>
+            Asset ID: <span className="font-mono text-muted-foreground/70">{resolvedParams.id}</span>
           </p>
         </div>
       </div>

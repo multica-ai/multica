@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@multica/ui/lib/utils";
 import type { ReviewComment } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
-import { useActorName } from "../common/actor-avatar";
+import { useActorName } from "@multica/core/workspace/hooks";
 
 // --- Time formatting ---
 export function formatTimecode(seconds: number): string {
@@ -165,7 +165,7 @@ function CommentMarker({
         )}
         style={{ backgroundColor: color }}
       >
-        <ActorAvatar actorType="member" actorId={comment.author_id} size="sm" />
+        <ActorAvatar actorType="member" actorId={comment.author_id} size={16} />
       </div>
 
       {isHovered && tooltipPos && createPortal(
@@ -182,7 +182,7 @@ function CommentMarker({
         >
           <div className="bg-popover border border-border rounded-lg shadow-2xl p-3">
             <div className="flex items-center gap-2 mb-1.5">
-              <ActorAvatar actorType="member" actorId={comment.author_id} size="sm" />
+              <ActorAvatar actorType="member" actorId={comment.author_id} size={16} />
               <span className="text-xs font-medium text-popover-foreground truncate">{authorName}</span>
               {comment.start_time !== null && comment.start_time !== undefined && (
                 <span className="ml-auto text-[10px] font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded">

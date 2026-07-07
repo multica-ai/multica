@@ -62,8 +62,8 @@ export function ReviewCommentSidebar({
     e.preventDefault();
     if (!draftContent.trim()) return;
 
-    let finalStartTime = (asset.asset_type === "video" || asset.asset_type === "audio") && !replyingTo ? currentTime : null;
-    let finalEndTime = (asset.asset_type === "video" || asset.asset_type === "audio") && !replyingTo ? endTime : null;
+    let finalStartTime = (asset.asset_type === "video") && !replyingTo ? currentTime : null;
+    let finalEndTime = (asset.asset_type === "video") && !replyingTo ? endTime : null;
 
     if (finalStartTime !== null && finalEndTime !== null && finalStartTime > finalEndTime) {
       const temp = finalStartTime;
@@ -76,8 +76,8 @@ export function ReviewCommentSidebar({
       issueId: asset.issue_id,
       assetId: asset.id,
       content: draftContent,
-      start_time: finalStartTime,
-      end_time: finalEndTime,
+      start_time: finalStartTime !== null ? finalStartTime : undefined,
+      end_time: finalEndTime !== null ? finalEndTime : undefined,
       shapes: getCanvasShapes() || [],
       parentId: replyingTo || undefined,
     });

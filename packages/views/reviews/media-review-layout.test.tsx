@@ -40,7 +40,7 @@ describe("MediaReviewLayout", () => {
   it("renders empty state when no assets", () => {
     const queryClient = new QueryClient();
     const mockAsset = { id: "1", issue_id: "1", asset_type: "video" } as ReviewAsset;
-    const { container } = render(
+    render(
       <QueryClientProvider client={queryClient}>
         <MediaReviewLayout asset={mockAsset} workspaceId="ws-1" onAssetChange={vi.fn()} onClose={vi.fn()} />
       </QueryClientProvider>

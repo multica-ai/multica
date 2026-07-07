@@ -48,9 +48,6 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       const video = mediaRef.current as HTMLVideoElement;
       mediaWidth = video.videoWidth;
       mediaHeight = video.videoHeight;
-    } else if (asset.asset_type === "audio") {
-      mediaWidth = container.width;
-      mediaHeight = container.height;
     } else {
       const img = mediaRef.current as HTMLImageElement;
       mediaWidth = img.naturalWidth;
@@ -111,16 +108,17 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         if (hls) hls.destroy();
       };
     }
+    return undefined;
   }, [asset.src_url, asset.asset_type]);
 
   useImperativeHandle(ref, () => ({
     seek: (time: number) => {
-      if ((asset.asset_type === "video" || asset.asset_type === "audio") && mediaRef.current) {
+      if ((asset.asset_type === "video") && mediaRef.current) {
         (mediaRef.current as HTMLMediaElement).currentTime = time;
       }
     },
     pause: () => {
-      if ((asset.asset_type === "video" || asset.asset_type === "audio") && mediaRef.current) {
+      if ((asset.asset_type === "video") && mediaRef.current) {
         (mediaRef.current as HTMLMediaElement).pause();
       }
     },
@@ -140,7 +138,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   }));
 
   const handleTimeUpdate = () => {
-    if ((asset.asset_type === "video" || asset.asset_type === "audio") && mediaRef.current) {
+    if ((asset.asset_type === "video") && mediaRef.current) {
       const time = (mediaRef.current as HTMLMediaElement).currentTime;
       setCurrentTime(time);
       if (onTimeUpdate) onTimeUpdate(time);
@@ -159,7 +157,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
     setDrawingShape(newShape);
     onDrawingShapeChange?.(newShape);
     
-    if ((asset.asset_type === "video" || asset.asset_type === "audio") && mediaRef.current) {
+    if ((asset.asset_type === "video") && mediaRef.current) {
       (mediaRef.current as HTMLMediaElement).pause();
     }
   };
@@ -195,7 +193,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((asset.asset_type !== "video" && asset.asset_type !== "audio") || !mediaRef.current) return;
+    if ((asset.asset_type !== "video") || !mediaRef.current) return;
     const media = mediaRef.current as HTMLMediaElement;
     
     // Ignore keyboard events if we're focused in an input/textarea
@@ -234,7 +232,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   };
 
   const handlePlayPause = () => {
-    if (!mediaRef.current || (asset.asset_type !== "video" && asset.asset_type !== "audio")) return;
+    if (!mediaRef.current || (asset.asset_type !== "video")) return;
     const media = mediaRef.current as HTMLMediaElement;
     if (media.paused) media.play();
     else media.pause();
@@ -251,7 +249,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
   };
 
   const stepFrame = (frames: number) => {
-    if (!mediaRef.current || (asset.asset_type !== "video" && asset.asset_type !== "audio")) return;
+    if (!mediaRef.current || (asset.asset_type !== "video")) return;
     const media = mediaRef.current as HTMLMediaElement;
     // Assume 30fps for stepping
     media.currentTime = Math.max(0, Math.min(asset.duration || 0, media.currentTime + (frames * (1/30))));
@@ -277,24 +275,6 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
             onClick={handlePlayPause}
             loop={isLooping}
           />
-        ) : asset.asset_type === "audio" ? (
-          <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-zinc-900 rounded-sm">
-            <audio
-              ref={mediaRef as React.RefObject<HTMLAudioElement>}
-              src={asset.src_url}
-              onLoadedMetadata={calculateTrueLayout}
-              onTimeUpdate={handleTimeUpdate}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              loop={isLooping}
-            />
-            <div className="text-muted-foreground flex flex-col items-center gap-4">
-              <div className="w-32 h-32 rounded-full bg-zinc-800 flex items-center justify-center animate-pulse">
-                <Play className="w-12 h-12 text-zinc-600 ml-2" />
-              </div>
-              <span className="text-sm font-medium">Audio Asset</span>
-            </div>
-          </div>
         ) : (
         <img
           ref={mediaRef as React.RefObject<HTMLImageElement>}
@@ -362,7 +342,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         </div>
       )}
 
-      {(asset.asset_type === "video" || asset.asset_type === "audio") && asset.duration && (
+      {(asset.asset_type === "video") && asset.duration && (
         <div className="absolute bottom-16 left-0 right-0 z-10 px-4">
           <MediaScrubber 
             currentTime={currentTime} 
@@ -379,7 +359,7 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       )}
 
       {/* Glassmorphism Custom Controls (only for video/audio) */}
-      {(asset.asset_type === "video" || asset.asset_type === "audio") && (
+      {(asset.asset_type === "video") && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full backdrop-blur-md bg-background/80 border border-border/50 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
           
           <div className="flex items-center gap-1.5 mr-2">
@@ -409,8 +389,9 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
                 const speeds = [0.5, 1, 1.25, 1.5, 2];
                 let nextIndex = speeds.indexOf(video.playbackRate) + 1;
                 if (nextIndex >= speeds.length) nextIndex = 0;
-                video.playbackRate = speeds[nextIndex];
-                setPlaybackRate(speeds[nextIndex]);
+                const speed = speeds[nextIndex] || 1;
+                video.playbackRate = speed;
+                setPlaybackRate(speed);
               }} 
               className="px-2 py-1 text-[11px] font-mono font-medium hover:bg-muted rounded text-foreground transition-colors min-w-[36px]"
             >

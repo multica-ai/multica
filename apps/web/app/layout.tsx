@@ -8,6 +8,7 @@ import { WebProviders } from "@/components/web-providers";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -143,6 +144,7 @@ export default async function RootLayout({
             {children}
           </WebProviders>
           <Toaster />
+          <PwaInstallPrompt />
         </ThemeProvider>
       </body>
     </html>
