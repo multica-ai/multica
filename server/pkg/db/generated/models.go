@@ -999,6 +999,14 @@ type UserComposioConnection struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserDeviceToken struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	Token     string             `json:"token"`
+	Platform  string             `json:"platform"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type VerificationCode struct {
 	ID        pgtype.UUID        `json:"id"`
 	Email     string             `json:"email"`
