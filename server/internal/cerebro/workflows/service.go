@@ -466,11 +466,12 @@ func commentMentionMatches(cfg TriggerConfigCommentMention, te TriggerEvent) boo
 //
 // Phase-2 ext (JEH-1114, PR 2): the `evidence_present` op needs DB access
 // (it scans the issue's recent comments + attachments), so this is now a
-// Service method. Pure ops still flow through evaluate(); evidence_present
-// is checked separately and short-circuits the rest of the chain. DB lookup
-// failures fail CLOSED (return false) — for evidence-presence specifically,
-// firing a `set_status: done` workflow without confirmed evidence is much
-// worse than skipping a run we'll see again on the next event.
+// Service method. Pure ops flow through evaluate() and are decided BEFORE
+// the DB-backed/side-effecting ops (evidence_present, check_passes) run.
+// DB lookup failures fail CLOSED (return false) — for evidence-presence
+// specifically, firing a `set_status: done` workflow without confirmed
+// evidence is much worse than skipping a run we'll see again on the next
+// event.
 func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEvent) bool {
 	conds, err := parseConditions(wf.conditions)
 	if err != nil {
@@ -484,8 +485,27 @@ func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEve
 		return true
 	}
 
+	// Pure conditions (field/op/value against the event payload) must be
+	// decided FIRST: evidence_present hits the DB and check_passes is
+	// side-effecting (EvaluateCheckGate materializes gate state, check runs,
+	// and human approvals for this issue+gate). Evaluating those before the
+	// pure `issue.id eq` scope filter made every issue-scoped delivery gate
+	// in the workspace open a gate round on ANY issue entering the trigger
+	// status (FIR-2283: N stale gates → N duplicate approvals + N check
+	// tasks per in_review event).
 	pure := make([]Condition, 0, len(conds))
+	deferred := make([]Condition, 0, 2)
 	for _, c := range conds {
+		if c.Op == OpEvidencePresent || c.Op == OpCheckPasses {
+			deferred = append(deferred, c)
+			continue
+		}
+		pure = append(pure, c)
+	}
+	if len(pure) > 0 && !evaluate(pure, te.Raw) {
+		return false
+	}
+	for _, c := range deferred {
 		if c.Op == OpEvidencePresent {
 			ok, err := s.evaluateEvidence(ctx, wf, te, c)
 			if err != nil {
@@ -501,38 +521,31 @@ func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEve
 			}
 			continue
 		}
-		if c.Op == OpCheckPasses {
-			// Loop delivery gate. Fail closed when no evaluator is wired or the
-			// decision errors — advancing a `set_status: done` gate without a
-			// confirmed green check is exactly the untrustworthy outcome the
-			// gate exists to prevent.
-			if s.gateEval == nil {
-				slog.Warn("workflow conditions: check_passes has no gate evaluator wired",
-					"workflow_id", uuidString(wf.id),
-					"issue_id", te.IssueID,
-				)
-				return false
-			}
-			ok, err := s.gateEval.EvaluateCheckGate(ctx, te.IssueID, uuidString(wf.id), c.Value)
-			if err != nil {
-				slog.Warn("workflow conditions: check_passes eval failed",
-					"workflow_id", uuidString(wf.id),
-					"issue_id", te.IssueID,
-					"error", err,
-				)
-				return false
-			}
-			if !ok {
-				return false
-			}
-			continue
+		// OpCheckPasses — loop delivery gate. Fail closed when no evaluator
+		// is wired or the decision errors — advancing a `set_status: done`
+		// gate without a confirmed green check is exactly the untrustworthy
+		// outcome the gate exists to prevent.
+		if s.gateEval == nil {
+			slog.Warn("workflow conditions: check_passes has no gate evaluator wired",
+				"workflow_id", uuidString(wf.id),
+				"issue_id", te.IssueID,
+			)
+			return false
 		}
-		pure = append(pure, c)
+		ok, err := s.gateEval.EvaluateCheckGate(ctx, te.IssueID, uuidString(wf.id), c.Value)
+		if err != nil {
+			slog.Warn("workflow conditions: check_passes eval failed",
+				"workflow_id", uuidString(wf.id),
+				"issue_id", te.IssueID,
+				"error", err,
+			)
+			return false
+		}
+		if !ok {
+			return false
+		}
 	}
-	if len(pure) == 0 {
-		return true
-	}
-	return evaluate(pure, te.Raw)
+	return true
 }
 
 // envFlagEnabled returns true for the small set of values we accept as on.

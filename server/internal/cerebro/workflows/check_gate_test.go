@@ -95,3 +95,65 @@ func TestConditionsHold_CheckPasses_FailsClosedOnError(t *testing.T) {
 		t.Fatal("check_passes must fail closed when the evaluator errors")
 	}
 }
+
+// scopedCheckPassesWorkflow builds a delivery-gate rule the way the issue-loop
+// compiler does: an `issue.id eq` scope filter FOLLOWED by the check_passes
+// gate condition.
+func scopedCheckPassesWorkflow(t *testing.T, issueID string) workflow {
+	t.Helper()
+	conds, err := json.Marshal([]Condition{
+		{Field: "issue.id", Op: "eq", Value: issueID},
+		{
+			Field: "loop.checks",
+			Op:    OpCheckPasses,
+			Value: CheckGateValue{Checks: [][]string{{"make", "build"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal conditions: %v", err)
+	}
+	return workflow{conditions: conds}
+}
+
+// Regression (FIR-2283): EvaluateCheckGate is side-effecting — it materializes
+// gate state, check runs, and human approvals for the (issue, gate) pair. The
+// pure `issue.id eq` scope filter must therefore be decided BEFORE the gate
+// evaluator runs; otherwise every issue-scoped delivery gate in the workspace
+// opens a gate round (duplicate approvals + check tasks) on ANY issue entering
+// the trigger status.
+func TestConditionsHold_CheckPasses_SkippedWhenIssueScopeDoesNotMatch(t *testing.T) {
+	gate := &stubGate{advance: true}
+	s := (&Service{}).WithGateEvaluator(gate)
+
+	scoped := "00000000-0000-0000-0000-00000000000a"
+	other := "00000000-0000-0000-0000-00000000000b"
+	te := TriggerEvent{
+		IssueID: other,
+		Raw:     map[string]any{"issue": map[string]any{"id": other}},
+	}
+
+	if s.conditionsHold(context.Background(), scopedCheckPassesWorkflow(t, scoped), te) {
+		t.Fatal("conditions must not hold for an issue outside the rule's scope")
+	}
+	if gate.calls != 0 {
+		t.Fatalf("gate evaluator must NOT be invoked for an out-of-scope issue (side effects!), got %d calls", gate.calls)
+	}
+}
+
+func TestConditionsHold_CheckPasses_RunsWhenIssueScopeMatches(t *testing.T) {
+	gate := &stubGate{advance: true}
+	s := (&Service{}).WithGateEvaluator(gate)
+
+	scoped := "00000000-0000-0000-0000-00000000000a"
+	te := TriggerEvent{
+		IssueID: scoped,
+		Raw:     map[string]any{"issue": map[string]any{"id": scoped}},
+	}
+
+	if !s.conditionsHold(context.Background(), scopedCheckPassesWorkflow(t, scoped), te) {
+		t.Fatal("conditions should hold for the scoped issue when the evaluator advances")
+	}
+	if gate.calls != 1 {
+		t.Fatalf("gate evaluator should be called once for the scoped issue, got %d", gate.calls)
+	}
+}
