@@ -6,7 +6,15 @@ import type { ReviewAsset, ReviewComment } from "@multica/core/types";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import Svg, { Rect, Path, Line, Polygon, Ellipse } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
-import { MediaScrubber, formatTime, formatTimecode } from "./media-scrubber";
+import { MediaScrubber, formatTimecode } from "./media-scrubber";
+import {
+  normalizeShape,
+  rectToSvgProps,
+  ellipseToSvgProps,
+  pointsToSvgPath,
+  arrowHeadPoints,
+  type ReviewShape,
+} from "@/lib/review-shape-geometry";
 
 export interface MediaReviewPlayerProps {
   asset: ReviewAsset;
@@ -27,11 +35,83 @@ export interface MediaReviewPlayerRef {
   getCurrentTime: () => number;
 }
 
+/**
+ * Render one annotation shape in px coordinates against the current media
+ * layout. All coordinates go through lib/review-shape-geometry so Path/
+ * Polygon (which have no "%" form) and Rect/Ellipse use the same units.
+ */
+function renderShape(
+  s: ReviewShape,
+  w: number,
+  h: number,
+  opts: { key: string; strokeWidth: number; fillOpacity: number; onPress?: () => void },
+) {
+  const { key, strokeWidth, fillOpacity, onPress } = opts;
+  if (s.type === "pen" && s.points && s.points.length > 0) {
+    return (
+      <Path
+        key={key}
+        d={pointsToSvgPath(s.points, w, h)}
+        stroke={s.color}
+        strokeWidth={strokeWidth}
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        onPress={onPress}
+      />
+    );
+  }
+  if (s.type === "arrow" && s.points && s.points.length === 2) {
+    const [start, end] = s.points as [
+      { x: number; y: number },
+      { x: number; y: number },
+    ];
+    return (
+      <React.Fragment key={key}>
+        <Line
+          x1={start.x * w}
+          y1={start.y * h}
+          x2={end.x * w}
+          y2={end.y * h}
+          stroke={s.color}
+          strokeWidth={strokeWidth}
+          onPress={onPress}
+        />
+        <Polygon points={arrowHeadPoints(start, end, w, h)} fill={s.color} onPress={onPress} />
+      </React.Fragment>
+    );
+  }
+  if (s.type === "ellipse") {
+    return (
+      <Ellipse
+        key={key}
+        {...ellipseToSvgProps(s, w, h)}
+        stroke={s.color}
+        strokeWidth={strokeWidth}
+        fill={s.color}
+        fillOpacity={fillOpacity}
+        onPress={onPress}
+      />
+    );
+  }
+  return (
+    <Rect
+      key={key}
+      {...rectToSvgProps(s, w, h)}
+      stroke={s.color}
+      strokeWidth={strokeWidth}
+      fill={s.color}
+      fillOpacity={fillOpacity}
+      onPress={onPress}
+    />
+  );
+}
+
 export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPlayerProps>(
   ({ asset, onTimeUpdate, comments, selectedCommentId, onSelectComment, onDrawingShapeChange, selectedTool = 'rectangle', selectedColor = '#ef4444' }, ref) => {
-    const [drawingShape, setDrawingShape] = useState<any>(null);
-    const [isDrawing, setIsDrawing] = useState(false);
+    const [drawingShape, setDrawingShape] = useState<ReviewShape | null>(null);
     const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
 
     // Only setup player if it's a video
@@ -39,6 +119,10 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       asset.asset_type === "video" ? asset.src_url : null,
       (player) => {
         player.loop = true;
+        // timeUpdate events are DISABLED by default (interval 0) — without
+        // this line currentTime never advances, so the scrubber freezes and
+        // timed comment overlays never appear.
+        player.timeUpdateEventInterval = 0.25;
       }
     );
 
@@ -74,6 +158,12 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         const time = player.currentTime;
         setCurrentTime(time);
         onTimeUpdate?.(time);
+        // Duration comes from the loaded item, not the asset row — the
+        // backend doesn't store duration for every upload, and a 0 duration
+        // makes every scrubber seek collapse to t=0.
+        if (Number.isFinite(player.duration) && player.duration > 0) {
+          setDuration((d) => (d === player.duration ? d : player.duration));
+        }
         if (player.videoTrack?.size && (mediaSize.width === 0 || mediaSize.height === 0)) {
           setMediaSize(player.videoTrack.size);
         }
@@ -99,11 +189,8 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       },
       getCanvasShapes: () => {
         if (!drawingShape) return [];
-        const shape = { ...drawingShape };
-        if (shape.width < 0) { shape.x += shape.width; shape.width = Math.abs(shape.width); }
-        if (shape.height < 0) { shape.y += shape.height; shape.height = Math.abs(shape.height); }
-        if (shape.width < 0.01 && shape.height < 0.01) return [];
-        return [shape];
+        const shape = normalizeShape(drawingShape);
+        return shape ? [shape] : [];
       },
       clearCanvasShapes: () => {
         setDrawingShape(null);
@@ -112,7 +199,13 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
       getCurrentTime: () => currentTime,
     }));
 
+    // runOnJS(true): the callbacks below call React setState and parent
+    // callbacks. Without this flag gesture-handler runs them as Reanimated
+    // worklets on the UI thread, which crashes on the first touch ("Tried
+    // to synchronously call a non-worklet function on the UI thread").
+    // Drawing is setState-driven anyway, so JS-thread gestures cost nothing.
     const panGesture = Gesture.Pan()
+      .runOnJS(true)
       .onStart((e) => {
         if (!layout.width || !layout.height) return;
         // x and y in GestureDetector are relative to the bounding box of the Gesture.
@@ -124,9 +217,11 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         const nx = Math.max(0, Math.min(1, relX / layout.width));
         const ny = Math.max(0, Math.min(1, relY / layout.height));
         
-        const newShape = (selectedTool === 'rectangle' || selectedTool === 'ellipse')
+        // Point shapes still carry zeroed x/y/width/height — core's
+        // AnnotationShape declares them required for every type.
+        const newShape: ReviewShape = (selectedTool === 'rectangle' || selectedTool === 'ellipse')
           ? { type: selectedTool, x: nx, y: ny, width: 0, height: 0, color: selectedColor, strokeWidth: 2 }
-          : { type: selectedTool, points: [{x: nx, y: ny}, {x: nx, y: ny}], color: selectedColor, strokeWidth: 2 };
+          : { type: selectedTool, x: 0, y: 0, width: 0, height: 0, points: [{x: nx, y: ny}, {x: nx, y: ny}], color: selectedColor, strokeWidth: 2 };
         setDrawingShape(newShape);
         onDrawingShapeChange?.(newShape);
         
@@ -139,28 +234,26 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
         const nx = Math.max(0, Math.min(1, relX / layout.width));
         const ny = Math.max(0, Math.min(1, relY / layout.height));
         
-        let newShape;
+        let newShape: ReviewShape = drawingShape;
         if (drawingShape.type === 'rectangle' || drawingShape.type === 'ellipse') {
           newShape = {
             ...drawingShape,
-            width: nx - drawingShape.x,
-            height: ny - drawingShape.y,
+            width: nx - (drawingShape.x ?? 0),
+            height: ny - (drawingShape.y ?? 0),
           };
-        } else if (drawingShape.type === 'pen') {
-          const lastPoint = drawingShape.points[drawingShape.points.length - 1];
+        } else if (drawingShape.type === 'pen' && drawingShape.points?.length) {
+          const lastPoint = drawingShape.points[drawingShape.points.length - 1]!;
           const dist = Math.hypot(lastPoint.x - nx, lastPoint.y - ny);
           if (dist > 0.005) {
             newShape = {
               ...drawingShape,
               points: [...drawingShape.points, {x: nx, y: ny}]
             };
-          } else {
-            newShape = drawingShape;
           }
-        } else if (drawingShape.type === 'arrow') {
+        } else if (drawingShape.type === 'arrow' && drawingShape.points?.length) {
           newShape = {
             ...drawingShape,
-            points: [drawingShape.points[0], {x: nx, y: ny}]
+            points: [drawingShape.points[0]!, {x: nx, y: ny}]
           };
         }
         setDrawingShape(newShape);
@@ -214,113 +307,26 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
                 }}
               >
                 <Svg style={StyleSheet.absoluteFill}>
-                  {visibleComments.map(c => 
-                    c.shapes?.map((s: any, i: number) => {
+                  {visibleComments.map(c =>
+                    c.shapes?.map((s: ReviewShape, i: number) => {
                       const isSelected = selectedCommentId === c.id;
                       const fillOpacity = isSelected ? 0.4 : 0.2;
                       const strokeWidth = isSelected ? 4 : 2;
-                      if (s.type === 'pen' && s.points && s.points.length > 0) {
-                        const pathData = s.points.map((p: any, idx: number) => 
-                          `${idx === 0 ? 'M' : 'L'} ${p.x * 100} ${p.y * 100}`
-                        ).join(' ');
-                        return <Path key={`${c.id}-${i}`} d={pathData} stroke={s.color} strokeWidth={strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" onPress={() => onSelectComment?.(c.id)} />;
-                      }
-                      if (s.type === 'arrow' && s.points && s.points.length === 2) {
-                        const [start, end] = s.points;
-                        const angle = Math.atan2(end.y - start.y, end.x - start.x);
-                        const headLen = 0.05; // 5% of screen approx
-                        const p1 = { x: end.x - headLen * Math.cos(angle - Math.PI/6), y: end.y - headLen * Math.sin(angle - Math.PI/6) };
-                        const p2 = { x: end.x - headLen * Math.cos(angle + Math.PI/6), y: end.y - headLen * Math.sin(angle + Math.PI/6) };
-                        return (
-                          <React.Fragment key={`${c.id}-${i}`}>
-                            <Line x1={`${start.x * 100}%`} y1={`${start.y * 100}%`} x2={`${end.x * 100}%`} y2={`${end.y * 100}%`} stroke={s.color} strokeWidth={strokeWidth} onPress={() => onSelectComment?.(c.id)} />
-                            <Polygon points={`${end.x * 100},${end.y * 100} ${p1.x * 100},${p1.y * 100} ${p2.x * 100},${p2.y * 100}`} fill={s.color} onPress={() => onSelectComment?.(c.id)} />
-                          </React.Fragment>
-                        );
-                      }
-                      if (s.type === 'ellipse') {
-                        return (
-                          <Ellipse
-                            key={`${c.id}-${i}`}
-                            cx={`${(s.x + (s.width || 0) / 2) * 100}%`}
-                            cy={`${(s.y + (s.height || 0) / 2) * 100}%`}
-                            rx={`${Math.abs((s.width || 0) / 2) * 100}%`}
-                            ry={`${Math.abs((s.height || 0) / 2) * 100}%`}
-                            stroke={s.color}
-                            strokeWidth={strokeWidth}
-                            fill={s.color}
-                            fillOpacity={fillOpacity}
-                            onPress={() => onSelectComment?.(c.id)}
-                          />
-                        );
-                      }
-                      return (
-                        <Rect
-                          key={`${c.id}-${i}`}
-                          x={`${s.x * 100}%`}
-                          y={`${s.y * 100}%`}
-                          width={`${(s.width || 0) * 100}%`}
-                          height={`${(s.height || 0) * 100}%`}
-                          stroke={s.color}
-                          strokeWidth={strokeWidth}
-                          fill={s.color}
-                          fillOpacity={fillOpacity}
-                          onPress={() => onSelectComment?.(c.id)}
-                        />
-                      );
+                      const select = () => onSelectComment?.(c.id);
+                      return renderShape(s, layout.width, layout.height, {
+                        key: `${c.id}-${i}`,
+                        strokeWidth,
+                        fillOpacity,
+                        onPress: select,
+                      });
                     })
                   )}
-                  {drawingShape && drawingShape.type === 'rectangle' && (
-                    <Rect
-                      x={`${Math.min(drawingShape.x, drawingShape.x + drawingShape.width) * 100}%`}
-                      y={`${Math.min(drawingShape.y, drawingShape.y + drawingShape.height) * 100}%`}
-                      width={`${Math.abs(drawingShape.width) * 100}%`}
-                      height={`${Math.abs(drawingShape.height) * 100}%`}
-                      stroke={drawingShape.color}
-                      strokeWidth={2}
-                      fill={drawingShape.color}
-                      fillOpacity={0.3}
-                    />
-                  )}
-                  {drawingShape && drawingShape.type === 'ellipse' && (
-                    <Ellipse
-                      cx={`${(drawingShape.x + drawingShape.width / 2) * 100}%`}
-                      cy={`${(drawingShape.y + drawingShape.height / 2) * 100}%`}
-                      rx={`${Math.abs(drawingShape.width / 2) * 100}%`}
-                      ry={`${Math.abs(drawingShape.height / 2) * 100}%`}
-                      stroke={drawingShape.color}
-                      strokeWidth={2}
-                      fill={drawingShape.color}
-                      fillOpacity={0.3}
-                    />
-                  )}
-                  {drawingShape && drawingShape.type === 'pen' && drawingShape.points && drawingShape.points.length > 0 && (
-                    <Path
-                      d={drawingShape.points.map((p: any, idx: number) => `${idx === 0 ? 'M' : 'L'} ${p.x * 100} ${p.y * 100}`).join(' ')}
-                      stroke={drawingShape.color}
-                      strokeWidth={2}
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  )}
-                  {drawingShape && drawingShape.type === 'arrow' && drawingShape.points && drawingShape.points.length === 2 && (
-                    <React.Fragment>
-                      <Line 
-                        x1={`${drawingShape.points[0].x * 100}%`} y1={`${drawingShape.points[0].y * 100}%`} 
-                        x2={`${drawingShape.points[1].x * 100}%`} y2={`${drawingShape.points[1].y * 100}%`} 
-                        stroke={drawingShape.color} strokeWidth={2} 
-                      />
-                      <Polygon 
-                        points={`
-                          ${drawingShape.points[1].x * 100},${drawingShape.points[1].y * 100} 
-                          ${(drawingShape.points[1].x - 0.05 * Math.cos(Math.atan2(drawingShape.points[1].y - drawingShape.points[0].y, drawingShape.points[1].x - drawingShape.points[0].x) - Math.PI/6)) * 100},${(drawingShape.points[1].y - 0.05 * Math.sin(Math.atan2(drawingShape.points[1].y - drawingShape.points[0].y, drawingShape.points[1].x - drawingShape.points[0].x) - Math.PI/6)) * 100} 
-                          ${(drawingShape.points[1].x - 0.05 * Math.cos(Math.atan2(drawingShape.points[1].y - drawingShape.points[0].y, drawingShape.points[1].x - drawingShape.points[0].x) + Math.PI/6)) * 100},${(drawingShape.points[1].y - 0.05 * Math.sin(Math.atan2(drawingShape.points[1].y - drawingShape.points[0].y, drawingShape.points[1].x - drawingShape.points[0].x) + Math.PI/6)) * 100}
-                        `} 
-                        fill={drawingShape.color} 
-                      />
-                    </React.Fragment>
-                  )}
+                  {drawingShape &&
+                    renderShape(drawingShape, layout.width, layout.height, {
+                      key: "drawing",
+                      strokeWidth: 2,
+                      fillOpacity: 0.3,
+                    })}
                 </Svg>
               </View>
             </View>
@@ -343,9 +349,9 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
                 </Pressable>
                 <Text style={styles.timeText}>{formatTimecode(currentTime)}</Text>
               </View>
-              <MediaScrubber 
+              <MediaScrubber
                 currentTime={currentTime}
-                duration={asset.duration || 0}
+                duration={duration || asset.duration || 0}
                 comments={comments}
                 selectedCommentId={selectedCommentId}
                 onSeek={(time) => { player.currentTime = time; }}
@@ -360,6 +366,8 @@ export const MediaReviewPlayer = forwardRef<MediaReviewPlayerRef, MediaReviewPla
     );
   }
 );
+
+MediaReviewPlayer.displayName = "MediaReviewPlayer";
 
 const styles = StyleSheet.create({
   container: {

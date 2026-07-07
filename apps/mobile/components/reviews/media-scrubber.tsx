@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { View, StyleSheet, Text, LayoutChangeEvent, Pressable } from "react-native";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import type { ReviewComment } from "@multica/core/types";
 import { ActorAvatar } from "../ui/actor-avatar";
@@ -64,7 +64,11 @@ export function MediaScrubber({
     setTrackWidth(e.nativeEvent.layout.width);
   };
 
+  // runOnJS(true): these callbacks call Haptics and parent JS callbacks
+  // (onSeek / onScrubStart). Without the flag gesture-handler runs them as
+  // Reanimated worklets on the UI thread and crashes on first touch.
   const panGesture = Gesture.Pan()
+    .runOnJS(true)
     .onStart((e) => {
       if (!trackWidth) return;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -83,6 +87,7 @@ export function MediaScrubber({
     });
 
   const tapGesture = Gesture.Tap()
+    .runOnJS(true)
     .onEnd((e) => {
       if (!trackWidth) return;
       const ratio = Math.max(0, Math.min(1, e.x / trackWidth));
