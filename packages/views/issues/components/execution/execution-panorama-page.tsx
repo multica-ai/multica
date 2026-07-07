@@ -76,6 +76,7 @@ export function ExecutionPanoramaPage({
   const criticElementMap = useRef(new Map<string, HTMLButtonElement>());
   const [nodePositions, setNodePositions] = useState(new Map<string, DOMRect>());
   const [criticPositions, setCriticPositions] = useState(new Map<string, DOMRect>());
+  const measureRafRef = useRef<number | null>(null);
 
   const measurePositions = useCallback(() => {
     const containerRect = containerRef.current?.getBoundingClientRect();
@@ -105,6 +106,17 @@ export function ExecutionPanoramaPage({
     });
     setCriticPositions(nextCriticPos);
   }, []);
+
+  // Capture scroll events from descendant scroll containers (e.g. StageLane
+  // overflow-x-auto) so that SVG edge paths stay aligned with node cards even
+  // after the user scrolls a stage lane horizontally.
+  const handleDescendantScroll = useCallback(() => {
+    if (measureRafRef.current !== null) return;
+    measureRafRef.current = requestAnimationFrame(() => {
+      measurePositions();
+      measureRafRef.current = null;
+    });
+  }, [measurePositions]);
 
   useLayoutEffect(() => {
     measurePositions();
@@ -213,6 +225,7 @@ export function ExecutionPanoramaPage({
         ref={containerRef}
         className="relative"
         data-testid="panorama-canvas"
+        onScrollCapture={handleDescendantScroll}
       >
         {/* SVG overlay for edges (only when run exists) */}
         {runId && (

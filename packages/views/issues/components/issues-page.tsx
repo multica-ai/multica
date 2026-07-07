@@ -226,7 +226,7 @@ export function IssuesPage() {
 
       <ViewStoreProvider store={useIssueViewStore}>
         {/* Header 2: Scope tabs + filters */}
-        <IssuesHeader scopedIssues={headerIssues} allowGraph />
+        <IssuesHeader scopedIssues={headerIssues} />
 
         {/* Content: scrollable */}
         {headerIssues.length === 0 ? (
