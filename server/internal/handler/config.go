@@ -36,6 +36,10 @@ type AppConfig struct {
 	// with the operator's own domains instead of Multica Cloud defaults.
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
+	// GithubRepo / GithubBranch let self-hosted forks override every
+	// user-facing GitHub link (install commands, releases, feedback).
+	GithubRepo   string `json:"github_repo,omitempty"`
+	GithubBranch string `json:"github_branch,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -66,6 +70,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.GithubRepo, config.GithubBranch = githubConfigFromEnv()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 
 	// Re-read from env on every request so operators can rotate keys via
@@ -99,6 +104,35 @@ func daemonSetupURLsFromEnv() (string, string) {
 		return "", ""
 	}
 	return serverURL, appURL
+}
+
+func githubConfigFromEnv() (string, string) {
+	repo := strings.TrimSpace(os.Getenv("MULTICA_GITHUB_REPO"))
+	if repo == "" || !validGithubRepoSlug(repo) {
+		return "", ""
+	}
+	branch := strings.TrimSpace(os.Getenv("MULTICA_GITHUB_BRANCH"))
+	if branch == "" {
+		return repo, ""
+	}
+	return repo, branch
+}
+
+func validGithubRepoSlug(raw string) bool {
+	if strings.Contains(raw, "://") {
+		return false
+	}
+	parts := strings.Split(raw, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.Contains(part, "/") {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizePublicURL(raw string) string {

@@ -27,7 +27,7 @@ import {
   FOLLOWUP_COMMENT_PREFIX,
   getCreateAgentGuideBody,
   HELPER_DESCRIPTION,
-  HELPER_INSTRUCTIONS,
+  getHelperInstructions,
   HELPER_STARTER_PROMPTS,
   INSTALL_RUNTIME_ISSUE_BODY,
   INSTALL_RUNTIME_ISSUE_TITLE,
@@ -172,7 +172,7 @@ async function findOrCreateHelper(
     return api.createAgent({
       name: HELPER_AGENT_NAME,
       description: HELPER_DESCRIPTION[lang],
-      instructions: HELPER_INSTRUCTIONS[lang],
+      instructions: getHelperInstructions(lang),
       avatar_url: HELPER_AVATAR_URL,
       runtime_id: runtimeId,
       visibility: "workspace",

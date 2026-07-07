@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
+import { useGithubConfig } from "@multica/core/github/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import { createEnDict } from "./en";
 import { createJaDict } from "./ja";
@@ -24,7 +25,7 @@ import {
 
 const dictionaryFactories: Record<
   LandingDictionaryLocale,
-  (allowSignup: boolean) => LandingDict
+  (allowSignup: boolean, githubWebUrl: string) => LandingDict
 > = {
   en: createEnDict,
   ja: createJaDict,
@@ -52,9 +53,10 @@ export function LocaleProvider({
   const router = useRouter();
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   const allowSignup = useConfigStore((state) => state.allowSignup);
+  const { webUrl } = useGithubConfig();
   const t = useMemo(
-    () => dictionaryFactories[toLandingDictionaryLocale(locale)](allowSignup),
-    [allowSignup, locale],
+    () => dictionaryFactories[toLandingDictionaryLocale(locale)](allowSignup, webUrl),
+    [allowSignup, locale, webUrl],
   );
 
   const setLocale = useCallback(

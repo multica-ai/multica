@@ -316,3 +316,51 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
 	}
 }
+
+func TestGetConfigGithubRepoFromEnv(t *testing.T) {
+	t.Setenv("MULTICA_GITHUB_REPO", "Git-on-my-level/multica")
+	t.Setenv("MULTICA_GITHUB_BRANCH", "develop")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.GithubRepo != "Git-on-my-level/multica" {
+		t.Fatalf("github_repo: want Git-on-my-level/multica, got %q", cfg.GithubRepo)
+	}
+	if cfg.GithubBranch != "develop" {
+		t.Fatalf("github_branch: want develop, got %q", cfg.GithubBranch)
+	}
+}
+
+func TestGetConfigOmitsInvalidGithubRepo(t *testing.T) {
+	t.Setenv("MULTICA_GITHUB_REPO", "https://github.com/multica-ai/multica")
+	t.Setenv("MULTICA_GITHUB_BRANCH", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.GithubRepo != "" {
+		t.Fatalf("github_repo: want omitted for invalid slug, got %q", cfg.GithubRepo)
+	}
+	if cfg.GithubBranch != "" {
+		t.Fatalf("github_branch: want omitted when repo invalid, got %q", cfg.GithubBranch)
+	}
+}

@@ -2,6 +2,7 @@ import {
   parseReleaseAssets,
   type DownloadAssets,
 } from "./parse-release-assets";
+import { getServerGithubConfig } from "@/lib/github-config";
 
 /**
  * Server-side fetcher for the latest Multica release, designed to
@@ -30,9 +31,6 @@ export interface LatestRelease {
   assets: DownloadAssets;
 }
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases?per_page=2";
-
 const REVALIDATE_SECONDS = 300;
 
 const FRESH_RELEASE_WINDOW_MS = 60 * 60 * 1000;
@@ -47,6 +45,7 @@ interface GitHubReleasePayload {
 }
 
 export async function fetchLatestRelease(): Promise<LatestRelease> {
+  const { releasesListApiUrl } = getServerGithubConfig();
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -63,7 +62,7 @@ export async function fetchLatestRelease(): Promise<LatestRelease> {
   }
 
   try {
-    const res = await fetch(GITHUB_RELEASES_URL, {
+    const res = await fetch(releasesListApiUrl, {
       next: { revalidate: REVALIDATE_SECONDS },
       headers,
     });

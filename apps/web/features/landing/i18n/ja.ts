@@ -1,9 +1,12 @@
-import { githubUrl, discordUrl } from "../components/shared";
+import { discordUrl, githubUrl as defaultGithubUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
 
-export function createJaDict(allowSignup: boolean): LandingDict {
-  const base = createEnDict(allowSignup);
+export function createJaDict(
+  allowSignup: boolean,
+  githubWebUrl: string = defaultGithubUrl,
+): LandingDict {
+  const base = createEnDict(allowSignup, githubWebUrl);
 
   return {
     ...base,
@@ -242,7 +245,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           label: "リソース",
           links: [
             { label: "ドキュメント", href: "/docs/ja" },
-            { label: "API", href: githubUrl },
+            { label: "API", href: githubWebUrl },
             { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
             { label: "Discord", href: discordUrl },
           ],
@@ -253,7 +256,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             { label: "概要", href: "/about" },
             { label: "オープンソース", href: "#open-source" },
             { label: "営業に相談", href: "/contact-sales" },
-            { label: "GitHub", href: githubUrl },
+            { label: "GitHub", href: githubWebUrl },
           ],
         },
       },

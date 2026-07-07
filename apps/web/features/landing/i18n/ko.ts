@@ -1,9 +1,12 @@
-import { githubUrl, discordUrl } from "../components/shared";
+import { discordUrl, githubUrl as defaultGithubUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
 
-export function createKoDict(allowSignup: boolean): LandingDict {
-  const base = createEnDict(allowSignup);
+export function createKoDict(
+  allowSignup: boolean,
+  githubWebUrl: string = defaultGithubUrl,
+): LandingDict {
+  const base = createEnDict(allowSignup, githubWebUrl);
 
   return {
     ...base,
@@ -241,7 +244,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           label: "리소스",
           links: [
             { label: "문서", href: "/docs/ko" },
-            { label: "API", href: githubUrl },
+            { label: "API", href: githubWebUrl },
             { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
             { label: "Discord", href: discordUrl },
           ],
@@ -252,7 +255,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             { label: "소개", href: "/about" },
             { label: "오픈소스", href: "#open-source" },
             { label: "영업팀 문의", href: "/contact-sales" },
-            { label: "GitHub", href: githubUrl },
+            { label: "GitHub", href: githubWebUrl },
           ],
         },
       },

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { LandingHeader } from "./landing-header";
 import { LandingFooter } from "./landing-footer";
-import { GitHubMark, githubUrl } from "./shared";
+import { GitHubMark, useGithubWebUrl } from "./shared";
 import { useLocale } from "../i18n";
 
 export function AboutPageClient() {
   const { t } = useLocale();
+  const githubWebUrl = useGithubWebUrl();
   const n = t.about.nameLine;
 
   return (
@@ -45,7 +46,7 @@ export function AboutPageClient() {
 
           <div className="mt-12">
             <Link
-              href={githubUrl}
+              href={githubWebUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2.5 rounded-[12px] bg-[#0a0d12] px-5 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"

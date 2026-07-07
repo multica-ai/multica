@@ -42,6 +42,8 @@ export interface AppConfigResponse {
   analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
+  github_repo?: string;
+  github_branch?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
 }
@@ -191,6 +193,8 @@ export const AppConfigSchema = z.object({
   analytics_environment: OptionalStringSchema,
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
+  github_repo: OptionalStringSchema,
+  github_branch: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
 }).loose();
@@ -202,6 +206,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   google_client_id: "",
   daemon_server_url: "",
   daemon_app_url: "",
+  github_repo: "",
+  github_branch: "",
   workspace_creation_disabled: false,
   feature_flags: {},
 };

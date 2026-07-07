@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useGithubConfig } from "@multica/core/github/config";
 
 /**
  * Live GitHub star count for the landing header's "GitHub" button.
@@ -18,17 +19,17 @@ import { useEffect, useState } from "react";
  * a loop; the button just degrades to its plain "GitHub" label.
  */
 
-const REPO = "multica-ai/multica";
-
 // `undefined` = never fetched; `number` = resolved count; `null` = fetch failed.
 let cachedStars: number | null | undefined;
-let inFlight: Promise<number | null> | null = null;
+let cachedRepo = "";
+let loadGeneration = 0;
 
-async function loadStars(): Promise<number | null> {
-  if (cachedStars !== undefined) return cachedStars;
-  if (inFlight) return inFlight;
+async function loadStars(repo: string): Promise<number | null> {
+  if (cachedStars !== undefined && cachedRepo === repo) return cachedStars;
 
-  inFlight = fetch(`https://api.github.com/repos/${REPO}`, {
+  const generation = ++loadGeneration;
+  const requestRepo = repo;
+  return fetch(`https://api.github.com/repos/${requestRepo}`, {
     headers: { Accept: "application/vnd.github+json" },
   })
     .then((res) => {
@@ -36,34 +37,37 @@ async function loadStars(): Promise<number | null> {
       return res.json() as Promise<{ stargazers_count?: unknown }>;
     })
     .then((data) => {
+      if (generation !== loadGeneration) return null;
       const count =
         typeof data.stargazers_count === "number" ? data.stargazers_count : null;
       cachedStars = count;
+      cachedRepo = requestRepo;
       return count;
     })
     .catch(() => {
+      if (generation !== loadGeneration) return null;
       cachedStars = null;
+      cachedRepo = requestRepo;
       return null;
-    })
-    .finally(() => {
-      inFlight = null;
     });
-
-  return inFlight;
 }
 
 export function useGithubStars(): number | null {
-  const [stars, setStars] = useState<number | null>(cachedStars ?? null);
+  const { repo } = useGithubConfig();
+  const [stars, setStars] = useState<number | null>(
+    cachedRepo === repo ? (cachedStars ?? null) : null,
+  );
 
   useEffect(() => {
     let active = true;
-    void loadStars().then((count) => {
-      if (active && count != null) setStars(count);
+    void loadStars(repo).then((count) => {
+      if (!active) return;
+      setStars(count);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [repo]);
 
   return stars;
 }

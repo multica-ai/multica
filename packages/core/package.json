@@ -104,6 +104,8 @@
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
+    "./constants/github": "./constants/github.ts",
+    "./github/config": "./github/config.ts",
     "./feature-flags": "./feature-flags/index.ts",
     "./platform": "./platform/index.ts",
     "./analytics": "./analytics/index.ts",

@@ -3,6 +3,7 @@ import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { useGithubConfig } from "@multica/core/github/config";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
@@ -59,6 +60,7 @@ function DiagnosticsRow({
 }
 
 export function DaemonSettingsTab() {
+  const { webUrl } = useGithubConfig();
   const [prefs, setPrefs] = useState<DaemonPrefs>({ autoStart: true, autoStop: false });
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -176,9 +178,7 @@ export function DaemonSettingsTab() {
               size="sm"
               className="mt-2"
               onClick={() =>
-                window.desktopAPI.openExternal(
-                  "https://github.com/multica-ai/multica#cli-installation",
-                )
+                window.desktopAPI.openExternal(`${webUrl}#cli-installation`)
               }
             >
               Installation Guide

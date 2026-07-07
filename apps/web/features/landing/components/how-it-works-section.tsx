@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
-import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
+import { GitHubMark, useGithubWebUrl, heroButtonClassName } from "./shared";
 
 export function HowItWorksSection() {
   const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
+  const githubWebUrl = useGithubWebUrl();
 
   return (
     <section id="how-it-works" className="bg-[#05070b] text-white">
@@ -51,7 +52,7 @@ export function HowItWorksSection() {
             {t.howItWorks.ctaDocs}
           </Link>
           <Link
-            href={githubUrl}
+            href={githubWebUrl}
             target="_blank"
             rel="noreferrer"
             className={heroButtonClassName("ghost")}

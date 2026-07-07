@@ -26,6 +26,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { useT } from "../i18n";
+import { useGithubConfig } from "@multica/core/github/config";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 
 const MAX_MESSAGE_LEN = 10000;
@@ -55,6 +56,7 @@ export function FeedbackModal({
   initialMessage?: string;
 }) {
   const { t } = useT("modals");
+  const { issuesUrl } = useGithubConfig();
   const workspace = useCurrentWorkspace();
   const draft = useFeedbackDraftStore((s) => s.draft);
   const setDraft = useFeedbackDraftStore((s) => s.setDraft);
@@ -121,7 +123,7 @@ export function FeedbackModal({
           <p className="mt-1 text-xs text-muted-foreground">
             {t(($) => $.feedback.github_hint_prefix)}
             <a
-              href="https://github.com/multica-ai/multica/issues"
+              href={issuesUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"

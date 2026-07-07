@@ -20,13 +20,12 @@ import { Button } from "@multica/ui/components/ui/button";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
+import { useGithubConfig } from "@multica/core/github/config";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const CLOUD_SERVER_URL = "https://api.multica.ai";
 const CLOUD_APP_URL = "https://multica.ai";
 
@@ -190,6 +189,7 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
+  const { cliInstallCommand } = useGithubConfig();
   const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
   const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
   const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
@@ -209,7 +209,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
           <CommandStep
             n={1}
             label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
+            cmd={cliInstallCommand}
             copyAria={t(($) => $.connect.copy_aria)}
           />
 

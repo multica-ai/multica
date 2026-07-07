@@ -8,7 +8,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
-import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
+import { GitHubMark, useGithubWebUrl, headerButtonClassName } from "./shared";
 
 export function LandingHeader({
   variant = "dark",
@@ -18,6 +18,7 @@ export function LandingHeader({
   const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
   const stars = useGithubStars();
+  const githubWebUrl = useGithubWebUrl();
   const starsLabel = stars != null ? formatStarCount(stars) : null;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const docsHref = docsHrefForLocale(locale);
@@ -92,7 +93,7 @@ export function LandingHeader({
             )}
           </button>
           <Link
-            href={githubUrl}
+            href={githubWebUrl}
             target="_blank"
             rel="noreferrer"
             className={cn(
@@ -141,7 +142,7 @@ export function LandingHeader({
             )}
           >
             <Link
-              href={githubUrl}
+              href={githubWebUrl}
               target="_blank"
               rel="noreferrer"
               onClick={() => setIsMenuOpen(false)}

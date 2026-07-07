@@ -67,6 +67,10 @@ export function AuthInitializer({
           daemonServerUrl: cfg.daemon_server_url,
           daemonAppUrl: cfg.daemon_app_url,
         });
+        configStore.getState().setGithubConfig({
+          githubRepo: cfg.github_repo,
+          githubBranch: cfg.github_branch,
+        });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         if (cfg.posthog_key) {
           initAnalytics({

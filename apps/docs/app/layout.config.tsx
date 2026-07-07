@@ -1,6 +1,8 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import { ArrowUpRight } from "lucide-react";
 
+import { resolveGithubConfig } from "@multica/core/github/config";
+
 // Docs-local stateless Multica mark — matches @multica/ui's MulticaIcon
 // visually (same 8-pointed-asterisk clip-path), but without useState/
 // useEffect so it's safe to render from Server Components such as
@@ -53,6 +55,11 @@ const externalLinkText = (label: string) => (
   </span>
 );
 
+const githubWebUrl = resolveGithubConfig({
+  repo: process.env.MULTICA_GITHUB_REPO?.trim() || undefined,
+  branch: process.env.MULTICA_GITHUB_BRANCH?.trim() || undefined,
+}).webUrl;
+
 export const baseOptions: BaseLayoutProps = {
   nav: {
     title: (
@@ -63,7 +70,7 @@ export const baseOptions: BaseLayoutProps = {
     {
       icon: <GitHubMark />,
       text: externalLinkText("GitHub"),
-      url: "https://github.com/multica-ai/multica",
+      url: githubWebUrl,
       external: true,
     },
     {

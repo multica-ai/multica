@@ -95,6 +95,8 @@ services:
       # intentionally NOT used to derive this value, to avoid Host /
       # X-Forwarded-Host spoofing on misconfigured proxies.
       MULTICA_PUBLIC_URL: ${MULTICA_PUBLIC_URL:-}
+      MULTICA_GITHUB_REPO: ${MULTICA_GITHUB_REPO:-}
+      MULTICA_GITHUB_BRANCH: ${MULTICA_GITHUB_BRANCH:-}
       # Comma-separated CIDRs whose source IP is allowed to set
       # X-Forwarded-For / X-Real-IP for the webhook per-IP rate limiter.
       # Empty default = headers ignored, RemoteAddr used. Set e.g.
@@ -128,6 +130,8 @@ services:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
+      MULTICA_GITHUB_REPO: ${MULTICA_GITHUB_REPO:-}
+      MULTICA_GITHUB_BRANCH: ${MULTICA_GITHUB_BRANCH:-}
     restart: unless-stopped
 
 volumes:

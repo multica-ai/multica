@@ -1,6 +1,7 @@
 import { Instrument_Serif, Noto_Serif_SC } from "next/font/google";
 import { LocaleProvider } from "@/features/landing/i18n";
 import { getRequestLocale } from "@/lib/request-locale";
+import { getServerGithubConfig } from "@/lib/github-config";
 
 const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
@@ -14,30 +15,32 @@ const notoSerifSC = Noto_Serif_SC({
   variable: "--font-serif-zh",
 });
 
-const jsonLd = {
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "Organization",
-      name: "Multica",
-      url: "https://www.multica.ai",
-      sameAs: ["https://github.com/multica-ai/multica"],
-    },
-    {
-      "@type": "SoftwareApplication",
-      name: "Multica",
-      applicationCategory: "ProjectManagement",
-      operatingSystem: "Web",
-      description:
-        "Open-source project management platform that turns coding agents into real teammates.",
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
+function buildJsonLd(githubWebUrl: string) {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        name: "Multica",
+        url: "https://www.multica.ai",
+        sameAs: [githubWebUrl],
       },
-    },
-  ],
-};
+      {
+        "@type": "SoftwareApplication",
+        name: "Multica",
+        applicationCategory: "ProjectManagement",
+        operatingSystem: "Web",
+        description:
+          "Open-source project management platform that turns coding agents into real teammates.",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+      },
+    ],
+  };
+}
 
 export default async function LandingLayout({
   children,
@@ -45,6 +48,7 @@ export default async function LandingLayout({
   children: React.ReactNode;
 }) {
   const initialLocale = await getRequestLocale();
+  const jsonLd = buildJsonLd(getServerGithubConfig().webUrl);
 
   return (
     <>

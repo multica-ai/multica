@@ -4,6 +4,8 @@ import {
 } from "@multica/core/i18n";
 
 export {
+  getHelperInstructions,
+  buildHelperInstructions,
   HELPER_INSTRUCTIONS,
   HELPER_DESCRIPTION,
   type HelperInstructionsLang,

@@ -15,6 +15,8 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  githubRepo: string;
+  githubBranch: string;
   featureFlags: Record<string, boolean>;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
@@ -25,6 +27,10 @@ interface ConfigState {
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
     daemonAppUrl?: string;
+  }) => void;
+  setGithubConfig: (config: {
+    githubRepo?: string;
+    githubBranch?: string;
   }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
 }
@@ -37,12 +43,16 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  githubRepo: "",
+  githubBranch: "",
   featureFlags: {},
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
     set({ allowSignup, googleClientId, workspaceCreationDisabled }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
+  setGithubConfig: ({ githubRepo = "", githubBranch = "" }) =>
+    set({ githubRepo, githubBranch }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
 }));
 

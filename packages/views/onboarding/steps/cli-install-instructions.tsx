@@ -6,10 +6,9 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useGithubConfig } from "@multica/core/github/config";
 import { useT } from "../../i18n";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const SETUP_CMD = "multica setup";
 
 function CopyButton({ text }: { text: string }) {
@@ -72,13 +71,14 @@ function Step({ n, label, cmd }: { n: number; label: string; cmd: string }) {
  */
 export function CliInstallInstructions() {
   const { t } = useT("onboarding");
+  const { cliInstallCommand } = useGithubConfig();
   return (
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">
         <p className="text-xs leading-[1.55] text-muted-foreground">
           {t(($) => $.cli_install.intro)}
         </p>
-        <Step n={1} label={t(($) => $.cli_install.step1_label)} cmd={INSTALL_CMD} />
+        <Step n={1} label={t(($) => $.cli_install.step1_label)} cmd={cliInstallCommand} />
         <Step n={2} label={t(($) => $.cli_install.step2_label)} cmd={SETUP_CMD} />
       </CardContent>
     </Card>

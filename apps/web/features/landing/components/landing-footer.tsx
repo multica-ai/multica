@@ -8,7 +8,7 @@ import {
   XMark,
   GitHubMark,
   DiscordMark,
-  githubUrl,
+  useGithubWebUrl,
   twitterUrl,
   discordUrl,
 } from "./shared";
@@ -16,6 +16,7 @@ import { useLocale, locales, localeLabels } from "../i18n";
 
 export function LandingFooter() {
   const { t, locale, setLocale } = useLocale();
+  const githubWebUrl = useGithubWebUrl();
   const user = useAuthStore((s) => s.user);
   const groups = Object.values(t.footer.groups);
 
@@ -45,7 +46,7 @@ export function LandingFooter() {
                 <XMark className="size-4" />
               </Link>
               <Link
-                href={githubUrl}
+                href={githubWebUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="text-white/40 transition-colors hover:text-white"

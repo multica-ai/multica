@@ -1,4 +1,4 @@
-import { HELPER_DESCRIPTION, HELPER_INSTRUCTIONS } from "./helper-instructions";
+import { HELPER_DESCRIPTION, getHelperInstructions } from "./helper-instructions";
 
 const HELPER_AGENT_NAME = "Multica Helper";
 
@@ -71,7 +71,7 @@ ${HELPER_DESCRIPTION.en}
 
 **Instructions**
 \`\`\`md
-${HELPER_INSTRUCTIONS.en}
+${getHelperInstructions("en")}
 \`\`\`
 
 ## 4. Save → assign an issue
@@ -113,7 +113,7 @@ ${HELPER_DESCRIPTION.zh}
 
 **指令**
 \`\`\`md
-${HELPER_INSTRUCTIONS.zh}
+${getHelperInstructions("zh")}
 \`\`\`
 
 ## 4. 保存 → 分派 issue
@@ -155,7 +155,7 @@ ${HELPER_DESCRIPTION.ko}
 
 **Instructions**
 \`\`\`md
-${HELPER_INSTRUCTIONS.ko}
+${getHelperInstructions("ko")}
 \`\`\`
 
 ## 4. 저장 → issue 배정
@@ -197,7 +197,7 @@ ${HELPER_DESCRIPTION.ja}
 
 **Instructions**
 \`\`\`md
-${HELPER_INSTRUCTIONS.ja}
+${getHelperInstructions("ja")}
 \`\`\`
 
 ## 4. 保存 → issue を割り当てる

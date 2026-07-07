@@ -39,16 +39,29 @@ function resetConfigStore() {
     daemonServerUrl: "",
     daemonAppUrl: "",
     workspaceCreationDisabled: false,
+    githubRepo: "",
+    githubBranch: "",
   });
 }
 
 function renderDialog(config?: {
   daemonServerUrl?: string;
   daemonAppUrl?: string;
+  githubRepo?: string;
+  githubBranch?: string;
 }) {
   resetConfigStore();
-  if (config) {
-    configStore.getState().setDaemonConfig(config);
+  if (config?.daemonServerUrl || config?.daemonAppUrl) {
+    configStore.getState().setDaemonConfig({
+      daemonServerUrl: config.daemonServerUrl,
+      daemonAppUrl: config.daemonAppUrl,
+    });
+  }
+  if (config?.githubRepo || config?.githubBranch) {
+    configStore.getState().setGithubConfig({
+      githubRepo: config.githubRepo,
+      githubBranch: config.githubBranch,
+    });
   }
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -76,6 +89,17 @@ describe("ConnectRemoteDialog", () => {
     );
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://multica.ai",
+    );
+  });
+
+  it("uses fork install command from github config", () => {
+    const { baseElement } = renderDialog({
+      githubRepo: "Git-on-my-level/multica",
+      githubBranch: "main",
+    });
+
+    expect(baseElement).toHaveTextContent(
+      "curl -fsSL https://raw.githubusercontent.com/Git-on-my-level/multica/main/scripts/install.sh | bash",
     );
   });
 

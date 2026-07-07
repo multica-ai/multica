@@ -1,6 +1,12 @@
+import { githubWebUrl, DEFAULT_GITHUB_REPO } from "@multica/core/constants/github";
+import { useGithubConfig } from "@multica/core/github/config";
 import { cn } from "@multica/ui/lib/utils";
 
-export const githubUrl = "https://github.com/multica-ai/multica";
+export const githubUrl = githubWebUrl(DEFAULT_GITHUB_REPO);
+
+export function useGithubWebUrl(): string {
+  return useGithubConfig().webUrl;
+}
 export const twitterUrl = "https://x.com/MulticaAI";
 export const discordUrl = "https://discord.gg/W8gYBn226t";
 

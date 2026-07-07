@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useLocale } from "../i18n";
-import { GitHubMark, githubUrl } from "./shared";
+import { GitHubMark, useGithubWebUrl } from "./shared";
 
 export function OpenSourceSection() {
   const { t } = useLocale();
+  const githubWebUrl = useGithubWebUrl();
 
   return (
     <section id="open-source" className="bg-white text-[#0a0d12]">
@@ -26,7 +27,7 @@ export function OpenSourceSection() {
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href={githubUrl}
+                href={githubWebUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2.5 rounded-[12px] bg-[#0a0d12] px-5 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#0a0d12]/88"
