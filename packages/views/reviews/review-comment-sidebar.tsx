@@ -162,7 +162,7 @@ export function ReviewCommentSidebar({
                               onSeek(comment.start_time);
                             }}
                           >
-                            {new Date(comment.start_time * 1000).toISOString().substr(14, 5)} - {new Date(comment.end_time * 1000).toISOString().substr(14, 5)}
+                            {new Date(comment.start_time * 1000).toISOString().substring(14, 19)} - {new Date(comment.end_time * 1000).toISOString().substring(14, 19)}
                           </span>
                         )}
                       </div>
@@ -345,7 +345,7 @@ export function ReviewCommentSidebar({
             {asset.asset_type === "video" && (
               <div className="flex justify-between items-center bg-muted p-2 rounded border border-border">
                 <span className="text-xs text-muted-foreground font-medium">
-                  {new Date(currentTime * 1000).toISOString().substr(14, 5)}
+                  {new Date(currentTime * 1000).toISOString().substring(14, 19)}
                 </span>
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors">
