@@ -563,6 +563,22 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
+	// If the same Feishu app (app_id) was previously bound to a DIFFERENT
+	// agent in this workspace and later revoked, that revoked row still
+	// holds the (channel_type, config->>'app_id') unique index slot and
+	// blocks the UpsertChannelInstallation INSERT below. Remove the
+	// revoked placeholder first — the transaction wraps both the delete
+	// and the upsert so a failure between them rolls back cleanly. The
+	// current agent (sess.agentID) is excluded: re-connecting the SAME
+	// agent reactivates its own revoked row in place via the upsert's
+	// ON CONFLICT, keeping its installation_id and every binding intact.
+	if err := qtx.RemoveRevokedInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
+		s.cfg.Logger.Warn("lark registration: cleanup revoked installation",
+			"session_id", sess.id, "err", err)
+		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		return
+	}
+
 	inst, err := qtx.UpsertLarkInstallation(ctx, UpsertInstallationParams{
 		WorkspaceID:        sess.workspaceID,
 		AgentID:            sess.agentID,

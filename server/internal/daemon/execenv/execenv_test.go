@@ -858,6 +858,15 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"Do NOT end your turn while background tasks",
 				"wait for a future notification/reminder",
 				"run the work synchronously instead",
+				// Hardened pins (MUL-4140): the mechanism that slipped
+				// through in MUL-4091 was a turn ending cleanly with a
+				// "standing by, I'll report when CI finishes" message and
+				// no follow-up wakeup. These pins forbid that shape.
+				"Never background-and-yield",
+				"foreground tool call that blocks",
+				"gh run watch",
+				"running in the background so you can keep working",
+				"standing by",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
@@ -2002,6 +2011,53 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("plugin cache skill content = %q", data)
+	}
+}
+
+func TestPrepareCodexHomeCopiesRelativeModelCatalog(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "cc-switch-model-catalog.json"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "cc-switch-model-catalog.json"), []byte(`{"models":[{"model":"deepseek-v4-flash"}]}`), 0o644); err != nil {
+		t.Fatalf("write shared model catalog: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "cc-switch-model-catalog.json"))
+	if err != nil {
+		t.Fatalf("read per-task model catalog: %v", err)
+	}
+	if string(data) != `{"models":[{"model":"deepseek-v4-flash"}]}` {
+		t.Errorf("per-task model catalog = %q", data)
+	}
+}
+
+func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "missing-catalog.json"`), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHome(codexHome, testLogger())
+	if err == nil {
+		t.Fatal("expected prepareCodexHome to fail for missing model catalog")
+	}
+	for _, want := range []string{"model_catalog_json", "missing-catalog.json", filepath.Join(sharedHome, "missing-catalog.json")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
 	}
 }
 

@@ -43,6 +43,30 @@ describe("newSessionDraftKey", () => {
   });
 });
 
+describe("chat store — open/closed default", () => {
+  it("starts closed when no preference is stored", () => {
+    const store = createChatStore({ storage: memStorage() });
+    expect(store.getState().isOpen).toBe(false);
+  });
+
+  it("honours an explicit stored 'open' preference", () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:isOpen", "true");
+    const store = createChatStore({ storage });
+    expect(store.getState().isOpen).toBe(true);
+  });
+
+  it("persists a toggle so the choice survives reload", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    store.getState().setOpen(true);
+    expect(storage.getItem("multica:chat:isOpen")).toBe("true");
+
+    const reloaded = createChatStore({ storage });
+    expect(reloaded.getState().isOpen).toBe(true);
+  });
+});
+
 describe("chat store — draft attachments", () => {
   let store: ReturnType<typeof createChatStore>;
 

@@ -4,8 +4,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
+import { defaultStorage } from "../platform/storage";
+import { workspaceKeys } from "../workspace/queries";
+import {
+  markWorkspaceDeletePending,
+  unmarkWorkspaceDeletePending,
+} from "../workspace/pending-delete";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
 vi.mock("../platform/workspace-storage", () => ({
@@ -185,5 +191,61 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "messages-page"]);
     expect(calls).toContainEqual(["chat", "pending-task"]);
     expect(calls).toContainEqual(["task-messages"]);
+  });
+});
+
+describe("useRealtimeSync — workspace:deleted self-initiated suppression", () => {
+  let qc: QueryClient;
+  let stores: RealtimeSyncStores;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    stores = createStores();
+  });
+
+  afterEach(() => {
+    unmarkWorkspaceDeletePending("ws-2");
+    localStorage.clear();
+  });
+
+  // getCurrentWsId is mocked to "ws-1" at module level, so deleting "ws-2"
+  // never enters the relocate branch — these tests only exercise the
+  // storage-cleanup path, which is the observable difference between a
+  // handled and a suppressed event.
+  const dispatchWorkspaceDeleted = (ws: WSClient, workspaceId: string) => {
+    const call = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "workspace:deleted");
+    expect(call).toBeDefined();
+    (call![1] as (p: unknown) => void)({ workspace_id: workspaceId });
+  };
+
+  it("ignores the event for a delete this client initiated", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    qc.setQueryData(workspaceKeys.list(), [{ id: "ws-2", slug: "delete-me" }]);
+    defaultStorage.setItem("multica_issue_draft:delete-me", "draft");
+
+    markWorkspaceDeletePending("ws-2");
+    dispatchWorkspaceDeleted(ws, "ws-2");
+
+    // useDeleteWorkspace.onSuccess owns cleanup for self-initiated deletes;
+    // the handler must not have touched storage.
+    expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
+  });
+
+  it("still cleans up for a delete initiated elsewhere", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    qc.setQueryData(workspaceKeys.list(), [{ id: "ws-2", slug: "delete-me" }]);
+    defaultStorage.setItem("multica_issue_draft:delete-me", "draft");
+
+    dispatchWorkspaceDeleted(ws, "ws-2");
+
+    expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBeNull();
   });
 });

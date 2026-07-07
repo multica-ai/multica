@@ -20,11 +20,24 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    composio_toolkit_allowlist, permission_mode
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16,
+    sqlc.narg('composio_toolkit_allowlist')::text[],
+    COALESCE(sqlc.narg('permission_mode'), 'private')
+)
 RETURNING *;
 
 -- name: UpdateAgent :one
+-- composio_toolkit_allowlist is set wholesale: the API layer is responsible
+-- for normalising the request payload to either (a) the new slug list — sent
+-- here verbatim — or (b) an empty array to explicitly disable Composio.
+-- Distinguish "field omitted" (preserve) from "explicit clear" via
+-- ClearAgentComposioToolkitAllowlist below, mirroring the
+-- thinking_level / mcp_config two-query pattern: COALESCE can't restore NULL.
 UPDATE agent SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -33,6 +46,7 @@ UPDATE agent SET
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
+    permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
@@ -41,7 +55,19 @@ UPDATE agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentComposioToolkitAllowlist :one
+-- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based
+-- UpdateAgent cannot set the column back to NULL — sending an empty array
+-- through there would persist `{}` (still a non-NULL, equivalent to "no
+-- toolkits" but distinct from "field never configured"). The API uses this
+-- dedicated query when the agent owner removes every toolkit; subsequent
+-- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
+UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -134,10 +160,17 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
+-- head_sha stamps the commit under review into the task's context JSONB so the
+-- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
+-- against an OLD head apart from a fresh request against a NEW head (TEN-356).
+-- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
+-- issues with no linked PR. Issue-linked tasks never hit quick-create context
+-- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
+-- key rides harmlessly alongside.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id
+    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -145,7 +178,15 @@ VALUES (
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
-    sqlc.narg(squad_id)
+    sqlc.narg(squad_id),
+    CASE
+        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
+        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
+        ELSE NULL
+    END,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 )
 RETURNING *;
 
@@ -153,8 +194,16 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
+    runtime_mcp_overlay, runtime_connected_apps
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
+)
 RETURNING *;
 
 -- name: CreateDeferredAgentTask :one
@@ -198,12 +247,18 @@ WHERE id = $1 AND issue_id IS NULL;
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
 -- continues to recognise it as a leader task. Inheriting squad_id also keeps
 -- the squad-leader briefing injection working across retries.
+--
+-- originator_user_id is inherited so the Composio overlay decision sees the
+-- same top-of-chain human across the retry: the user behind the original
+-- run has not changed. The Composio overlay follows the agent's invocation
+-- permission and uses the agent owner's connection (MUL-3963); originator is
+-- carried for A2A/audit, not as an originator == agent.owner_id gate.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -213,7 +268,10 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
-    p.squad_id
+    p.squad_id,
+    p.originator_user_id,
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -510,11 +568,37 @@ RETURNING *;
 
 -- name: FailStaleTasks :many
 -- Fails tasks stuck in dispatched/running beyond the given thresholds.
--- Handles cases where the daemon is alive but the task is orphaned
--- (e.g. agent process hung, daemon failed to report completion).
--- Dispatched tasks with an active prepare lease are excluded because the
--- daemon is still proving liveness while resolving/cache/preparing startup
--- inputs before StartTask.
+--
+-- Each branch pairs a wall-clock deadline with a task-appropriate liveness
+-- signal, so the sweeper only kills tasks whose owning daemon is no longer
+-- proving it is alive:
+--
+--   * Dispatched: `prepare_lease_expires_at` is refreshed every 15s by the
+--     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
+--     A live lease excludes the row.
+--
+--   * Running: no per-task lease is renewed once StartTask fires, so we key
+--     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
+--     which the daemon bumps every ~15s while it is up. A running task whose
+--     runtime is `online` AND whose `last_seen_at` is within
+--     @runtime_stale_secs is treated as alive and is NOT killed by this
+--     wall-clock backstop, even after `started_at` exceeds the running
+--     timeout. This is what lets healthy multi-hour research / training runs
+--     survive on self-hosted deployments (MUL-4107): the daemon side is
+--     bounded only by inactivity watchdogs (idle / per-tool), so the
+--     server-side wall clock must not shadow that with a coarser cap.
+--
+-- The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
+-- (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
+-- `FailTasksForOfflineRuntimes` in the same tick). The wall-clock branch
+-- here is a defensive backstop for pathological cases where a runtime row
+-- somehow retains status='online' with a stale DB heartbeat for longer than
+-- the wall clock allows.
+--
+-- runtime_id IS NULL: a running row with no runtime is by definition not
+-- proving liveness, so the wall clock is allowed to fire — same shape as
+-- the legacy pure-wall-clock behavior for that (rare / historical) case.
+--
 -- waiting_local_directory rows are intentionally excluded: the daemon owns
 -- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
 -- of this task can exceed the dispatch / running timeouts without being
@@ -529,7 +613,16 @@ WHERE (
     AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision)
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
   )
-   OR (status = 'running' AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision))
+   OR (
+    status = 'running'
+    AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision)
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime r
+      WHERE r.id = agent_task_queue.runtime_id
+        AND r.status = 'online'
+        AND r.last_seen_at >= now() - make_interval(secs => @runtime_stale_secs::double precision)
+    )
+  )
 RETURNING *;
 
 -- name: ExpireStaleQueuedTasks :many
@@ -607,27 +700,42 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 -- name: HasPendingTaskForIssueAndAgent :one
 -- Returns true if a specific agent already has a queued or dispatched task
 -- for the given issue. Used by @mention trigger dedup.
+--
+-- head_sha keys the dedup on the commit under review (TEN-356): when a caller
+-- passes a non-empty head_sha, a pending task only dedups if it was stamped
+-- with the SAME head_sha at enqueue time. If HEAD advanced since the pending
+-- task's run began (its context head_sha differs, or predates the stamp and is
+-- NULL), the dedup MISSES and a fresh review enqueues against the new HEAD.
+-- When head_sha is empty/NULL (issue has no linked PR) the check falls back to
+-- the pre-TEN-356 (issue_id, agent_id) key so non-PR issues keep coalescing.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
+  AND (
+    COALESCE(sqlc.narg('head_sha')::text, '') = ''
+    OR context->>'head_sha' = sqlc.narg('head_sha')::text
+  );
 
 -- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
 -- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
 -- current comment being edited. Edit preview needs this because save cancels
 -- that comment's old queued/dispatched tasks before re-computing triggers.
+-- Carries the same head_sha dedup key as HasPendingTaskForIssueAndAgent (TEN-356).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = @issue_id
   AND agent_id = @agent_id
   AND status IN ('queued', 'dispatched')
-  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid;
+  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
+  AND (
+    COALESCE(sqlc.narg('head_sha')::text, '') = ''
+    OR context->>'head_sha' = sqlc.narg('head_sha')::text
+  );
 
--- name: GetLatestTaskIsLeaderForIssueAndAgent :one
--- Returns the is_leader_task flag of the agent's most recent task on this
--- issue, or NULL if the agent has never had a task on this issue. Used by
--- the squad-leader self-trigger guard to tell whether the agent's last
--- activity on the issue was in the leader role or the worker role (an
--- agent that holds both roles in a squad would otherwise be skipped by
--- the role-blind authorID == leaderID check).
-SELECT is_leader_task FROM agent_task_queue
+-- name: GetLatestTaskRoleForIssueAndAgent :one
+-- Returns the role markers from the agent's most recent task on this issue.
+-- Used by the squad-leader self-trigger guard to tell apart leader tasks,
+-- same-squad worker tasks, and generic agent tasks such as direct mentions or
+-- thread-parent replies.
+SELECT is_leader_task, squad_id FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
 ORDER BY created_at DESC
 LIMIT 1;

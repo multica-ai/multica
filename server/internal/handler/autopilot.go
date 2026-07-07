@@ -971,31 +971,10 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// autopilot_subscriber carries no DB-level foreign key/cascade (repo rule:
-	// referential cleanup lives in the application layer), so delete the
-	// subscriber template alongside the autopilot in one transaction. Without
-	// this, deleting an autopilot would orphan its subscriber rows.
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-
-	if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), idUUID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
-		return
-	}
-	if err := qtx.DeleteAutopilotCollaboratorsForAutopilot(r.Context(), idUUID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
-		return
-	}
-	if err := qtx.DeleteAutopilot(r.Context(), idUUID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
+	// Product "delete" is archival: stop future triggers and hide the
+	// autopilot from default lists while preserving runs, tasks, webhook
+	// deliveries, subscribers, and collaborators as execution history.
+	if err := h.Queries.ArchiveAutopilot(r.Context(), idUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
@@ -1380,7 +1359,7 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 		// Private-leader gate: the member configuring the autopilot must have
 		// access to the private leader, same as validateAssigneePair.
 		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
-		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+		if !h.canInvokeAgent(r.Context(), leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), util.UUIDToString(workspaceID)) {
 			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
 			return false
 		}

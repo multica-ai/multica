@@ -450,6 +450,24 @@ describe("AppConfigSchema cdn_signed drift", () => {
     const parsed = AppConfigSchema.parse({ cdn_signed: true });
     expect(parsed.cdn_signed).toBe(true);
   });
+
+  it("parses frontend feature flag decisions", () => {
+    const parsed = AppConfigSchema.parse({
+      feature_flags: {
+        composio_mcp_apps: true,
+        malformed_future_flag: "yes",
+      },
+    });
+    expect(parsed.feature_flags).toEqual({
+      composio_mcp_apps: true,
+      malformed_future_flag: false,
+    });
+  });
+
+  it("defaults malformed feature_flags to an empty object", () => {
+    const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
+    expect(parsed.feature_flags).toEqual({});
+  });
 });
 
 describe("InboxUnreadSummarySchema", () => {

@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 14개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI 등 14개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,83 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.3.40",
+          date: "2026-07-07",
+          title: "페이지 내 찾기, 다운로드 이어받기, 여러 수정",
+          changes: [],
+          features: [
+            "이제 명령줄에서 바로 워크스페이스 멤버를 초대할 수 있습니다.",
+            "Issue 상세에서 페이지 내 찾기(Ctrl+F)로 일치 항목으로 이동하고 강조할 수 있습니다.",
+            "첨부 파일 다운로드가 중단되어도 처음부터가 아니라 중단된 지점부터 이어받습니다.",
+          ],
+          improvements: [
+            "채팅의 진행 중 태스크 표시가 더 빠르게 갱신되고 백그라운드 요청도 줄었습니다.",
+            "더 많은 에이전트 프로바이더에서 MCP를 설정할 수 있습니다.",
+            "워크스페이스를 열 때 채팅 창이 자동으로 열리지 않으며, 버튼으로 직접 열 수 있습니다.",
+          ],
+          fixes: [
+            "같은 컴퓨터에서 병렬로 실행되는 여러 에이전트 태스크가 서로 간섭하지 않습니다.",
+            "Feishu 봇을 같은 에이전트에 다시 연결해도 멤버 계정 연동과 채팅이 사라지지 않습니다.",
+            "로그인 후 이미 워크스페이스가 있으면 새 워크스페이스 만들기 페이지로 잘못 이동하지 않습니다.",
+            "워크스페이스 삭제는 서버 확인을 기다린 뒤 이동하고, 실패하면 현재 화면에 그대로 머뭅니다.",
+            "root나 sudo로 Claude를 실행할 때 그냥 실패하지 않고 명확한 오류를 표시합니다.",
+            "프로파일이 사라진 고아 런타임을 삭제할 수 있습니다.",
+          ],
+        },
+        {
+          version: "0.3.39",
+          date: "2026-07-06",
+          title: "Qoder·TRAE CLI를 커스텀 런타임 베이스로, 스쿼드와 안정성 수정",
+          changes: [],
+          features: [
+            "Qoder를 베이스로 한 커스텀 런타임을 만들 수 있습니다. Qoder CN 사용자도 바로 이용할 수 있습니다.",
+            "ByteDance TRAE CLI도 커스텀 런타임의 베이스로 선택할 수 있습니다.",
+          ],
+          improvements: [
+            "런타임 프로바이더 페이지와 공개 문서를 Qoder·TRAE CLI를 포함한 현재 내장 런타임 전체 목록으로 갱신했고, 모든 언어 사이트에 반영했습니다.",
+          ],
+          fixes: [
+            "프라이빗 리더 스쿼드에서 하위 Issue가 에이전트에 의해 종료될 때, 다단계 스쿼드 흐름이 첫 단계에서 멈추지 않습니다.",
+            "상위 Issue의 '하위 완료' 알림이 중간 단계를 최종 단계로 잘못 표기하지 않고, 리더가 '다음 단계 이어가기'와 '마무리' 중에서 직접 고를 수 있습니다.",
+            "스쿼드 리더가 마무리 작업을 하는 동안 로컬 저장소 잠금을 잡지 않도록 바뀌어, 같은 저장소에서 여러 에이전트가 동시에 작업할 수 있습니다.",
+            "장시간 실행되는 에이전트 태스크(리서치·훈련·코드 생성)가 로컬 데몬이 살아 있는 한 서버 측에서 중단되지 않습니다.",
+            "셀프호스트 환경의 검색이 멈추지 않고, 큰 워크스페이스에서도 첫 검색부터 결과를 빠르게 돌려줍니다.",
+            "Issue·코멘트 에디터에 긴 스택트레이스나 비정상적으로 긴 문자열을 붙여 넣어도 화면이 얼지 않습니다.",
+            "Claude와 함께 설치된 환경에서 Antigravity 에이전트가 실행에 실패하지 않습니다.",
+            "Windows 에이전트에서도 Browser MCP가 정상적으로 실행됩니다.",
+            "Codex 에이전트의 MCP 설정이 다시 정확히 적용됩니다.",
+            "Pi 에이전트의 태스크 결과에 중간 사고가 섞이지 않고 최종 답변만 표시됩니다.",
+            "오토파일럿이 실행이 예상보다 오래 걸릴 때 같은 Issue를 연속으로 두 번 실행하지 않습니다.",
+            "Issue의 PR 목록에는 실제로 그 Issue를 대상으로 삼는 PR만 표시되고, 본문에서 'Related to MUL-…' 정도로만 언급한 PR은 숨겨집니다.",
+            "Issue 액션 메뉴의 중첩되어 있던 'More' 항목이 'Relations(관계)'로 이름이 바뀌어, 열어 보지 않아도 안에 무엇이 있는지 알 수 있습니다.",
+            "채팅, Issue 생성, Issue 본문, 피드백 등 모든 첨부 업로드 버튼에서 시스템 파일 대화상자로 여러 파일을 한 번에 선택할 수 있습니다.",
+          ],
+        },
+        {
+          version: "0.3.36",
+          date: "2026-07-03",
+          title: "Transcript 뷰 상태 기억, Helm 외부 PostgreSQL 지원, 안정성 수정",
+          changes: [],
+          features: [
+            "태스크 Transcript가 필터·펼침 상태를 기억해, 같은 실행을 다시 열 때 그대로 복원합니다.",
+            "셀프호스트(Helm): 새 `postgres.external.enabled` 토글로 Multica를 외부 관리형 PostgreSQL(RDS, CNPG, Cloud SQL, Neon 등)에 연결하고 내장 DB를 건너뛸 수 있습니다.",
+          ],
+          fixes: [
+            "댓글 초안에 빈 `1. ` 항목이 있을 때, 재로딩 후 캐럿이 아래 블록에 갇히던 문제를 고쳤습니다.",
+            "로그인 셸의 훅 래퍼가 앞에 있어도, 데몬이 올바른 에이전트 CLI(Claude, Codex 등)를 정확히 발견합니다.",
+            "새 커밋이 푸시되면 PR 리뷰 에이전트가 다시 실행되며, 이전 커밋의 결과를 그대로 재사용하지 않습니다.",
+            "서버 파드 재시작 사이에 발행된 실시간 이벤트가 조용히 유실되지 않도록, 5분 경계 리플레이 윈도우로 보완합니다.",
+            "Kiro ACP 런타임 태스크 사용량이 사용량 로그에 다시 정확히 기록됩니다.",
+            "런타임이 오프라인이어도, Autopilot의 'Issue 생성' 실행이 실행 목록에 계속 표시됩니다.",
+            "본문이 첨부·블록·rich_text에만 있는 Slack 알림 카드(Grafana, Incoming Webhook 등)를 폴백 문구 대신 첨부 본문에서 읽습니다.",
+            "Codex 에이전트 태스크가 태스크 홈에서 데몬의 Codex 모델 카탈로그를 다시 볼 수 있습니다. (커뮤니티 보고)",
+            "레거시 `/squads/…`, `/usage` 웹 경로가 404 대신 현재 대응 페이지로 리다이렉트됩니다.",
+            "데스크톱 앱의 저장 대화상자가 `download.txt`로 폴백하지 않고 실제 첨부 파일명을 사용합니다. (커뮤니티 기여)",
+            "스쿼드 협업: 리더가 mention으로 디스패치한 워커 에이전트가 완료 댓글을 HTTP API로 게시할 때, 프라이빗 스쿼드 리더가 정확히 깨어나며, 리더 → 워커 → 리더 루프가 첫 홉에서 멈추지 않습니다.",
+            "호스트의 Claude CLI가 `--effort` 플래그 이전 버전이어도 태스크가 하드 실패하지 않고, 데몬이 effort 플래그를 경고와 함께 제거하고 기본 실행으로 폴백합니다.",
+          ],
+        },
         {
           version: "0.3.35",
           date: "2026-07-02",

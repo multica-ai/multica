@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -709,14 +710,6 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 
-	rows, err := h.DB.Query(ctx, sqlQuery, args...)
-	if err != nil {
-		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
-		writeError(w, http.StatusInternalServerError, "failed to search projects")
-		return
-	}
-	defer rows.Close()
-
 	type projectSearchRow struct {
 		project     db.Project
 		totalCount  int64
@@ -724,31 +717,42 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var results []projectSearchRow
-	for rows.Next() {
-		var row projectSearchRow
-		if err := rows.Scan(
-			&row.project.ID,
-			&row.project.WorkspaceID,
-			&row.project.Title,
-			&row.project.Description,
-			&row.project.Icon,
-			&row.project.Status,
-			&row.project.Priority,
-			&row.project.LeadType,
-			&row.project.LeadID,
-			&row.project.CreatedAt,
-			&row.project.UpdatedAt,
-			&row.totalCount,
-			&row.matchSource,
-		); err != nil {
-			slog.Warn("search projects scan failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to search projects")
+	err := runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
+		for rows.Next() {
+			var row projectSearchRow
+			if err := rows.Scan(
+				&row.project.ID,
+				&row.project.WorkspaceID,
+				&row.project.Title,
+				&row.project.Description,
+				&row.project.Icon,
+				&row.project.Status,
+				&row.project.Priority,
+				&row.project.LeadType,
+				&row.project.LeadID,
+				&row.project.CreatedAt,
+				&row.project.UpdatedAt,
+				&row.totalCount,
+				&row.matchSource,
+			); err != nil {
+				return fmt.Errorf("scan: %w", err)
+			}
+			results = append(results, row)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		// Statement-timeout surfaces as SQLSTATE 57014 — same
+		// fail-fast contract as SearchIssues (see runSearchQuery).
+		if isSearchStatementTimeout(err) {
+			slog.Warn("search projects timed out",
+				"workspace_id", workspaceID,
+				"query", q,
+				"timeout", searchStatementTimeout)
+			writeError(w, http.StatusServiceUnavailable, "search timed out; please refine your query or try again")
 			return
 		}
-		results = append(results, row)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("search projects rows error", "error", err)
+		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
 		return
 	}

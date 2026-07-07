@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  Search,
   X,
 } from "lucide-react";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -19,6 +20,7 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -85,6 +87,8 @@ export function AgentListToolbar({
   scope,
   onScopeChange,
   scopeCounts,
+  search,
+  onSearchChange,
   filters,
   onToggleFilter,
   onClearFilters,
@@ -102,6 +106,8 @@ export function AgentListToolbar({
   onScopeChange: (scope: AgentsScope) => void;
   /** Per-scope totals from the FULL set — scope counts ignore filters. */
   scopeCounts: Record<AgentsScope, number>;
+  search: string;
+  onSearchChange: (value: string) => void;
   filters: AgentListFilters;
   onToggleFilter: (key: keyof AgentListFilters, value: string) => void;
   onClearFilters: () => void;
@@ -122,6 +128,7 @@ export function AgentListToolbar({
 
   const activeCount = countActiveFilterDimensions(filters);
   const hasActiveFilters = activeCount > 0;
+  const hasSearch = search.trim().length > 0;
 
   // Option lists with counts, derived from the scope's unfiltered rows so
   // toggling one dimension doesn't make the others' options vanish.
@@ -184,11 +191,21 @@ export function AgentListToolbar({
   return (
     <div className="h-12 shrink-0 overflow-x-auto px-5 [-webkit-overflow-scrolling:touch]">
       <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        {/* Left: scope buttons + result count. Scope mixes the ownership lens
-          (mine/all) with the archived lifecycle stage; no search box (scope
-          partitions the small set). Button styling and the <md dropdown
-          collapse follow the issues header's scope buttons. */}
+        {/* Left: local search + scope buttons + result count. Scope mixes the
+          ownership lens (mine/all) with the archived lifecycle stage. Button
+          styling and the <md dropdown collapse follow the issues header's
+          scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
+        <div className="relative hidden shrink-0 md:block">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t(($) => $.page.search_placeholder)}
+            className="h-8 w-56 pl-8 text-sm"
+          />
+        </div>
+
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {AGENT_SCOPES.map((s) => (
             <Button
@@ -240,7 +257,7 @@ export function AgentListToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {hasActiveFilters && (
+        {(hasActiveFilters || hasSearch) && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
             className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"

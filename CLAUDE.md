@@ -36,7 +36,9 @@ Keep server state and client state separate.
 - React Context is for platform plumbing only, such as `WorkspaceIdProvider` and `NavigationProvider`.
 - Only auth/workspace stores may call `api.*` directly. Other server interaction belongs in queries/mutations.
 - Workspace-scoped query keys must include `wsId`.
-- Mutations should be optimistic by default: patch locally, send request, roll back on failure, invalidate on settle.
+- Optimistic updates only when ALL hold: outcome locally predictable, user stays on the same screen (no navigation), failure is rare, rollback is trivial. Canonical: status/assignee/toggle field patches — patch determinate caches, roll back on failure, invalidate uncertain projections on settle.
+- Flows that navigate or confirm (create, delete, leave) must await the server before navigating or cleaning up; never optimistically remove an entity from cache.
+- Chat/message send uses the pending-message pattern: render immediately with a visible pending state and retry on failure, not silent optimism.
 - WebSocket events invalidate or patch Query cache; they never write directly to Zustand stores.
 - Persist durable preferences/drafts/layout. Do not persist server data or ephemeral UI state.
 - Zustand selectors must return stable references. Do not return freshly allocated objects/arrays from selectors without shallow comparison.

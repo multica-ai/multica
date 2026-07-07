@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestCreateComment_SquadMentionStampsSquadIDOnLeaderTask locks the enqueue
@@ -116,7 +117,7 @@ func TestCreateRetryTask_InheritsSquadID(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
 	})
 
-	child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
+	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: util.MustParseUUID(parentID)})
 	if err != nil {
 		t.Fatalf("CreateRetryTask: %v", err)
 	}

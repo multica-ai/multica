@@ -420,6 +420,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
 	"--log-file":                     blockedWithValue,  // daemon needs it for session capture
+	"--settings":                     blockedWithValue,  // Claude Code-only flag; agy rejects it
 }
 
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy

@@ -88,6 +88,8 @@
     "./gitlab/queries": "./gitlab/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
+    "./composio": "./composio/index.ts",
+    "./composio/queries": "./composio/queries.ts",
     "./slack": "./slack/index.ts",
     "./slack/queries": "./slack/queries.ts",
     "./feedback": "./feedback/index.ts",
