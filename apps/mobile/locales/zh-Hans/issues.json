@@ -1,0 +1,59 @@
+{
+  "status_label": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked",
+    "cancelled": "Cancelled"
+  },
+  "priority_label": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "error": {
+    "load_prefix": "加载 issue 失败：",
+    "unknown": "未知错误",
+    "retry": "重试"
+  },
+  "my_issues": {
+    "tab_title": "我的 issue",
+    "scope": {
+      "assigned": "已分配",
+      "created": "已创建",
+      "agents": "智能体"
+    },
+    "empty": {
+      "no_active_filters": "没有符合当前筛选条件的 issue。",
+      "assigned": "没有分配给你的 issue。",
+      "created": "你还没有创建任何 issue。",
+      "agents": "还没有分配给你的智能体或小队的 issue。"
+    }
+  },
+  "all_issues": {
+    "scope": {
+      "all": "全部",
+      "members": "成员",
+      "agents": "智能体"
+    },
+    "empty": {
+      "no_active_filters": "没有符合当前筛选条件的 issue。",
+      "all": "此工作区还没有 issue。",
+      "members": "没有分配给成员的 issue。",
+      "agents": "没有分配给智能体或小队的 issue。"
+    }
+  },
+  "filter_button": {
+    "accessibility_label": "筛选"
+  },
+  "filter": {
+    "title": "筛选",
+    "reset": "重置",
+    "status_section": "状态",
+    "priority_section": "优先级"
+  }
+}

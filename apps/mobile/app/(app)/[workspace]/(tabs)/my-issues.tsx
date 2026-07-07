@@ -19,6 +19,7 @@ import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -45,24 +46,25 @@ import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
-// Mobile pill row has tight width on SE3 (375pt). Three pills + Filter icon
-// must fit in 343pt usable space, so the agents scope renders "Agents" — the
-// full "Agents and Squads" label (~135pt) blows past safe limits and breaks
-// under Dynamic Type. Semantics unchanged: same backend predicate
-// (`involves_user_id`, MUL-2397) covers owned agents + related squads; the
-// empty state copy still says "agents or squads".
-const SCOPES: { value: MyIssuesScope; label: string }[] = [
-  { value: "assigned", label: "Assigned" },
-  { value: "created", label: "Created" },
-  { value: "agents", label: "Agents" },
-];
-
 type IssueSection = { status: IssueStatus; data: Issue[] };
 
 export default function MyIssues() {
+  const { t } = useTranslation("issues");
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+
+  // Mobile pill row has tight width on SE3 (375pt). Three pills + Filter icon
+  // must fit in 343pt usable space, so the agents scope renders "Agents" — the
+  // full "Agents and Squads" label (~135pt) blows past safe limits and breaks
+  // under Dynamic Type. Semantics unchanged: same backend predicate
+  // (`involves_user_id`, MUL-2397) covers owned agents + related squads; the
+  // empty state copy still says "agents or squads".
+  const SCOPES: { value: MyIssuesScope; label: string }[] = [
+    { value: "assigned", label: t("my_issues.scope.assigned") },
+    { value: "created", label: t("my_issues.scope.created") },
+    { value: "agents", label: t("my_issues.scope.agents") },
+  ];
 
   const scope = useMyIssuesViewStore((s) => s.scope);
   const setScope = useMyIssuesViewStore((s) => s.setScope);
@@ -126,7 +128,7 @@ export default function MyIssues() {
 
   return (
     <View className="flex-1 bg-background">
-      <Header title="My Issues" right={<HeaderActions />} />
+      <Header title={t("my_issues.tab_title")} right={<HeaderActions />} />
       <ScopeToolbar
         scopes={SCOPES}
         scope={scope}
@@ -151,19 +153,19 @@ export default function MyIssues() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("error.load_prefix")}{" "}
+            {error instanceof Error ? error.message : t("error.unknown")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("error.retry")}</Text>
           </Button>
         </View>
       ) : showEmptyState ? (
         <EmptyState
           message={
             hasActiveFilters
-              ? "No issues match the current filters."
-              : emptyMessageForScope(scope)
+              ? t("my_issues.empty.no_active_filters")
+              : emptyMessageForScope(t, scope)
           }
         />
       ) : (
@@ -214,13 +216,14 @@ function FilterButton({
   hasActiveFilters: boolean;
 }) {
   const { colorScheme } = useColorScheme();
+  const { t } = useTranslation("issues");
   return (
     <View style={{ position: "relative" }} className="ml-2">
       <Button
         variant="outline"
         size="sm"
         onPress={onPress}
-        accessibilityLabel="Filter"
+        accessibilityLabel={t("filter_button.accessibility_label")}
         className="w-9 px-0"
       >
         <Ionicons
@@ -360,14 +363,17 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-function emptyMessageForScope(scope: MyIssuesScope): string {
+function emptyMessageForScope(
+  t: (key: string) => string,
+  scope: MyIssuesScope,
+): string {
   switch (scope) {
     case "assigned":
-      return "No issues assigned to you.";
+      return t("my_issues.empty.assigned");
     case "created":
-      return "You haven't created any issues.";
+      return t("my_issues.empty.created");
     case "agents":
-      return "No issues assigned to your agents or squads yet.";
+      return t("my_issues.empty.agents");
   }
 }
 

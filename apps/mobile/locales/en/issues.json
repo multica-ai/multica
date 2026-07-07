@@ -1,0 +1,59 @@
+{
+  "status_label": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked",
+    "cancelled": "Cancelled"
+  },
+  "priority_label": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "error": {
+    "load_prefix": "Failed to load issues:",
+    "unknown": "unknown error",
+    "retry": "Retry"
+  },
+  "my_issues": {
+    "tab_title": "My Issues",
+    "scope": {
+      "assigned": "Assigned",
+      "created": "Created",
+      "agents": "Agents"
+    },
+    "empty": {
+      "no_active_filters": "No issues match the current filters.",
+      "assigned": "No issues assigned to you.",
+      "created": "You haven't created any issues.",
+      "agents": "No issues assigned to your agents or squads yet."
+    }
+  },
+  "all_issues": {
+    "scope": {
+      "all": "All",
+      "members": "Members",
+      "agents": "Agents"
+    },
+    "empty": {
+      "no_active_filters": "No issues match the current filters.",
+      "all": "No issues in this workspace.",
+      "members": "No issues assigned to a member.",
+      "agents": "No issues assigned to agents or squads."
+    }
+  },
+  "filter_button": {
+    "accessibility_label": "Filter"
+  },
+  "filter": {
+    "title": "Filter",
+    "reset": "Reset",
+    "status_section": "Status",
+    "priority_section": "Priority"
+  }
+}
