@@ -719,6 +719,58 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 	return items, nil
 }
 
+const listIssueDescendants = `-- name: ListIssueDescendants :many
+WITH RECURSIVE descendants AS (
+    SELECT id, workspace_id, parent_issue_id::uuid, 0::int AS depth
+    FROM multica_issue
+    WHERE parent_issue_id = $1 AND workspace_id = $2
+    UNION ALL
+    SELECT i.id, i.workspace_id, i.parent_issue_id, d.depth + 1
+    FROM multica_issue i
+    JOIN descendants d ON i.parent_issue_id = d.id
+    WHERE i.workspace_id = $2
+)
+SELECT id, workspace_id, parent_issue_id, depth FROM descendants
+ORDER BY depth DESC
+`
+
+type ListIssueDescendantsParams struct {
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+type ListIssueDescendantsRow struct {
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	Depth         int32       `json:"depth"`
+}
+
+func (q *Queries) ListIssueDescendants(ctx context.Context, arg ListIssueDescendantsParams) ([]ListIssueDescendantsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueDescendants, arg.ParentIssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueDescendantsRow{}
+	for rows.Next() {
+		var i ListIssueDescendantsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ParentIssueID,
+			&i.Depth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,

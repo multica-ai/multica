@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"errors"
 	"fmt"
 	"io"
@@ -2660,40 +2661,59 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
-	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
-
-	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
-
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
+	// Collect all descendants (recursive CTE, deepest-first) so we can
+	// cascade-delete them in the application layer, firing WS events and
+	// cleaning up attachments/tasks/autopilot runs for each.
+	descendants, err := h.Queries.ListIssueDescendants(r.Context(), db.ListIssueDescendantsParams{
+		ParentIssueID: issue.ID,
+		WorkspaceID:   issue.WorkspaceID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete issue")
-		return
+		slog.Warn("failed to list issue descendants for cascade delete", append(logger.RequestAttrs(r), "issue_id", id, "error", err)...)
 	}
 
-	// Cascade delete any pins pointing at this issue so the sidebar doesn't
-	// keep firing per-id GETs for a deleted issue (most returning 404).
-	if err := h.Queries.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
-		ItemType: "issue",
-		ItemID:   issue.ID,
-	}); err != nil {
-		slog.Warn("failed to cascade delete pins for deleted issue", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
+	// Build the deletion target list: descendants (deepest-first) then root.
+	type target struct {
+		id          pgtype.UUID
+		workspaceID pgtype.UUID
+	}
+	var targets []target
+	for _, d := range descendants {
+		targets = append(targets, target{id: d.ID, workspaceID: d.WorkspaceID})
+	}
+	targets = append(targets, target{id: issue.ID, workspaceID: issue.WorkspaceID})
+
+	var allAttachmentURLs []string
+	for _, t := range targets {
+		h.TaskService.CancelTasksForIssue(r.Context(), t.id)
+		h.Queries.FailAutopilotRunsByIssue(r.Context(), t.id)
+
+		urls, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), t.id)
+		allAttachmentURLs = append(allAttachmentURLs, urls...)
+
+		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+			ID:          t.id,
+			WorkspaceID: t.workspaceID,
+		}); err != nil {
+			slog.Warn("delete issue failed", "issue_id", uuidToString(t.id), "error", err)
+			continue
+		}
+
+		if err := h.Queries.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
+			ItemType: "issue",
+			ItemID:   t.id,
+		}); err != nil {
+			slog.Warn("failed to cascade delete pins for deleted issue", append(logger.RequestAttrs(r), "issue_id", uuidToString(t.id), "error", err)...)
+		}
+
+		actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(t.workspaceID))
+		h.publish(protocol.EventIssueDeleted, uuidToString(t.workspaceID), actorType, actorID, map[string]any{"issue_id": uuidToString(t.id)})
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	// Always emit the resolved UUID — frontend caches key by UUID, so an
-	// identifier-style payload ("MUL-123") would leave stale entries on
-	// other clients after an identifier-path delete.
+	h.deleteS3Objects(r.Context(), allAttachmentURLs)
+
 	resolvedID := uuidToString(issue.ID)
-	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
-	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
+	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID), "descendants", len(descendants))...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -3034,7 +3054,19 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	deleted := 0
+
+	// Collect all targets (root + descendants), deduplicating by ID.
+	type target struct {
+		id          pgtype.UUID
+		workspaceID pgtype.UUID
+		depth       int32 // CTE recursion depth: 0=direct child, 1=grandchild, etc.
+	}
+	seen := make(map[[16]byte]bool)
+	rootIDs := make(map[[16]byte]bool) // tracks original request IDs for response count
+	var targets []target
+
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -3048,29 +3080,70 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-		h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
+		if !seen[issueUUID.Bytes] {
+			seen[issueUUID.Bytes] = true
+			rootIDs[issueUUID.Bytes] = true
+			targets = append(targets, target{id: issue.ID, workspaceID: issue.WorkspaceID, depth: -1})
+		}
 
-		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
-		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
+		descendants, err := h.Queries.ListIssueDescendants(r.Context(), db.ListIssueDescendantsParams{
+			ParentIssueID: issue.ID,
+			WorkspaceID:   issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("failed to list issue descendants for batch cascade delete", append(logger.RequestAttrs(r), "issue_id", issueID, "error", err)...)
+			continue
+		}
+		for _, d := range descendants {
+			if seen[d.ID.Bytes] {
+				continue
+			}
+			seen[d.ID.Bytes] = true
+			targets = append(targets, target{id: d.ID, workspaceID: d.WorkspaceID, depth: d.Depth})
+		}
+	}
+
+	// Sort deepest-first so leaves are deleted before their parents.
+	// Root issues have depth -1 so they sort last.
+	slices.SortFunc(targets, func(a, b target) int {
+		return int(b.depth - a.depth)
+	})
+
+	deleted := 0
+	totalDeleted := 0
+	var allAttachmentURLs []string
+	for _, t := range targets {
+		h.TaskService.CancelTasksForIssue(r.Context(), t.id)
+		h.Queries.FailAutopilotRunsByIssue(r.Context(), t.id)
+
+		urls, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), t.id)
+		allAttachmentURLs = append(allAttachmentURLs, urls...)
 
 		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
+			ID:          t.id,
+			WorkspaceID: t.workspaceID,
 		}); err != nil {
-			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
+			slog.Warn("batch delete issue failed", "issue_id", uuidToString(t.id), "error", err)
 			continue
 		}
 
-		h.deleteS3Objects(r.Context(), attachmentURLs)
+		if err := h.Queries.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
+			ItemType: "issue",
+			ItemID:   t.id,
+		}); err != nil {
+			slog.Warn("failed to cascade delete pins for deleted issue", append(logger.RequestAttrs(r), "issue_id", uuidToString(t.id), "error", err)...)
+		}
 
-		// Always emit the resolved UUID — frontend caches key by UUID.
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
-		deleted++
+		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(t.id)})
+		totalDeleted++
+		if rootIDs[t.id.Bytes] {
+			deleted++
+		}
 	}
 
-	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
+	h.deleteS3Objects(r.Context(), allAttachmentURLs)
+
+	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", totalDeleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
 
