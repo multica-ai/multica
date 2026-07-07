@@ -15,6 +15,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  InboxItem,
+  InboxPage,
   InboxWorkspaceUnread,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
@@ -972,6 +974,69 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+// ---------------------------------------------------------------------------
+// Inbox list schemas (`/api/inbox` GET).
+//
+// New servers return a paginated envelope. Older servers returned a raw array,
+// so accept both at the API boundary and normalize to the paginated shape.
+// ---------------------------------------------------------------------------
+
+const InboxItemSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  recipient_type: z.string(),
+  recipient_id: z.string(),
+  actor_type: z.string().nullable().default(null),
+  actor_id: z.string().nullable().default(null),
+  type: z.string(),
+  severity: z.string(),
+  issue_id: z.string().nullable().default(null),
+  title: z.string().default(""),
+  body: z.string().nullable().default(null),
+  issue_status: z.string().nullable().default(null),
+  read: z.boolean().default(false),
+  archived: z.boolean().default(false),
+  created_at: z.string().default(""),
+  details: z.record(z.string(), z.unknown()).nullable().default(null),
+}).loose();
+
+const InboxCursorSchema = z.object({
+  created_at: z.string(),
+  id: z.string(),
+}).loose();
+
+const InboxPageEnvelopeSchema = z.object({
+  items: z.array(InboxItemSchema).default([]),
+  limit: z.number().default(50),
+  has_more: z.boolean().default(false),
+  next_cursor: InboxCursorSchema.nullable().default(null),
+}).loose();
+
+export const InboxPageSchema = z.union([
+  InboxPageEnvelopeSchema,
+  z.array(InboxItemSchema).transform((items) => ({
+    items,
+    limit: items.length,
+    has_more: false,
+    next_cursor: null,
+  })),
+]);
+
+export const EMPTY_INBOX_PAGE: InboxPage = {
+  items: [],
+  limit: 50,
+  has_more: false,
+  next_cursor: null,
+};
+
+export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
+
+export const InboxUnreadCountSchema = z.object({
+  count: z.number().default(0),
+}).loose();
+
+export const EMPTY_INBOX_UNREAD_COUNT = { count: 0 };
 
 // ---------------------------------------------------------------------------
 // Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -785,11 +786,82 @@ func TestInboxThroughRouter(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("ListInbox: expected 200, got %d", resp.StatusCode)
 	}
-	var items []map[string]any
-	readJSON(t, resp, &items)
-	// Inbox may be empty, just verify it returns valid JSON array
-	if items == nil {
+	var page struct {
+		Items      []map[string]any `json:"items"`
+		Limit      int              `json:"limit"`
+		HasMore    bool             `json:"has_more"`
+		NextCursor *struct {
+			CreatedAt string `json:"created_at"`
+			ID        string `json:"id"`
+		} `json:"next_cursor"`
+	}
+	readJSON(t, resp, &page)
+	if page.Items == nil {
 		t.Fatal("expected non-nil inbox items array")
+	}
+	if page.Limit <= 0 {
+		t.Fatalf("expected positive page limit, got %d", page.Limit)
+	}
+}
+
+func TestInboxPaginationThroughRouter(t *testing.T) {
+	ctx := context.Background()
+	const titlePrefix = "Pagination fixture "
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, created_at)
+		VALUES
+			($1, 'member', $2, 'issue_assigned', $3 || 'newest', now() + interval '3 hours'),
+			($1, 'member', $2, 'issue_assigned', $3 || 'middle', now() + interval '2 hours'),
+			($1, 'member', $2, 'issue_assigned', $3 || 'oldest', now() + interval '1 hour')
+	`, testWorkspaceID, testUserID, titlePrefix); err != nil {
+		t.Fatalf("failed to seed inbox pagination fixtures: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE workspace_id = $1 AND title LIKE $2`, testWorkspaceID, titlePrefix+"%")
+	})
+
+	resp := authRequest(t, "GET", "/api/inbox?limit=2", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("ListInbox page 1: expected 200, got %d", resp.StatusCode)
+	}
+	var firstPage struct {
+		Items      []map[string]any `json:"items"`
+		HasMore    bool             `json:"has_more"`
+		NextCursor *struct {
+			CreatedAt string `json:"created_at"`
+			ID        string `json:"id"`
+		} `json:"next_cursor"`
+	}
+	readJSON(t, resp, &firstPage)
+	if len(firstPage.Items) != 2 {
+		t.Fatalf("expected first page length 2, got %d", len(firstPage.Items))
+	}
+	if !firstPage.HasMore || firstPage.NextCursor == nil {
+		t.Fatalf("expected first page to have a next cursor, got %+v", firstPage)
+	}
+	if firstPage.Items[0]["title"] != titlePrefix+"newest" || firstPage.Items[1]["title"] != titlePrefix+"middle" {
+		t.Fatalf("unexpected first page ordering: %+v", firstPage.Items)
+	}
+
+	cursor := url.Values{}
+	cursor.Set("limit", "2")
+	cursor.Set("before_created_at", firstPage.NextCursor.CreatedAt)
+	cursor.Set("before_id", firstPage.NextCursor.ID)
+	resp = authRequest(t, "GET", "/api/inbox?"+cursor.Encode(), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("ListInbox page 2: expected 200, got %d", resp.StatusCode)
+	}
+	var secondPage struct {
+		Items   []map[string]any `json:"items"`
+		HasMore bool             `json:"has_more"`
+	}
+	readJSON(t, resp, &secondPage)
+	if len(secondPage.Items) == 0 || secondPage.Items[0]["title"] != titlePrefix+"oldest" {
+		t.Fatalf("expected second page to start with oldest fixture, got %+v", secondPage.Items)
+	}
+	if secondPage.HasMore {
+		t.Fatal("expected final page to have has_more=false")
 	}
 }
 

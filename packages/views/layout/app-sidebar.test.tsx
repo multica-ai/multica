@@ -127,8 +127,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   };
 });
 vi.mock("@multica/core/inbox/queries", () => ({
-  deduplicateInboxItems: (items: unknown[]) => items,
-  inboxKeys: { list: () => ["inbox"], unreadSummary: () => ["inbox", "unread-summary"] },
+  inboxUnreadCountOptions: () => ({ queryKey: ["inbox", "ws-1", "unread-count"] }),
   inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
   hasOtherWorkspaceUnread: (
     entries: { workspace_id: string; count: number }[],
@@ -159,6 +158,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "inbox" && queryKey[2] === "unread-count") return { data: { count: 0 } };
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     return { data: [] };

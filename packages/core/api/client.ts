@@ -62,6 +62,8 @@ import type {
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
+  InboxCursor,
+  InboxPage,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -218,6 +220,10 @@ import {
   EMPTY_CANCEL_TASK_RESPONSE,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  InboxPageSchema,
+  EMPTY_INBOX_PAGE,
+  InboxUnreadCountSchema,
+  EMPTY_INBOX_UNREAD_COUNT,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
 } from "./schemas";
@@ -1480,7 +1486,26 @@ export class ApiClient {
 
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+    const page = await this.listInboxPage();
+    return page.items;
+  }
+
+  async listInboxPage(params?: {
+    limit?: number;
+    before?: InboxCursor | null;
+  }): Promise<InboxPage> {
+    const search = new URLSearchParams();
+    if (params?.limit) search.set("limit", String(params.limit));
+    if (params?.before) {
+      search.set("before_created_at", params.before.created_at);
+      search.set("before_id", params.before.id);
+    }
+    const query = search.toString();
+    const path = `/api/inbox${query ? `?${query}` : ""}`;
+    const raw = await this.fetch<unknown>(path);
+    return parseWithFallback(raw, InboxPageSchema, EMPTY_INBOX_PAGE, {
+      endpoint: "GET /api/inbox",
+    });
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
@@ -1492,7 +1517,10 @@ export class ApiClient {
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/unread-count");
+    const raw = await this.fetch<unknown>("/api/inbox/unread-count");
+    return parseWithFallback(raw, InboxUnreadCountSchema, EMPTY_INBOX_UNREAD_COUNT, {
+      endpoint: "GET /api/inbox/unread-count",
+    });
   }
 
   // Cross-workspace unread summary: one entry per workspace the user belongs

@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
-  inboxListOptions,
+  inboxPageOptions,
   deduplicateInboxItems,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
@@ -70,7 +70,17 @@ export function InboxPage() {
   }, [urlIssue]);
 
   const wsId = useWorkspaceId();
-  const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
+  const {
+    data: inboxPages,
+    isLoading: loading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery(inboxPageOptions(wsId));
+  const rawItems = useMemo(
+    () => inboxPages?.pages.flatMap((page) => page.items) ?? [],
+    [inboxPages],
+  );
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
   const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
@@ -101,12 +111,27 @@ export function InboxPage() {
     if (loading) return;
     if (!selectedKey) return;
     if (selected) return;
+    if (isFetchingNextPage) return;
+    if (hasNextPage) {
+      fetchNextPage();
+      return;
+    }
     if (lastResolvedKeyRef.current === selectedKey) {
       setSelectedKey("");
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
+  }, [
+    loading,
+    selectedKey,
+    selected,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    replace,
+    wsPaths,
+    setSelectedKey,
+  ]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
@@ -283,6 +308,21 @@ export function InboxPage() {
           onArchive={() => handleArchive(item.id)}
         />
       ))}
+      {hasNextPage && (
+        <div className="p-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-muted-foreground"
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage
+              ? t(($) => $.list.loading_more)
+              : t(($) => $.list.load_more)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 

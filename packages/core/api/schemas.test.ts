@@ -7,8 +7,12 @@ import {
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  EMPTY_INBOX_PAGE,
+  EMPTY_INBOX_UNREAD_COUNT,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_USER,
+  InboxPageSchema,
+  InboxUnreadCountSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
@@ -467,6 +471,91 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults malformed feature_flags to an empty object", () => {
     const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
     expect(parsed.feature_flags).toEqual({});
+  });
+});
+
+describe("InboxPageSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox" };
+  const inboxItem = {
+    id: "inbox-1",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "user-1",
+    actor_type: "agent",
+    actor_id: "agent-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-1",
+    title: "New comment",
+    body: null,
+    issue_status: "todo",
+    read: false,
+    archived: false,
+    created_at: "2026-07-07T00:00:00Z",
+    details: { comment_id: "comment-1" },
+  };
+
+  it("parses a paginated inbox response", () => {
+    const parsed = parseWithFallback(
+      {
+        items: [inboxItem],
+        limit: 50,
+        has_more: true,
+        next_cursor: {
+          created_at: "2026-07-07T00:00:00Z",
+          id: "inbox-1",
+        },
+        future_field: "kept",
+      },
+      InboxPageSchema,
+      EMPTY_INBOX_PAGE,
+      ENDPOINT,
+    );
+
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.has_more).toBe(true);
+    expect(parsed.next_cursor).toEqual({
+      created_at: "2026-07-07T00:00:00Z",
+      id: "inbox-1",
+    });
+  });
+
+  it("normalizes the legacy array response into a page", () => {
+    const parsed = parseWithFallback(
+      [inboxItem],
+      InboxPageSchema,
+      EMPTY_INBOX_PAGE,
+      ENDPOINT,
+    );
+
+    expect(parsed).toMatchObject({
+      items: [inboxItem],
+      limit: 1,
+      has_more: false,
+      next_cursor: null,
+    });
+  });
+
+  it("returns the empty fallback for malformed inbox bodies", () => {
+    expect(
+      parseWithFallback({ items: "not an array" }, InboxPageSchema, EMPTY_INBOX_PAGE, ENDPOINT),
+    ).toBe(EMPTY_INBOX_PAGE);
+  });
+});
+
+describe("InboxUnreadCountSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/unread-count" };
+
+  it("parses the unread count response", () => {
+    expect(
+      parseWithFallback({ count: 3 }, InboxUnreadCountSchema, EMPTY_INBOX_UNREAD_COUNT, ENDPOINT),
+    ).toEqual({ count: 3 });
+  });
+
+  it("returns the zero fallback for malformed counts", () => {
+    expect(
+      parseWithFallback({ count: "3" }, InboxUnreadCountSchema, EMPTY_INBOX_UNREAD_COUNT, ENDPOINT),
+    ).toBe(EMPTY_INBOX_UNREAD_COUNT);
   });
 });
 
