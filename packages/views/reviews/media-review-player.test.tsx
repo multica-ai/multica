@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MediaReviewPlayer } from "./media-review-player";
@@ -49,5 +52,30 @@ describe("MediaReviewPlayer", () => {
 
     const { container } = render(<MediaReviewPlayer asset={asset} />);
     expect(container.querySelector("img")).toBeInTheDocument();
+  });
+
+  it("toggles playback speed when clicking the speed button", () => {
+    const asset: ReviewAsset = {
+      id: "4",
+      name: "test.mp4",
+      src_url: "http://example.com/test.mp4",
+      asset_type: "video",
+      issue_id: "1",
+      duration: 10,
+    } as ReviewAsset;
+
+    render(<MediaReviewPlayer asset={asset} />);
+    const speedButton = screen.getByText("1x");
+    
+    // Default is 1x
+    expect(speedButton.textContent).toBe("1x");
+    
+    // Click cycles to 1.25x
+    fireEvent.click(speedButton);
+    expect(screen.getByText("1.25x")).toBeInTheDocument();
+    
+    // Click cycles to 1.5x
+    fireEvent.click(screen.getByText("1.25x"));
+    expect(screen.getByText("1.5x")).toBeInTheDocument();
   });
 });

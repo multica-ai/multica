@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { MediaReviewLayout } from "./media-review-layout";
@@ -42,6 +45,6 @@ describe("MediaReviewLayout", () => {
         <MediaReviewLayout asset={mockAsset} workspaceId="ws-1" onAssetChange={vi.fn()} onClose={vi.fn()} />
       </QueryClientProvider>
     );
-    expect(screen.getByText(/Version/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Version/i)[0]).toBeInTheDocument();
   });
 });

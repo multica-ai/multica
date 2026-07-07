@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { ReviewCommentSidebar } from "./review-comment-sidebar";
@@ -90,5 +93,30 @@ describe("ReviewCommentSidebar", () => {
     );
     
     expect(screen.getByText("Test comment")).toBeInTheDocument();
+  });
+
+  it("toggles the end time duration when clicking the clock button", () => {
+    const asset = { id: "1", asset_type: "video", issue_id: "1" } as ReviewAsset;
+    
+    render(
+      <ReviewCommentSidebar
+        workspaceId="ws-1"
+        asset={asset}
+        currentTime={5}
+        onSeek={vi.fn()}
+        onDrawStart={vi.fn()}
+        getCanvasShapes={vi.fn(() => [])}
+        clearCanvasShapes={vi.fn()}
+      />
+    );
+    
+    const rangeButton = screen.getByTitle("Set end time (duration)");
+    expect(rangeButton).toBeInTheDocument();
+    
+    fireEvent.click(rangeButton);
+    
+    // Now it should have removed the end time or toggled it
+    // The button title changes to 'Remove end time'
+    expect(screen.getByTitle("Remove end time")).toBeInTheDocument();
   });
 });
