@@ -2782,27 +2782,31 @@
     },
     {
       "id": "sprint assign",
-      "gate": "via:PUT /api/issues/{id}"
+      "gate": "via:PUT /api/cerebro/issues/{id}/sprint + PUT /api/issues/{id} (legacy fallback)"
     },
     {
       "id": "sprint create",
-      "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
+      "gate": "via:POST /api/cerebro/projects/{id}/sprints + POST /api/projects/ + PUT /api/projects/{id}/parent (legacy fallback)"
     },
     {
       "id": "sprint delete",
-      "gate": "via:DELETE /api/projects/{id}/"
+      "gate": "via:DELETE /api/cerebro/sprints/{id} + DELETE /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "sprint get",
-      "exempt": "read-only - wraps GET /api/projects/{id}"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id} (legacy fallback: GET /api/projects/{id})"
+    },
+    {
+      "id": "sprint issues",
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id}/issues"
     },
     {
       "id": "sprint list",
-      "exempt": "read-only - wraps GET /api/projects/tree"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints (legacy fallback: GET /api/projects/tree)"
     },
     {
       "id": "sprint update",
-      "gate": "via:PUT /api/projects/{id}/"
+      "gate": "via:PUT /api/cerebro/sprints/{id} + PUT /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "squad activity",
