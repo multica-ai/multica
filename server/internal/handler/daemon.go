@@ -1690,6 +1690,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// URL alone is signed and 30-min expiring on the private CDN.
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
 				unanswered := trailingUserMessages(msgs)
+				if resp.ChatChannelType == "" {
+					resp.ChatHistory = chatHistoryBeforeUnanswered(msgs, unanswered)
+				}
 				parts := make([]string, 0, len(unanswered))
 				for _, m := range unanswered {
 					if strings.TrimSpace(m.Content) != "" {
@@ -2078,6 +2081,52 @@ func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 		}
 	}
 	return msgs[start:]
+}
+
+const (
+	chatHistoryContextMaxMessages = 12
+	chatHistoryContextMaxChars    = 8000
+)
+
+// chatHistoryBeforeUnanswered returns a bounded transcript of the current
+// web-chat session before the unanswered user-message run. Provider-native
+// session resume remains the primary memory path, but this explicit context
+// keeps later widget turns coherent when a runtime cannot resume or reports a
+// stale session id.
+func chatHistoryBeforeUnanswered(msgs []db.ChatMessage, unanswered []db.ChatMessage) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	cutoff := len(msgs) - len(unanswered)
+	if cutoff <= 0 {
+		return ""
+	}
+	start := cutoff - chatHistoryContextMaxMessages
+	if start < 0 {
+		start = 0
+	}
+
+	var b strings.Builder
+	for _, m := range msgs[start:cutoff] {
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		role := m.Role
+		if role != "assistant" {
+			role = "user"
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "%s: %s", role, content)
+	}
+
+	out := b.String()
+	if len(out) <= chatHistoryContextMaxChars {
+		return out
+	}
+	return out[len(out)-chatHistoryContextMaxChars:]
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

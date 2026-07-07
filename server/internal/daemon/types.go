@@ -81,6 +81,7 @@ type Task struct {
 	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
 	ChatInThread             bool                  `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
+	ChatHistory              string                `json:"chat_history,omitempty"`                // bounded recent web-chat transcript before the current unanswered user message(s)
 	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
 	AutopilotID              string                `json:"autopilot_id,omitempty"`                // autopilot that spawned this run

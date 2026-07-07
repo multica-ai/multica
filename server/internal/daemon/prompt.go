@@ -243,6 +243,10 @@ func buildChatPrompt(task Task) string {
 			}
 		}
 	}
+	if strings.TrimSpace(task.ChatHistory) != "" && task.ChatChannelType == "" {
+		b.WriteString("Recent conversation context in this chat session:\n")
+		fmt.Fprintf(&b, "%s\n\n", task.ChatHistory)
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

@@ -309,6 +309,37 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	})
 }
 
+func TestBuildChatPromptIncludesWebChatHistory(t *testing.T) {
+	out := buildChatPrompt(Task{
+		ChatSessionID: "sess-1",
+		ChatHistory:   "user: remember the project is Apollo\n\nassistant: Got it.",
+		ChatMessage:   "what project did I mention?",
+	})
+
+	for _, want := range []string{
+		"Recent conversation context in this chat session:",
+		"user: remember the project is Apollo",
+		"assistant: Got it.",
+		"User message:\nwhat project did I mention?",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("web chat prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+func TestBuildChatPromptOmitsHistoryForChannelChat(t *testing.T) {
+	out := buildChatPrompt(Task{
+		ChatSessionID:   "sess-1",
+		ChatChannelType: "slack",
+		ChatHistory:     "user: stale Multica transcript",
+		ChatMessage:     "hi",
+	})
+	if strings.Contains(out, "stale Multica transcript") {
+		t.Fatalf("channel chat prompt must not inline Multica chat history, got:\n%s", out)
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{

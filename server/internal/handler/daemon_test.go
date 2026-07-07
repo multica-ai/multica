@@ -2929,6 +2929,7 @@ type claimRuntimeGuardTask struct {
 	PriorSessionID           string   `json:"prior_session_id"`
 	PriorWorkDir             string   `json:"prior_work_dir"`
 	ChatMessage              string   `json:"chat_message"`
+	ChatHistory              string   `json:"chat_history"`
 	ThreadName               string   `json:"thread_name"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
 	ProjectID                string   `json:"project_id"`
@@ -3492,6 +3493,18 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ChatMessage != "深圳呢" {
 		t.Fatalf("after a reply, only the new user message must be delivered; got %q", task.ChatMessage)
+	}
+	for _, want := range []string{
+		"user: 看上海天气",
+		"user: 还有青岛",
+		"assistant: 上海与青岛天气如下…",
+	} {
+		if !strings.Contains(task.ChatHistory, want) {
+			t.Fatalf("follow-up chat history missing %q\n--- history ---\n%s", want, task.ChatHistory)
+		}
+	}
+	if strings.Contains(task.ChatHistory, "深圳呢") {
+		t.Fatalf("follow-up chat history must exclude current unanswered message, got %q", task.ChatHistory)
 	}
 }
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -84,5 +85,30 @@ func TestTrailingUserMessages(t *testing.T) {
 				t.Fatalf("trailingUserMessages = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestChatHistoryBeforeUnansweredIncludesPriorTurns(t *testing.T) {
+	msgs := []db.ChatMessage{
+		msg("user", "remember Apollo"),
+		msg("assistant", "I will remember Apollo."),
+		msg("user", "also remember launch is Friday"),
+		msg("assistant", "Got it."),
+		msg("user", "what did I ask you to remember?"),
+	}
+
+	history := chatHistoryBeforeUnanswered(msgs, trailingUserMessages(msgs))
+	for _, want := range []string{
+		"user: remember Apollo",
+		"assistant: I will remember Apollo.",
+		"user: also remember launch is Friday",
+		"assistant: Got it.",
+	} {
+		if !strings.Contains(history, want) {
+			t.Fatalf("history missing %q\n--- history ---\n%s", want, history)
+		}
+	}
+	if strings.Contains(history, "what did I ask you to remember?") {
+		t.Fatalf("history must exclude current unanswered message, got:\n%s", history)
 	}
 }
