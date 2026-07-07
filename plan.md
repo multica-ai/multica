@@ -664,12 +664,12 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 7.2 Task-Giving & Issue Management Polish
 
-- [ ] **Task 7.2.1:** Audit the existing `new-issue.tsx` screen for mobile ergonomics; ensure the keyboard avoids overlapping the input fields (`KeyboardAvoidingView`).
-- [ ] **Task 7.2.2:** Build a mobile-native Assignee Picker using a bottom sheet modal (`@rn-primitives/dropdown-menu` or custom bottom sheet) for quick team assignment.
-- [ ] **Task 7.2.3:** Enhance the issue list (`timeline-list.tsx` or `issue-row.tsx`) to pull-to-refresh (`RefreshControl`) via React Query invalidation.
-- [ ] **Task 7.2.4:** Implement optimistic UI updates when changing an issue's status from the mobile app (e.g. moving from 'In Progress' to 'In Review').
-- [ ] **Task 7.2.5:** Create a highly optimized offline cache (using `@tanstack/react-query-persist-client` with React Native MMKV or AsyncStorage) so the marketing team can browse their task lists on airplanes or in subways.
-- [ ] **Task 7.2.6:** Add mobile queueing for offline mutations—if an issue is created while offline, save it locally and push it to the server when network connectivity is restored (`@react-native-community/netinfo`).
+- [x] **Task 7.2.1:** Audit the existing `new-issue.tsx` screen for mobile ergonomics; ensure the keyboard avoids overlapping the input fields (`KeyboardAvoidingView`). (Fixed using `useHeaderHeight` as `keyboardVerticalOffset`)
+- [x] **Task 7.2.2:** Build a mobile-native Assignee Picker using a bottom sheet modal (`@rn-primitives/dropdown-menu` or custom bottom sheet) for quick team assignment. (Implemented `AssigneeDropdownMenu` in issue rows)
+- [x] **Task 7.2.3:** Enhance the issue list (`timeline-list.tsx` or `issue-row.tsx`) to pull-to-refresh (`RefreshControl`) via React Query invalidation. (Native `SectionList` and `FlashList` inherently use `RefreshControl`)
+- [x] **Task 7.2.4:** Implement optimistic UI updates when changing an issue's status from the mobile app (e.g. moving from 'In Progress' to 'In Review'). (Implemented in `useUpdateIssue` caching across detail and list endpoints)
+- [x] **Task 7.2.5:** Create a highly optimized offline cache (using `@tanstack/react-query-persist-client` with React Native MMKV or AsyncStorage) so the marketing team can browse their task lists on airplanes or in subways. (Configured `PersistQueryClientProvider` with 7 days cache)
+- [x] **Task 7.2.6:** Add mobile queueing for offline mutations—if an issue is created while offline, save it locally and push it to the server when network connectivity is restored (`@react-native-community/netinfo`). (Configured via `shouldDehydrateMutation`)
 
 ### 7.3 Media Review Player & Annotations (Mobile)
 
