@@ -658,8 +658,8 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Task 7.1.2:** Configure iOS APNs (`UIBackgroundModes: remote-notification`) and Android FCM `googleServicesFile` in Expo app config (`app.config.ts`).
 - [x] **Task 7.1.3:** Create a push token registration hook (`usePushNotifications.ts`) and integrated it into the root authenticated layout (`_layout.tsx`) to request user permissions on login.
 - [x] **Task 7.1.4:** Build a backend API endpoint (`POST /api/users/me/device-tokens`) to securely store APNs/FCM tokens for the authenticated user (`user_device_tokens` table created, endpoint exposed in `device_token.go`).
-- [ ] **Task 7.1.5:** Implement backend background workers to trigger push notifications when a user is assigned an issue, mentioned in a comment, or when a review asset is uploaded.
-- [ ] **Task 7.1.6:** Configure deep linking schemas (`expo-linking`) in the mobile app to handle push notification taps (e.g., routing directly to `multica://workspace/issue/123`).
+- [x] **Task 7.1.5:** Implement backend background workers to trigger push notifications when a user is assigned an issue, mentioned in a comment, or when a review asset is uploaded. (Implemented via `EventInboxNew` in `notification_listeners.go`)
+- [x] **Task 7.1.6:** Configure deep linking schemas (`expo-linking`) in the mobile app to handle push notification taps (e.g., routing directly to `multica://workspace/issue/123`). (Implemented in `use-push-notifications.ts`)
 - [ ] **Task 7.1.7:** Add a Notification Preferences screen in the mobile app settings so users can toggle specific push event types (mentions, assignments, status changes).
 
 ### 7.2 Task-Giving & Issue Management Polish
@@ -669,7 +669,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Task 7.2.3:** Enhance the issue list (`timeline-list.tsx` or `issue-row.tsx`) to pull-to-refresh (`RefreshControl`) via React Query invalidation. (Native `SectionList` and `FlashList` inherently use `RefreshControl`)
 - [x] **Task 7.2.4:** Implement optimistic UI updates when changing an issue's status from the mobile app (e.g. moving from 'In Progress' to 'In Review'). (Implemented in `useUpdateIssue` caching across detail and list endpoints)
 - [x] **Task 7.2.5:** Create a highly optimized offline cache (using `@tanstack/react-query-persist-client` with React Native MMKV or AsyncStorage) so the marketing team can browse their task lists on airplanes or in subways. (Configured `PersistQueryClientProvider` with 7 days cache)
-- [x] **Task 7.2.6:** Add mobile queueing for offline mutations—if an issue is created while offline, save it locally and push it to the server when network connectivity is restored (`@react-native-community/netinfo`). (Configured via `shouldDehydrateMutation`)
+- [x] **Task 7.2.6:** Add mobile queueing for offline mutations—if an issue is created while offline, save it locally and push it to the server when network connectivity is restored (`@react-native-community/netinfo`). (Configured via `shouldDehydrateMutation` and default mutation functions in `query-client.ts`)
 
 ### 7.3 Media Review Player & Annotations (Mobile)
 
