@@ -26,6 +26,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQueries } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type {
   Issue,
   IssueStatus,
@@ -296,6 +297,7 @@ interface SearchResultsState {
 const EMPTY_RESULTS: SearchResultsState = { issues: [], projects: [] };
 
 export default function SearchModal() {
+  const { t } = useTranslation("workspace");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const slug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
 
@@ -395,7 +397,7 @@ export default function SearchModal() {
     if (!trimmedQuery) {
       if (recentIssues.length === 0) return [];
       return [
-        { kind: "header", key: "h-recent", title: "Recent" },
+        { kind: "header", key: "h-recent", title: t("search.section.recent") },
         ...recentIssues.map<RowItem>((issue) => ({
           kind: "recent",
           key: `r-${issue.id}`,
@@ -405,19 +407,27 @@ export default function SearchModal() {
     }
     const items: RowItem[] = [];
     if (results.projects.length > 0) {
-      items.push({ kind: "header", key: "h-projects", title: "Projects" });
+      items.push({
+        kind: "header",
+        key: "h-projects",
+        title: t("search.section.projects"),
+      });
       for (const p of results.projects) {
         items.push({ kind: "project", key: `p-${p.id}`, project: p, query: trimmedQuery });
       }
     }
     if (results.issues.length > 0) {
-      items.push({ kind: "header", key: "h-issues", title: "Issues" });
+      items.push({
+        kind: "header",
+        key: "h-issues",
+        title: t("search.section.issues"),
+      });
       for (const it of results.issues) {
         items.push({ kind: "issue", key: `i-${it.id}`, issue: it, query: trimmedQuery });
       }
     }
     return items;
-  }, [trimmedQuery, recentIssues, results]);
+  }, [trimmedQuery, recentIssues, results, t]);
 
   const renderItem = useCallback<ListRenderItem<RowItem>>(
     ({ item }) => {
@@ -451,7 +461,7 @@ export default function SearchModal() {
           <TextInput
             value={query}
             onChangeText={handleChange}
-            placeholder="Search issues and projects"
+            placeholder={t("search.placeholder")}
             placeholderTextColor="#a1a1aa"
             autoFocus
             autoCorrect={false}
@@ -477,13 +487,13 @@ export default function SearchModal() {
             ) : trimmedQuery && !hasResults ? (
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
-                  No results for &ldquo;{trimmedQuery}&rdquo;
+                  {t("search.no_results", { query: trimmedQuery })}
                 </Text>
               </View>
             ) : !trimmedQuery && recentIssues.length === 0 ? (
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
-                  Type to search issues and projects.
+                  {t("search.empty_prompt")}
                 </Text>
               </View>
             ) : null

@@ -40,6 +40,7 @@ import { Image as ExpoImage } from "expo-image";
 import { router, usePathname } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import type { User, Workspace } from "@multica/core/types";
 import {
@@ -73,17 +74,12 @@ interface NavItem {
   path: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { label: "Pinned", icon: "pin", path: "/more/pins" },
-  { label: "Issues", icon: "list.bullet", path: "/more/issues" },
-  { label: "Projects", icon: "square.stack", path: "/more/projects" },
-];
-
 export function MoreTabDropdownAnchor({
   triggerRef,
 }: {
   triggerRef: React.RefObject<TriggerRef | null>;
 }) {
+  const { t: tWs } = useTranslation("workspace");
   const insets = useSafeAreaInsets();
   const slug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const user = useAuthStore((s) => s.user);
@@ -91,6 +87,23 @@ export function MoreTabDropdownAnchor({
   const { colorScheme } = useColorScheme();
   const t = THEME[colorScheme];
   const currentWorkspace = useCurrentWorkspace(slug);
+
+  const NAV_ITEMS: NavItem[] = useMemo(
+    () => [
+      { label: tWs("more_dropdown.nav.pinned"), icon: "pin", path: "/more/pins" },
+      {
+        label: tWs("more_dropdown.nav.issues"),
+        icon: "list.bullet",
+        path: "/more/issues",
+      },
+      {
+        label: tWs("more_dropdown.nav.projects"),
+        icon: "square.stack",
+        path: "/more/projects",
+      },
+    ],
+    [tWs],
+  );
 
   const isActive = (path: string) => {
     if (!slug) return false;
@@ -187,12 +200,13 @@ function UserCard({
   onPress: () => void;
   chevronTint: string;
 }) {
+  const { t } = useTranslation("workspace");
   const initial = (user?.name ?? user?.email ?? "U").charAt(0).toUpperCase();
   return (
     <DropdownMenuItem
       onPress={onPress}
       className="h-12 gap-3"
-      accessibilityLabel="Account settings"
+      accessibilityLabel={t("more_dropdown.account_settings_a11y")}
     >
       {user?.avatar_url ? (
         <Image
@@ -257,8 +271,10 @@ function WorkspaceCard({
   onPress: () => void;
   chevronTint: string;
 }) {
+  const { t } = useTranslation("workspace");
   const { data } = useQuery(workspaceListOptions());
   const canSwitch = (data?.length ?? 0) > 1;
+  const workspaceFallback = t("more_dropdown.workspace_fallback");
 
   return (
     <DropdownMenuItem
@@ -266,11 +282,13 @@ function WorkspaceCard({
       disabled={!canSwitch}
       className="h-12 gap-3"
       accessibilityLabel={
-        canSwitch ? "Switch workspace" : currentWorkspaceName ?? "Workspace"
+        canSwitch
+          ? t("more_dropdown.switch_workspace_a11y")
+          : currentWorkspaceName ?? workspaceFallback
       }
     >
       <WorkspaceAvatar
-        name={currentWorkspaceName ?? "Workspace"}
+        name={currentWorkspaceName ?? workspaceFallback}
         avatarUrl={currentWorkspaceAvatarUrl}
         size={32}
       />
@@ -279,7 +297,7 @@ function WorkspaceCard({
           className="text-sm font-medium text-foreground"
           numberOfLines={1}
         >
-          {currentWorkspaceName ?? "Workspace"}
+          {currentWorkspaceName ?? workspaceFallback}
         </Text>
       </View>
       {canSwitch ? (

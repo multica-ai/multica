@@ -34,6 +34,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import type { Issue, PinnedItem, Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
 export default function PinsPage() {
+  const { t } = useTranslation("workspace");
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -76,11 +78,11 @@ export default function PinsPage() {
     return (
       <View className="flex-1 bg-background px-4 gap-3 pt-4">
         <Text className="text-sm text-destructive">
-          Failed to load pins:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
+          {t("pins.error.load_prefix")}{" "}
+          {error instanceof Error ? error.message : t("pins.error.unknown")}
         </Text>
         <Button variant="outline" onPress={() => refetch()}>
-          <Text>Retry</Text>
+          <Text>{t("pins.error.retry")}</Text>
         </Button>
       </View>
     );
@@ -90,8 +92,7 @@ export default function PinsPage() {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-sm text-muted-foreground text-center">
-          No pins yet. Pin an issue or project from its actions menu to
-          surface it here.
+          {t("pins.empty.message")}
         </Text>
       </View>
     );
@@ -214,13 +215,15 @@ function MissingPinRow({
   itemType: "issue" | "project";
   itemId: string;
 }) {
+  const { t } = useTranslation("workspace");
   const { colorScheme } = useColorScheme();
   const deletePin = useDeletePin();
+  const itemTypeLabel = t(`pins.missing.item_type.${itemType}`);
   return (
     <Pressable
       onPress={() => deletePin.mutate({ itemType, itemId })}
       className="px-4 py-3 flex-row items-center gap-3 active:bg-secondary opacity-60"
-      accessibilityLabel={`Unavailable ${itemType}, tap to unpin`}
+      accessibilityLabel={t("pins.missing.a11y", { itemType: itemTypeLabel })}
     >
       <Ionicons
         name="alert-circle-outline"
@@ -228,7 +231,7 @@ function MissingPinRow({
         color={THEME[colorScheme].mutedForeground}
       />
       <Text className="flex-1 text-sm text-muted-foreground" numberOfLines={1}>
-        Unavailable {itemType} — tap to unpin
+        {t("pins.missing.label", { itemType: itemTypeLabel })}
       </Text>
     </Pressable>
   );
