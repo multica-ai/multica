@@ -1,0 +1,31 @@
+{
+  "account": {
+    "title": "账号",
+    "user_avatar_alt": "用户头像",
+    "notifications_row": {
+      "title": "通知",
+      "subtitle": "收件箱与系统提醒"
+    }
+  },
+  "workspaces": {
+    "title": "工作区",
+    "error": "加载工作区失败"
+  },
+  "appearance": {
+    "title": "外观",
+    "theme": {
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    }
+  },
+  "language": {
+    "title": "语言",
+    "options": {
+      "english": "English",
+      "chinese": "中文",
+      "system": "跟随系统"
+    }
+  },
+  "sign_out_message": "退出后需要重新登录才能使用 Multica。"
+}

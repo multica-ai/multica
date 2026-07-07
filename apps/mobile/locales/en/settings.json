@@ -1,0 +1,31 @@
+{
+  "account": {
+    "title": "Account",
+    "user_avatar_alt": "User avatar",
+    "notifications_row": {
+      "title": "Notifications",
+      "subtitle": "Inbox and system alerts"
+    }
+  },
+  "workspaces": {
+    "title": "Workspaces",
+    "error": "Failed to load workspaces"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "theme": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    }
+  },
+  "language": {
+    "title": "Language",
+    "options": {
+      "english": "English",
+      "chinese": "中文",
+      "system": "System"
+    }
+  },
+  "sign_out_message": "You'll need to sign in again to use Multica on this device."
+}
