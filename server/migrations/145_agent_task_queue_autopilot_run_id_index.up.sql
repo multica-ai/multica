@@ -1,0 +1,33 @@
+-- Index the FK column agent_task_queue.autopilot_run_id (MUL-4180).
+--
+-- Migration 042 added `agent_task_queue.autopilot_run_id` with
+-- `REFERENCES autopilot_run(id) ON DELETE SET NULL` but never created an
+-- index on the referencing column. Postgres does NOT auto-index FK
+-- columns, so the referential-action trigger that fires when an
+-- autopilot_run row is deleted —
+--   UPDATE agent_task_queue SET autopilot_run_id = NULL
+--   WHERE autopilot_run_id = <deleted run id>
+-- — has no index to use and degrades to a full sequential scan of
+-- agent_task_queue, the hottest/largest table in the schema.
+--
+-- Deleting an autopilot cascades (ON DELETE CASCADE) into every one of its
+-- autopilot_run rows, and each deleted run fires that trigger once. So
+-- `DELETE FROM autopilot` costs one full agent_task_queue seq scan PER run.
+-- For an autopilot with real run history this is O(runs × queue-size) and
+-- the DELETE request hangs for seconds-to-minutes — the client sits on the
+-- "删除中..." confirm dialog and the UI appears frozen (MUL-4180).
+--
+-- Partial `WHERE autopilot_run_id IS NOT NULL` keeps the index tiny: only
+-- autopilot-originated tasks set the column, the vast majority of queue
+-- rows leave it NULL. The trigger's `autopilot_run_id = $1` predicate
+-- implies IS NOT NULL, so the planner can still use the partial index.
+-- Mirrors idx_webhook_delivery_run (migration 093), which indexes the same
+-- ON DELETE SET NULL FK on webhook_delivery.
+--
+-- CONCURRENTLY because agent_task_queue is on the hot dispatch path — a
+-- plain CREATE INDEX takes ACCESS EXCLUSIVE and would block claims during
+-- the build. Single-statement file: the migration runner cannot mix
+-- CONCURRENTLY with other statements (see migration 080/143).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_task_queue_autopilot_run_id
+    ON agent_task_queue (autopilot_run_id)
+    WHERE autopilot_run_id IS NOT NULL;
