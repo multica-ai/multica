@@ -438,7 +438,7 @@ describe("handleInboxNew", () => {
     await handleInboxNew(qc, inboxItem());
 
     expect(invalidate).toHaveBeenCalledWith({
-      queryKey: inboxKeys.list("ws-a"),
+      queryKey: inboxKeys.all("ws-a"),
     });
     expect(showNotification).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "workspace-a" }),
