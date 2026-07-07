@@ -59,8 +59,8 @@ func hardenWindowsBrowserMcpConfig(raw json.RawMessage, tempDir string) ([]byte,
 				servers[name], changed = mustMarshalRaw(entry), true
 			}
 		case lowerName == "chrome-devtools" || argsContain(args, "chrome-devtools-mcp"):
-			if path, ok := windowsChromiumFallbackExecutable(); ok && shouldPinChromeDevToolsExecutable(args) {
-				entry["args"] = append(args, "--executablePath="+path)
+			if flag, ok := windowsChromeDevToolsBrowserFlag(); ok && shouldPinChromeDevToolsExecutable(args) {
+				entry["args"] = append(args, flag)
 				servers[name], changed = mustMarshalRaw(entry), true
 			}
 		}
@@ -99,24 +99,58 @@ func hardenWindowsPlaywrightMcpArgs(args []string, tempDir string) ([]string, er
 	return append(args, "--config", configPath), nil
 }
 
+func windowsChromeDevToolsBrowserFlag() (string, bool) {
+	if channel := strings.TrimSpace(browserMcpEnv("MULTICA_CHROME_DEVTOOLS_CHANNEL")); channel != "" {
+		return "--channel=" + channel, true
+	}
+	if path, ok := windowsChromiumFallbackExecutable(); ok {
+		return "--executablePath=" + path, true
+	}
+	return "", false
+}
+
 func windowsChromiumFallbackExecutable() (string, bool) {
 	if path := strings.TrimSpace(browserMcpEnv("MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH")); path != "" {
 		return path, true
 	}
-	for _, root := range []string{
-		browserMcpEnv("ProgramFiles(x86)"),
-		browserMcpEnv("ProgramFiles"),
-		browserMcpEnv("LocalAppData"),
-	} {
-		if strings.TrimSpace(root) == "" {
-			continue
-		}
-		path := windowsPathJoin(root, "Microsoft", "Edge", "Application", "msedge.exe")
-		if _, err := browserMcpStat(path); err == nil {
-			return path, true
+	for _, candidate := range windowsChromiumExecutableCandidates() {
+		if _, err := browserMcpStat(candidate); err == nil {
+			return candidate, true
 		}
 	}
 	return "", false
+}
+
+func windowsChromiumExecutableCandidates() []string {
+	installRoots := []string{
+		browserMcpEnv("ProgramFiles(x86)"),
+		browserMcpEnv("ProgramFiles"),
+	}
+	localRoot := browserMcpEnv("LocalAppData")
+
+	var candidates []string
+	for _, root := range installRoots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		candidates = append(candidates,
+			windowsPathJoin(root, "Microsoft", "Edge", "Application", "msedge.exe"),
+			windowsPathJoin(root, "Google", "Chrome Beta", "Application", "chrome.exe"),
+			windowsPathJoin(root, "Google", "Chrome SxS", "Application", "chrome.exe"),
+			windowsPathJoin(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+			windowsPathJoin(root, "Chromium", "Application", "chrome.exe"),
+		)
+	}
+	if strings.TrimSpace(localRoot) != "" {
+		candidates = append(candidates,
+			windowsPathJoin(localRoot, "Microsoft", "Edge", "Application", "msedge.exe"),
+			windowsPathJoin(localRoot, "Google", "Chrome Beta", "Application", "chrome.exe"),
+			windowsPathJoin(localRoot, "Google", "Chrome SxS", "Application", "chrome.exe"),
+			windowsPathJoin(localRoot, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+			windowsPathJoin(localRoot, "Chromium", "Application", "chrome.exe"),
+		)
+	}
+	return candidates
 }
 
 func windowsPathJoin(root string, elems ...string) string {

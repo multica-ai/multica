@@ -183,6 +183,10 @@ Daemon behavior is configured via flags or environment variables:
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+| Browser MCP Chrome DevTools executable | — | `MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH` | Auto-detect on Windows |
+| Browser MCP Chrome DevTools channel | — | `MULTICA_CHROME_DEVTOOLS_CHANNEL` | unset |
+
+On Windows, daemon-managed browser MCP configs add a Playwright launch config that disables GPU compositing for headless runs, and `chrome-devtools` is pinned to an installed Chromium-family browser when Chrome stable is not the right target. Set `MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH` for an explicit browser executable, or `MULTICA_CHROME_DEVTOOLS_CHANNEL` to pass a `chrome-devtools-mcp` channel instead.
 
 #### Workspace garbage collection
 

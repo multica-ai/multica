@@ -108,6 +108,25 @@ func TestHardenWindowsBrowserMcpConfigRespectsExplicitBrowserArgs(t *testing.T) 
 	}
 }
 
+func TestHardenWindowsBrowserMcpConfigAppliesChromeDevToolsChannelOverride(t *testing.T) {
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"MULTICA_CHROME_DEVTOOLS_CHANNEL": "chrome-beta",
+	}, nil)
+
+	raw := json.RawMessage(`{"mcpServers":{
+		"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest","--headless","--isolated"]}
+	}}`)
+
+	got, err := hardenBrowserMcpConfig(raw, t.TempDir())
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfig: %v", err)
+	}
+	chromeArgs := decodeArgs(t, decodeMcpServers(t, got)["chrome-devtools"])
+	if !contains(chromeArgs, "--channel=chrome-beta") {
+		t.Fatalf("chrome-devtools args missing channel override:\n%v", chromeArgs)
+	}
+}
+
 func TestHardenWindowsBrowserMcpConfigKeepsRawOnMalformedInput(t *testing.T) {
 	withBrowserMcpTestHost(t, "windows", nil, nil)
 
@@ -168,6 +187,47 @@ func TestWindowsChromiumFallbackExecutableSkipsMissingInstallDirs(t *testing.T) 
 	}
 }
 
+func TestWindowsChromiumFallbackExecutableDetectsChromiumFamilyBrowsers(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      map[string]string
+		existing string
+	}{
+		{
+			name: "chrome beta in program files",
+			env: map[string]string{
+				"ProgramFiles": `C:\Program Files`,
+			},
+			existing: `C:\Program Files\Google\Chrome Beta\Application\chrome.exe`,
+		},
+		{
+			name: "brave in local app data",
+			env: map[string]string{
+				"LocalAppData": `C:\Users\alice\AppData\Local`,
+			},
+			existing: `C:\Users\alice\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe`,
+		},
+		{
+			name: "chromium in program files x86",
+			env: map[string]string{
+				"ProgramFiles(x86)": `C:\Program Files (x86)`,
+			},
+			existing: `C:\Program Files (x86)\Chromium\Application\chrome.exe`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			withBrowserMcpTestHost(t, "windows", tc.env, map[string]bool{tc.existing: true})
+
+			got, ok := windowsChromiumFallbackExecutable()
+			if !ok || got != tc.existing {
+				t.Fatalf("fallback executable = %q, %v; want %q, true", got, ok, tc.existing)
+			}
+		})
+	}
+}
+
 func TestWindowsChromiumFallbackExecutablePropagatesOverride(t *testing.T) {
 	override := filepath.Clean(`D:\Browsers\Chromium\chrome.exe`)
 	withBrowserMcpTestHost(t, "windows", map[string]string{
@@ -177,6 +237,18 @@ func TestWindowsChromiumFallbackExecutablePropagatesOverride(t *testing.T) {
 	got, ok := windowsChromiumFallbackExecutable()
 	if !ok || got != override {
 		t.Fatalf("fallback executable = %q, %v; want %q, true", got, ok, override)
+	}
+}
+
+func TestWindowsChromeDevToolsBrowserFlagPrefersChannelOverride(t *testing.T) {
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"MULTICA_CHROME_DEVTOOLS_CHANNEL":         "chrome-beta",
+		"MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH": `D:\Browsers\Chrome\chrome.exe`,
+	}, map[string]bool{})
+
+	got, ok := windowsChromeDevToolsBrowserFlag()
+	if !ok || got != "--channel=chrome-beta" {
+		t.Fatalf("browser flag = %q, %v; want --channel=chrome-beta, true", got, ok)
 	}
 }
 
