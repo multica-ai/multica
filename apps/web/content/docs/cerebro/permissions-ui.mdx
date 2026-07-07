@@ -13,6 +13,22 @@ Hold musen over knappen et øjeblik. Der dukker en lille forklaring op der siger
 
 [Skærmbillede: viser en låst knap med en forklarende boble der dukker op]
 
+## For administratorer: sådan er skærmen bygget op
+
+Skærmen **Tools & permissions** (på en agent, en runtime, en gruppe eller et medlem) er delt op i tre faner:
+
+- **Permissions** — de almindelige handlinger og værktøjer, fx om agenten må oprette issues eller hente websider.
+- **Repos** — kode-repositories: hvad agenten må med hvert repo (fx læse, hente koden ned eller skubbe ændringer op).
+- **Connections** — forbindelser til eksterne systemer (fx kundeservice-systemet eller dataregistret) samt credential-bokse (opbevarede adgangsnøgler).
+
+Hver linje har **én knap** der viser beslutningen: **Allow** (ja), **Ask** (spørg et menneske først) eller **Deny** (nej). Klikker du på knappen, åbner et lille panel hvor du både vælger beslutningen og kan sætte en **When**-betingelse — altså hvornår reglen gælder (fx kun bestemte handlinger). Alt om én regel bor dermed ét sted; der er ikke længere en separat When-knap.
+
+Folder du en forbindelse eller et repo ud, ser du dens enkelte værktøjer og handlinger som linjer i fuld bredde med præcis samme knap. Et enkelt værktøj kan aldrig være mere åbent end hele forbindelsen — du kan kun stramme, ikke løsne, under-niveauet.
+
+Designet er det samme på mobil og computer.
+
+[Skærmbillede: viser Tools & permissions med de tre faner og en udfoldet forbindelse]
+
 ## For administratorer: se hvad hver tilladelse betyder
 
 På skærmen hvor du styrer tilladelser - tabellen hvor du sætter en handling til **Allow**, **Ask** eller **Deny** for en agent, et team eller en bruger - er der nu et lille info-ikon ved hver tilladelse. Hold musen over det, så får du en kort forklaring i almindeligt sprog af hvad netop den tilladelse dækker - for eksempel hvad `create_agent` eller `manage_credentials` rent faktisk giver lov til.
