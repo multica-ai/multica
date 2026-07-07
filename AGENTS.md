@@ -47,3 +47,16 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the authoritative rules and common commands.
+
+## Cursor Cloud specific instructions
+
+The VM snapshot already has the toolchain installed: Node 22, pnpm 10.28.2, **Go 1.26.1** (at `/usr/local/go`, symlinked into `/usr/local/bin/go` so it overrides the OS `go 1.22`; verify with `go version`), and Docker Engine. The startup update script only refreshes deps (`pnpm install` + `go mod download`), so you still have to start services yourself.
+
+Non-obvious startup caveats:
+
+- **Docker has no init system here — start the daemon manually each session before anything that needs Postgres.** Run `sudo dockerd` in a background tmux session (e.g. session `dockerd`), wait until `docker info` succeeds, and only then run Postgres/`make dev`. If `docker ps` fails with a socket permission error in a fresh shell, run `sudo chmod 666 /var/run/docker.sock`.
+- Postgres is a Docker container (`pgvector/pgvector:pg17`). `scripts/ensure-postgres.sh` / `make dev` start it via `docker compose up -d postgres`; the `pgdata` volume persists across restarts, so migrations already applied stay applied.
+- Standard run flow is in the `Makefile` / `scripts/dev.sh`: `make dev` (from a checkout with `.env`) ensures Postgres, runs migrations, and starts backend (`:8080`) + web (`:3000`). To run pieces separately, source `.env` + `scripts/local-env.sh`, then `cd server && go run ./cmd/server` and `pnpm dev:web`. `go run ./cmd/server` compiles on first start (~30s) before `/health` responds.
+- `.env` is gitignored; create it with `cp .env.example .env` if missing. For deterministic passwordless login in dev, set `MULTICA_DEV_VERIFICATION_CODE` (e.g. `888888`) in `.env` and restart the backend — otherwise email login codes are only printed to the backend stdout (no email provider configured locally).
+- The **agent daemon** (`multica` CLI) is only needed to actually execute agent work; browsing the app and creating workspaces/issues/projects works without it.
+- pnpm reports "Ignored build scripts" (sharp, msw, etc.) on install; this is expected and does not block backend, web dev, lint, typecheck, or tests.
