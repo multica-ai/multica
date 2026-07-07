@@ -40,6 +40,7 @@ import {
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
   Agent,
   ChatMessage,
@@ -82,6 +83,8 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 
 export default function ChatTab() {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -333,12 +336,12 @@ export default function ChatTab() {
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;
     Alert.alert(
-      "Delete this chat?",
-      activeSession.title || "Untitled chat",
+      t("delete_chat.title"),
+      activeSession.title || t("untitled_chat"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: tCommon("cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("delete_chat.confirm"),
           style: "destructive",
           onPress: () => {
             const id = activeSession.id;
@@ -349,17 +352,17 @@ export default function ChatTab() {
       ],
       { cancelable: true },
     );
-  }, [activeSession, deleteSession]);
+  }, [activeSession, deleteSession, t, tCommon]);
 
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
     !currentAgent || availability === "none" || isArchived === true;
   const disabledReason = !currentAgent
-    ? "No agent selected"
+    ? t("disabled_reason.no_agent")
     : availability === "none"
-      ? "No agents in this workspace"
+      ? t("disabled_reason.no_agents_workspace")
       : isArchived
-        ? "This chat is archived"
+        ? t("disabled_reason.archived")
         : undefined;
 
   return (

@@ -17,16 +17,20 @@
  * keeps a single route file serving both contexts.
  */
 import { useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { MentionPickerBody } from "@/components/issue/pickers/mention-picker-body";
 import { useNativeSearchBar } from "@/lib/use-native-search-bar";
 
 type Mode = "comment" | "chat";
 
 export default function MentionPickerRoute() {
+  const { t } = useTranslation("chat");
   const { mode: rawMode } = useLocalSearchParams<{ mode?: string }>();
   const mode: Mode = rawMode === "chat" ? "chat" : "comment";
   const placeholder =
-    mode === "chat" ? "Reference an issue" : "Search people or issues";
+    mode === "chat"
+      ? t("mention_picker.placeholder_chat")
+      : t("mention_picker.placeholder_comment");
   const query = useNativeSearchBar(placeholder, { autoFocus: true });
   return <MentionPickerBody mode={mode} query={query} />;
 }

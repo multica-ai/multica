@@ -1,0 +1,21 @@
+{
+  "untitled_chat": "Untitled chat",
+  "delete_chat": {
+    "title": "Delete this chat?",
+    "confirm": "Delete"
+  },
+  "disabled_reason": {
+    "no_agent": "No agent selected",
+    "no_agents_workspace": "No agents in this workspace",
+    "archived": "This chat is archived"
+  },
+  "sessions": {
+    "title": "Chats",
+    "empty": "No chats yet.",
+    "archived_label": "archived"
+  },
+  "mention_picker": {
+    "placeholder_chat": "Reference an issue",
+    "placeholder_comment": "Search people or issues"
+  }
+}

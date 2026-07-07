@@ -1,0 +1,21 @@
+{
+  "untitled_chat": "无标题聊天",
+  "delete_chat": {
+    "title": "删除此聊天？",
+    "confirm": "删除"
+  },
+  "disabled_reason": {
+    "no_agent": "未选择智能体",
+    "no_agents_workspace": "此工作区没有智能体",
+    "archived": "此聊天已归档"
+  },
+  "sessions": {
+    "title": "聊天",
+    "empty": "暂无聊天。",
+    "archived_label": "已归档"
+  },
+  "mention_picker": {
+    "placeholder_chat": "引用一个 issue",
+    "placeholder_comment": "搜索人员或 issue"
+  }
+}
