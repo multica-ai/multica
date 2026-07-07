@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -253,6 +254,60 @@ func TestResolveWorkspaceByIDOrSlug(t *testing.T) {
 			t.Errorf("error = %q, want it to reference 'workspace list'", err)
 		}
 	})
+}
+
+func TestRunWorkspaceGitHubBackfillIssuePRLinks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/workspaces/11111111-1111-1111-1111-111111111111/github/backfill-issue-pr-links" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["repo_owner"] != "Wilson-G" || body["repo_name"] != "my-awesome-multica" {
+			t.Fatalf("unexpected body: %#v", body)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"workspace_id":          "11111111-1111-1111-1111-111111111111",
+			"repo_owner":            "Wilson-G",
+			"repo_name":             "my-awesome-multica",
+			"scanned_prs":           3,
+			"linked_issue_pr_pairs": 4,
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "11111111-1111-1111-1111-111111111111")
+
+	cmd := &cobra.Command{Use: "backfill-issue-pr-links"}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("repo-owner", "", "")
+	cmd.Flags().String("repo-name", "", "")
+	cmd.Flags().String("output", "json", "")
+	_ = cmd.Flags().Set("repo-owner", "Wilson-G")
+	_ = cmd.Flags().Set("repo-name", "my-awesome-multica")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	defer func() { os.Stdout = oldStdout }()
+
+	if err := runWorkspaceGitHubBackfillIssuePRLinks(cmd, nil); err != nil {
+		t.Fatalf("runWorkspaceGitHubBackfillIssuePRLinks: %v", err)
+	}
+	w.Close()
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "\"linked_issue_pr_pairs\": 4") {
+		t.Fatalf("stdout = %s", string(out))
+	}
 }
 
 // resetWorkspaceUpdateFlags clears every flag on workspaceUpdateCmd and marks

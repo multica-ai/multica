@@ -411,6 +411,127 @@ func TestWebhook_MergedPR_PreservesCancelled(t *testing.T) {
 	}
 }
 
+func TestBackfillIssuePullRequestLinks_RebuildsMissingLinksFromMirroredPRs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`SELECT 1 FROM github_installation LIMIT 0`,
+		`SELECT 1 FROM github_pull_request LIMIT 0`,
+		`SELECT close_intent FROM issue_pull_request LIMIT 0`,
+	} {
+		if _, err := testPool.Exec(ctx, stmt); err != nil {
+			t.Skipf("github schema not available in test database: %v", err)
+		}
+	}
+	issueTitle := "Backfill target"
+	var (
+		issueID         string
+		issueIdentifier string
+	)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, status, priority, number, position)
+		VALUES ($1, 'member', $2, $3, 'in_progress', 'none', 439, -439)
+		RETURNING id, number
+	`, testWorkspaceID, testUserID, issueTitle).Scan(&issueID, new(int32)); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	issueIdentifier = "HAN-439"
+
+	const (
+		installationID int64 = 7654321
+		repoOwner            = "acme"
+		repoName             = "widget"
+		prNumber       int32 = 43
+	)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3`, testWorkspaceID, repoOwner, repoName)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1 AND installation_id = $2`, testWorkspaceID, installationID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   repoOwner,
+		AccountType:    "Organization",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	pr, err := testHandler.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		RepoOwner:      repoOwner,
+		RepoName:       repoName,
+		PrNumber:       prNumber,
+		Title:          issueIdentifier + ": restore links",
+		State:          "merged",
+		HtmlUrl:        "https://github.com/acme/widget/pull/43",
+		Branch:         strToText("agent/executor/" + strings.ToLower(issueIdentifier)),
+		PrCreatedAt:    parseGHTimeRequired("2026-06-23T16:00:00Z"),
+		PrUpdatedAt:    parseGHTimeRequired("2026-06-23T16:10:00Z"),
+		HeadSha:        "deadbeef",
+		Additions:      10,
+		Deletions:      2,
+		ChangedFiles:   1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertGitHubPullRequest: %v", err)
+	}
+	if linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issueID)); err != nil {
+		t.Fatalf("ListPullRequestsByIssue before backfill: %v", err)
+	} else if len(linked) != 0 {
+		t.Fatalf("expected no links before backfill, got %d", len(linked))
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/github/backfill-issue-pr-links", map[string]any{
+		"repo_owner": repoOwner,
+		"repo_name":  repoName,
+	}), "id", testWorkspaceID)
+	testHandler.BackfillIssuePullRequestLinks(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BackfillIssuePullRequestLinks: %d %s", w.Code, w.Body.String())
+	}
+	var resp GitHubBackfillIssuePRLinksResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ScannedPRs != 1 {
+		t.Errorf("ScannedPRs = %d, want 1", resp.ScannedPRs)
+	}
+	if resp.LinkedIssuePRPairs != 1 {
+		t.Errorf("LinkedIssuePRPairs = %d, want 1", resp.LinkedIssuePRPairs)
+	}
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after backfill: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected 1 linked PR after backfill, got %d", len(linked))
+	}
+	if linked[0].ID != pr.ID {
+		t.Errorf("linked PR id = %s, want %s", uuidToString(linked[0].ID), uuidToString(pr.ID))
+	}
+
+	var closeIntent bool
+	if err := testPool.QueryRow(ctx, `
+SELECT close_intent
+FROM issue_pull_request
+WHERE issue_id = $1 AND pull_request_id = $2
+`, issueID, pr.ID).Scan(&closeIntent); err != nil {
+		t.Fatalf("query close_intent: %v", err)
+	}
+	if closeIntent {
+		t.Error("expected backfill to leave close_intent=false when PR body is unavailable")
+	}
+}
+
 // TestWebhook_UninstallReturnsWorkspaceForBroadcast guards #4: the uninstall
 // path must look up the workspace_id BEFORE deleting the row so the
 // resulting `github_installation:deleted` event is broadcast scoped to that
