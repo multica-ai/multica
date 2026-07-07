@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Trash2, Share2, Link as LinkIcon } from "lucide-react";
+import { Trash2, Share2, Link as LinkIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ReviewAsset } from "@multica/core/types";
 import {
@@ -233,6 +233,16 @@ export function MediaReviewLayout({ workspaceId, asset, onAssetChange, onClose }
               <SelectItem value="approved">Approved</SelectItem>
             </SelectContent>
           </Select>
+
+          <div className="w-px h-6 bg-border mx-1" />
+
+          <button
+            onClick={() => onClose?.()}
+            title="Close review"
+            className="p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </div>
 

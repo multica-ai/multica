@@ -2338,7 +2338,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       <Dialog open={!!reviewAsset} onOpenChange={(open) => !open && handleReviewAssetChange(null)}>
         {/* sm:max-w-none is required: DialogContent defaults to sm:max-w-sm, which a plain max-w-* cannot override */}
-        <DialogContent className="w-screen h-screen max-w-none sm:max-w-none max-h-none p-0 gap-0 rounded-none border-0 bg-background">
+        <DialogContent showCloseButton={false} className="w-screen h-screen max-w-none sm:max-w-none max-h-none p-0 gap-0 rounded-none border-0 bg-background">
           {reviewAsset && (
             <MediaReviewLayout
               workspaceId={wsId}
