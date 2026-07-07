@@ -296,10 +296,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.40",
         date: "2026-07-07",
-        title: "本地目录并行任务、页内查找与多项修复",
+        title: "页内查找、断点续传与多项修复",
         changes: [],
         features: [
-          "绑定到同一个本地目录的多个任务现在可以真正并行运行，不再排队等待。",
           "你现在可以直接用命令行邀请成员加入工作区。",
           "Issue 详情页支持页内查找（Ctrl+F），可以直接跳转并高亮关键词。",
           "附件下载中断后可以断点续传，不用再从头下载。",

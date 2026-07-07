@@ -296,10 +296,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.40",
         date: "2026-07-07",
-        title: "Parallel local-directory tasks, in-page find, and fixes",
+        title: "In-page find, resumable downloads, and fixes",
         changes: [],
         features: [
-          "Tasks bound to the same local directory can now run in parallel instead of queuing up.",
           "You can now invite workspace members straight from the command line.",
           "Issue detail now supports in-page find (Ctrl+F) to jump to and highlight matches.",
           "Attachment downloads can resume after an interruption instead of restarting from the beginning.",
