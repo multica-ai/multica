@@ -7,6 +7,7 @@
  * touch feedback / sizing / dark-mode tinting are all consistent with the
  * rest of the header toolbar.
  */
+import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 
 interface Props {
@@ -20,20 +21,21 @@ export function ChatSessionActions({
   onMorePress,
   onNewPress,
 }: Props) {
+  const { t } = useTranslation("chat");
   return (
     <>
       {showMore ? (
         <IconButton
           name="ellipsis-horizontal"
           onPress={onMorePress}
-          accessibilityLabel="Session actions"
+          accessibilityLabel={t("session_actions.session_actions_label")}
         />
       ) : null}
       <IconButton
         name="add"
         iconSize={24}
         onPress={onNewPress}
-        accessibilityLabel="New chat"
+        accessibilityLabel={t("session_actions.new_chat_label")}
       />
     </>
   );

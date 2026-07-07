@@ -17,5 +17,94 @@
   "mention_picker": {
     "placeholder_chat": "引用一个 issue",
     "placeholder_comment": "搜索人员或 issue"
+  },
+  "agent_picker": {
+    "title": "选择智能体",
+    "empty": "暂无可用的智能体。"
+  },
+  "composer": {
+    "placeholder_default": "输入消息…",
+    "pill_label_default": "输入消息…",
+    "agent_working": "智能体正在处理…",
+    "message_placeholder": "发送消息…",
+    "chat_unavailable": "聊天不可用",
+    "stop_agent_label": "停止智能体",
+    "replying_to": "回复 {{name}}",
+    "cancel_reply_label": "取消回复",
+    "mention_label": "提及某人或 issue",
+    "upload_image_label": "上传图片",
+    "upload_file_label": "上传文件",
+    "send_label": "发送",
+    "file_too_large_title": "文件过大",
+    "file_too_large_message": "文件大小不能超过 100 MB。"
+  },
+  "empty_state": {
+    "first_time": {
+      "title": "与你的智能体聊天",
+      "subtitle_prefix": "✨ 它们了解你的工作区——",
+      "subtitle_highlight": "issue、项目、skill",
+      "subtitle_suffix": "。",
+      "description": "试着让它做个总结、帮你规划一天，或者交给它处理一件小事。"
+    },
+    "returning": {
+      "title_named": "嗨，我是 {{name}}",
+      "title_default": "欢迎回到 Multica",
+      "subtitle": "试着问问"
+    },
+    "starter_prompts": {
+      "list_issues": "按优先级列出我的未完成 issue",
+      "summarize_today": "总结我今天做了什么",
+      "plan_next": "帮我规划接下来要做什么"
+    }
+  },
+  "message_list": {
+    "show_error_details_label": "显示错误详情",
+    "show_details": "显示详情",
+    "replied_in": "{{time}} 后回复",
+    "failed_after": "{{time}} 后失败"
+  },
+  "session_actions": {
+    "session_actions_label": "会话操作",
+    "new_chat_label": "新建聊天"
+  },
+  "timeline": {
+    "steps_one": "{{count}} 个步骤",
+    "steps_other": "{{count}} 个步骤",
+    "tool_fallback": "工具"
+  },
+  "title_button": {
+    "default_agent_name": "聊天",
+    "new_chat_subtitle": "新建聊天",
+    "accessibility_label": "会话与智能体选择"
+  },
+  "long_press": {
+    "copy": "复制",
+    "select_text": "选择文本"
+  },
+  "no_agent_banner": {
+    "accessibility_label": "没有可用的智能体，前往智能体设置",
+    "title": "没有可用的智能体",
+    "description": "请在「更多 → 智能体」中添加或启用一个智能体以开始聊天。"
+  },
+  "offline_banner": {
+    "default_agent_name": "此智能体",
+    "unstable": "{{name}} 可能刚刚断开连接——你的消息将进入队列。",
+    "offline": "{{name}} 已离线。消息将在其运行时恢复后发送。"
+  },
+  "status_pill": {
+    "offline": "离线",
+    "reconnecting": "正在重新连接",
+    "queued": "排队中",
+    "starting_up": "正在启动",
+    "thinking": "思考中",
+    "typing": "正在输入",
+    "working": "处理中",
+    "tool": {
+      "running_command": "正在执行命令",
+      "reading_files": "正在读取文件",
+      "searching_code": "正在搜索代码",
+      "making_edits": "正在编辑",
+      "searching_web": "正在搜索网页"
+    }
   }
 }

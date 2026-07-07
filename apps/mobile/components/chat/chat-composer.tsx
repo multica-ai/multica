@@ -31,6 +31,7 @@ import { Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useTranslation } from "react-i18next";
 import { MessageComposer } from "@/components/composer/message-composer";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -69,6 +70,7 @@ export function ChatComposer({
   disabledReason,
 }: Props) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useTranslation("chat");
 
   const onSubmit = useCallback(
     async ({
@@ -101,13 +103,15 @@ export function ChatComposer({
         pathname: "/[workspace]/mention-picker",
         params: { workspace: wsSlug ?? "", mode: "chat" },
       }}
-      placeholder={sending ? "Agent is working…" : "Message…"}
+      placeholder={
+        sending ? t("composer.agent_working") : t("composer.message_placeholder")
+      }
       pillLabel={
         sending
-          ? "Agent is working…"
+          ? t("composer.agent_working")
           : disabled
-            ? (disabledReason ?? "Chat unavailable")
-            : "Message…"
+            ? (disabledReason ?? t("composer.chat_unavailable"))
+            : t("composer.message_placeholder")
       }
       pillIcon="chatbubble-ellipses-outline"
       disabled={disabled}
@@ -122,6 +126,7 @@ export function ChatComposer({
 function StopButton({ onPress }: { onPress: () => void }) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
+  const { t } = useTranslation("chat");
   return (
     <Animated.View
       key="stop"
@@ -133,7 +138,7 @@ function StopButton({ onPress }: { onPress: () => void }) {
         className="h-8 w-8 items-center justify-center rounded-full bg-foreground active:opacity-80"
         hitSlop={12}
         accessibilityRole="button"
-        accessibilityLabel="Stop agent"
+        accessibilityLabel={t("composer.stop_agent_label")}
       >
         <View
           style={{

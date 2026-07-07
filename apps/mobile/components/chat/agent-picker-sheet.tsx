@@ -14,6 +14,7 @@
  * centered cards already work well on iOS.
  */
 import { Modal, Pressable, ScrollView, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import type { Agent } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
@@ -34,6 +35,7 @@ export function AgentPickerSheet({
   onPick,
   onClose,
 }: Props) {
+  const { t } = useTranslation("chat");
   return (
     <Modal
       visible={visible}
@@ -47,7 +49,7 @@ export function AgentPickerSheet({
             <View className="bg-popover rounded-2xl overflow-hidden">
               <View className="px-4 py-3 border-b border-border">
                 <Text className="text-base font-semibold text-foreground">
-                  Choose an agent
+                  {t("agent_picker.title")}
                 </Text>
               </View>
 
@@ -55,7 +57,7 @@ export function AgentPickerSheet({
                 {agents.length === 0 ? (
                   <View className="px-4 py-8">
                     <Text className="text-sm text-muted-foreground text-center">
-                      No agents available.
+                      {t("agent_picker.empty")}
                     </Text>
                   </View>
                 ) : (

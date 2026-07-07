@@ -20,6 +20,7 @@ import { useCallback, useState } from "react";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@multica/core/types";
 import { useChatSelectStore } from "@/data/chat-select-store";
 
@@ -28,6 +29,13 @@ export function useChatMessageLongPress(
 ): { onLongPress: () => void; isPressed: boolean } {
   const [isPressed, setIsPressed] = useState(false);
   const { showActionSheetWithOptions } = useActionSheet();
+  // Everything below runs inside this hook's own top-level scope (no
+  // nested plain-function helper the way `presentReactSheet` works in
+  // `components/issue/comment-context-menu.tsx`), so `t`/`tCommon` can be
+  // called directly here and simply closed over by the `useCallback`
+  // below — no need to thread them through as explicit parameters.
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
 
   const onLongPress = useCallback(() => {
     const hasContent = !!message.content;
@@ -48,10 +56,10 @@ export function useChatMessageLongPress(
     };
 
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(t("long_press.copy"), { kind: "copy" });
+      push(t("long_press.select_text"), { kind: "select" });
     }
-    push("Cancel", { kind: "cancel" });
+    push(tCommon("cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
 
@@ -78,7 +86,7 @@ export function useChatMessageLongPress(
         }
       },
     );
-  }, [message, showActionSheetWithOptions]);
+  }, [message, showActionSheetWithOptions, t, tCommon]);
 
   return { onLongPress, isPressed };
 }

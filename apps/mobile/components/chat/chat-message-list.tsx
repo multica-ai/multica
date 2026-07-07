@@ -42,6 +42,7 @@ import { ActivityIndicator, Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
   ChatMessage,
   ChatPendingTask,
@@ -352,10 +353,12 @@ function ElapsedCaption({
   variant: "replied" | "failed";
   elapsedMs: number;
 }) {
+  const { t } = useTranslation("chat");
+  const time = formatElapsedMs(elapsedMs);
   const label =
     variant === "replied"
-      ? `Replied in ${formatElapsedMs(elapsedMs)}`
-      : `Failed after ${formatElapsedMs(elapsedMs)}`;
+      ? t("message_list.replied_in", { time })
+      : t("message_list.failed_after", { time });
   return (
     <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
   );
@@ -374,6 +377,7 @@ function FailureBubble({
   isSelecting: boolean;
   longPress: ReturnType<typeof useChatMessageLongPress>;
 }) {
+  const { t } = useTranslation("chat");
   const hasRawError = rawError.trim().length > 0;
 
   // B6: pass `selectable={isSelecting}` rather than hard-coding
@@ -399,7 +403,7 @@ function FailureBubble({
             <CollapsibleTrigger asChild>
               <View
                 accessibilityRole="button"
-                accessibilityLabel="Show error details"
+                accessibilityLabel={t("message_list.show_error_details_label")}
                 className="mt-1 flex-row items-center gap-1 active:opacity-70"
               >
                 <Ionicons
@@ -408,7 +412,7 @@ function FailureBubble({
                   color="#71717a"
                 />
                 <Text className="text-xs text-muted-foreground">
-                  Show details
+                  {t("message_list.show_details")}
                 </Text>
               </View>
             </CollapsibleTrigger>
