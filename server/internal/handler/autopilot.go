@@ -971,10 +971,9 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// autopilot_subscriber carries no DB-level foreign key/cascade (repo rule:
-	// referential cleanup lives in the application layer), so delete the
-	// subscriber template alongside the autopilot in one transaction. Without
-	// this, deleting an autopilot would orphan its subscriber rows.
+	// Referential cleanup lives in the application layer. Keep all dependent
+	// autopilot rows in the same transaction so deleting the parent row does not
+	// rely on DB-level cascades for the hot path.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
@@ -990,6 +989,25 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.DeleteAutopilotCollaboratorsForAutopilot(r.Context(), idUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
+	}
+	runIDs, err := qtx.ListAutopilotRunIDsForAutopilot(r.Context(), idUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if len(runIDs) > 0 {
+		if err := qtx.ClearAgentTasksAutopilotRunIDs(r.Context(), runIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+			return
+		}
+		if err := qtx.ClearWebhookDeliveriesAutopilotRunIDs(r.Context(), runIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+			return
+		}
+		if err := qtx.DeleteAutopilotRunsByIDs(r.Context(), runIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+			return
+		}
 	}
 	if err := qtx.DeleteAutopilot(r.Context(), idUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")

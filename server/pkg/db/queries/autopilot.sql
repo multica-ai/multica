@@ -69,6 +69,26 @@ RETURNING *;
 -- name: DeleteAutopilot :exec
 DELETE FROM autopilot WHERE id = $1;
 
+-- name: ListAutopilotRunIDsForAutopilot :many
+-- Autopilot deletion intentionally handles run cleanup in the application
+-- layer instead of relying on autopilot_run.autopilot_id ON DELETE CASCADE.
+SELECT id FROM autopilot_run
+WHERE autopilot_id = $1;
+
+-- name: ClearAgentTasksAutopilotRunIDs :exec
+UPDATE agent_task_queue
+SET autopilot_run_id = NULL
+WHERE autopilot_run_id = ANY(@run_ids::uuid[]);
+
+-- name: ClearWebhookDeliveriesAutopilotRunIDs :exec
+UPDATE webhook_delivery
+SET autopilot_run_id = NULL
+WHERE autopilot_run_id = ANY(@run_ids::uuid[]);
+
+-- name: DeleteAutopilotRunsByIDs :exec
+DELETE FROM autopilot_run
+WHERE id = ANY(@run_ids::uuid[]);
+
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
@@ -451,4 +471,3 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
-

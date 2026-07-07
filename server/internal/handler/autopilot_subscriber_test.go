@@ -597,22 +597,33 @@ func TestAutopilotDispatchSkipsInboxWhenNoSubscribers(t *testing.T) {
 	}
 }
 
-// TestDeleteAutopilotRemovesSubscribers guards the app-layer cleanup that
-// replaced the dropped autopilot_subscriber → autopilot ON DELETE CASCADE:
-// deleting an autopilot must also delete its subscriber template rows in the
-// same transaction, leaving no orphans behind.
+// TestDeleteAutopilotRemovesSubscribers guards the app-layer cleanup used by
+// DELETE /api/autopilots/{id}: deleting an autopilot must clear its dependent
+// rows in the same transaction instead of relying on database cascades.
 func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
 	ctx := context.Background()
 	var autopilotID string
+	var taskID string
+	var deliveryID string
 	defer func() {
+		if taskID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		}
+		if deliveryID != "" {
+			testPool.Exec(ctx, `DELETE FROM webhook_delivery WHERE id = $1`, deliveryID)
+		}
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID)
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
 	}()
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -643,6 +654,48 @@ func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
 		t.Fatalf("subscriber rows before delete = %d, want 1", before)
 	}
 
+	var triggerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, webhook_token)
+		VALUES ($1, 'webhook', 'delete-app-layer-test')
+		RETURNING id
+	`, autopilotID).Scan(&triggerID); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	var runID1, runID2 string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, trigger_id, source, status)
+		VALUES ($1, $2, 'webhook', 'completed')
+		RETURNING id
+	`, autopilotID, triggerID).Scan(&runID1); err != nil {
+		t.Fatalf("create first run: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, trigger_id, source, status)
+		VALUES ($1, $2, 'webhook', 'failed')
+		RETURNING id
+	`, autopilotID, triggerID).Scan(&runID2); err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, autopilot_run_id
+		)
+		VALUES ($1, $2, 'completed', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, runID1).Scan(&taskID); err != nil {
+		t.Fatalf("create linked task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO webhook_delivery (
+			workspace_id, autopilot_id, trigger_id, provider, status, autopilot_run_id
+		)
+		VALUES ($1, $2, $3, 'generic', 'dispatched', $4)
+		RETURNING id
+	`, testWorkspaceID, autopilotID, triggerID, runID2).Scan(&deliveryID); err != nil {
+		t.Fatalf("create linked delivery: %v", err)
+	}
+
 	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil)
 	req = withURLParam(req, "id", autopilotID)
@@ -665,5 +718,27 @@ func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
 	}
 	if autopilotRows != 0 {
 		t.Fatalf("autopilot rows after delete = %d, want 0", autopilotRows)
+	}
+
+	var runRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID).Scan(&runRows); err != nil {
+		t.Fatalf("count runs after delete: %v", err)
+	}
+	if runRows != 0 {
+		t.Fatalf("autopilot_run rows after delete = %d, want 0 (app-layer cleanup)", runRows)
+	}
+	var taskRunValid bool
+	if err := testPool.QueryRow(ctx, `SELECT autopilot_run_id IS NOT NULL FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskRunValid); err != nil {
+		t.Fatalf("load task run link after delete: %v", err)
+	}
+	if taskRunValid {
+		t.Fatal("agent_task_queue.autopilot_run_id after delete is still set, want NULL")
+	}
+	var deliveryRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM webhook_delivery WHERE id = $1`, deliveryID).Scan(&deliveryRows); err != nil {
+		t.Fatalf("count delivery after delete: %v", err)
+	}
+	if deliveryRows != 0 {
+		t.Fatalf("webhook_delivery rows after delete = %d, want 0", deliveryRows)
 	}
 }

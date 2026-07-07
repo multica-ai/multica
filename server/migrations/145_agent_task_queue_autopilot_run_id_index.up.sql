@@ -10,12 +10,16 @@
 -- — has no index to use and degrades to a full sequential scan of
 -- agent_task_queue, the hottest/largest table in the schema.
 --
--- Deleting an autopilot cascades (ON DELETE CASCADE) into every one of its
--- autopilot_run rows, and each deleted run fires that trigger once. So
--- `DELETE FROM autopilot` costs one full agent_task_queue seq scan PER run.
--- For an autopilot with real run history this is O(runs × queue-size) and
--- the DELETE request hangs for seconds-to-minutes — the client sits on the
--- "删除中..." confirm dialog and the UI appears frozen (MUL-4180).
+-- Autopilot deletion now performs this cleanup in the application layer with
+-- one set-based UPDATE before deleting the runs, but that UPDATE still needs
+-- the same lookup to be indexed:
+--   UPDATE agent_task_queue SET autopilot_run_id = NULL
+--   WHERE autopilot_run_id = ANY(<run ids>)
+-- Without an index, an autopilot with real run history can still hang the
+-- DELETE request for seconds-to-minutes while the client sits on the
+-- "删除中..." confirm dialog (MUL-4180). The index also protects any remaining
+-- database-level ON DELETE SET NULL trigger path until the historical FK is
+-- removed in a future cleanup.
 --
 -- Partial `WHERE autopilot_run_id IS NOT NULL` keeps the index tiny: only
 -- autopilot-originated tasks set the column, the vast majority of queue

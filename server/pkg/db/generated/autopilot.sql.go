@@ -81,6 +81,28 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 	return err
 }
 
+const clearAgentTasksAutopilotRunIDs = `-- name: ClearAgentTasksAutopilotRunIDs :exec
+UPDATE agent_task_queue
+SET autopilot_run_id = NULL
+WHERE autopilot_run_id = ANY($1::uuid[])
+`
+
+func (q *Queries) ClearAgentTasksAutopilotRunIDs(ctx context.Context, runIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearAgentTasksAutopilotRunIDs, runIds)
+	return err
+}
+
+const clearWebhookDeliveriesAutopilotRunIDs = `-- name: ClearWebhookDeliveriesAutopilotRunIDs :exec
+UPDATE webhook_delivery
+SET autopilot_run_id = NULL
+WHERE autopilot_run_id = ANY($1::uuid[])
+`
+
+func (q *Queries) ClearWebhookDeliveriesAutopilotRunIDs(ctx context.Context, runIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearWebhookDeliveriesAutopilotRunIDs, runIds)
+	return err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -366,6 +388,16 @@ WHERE autopilot_id = $1
 // Application-layer cleanup run inside the autopilot delete transaction.
 func (q *Queries) DeleteAutopilotCollaboratorsForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAutopilotCollaboratorsForAutopilot, autopilotID)
+	return err
+}
+
+const deleteAutopilotRunsByIDs = `-- name: DeleteAutopilotRunsByIDs :exec
+DELETE FROM autopilot_run
+WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) DeleteAutopilotRunsByIDs(ctx context.Context, runIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotRunsByIDs, runIds)
 	return err
 }
 
@@ -727,6 +759,33 @@ func (q *Queries) ListAutopilotIDsForCollaborator(ctx context.Context, userID pg
 			return nil, err
 		}
 		items = append(items, autopilot_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAutopilotRunIDsForAutopilot = `-- name: ListAutopilotRunIDsForAutopilot :many
+SELECT id FROM autopilot_run
+WHERE autopilot_id = $1
+`
+
+// Autopilot deletion intentionally handles run cleanup in the application
+// layer instead of relying on autopilot_run.autopilot_id ON DELETE CASCADE.
+func (q *Queries) ListAutopilotRunIDsForAutopilot(ctx context.Context, autopilotID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAutopilotRunIDsForAutopilot, autopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
