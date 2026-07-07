@@ -90,7 +90,9 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
   const isPrivate = agent.permission_mode === "private";
   const isWorkspacePublic =
     agent.permission_mode === "public_to" &&
-    agent.invocation_targets.some((target) => target.target_type === "workspace");
+    (agent.invocation_targets ?? []).some(
+      (target) => target.target_type === "workspace",
+    );
   const showSharedWarning =
     !isPrivate && (allowlist.length > 0 || activeSlugs.length > 0);
 

@@ -65,7 +65,7 @@ import (
 // Errors are logged at warn level and swallowed: this is a best-effort
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
-func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue, actorType, actorID string) {
+func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
 	if !issue.ParentIssueID.Valid {
 		return
 	}
@@ -144,15 +144,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if staged {
 		closedStage := issue.Stage.Int32
 		summary, nextStage := stageProgressSummary(children, closedStage)
-		var advance string
-		if nextStage > 0 {
-			advance = fmt.Sprintf(
-				" Stage %d is next. Review the full layout with `multica issue children %s`, and if Stage %d's dependencies are satisfied promote its `backlog` sub-issues to `todo` to continue. Read each sub-issue's description first and only promote items whose stated dependencies are already met — do not rely on this parent's higher-level breakdown alone. If a description conflicts with that breakdown, leave it `backlog` and post a comment to confirm first.",
-				nextStage, parentID, nextStage,
-			)
-		} else {
-			advance = " This was the final stage. Wrap up the parent — synthesize the results and move it forward, or close it out if nothing remains."
-		}
+		advance := stageAdvanceInstruction(nextStage, parentID)
 		content = fmt.Sprintf(
 			"%sStage %d of this issue is complete — its last sub-issue [%s](mention://issue/%s) — \"%s\" — just finished. Stage progress — %s.%s",
 			mentionPrefix, closedStage, identifier, childID, title, summary, advance,
@@ -198,7 +190,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, comment, actorType, actorID)
+	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
@@ -300,6 +292,32 @@ func stageProgressSummary(children []db.Issue, closedStage int32) (summary strin
 	return strings.Join(parts, "; "), nextStage
 }
 
+// stageAdvanceInstruction returns the trailing instruction appended to a
+// staged child-done system comment, given the next stage with pending work
+// among the sub-issues that currently exist (nextStage, 0 = none).
+//
+//   - nextStage > 0: a later stage with unfinished work already exists, so
+//     point the leader at it.
+//   - nextStage == 0: no later stage exists *among the sub-issues created so
+//     far*. This deliberately does NOT assert that the workflow is finished.
+//     The server has no declarative workflow model — stages are agent-driven
+//     and often created lazily (stage N+1's sub-issues are only written after
+//     stage N produces the inputs they depend on), so an intermediate stage in
+//     such a pipeline reaches nextStage == 0 exactly like a true final stage
+//     does. The old wording ("This was the final stage. Wrap up the parent")
+//     asserted a finality the server cannot know and pushed leaders to wrap up
+//     mid-workflow (MUL-4062 / #4927). The message now names both possibilities
+//     and hands the create-next-vs-wrap-up decision back to the leader.
+func stageAdvanceInstruction(nextStage int32, parentID string) string {
+	if nextStage > 0 {
+		return fmt.Sprintf(
+			" Stage %d is next. Review the full layout with `multica issue children %s`, and if Stage %d's dependencies are satisfied promote its `backlog` sub-issues to `todo` to continue. Read each sub-issue's description first and only promote items whose stated dependencies are already met — do not rely on this parent's higher-level breakdown alone. If a description conflicts with that breakdown, leave it `backlog` and post a comment to confirm first.",
+			nextStage, parentID, nextStage,
+		)
+	}
+	return " Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, wrap up the parent (synthesize the results and move it forward, or close it out) — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now."
+}
+
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
 // child issue's title before it is embedded into the parent's system
 // comment. Smuggled mentions are already harmless on the listener path
@@ -390,7 +408,10 @@ func sanitizeMentionLabel(name string) string {
 //     Unlike a human @squad mention, this does NOT fan out to squad members
 //     — child-done is a coordination signal, the leader decides whether
 //     and how to wake the rest of the squad. Documented here so reviewers
-//     don't read "system mention" as inheriting the full member fan-out.
+//     don't read "system mention" as inheriting the full member fan-out. The
+//     actor that closed the child is irrelevant to routing: the target is the
+//     parent's own leader, chosen (and permission-checked) at squad-assign
+//     time, so no actor identity is threaded in — see triggerChildDoneSquad.
 //   - notification_preference is not consulted: this is a platform routing
 //     signal targeted at the assignee that already owns the parent, not a
 //     general notification. Per-user mute settings are evaluated by the
@@ -421,7 +442,7 @@ func sanitizeMentionLabel(name string) string {
 //     itself push a child back into a terminal transition.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment, actorType, actorID string) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
@@ -430,7 +451,7 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.I
 	case "agent":
 		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, systemComment.ID, actorType, actorID)
+		h.triggerChildDoneSquad(ctx, parent, systemComment.ID)
 	}
 }
 
@@ -475,35 +496,36 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 }
 
 // triggerChildDoneSquad enqueues a leader-role task for the parent's squad
-// assignee. Like the agent path (see triggerChildDoneAgent) it applies NO
-// self-trigger guard: even when the finished child is owned by the same squad
-// or by another squad sharing this leader, the leader must still be woken on
-// the PARENT to advance the next stage or wrap up. The prior same-squad /
-// shared-leader guards assumed the leader had already observed the child via
-// its own coordination cycle, but that wake lands on the CHILD and never
-// carries the parent-level stage-barrier instruction, so it stranded the
-// common "squad decomposes its parent into sub-issues assigned to its own
-// squad" pattern (MUL-3969). Re-triggering is bounded by the
-// HasPendingTaskForIssueAndAgent idempotency check below, exactly as the
-// agent path relies on it.
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID, actorType, actorID string) {
+// assignee. It mirrors the agent path (see triggerChildDoneAgent) exactly:
+//
+//   - NO self-trigger guard: even when the finished child is owned by the same
+//     squad or by another squad sharing this leader, the leader must still be
+//     woken on the PARENT to advance the next stage or wrap up. The prior
+//     same-squad / shared-leader guards assumed the leader had already observed
+//     the child via its own coordination cycle, but that wake lands on the
+//     CHILD and never carries the parent-level stage-barrier instruction, so it
+//     stranded the common "squad decomposes its parent into sub-issues assigned
+//     to its own squad" pattern (MUL-3969).
+//   - NO leader-invocation gate. Waking the parent's OWN squad leader on
+//     child-done is a coordination handoff on an issue the leader already owns,
+//     not a fresh invocation — invocation permission was already enforced when
+//     the parent was assigned to the squad (validateAssigneePair). The agent
+//     path has never gated this. Re-checking it here on behalf of the child's
+//     completer — an agent/system actor with no resolvable human originator —
+//     failed closed for the DEFAULT private leader, silently stranding every
+//     process-squad pipeline after its first stage while direct-to-leader-agent
+//     parents advanced fine (MUL-4063 / GH #4928). Removed so agent and squad
+//     child-done follow one path; if invocation permission is ever reintroduced
+//     it must be added to BOTH paths together.
+//
+// Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
+// check below, exactly as the agent path relies on it.
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil {
-		return
-	}
-
-	// Private-leader gate: deny if the actor cannot invoke the leader. Member
-	// actors are their own originator; agent/system child-done triggers have
-	// no resolvable human here, so canInvokeAgent fails closed for member/team
-	// targets while still admitting workspace-target leaders.
-	leaderOriginator := ""
-	if actorType == "member" {
-		leaderOriginator = actorID
-	}
-	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, leaderOriginator, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 

@@ -73,12 +73,19 @@ func allowAllAgents(db.Agent) bool { return true }
 // the pending-task dedup), not the top-level decision.
 //
 // The decision must equal the real enqueue conditions so preview never claims
-// a run that the write path then drops. In particular:
-//   - assign source (create / assignee change) cancels existing tasks before
-//     enqueuing, so a pre-existing pending task is moot — not checked here.
-//   - status source (backlog → active) enqueues without cancelling, so a live
-//     pending task would be blocked by the (issue_id, agent_id) unique index;
-//     reflected by the pending check below.
+// a net-new run that the write path then drops. The write enqueues through
+// CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
+// over pending (queued/dispatched) tasks; the pending check below mirrors that
+// guard, and only the status source needs it:
+//   - status source (backlog → active) can re-fire against an assignee that
+//     already holds a pending task (e.g. one a @mention raised while the issue
+//     sat in backlog); the check keeps preview from promising a run the unique
+//     index would coalesce away.
+//   - assign source (create / assignee change) skips the check: a create
+//     targets a fresh issue with no prior task, and a reassignment no longer
+//     cancels existing tasks (#4963 / MUL-4113) — in the rare case the new
+//     assignee already holds a pending task the insert simply no-ops on the
+//     same unique index, so the assignee still ends up with one pending run.
 func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput, probe IssueTriggerProbe) (IssueRunTrigger, bool) {
 	issue := in.Issue
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {

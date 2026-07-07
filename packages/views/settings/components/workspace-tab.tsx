@@ -21,7 +21,6 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
-import { useWorkspaceId } from "@multica/core/hooks";
 import {
   memberListOptions,
   workspaceKeys,
@@ -46,8 +45,17 @@ export function WorkspaceTab() {
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
-  const wsId = useWorkspaceId();
-  const { data: members = [], isFetched: membersFetched } = useQuery(memberListOptions(wsId));
+  // Derive the id from useCurrentWorkspace instead of the throwing
+  // useWorkspaceId: this component can legitimately render while the
+  // workspace is gone from the list cache but the URL slug hasn't changed
+  // yet (post-delete invalidation before navigation completes, or an
+  // external delete of the workspace we're on). The `!workspace` guard
+  // below renders null for that window; a throwing hook would crash first.
+  const wsId = workspace?.id;
+  const { data: members = [], isFetched: membersFetched } = useQuery({
+    ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
   const qc = useQueryClient();
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
@@ -55,36 +63,34 @@ export function WorkspaceTab() {
   const hasOnboarded = useHasOnboarded();
 
   /**
-   * Send the user to a safe URL BEFORE the leave/delete mutation fires.
-   * The destination is computed from the current cached workspace list,
-   * minus the workspace that's about to go away.
+   * Send the user to a safe URL, computed from the current cached workspace
+   * list minus the workspace that's going away.
    *
-   * Why navigate first, not after:
-   *   1. The backend broadcasts `workspace:deleted` / `member:removed` the
-   *      moment the mutation lands. If the user is still on the soon-to-
-   *      be-deleted workspace's URL when that event arrives, the realtime
-   *      handler in `use-realtime-sync.ts` also triggers a relocation —
-   *      and both code paths race with the mutation's own
-   *      `invalidateQueries` refetch. The loser's in-flight fetch gets
-   *      cancelled, surfacing as an unhandled `CancelledError`.
-   *   2. Navigating first means by the time the WS event fires, the
-   *      active workspace is already something else; the realtime
-   *      handler's "current === deleted" check fails and its relocate
-   *      branch no-ops.
-   *   3. UX: the destructive flow feels instant (dialog closes → new
-   *      workspace appears) even though the API hasn't responded yet.
+   * Call ordering differs per flow:
+   *   - Delete calls this AFTER the mutation succeeds. The realtime
+   *     `workspace:deleted` handler skips self-initiated deletes (see
+   *     pending-delete.ts), so nothing races this navigation.
+   *   - Leave still calls this BEFORE the mutation fires: `member:removed`
+   *     has no self-initiated marker yet, so if the user were still on the
+   *     workspace's URL when that event arrives, the realtime handler in
+   *     `use-realtime-sync.ts` would trigger a parallel full-page relocate
+   *     that races the mutation's `invalidateQueries` refetch — the loser's
+   *     in-flight fetch gets cancelled, surfacing as an unhandled
+   *     `CancelledError`. Navigating first makes the handler's
+   *     "current === lost workspace" check fail and its relocate no-op.
+   *     Known debt: give leave the same await-then-navigate shape as delete.
    */
   const navigateAwayFromCurrentWorkspace = () => {
     const cachedList =
       qc.getQueryData<Workspace[]>(workspaceListOptions().queryKey) ?? [];
     const remaining = cachedList.filter((w) => w.id !== workspace?.id);
-    // Clear the workspace-context singleton BEFORE navigating and BEFORE
-    // the mutation fires. Three downstream consumers read it:
-    //  1. Realtime `workspace:deleted` handler's "current === deleted"
-    //     check — if the singleton still points at the deleting workspace
-    //     when the WS event arrives, it fires a parallel relocate that
-    //     races the mutation's invalidate and the settings page's own
-    //     navigate, surfacing a CancelledError and a full-page reload.
+    // Clear the workspace-context singleton BEFORE navigating. Three
+    // downstream consumers read it:
+    //  1. Realtime relocate handlers' "current === lost workspace" check
+    //     (`member:removed` for leave; also a second line of defense for
+    //     delete) — if the singleton still points at the lost workspace
+    //     when the WS event arrives, they fire a parallel full-page
+    //     relocate that races this navigation.
     //  2. Chrome gating (`{slug && <AppSidebar />}` on desktop) — if the
     //     singleton lingers, the sidebar stays mounted while the deleted
     //     workspace is no longer in the list, and `useWorkspaceId` throws.
@@ -237,14 +243,17 @@ export function WorkspaceTab() {
   const handleConfirmDelete = async () => {
     if (!workspace) return;
     setActionId("delete-workspace");
-    // Close the dialog and navigate away FIRST. See navigateAwayFromCurrentWorkspace
-    // comment for why: keeps the realtime `workspace:deleted` handler out
-    // of the race so we don't end up with concurrent refetches cancelling
-    // each other and surfacing CancelledError.
-    setDeleteDialogOpen(false);
-    navigateAwayFromCurrentWorkspace();
+    // Await the DELETE with the dialog in its loading state, and only
+    // navigate on success (CLAUDE.md: flows that navigate must await the
+    // server; no optimistic removal). The realtime `workspace:deleted`
+    // handler skips self-initiated deletes via the pending-delete registry,
+    // so it can't race this navigation with its own full-page relocate.
+    // On failure the dialog stays open, the cache was never touched, and
+    // the user is exactly where they started.
     try {
       await deleteWorkspace.mutateAsync(workspace.id);
+      setDeleteDialogOpen(false);
+      navigateAwayFromCurrentWorkspace();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_delete_failed));
     } finally {

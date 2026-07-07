@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -38,6 +39,8 @@ type AutopilotService struct {
 // timezone fails to load. Exported so the scheduler can use the same default
 // when computing next run times.
 const DefaultAutopilotTriggerTimezone = "UTC"
+
+const autopilotRecentDuplicateWindow = 60 * time.Second
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
@@ -299,6 +302,14 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
+	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
+		ctx, qtx, ap.WorkspaceID, ap.ID, ap.ProjectID, title, autopilotRecentDuplicateWindow,
+	); err != nil {
+		return fmt.Errorf("recent duplicate guard: %w", err)
+	} else if found {
+		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID)}
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
@@ -356,12 +367,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-
-	// Update run with the linked issue.
-	updatedRun, err := s.Queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+	// Link the run inside the same tx as the issue insert. This makes the
+	// recent-duplicate guard count only fully observable autopilot issues and
+	// avoids a crash window where recovery would see an orphan issue but no
+	// linked run.
+	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
 		ID:      run.ID,
 		IssueID: issue.ID,
 	})
@@ -369,6 +379,10 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("link run to issue: %w", err)
 	}
 	*run = updatedRun
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
 
 	// Publish issue:created so the existing event chain fires
 	// (subscriber listeners, activity listeners, notification listeners). For
@@ -1381,6 +1395,7 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 //   - public_to agent -> workspace target admits any workspace-member creator
 //     (and agent-created autopilots as workspace principals); member target
 //     admits the matching creator; team targets are inert.
+//
 // Fail-closed on any lookup error.
 func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Autopilot, agent db.Agent) bool {
 	creatorID := util.UUIDToString(ap.CreatedByID)

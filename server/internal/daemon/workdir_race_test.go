@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,6 +155,106 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	}
 	if !workdirOnDisk.Load() {
 		t.Fatal("envRoot/workdir did not exist on disk when /start was called — os.MkdirAll must complete before StartTask (issue #3999 race A)")
+	}
+}
+
+func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-private-temp"
+	taskID := "task-private-temp"
+	expectedTempDir := filepath.Join(execenv.PredictRootDir(workspacesRoot, workspaceID, taskID), "tmp", taskID)
+
+	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	if err := os.Chmod(fakeBin, 0o755); err != nil {
+		t.Fatalf("chmod fake agent: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  srv.URL,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin, Model: ""},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-private-temp",
+		AuthToken:   "mat_private_temp",
+		Agent: &AgentData{
+			ID:   "agent-private-temp",
+			Name: "test-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE": captureFile,
+				"TMPDIR":       "/shared/tmp",
+				"TMP":          "/shared/tmp",
+				"TEMP":         "/shared/tmp",
+			},
+		},
+	}
+
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	result, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	info, err := os.Stat(expectedTempDir)
+	if err != nil {
+		t.Fatalf("expected task temp dir %q to exist: %v", expectedTempDir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected task temp path %q to be a directory", expectedTempDir)
+	}
+
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured agent env: %v", err)
+	}
+	got := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		got[key] = value
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got[key] != expectedTempDir {
+			t.Fatalf("%s = %q, want private task temp dir %q", key, got[key], expectedTempDir)
+		}
 	}
 }
 

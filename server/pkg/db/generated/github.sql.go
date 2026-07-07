@@ -252,7 +252,7 @@ SELECT
     COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1
+WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
 `
 
 type GetIssuePullRequestCloseAggregateRow struct {
@@ -268,6 +268,13 @@ type GetIssuePullRequestCloseAggregateRow struct {
 // (with close_intent) are persisted before this query runs, so the result
 // is event-agnostic — a link-only sibling closing after a closing-keyword
 // PR has already merged still resolves the issue.
+//
+// reference_only links (a PR that merely mentions the issue identifier in its
+// body) are excluded: they are hidden from the issue PR list, so they must not
+// silently gate auto-advance either. An open body-only mention would otherwise
+// keep open_count > 0 and block the issue from advancing while being invisible
+// in the UI. (reference_only rows never carry close_intent, so excluding them
+// does not change merged_with_close_intent_count.)
 func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetIssuePullRequestCloseAggregateRow, error) {
 	row := q.db.QueryRow(ctx, getIssuePullRequestCloseAggregate, issueID)
 	var i GetIssuePullRequestCloseAggregateRow
@@ -321,14 +328,18 @@ func (q *Queries) GetPendingGitHubInstallation(ctx context.Context, installation
 const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :exec
 
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
 ) VALUES (
-    $1, $2, $4, $5, $3
+    $1, $2, $4, $5, $3, $6
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
-        WHEN $6 THEN issue_pull_request.close_intent
+        WHEN $7 THEN issue_pull_request.close_intent
         ELSE EXCLUDED.close_intent
+    END,
+    reference_only = CASE
+        WHEN $7 THEN issue_pull_request.reference_only
+        ELSE EXCLUDED.reference_only
     END
 `
 
@@ -338,6 +349,7 @@ type LinkIssueToPullRequestParams struct {
 	CloseIntent         bool        `json:"close_intent"`
 	LinkedByType        pgtype.Text `json:"linked_by_type"`
 	LinkedByID          pgtype.UUID `json:"linked_by_id"`
+	ReferenceOnly       bool        `json:"reference_only"`
 	PreserveCloseIntent bool        `json:"preserve_close_intent"`
 }
 
@@ -349,6 +361,11 @@ type LinkIssueToPullRequestParams struct {
 // the current title/body parse result so authors can remove a closing keyword
 // before merge. Post-terminal edits can opt into preserving the stored value,
 // keeping the merge-time decision stable.
+//
+// reference_only marks a link justified ONLY by a bare body mention (no closing
+// keyword, no title/branch reference). It follows the same preserve gate as
+// close_intent so a post-terminal edit can't retroactively hide a PR that did
+// the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
 func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) error {
 	_, err := q.db.Exec(ctx, linkIssueToPullRequest,
 		arg.IssueID,
@@ -356,6 +373,7 @@ func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPul
 		arg.CloseIntent,
 		arg.LinkedByType,
 		arg.LinkedByID,
+		arg.ReferenceOnly,
 		arg.PreserveCloseIntent,
 	)
 	return err
@@ -470,7 +488,7 @@ WITH issue_prs AS (
     SELECT pr.id, pr.head_sha
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = $1
+    WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
 ),
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
@@ -509,7 +527,7 @@ SELECT
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = $1
+WHERE ipr.issue_id = $1 AND NOT ipr.reference_only
 ORDER BY pr.pr_created_at DESC
 `
 
@@ -551,7 +569,9 @@ type ListPullRequestsByIssueRow struct {
 // selected so a single app firing multiple suites on the same head doesn't
 // get counted N times. Late-arriving suites for an OLD head are stored but
 // excluded by the head_sha filter, so they can't override the new head's
-// pending view.
+// pending view. reference_only links (a PR that merely mentions the issue
+// identifier in its body, with no closing keyword and no title/branch
+// reference) are filtered out — they are not working PRs for this issue.
 func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UUID) ([]ListPullRequestsByIssueRow, error) {
 	rows, err := q.db.Query(ctx, listPullRequestsByIssue, issueID)
 	if err != nil {

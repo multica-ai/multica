@@ -224,6 +224,20 @@ type Daemon struct {
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
 
+	// worktreePool implements the MUL-3483 worktree_pool mode. It only
+	// participates for local_directory resources whose ref opts into
+	// mode="worktree_pool"; in_place tasks bypass it entirely and keep
+	// the shared-tree + path-mutex semantics unchanged.
+	worktreePool *WorktreePoolManager
+
+	// localLeases stashes the resolved workdir a task should execute in
+	// when the local_directory ref uses worktree_pool. handleTask
+	// populates the entry after Acquire succeeds and clears it in the
+	// same release closure; runTask reads it to route
+	// execenv.PrepareParams.LocalWorkDir at the newly-allocated
+	// worktree rather than the base local_path. Keyed by task ID.
+	localLeases sync.Map // map[string]localDirectoryLease
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -266,6 +280,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
+		worktreePool:              NewWorktreePoolManager(logger),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
@@ -2977,7 +2992,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// sibling workdir (which is the user's path) or the envRoot
 			// itself (we want output/ and logs/ to linger for forensic
 			// access).
-			if assignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID); assignment != nil {
+			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -3008,7 +3023,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
-	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
@@ -3026,6 +3041,31 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
+	}
+
+	switch assignment.Ref.modeOrDefault() {
+	case localDirectoryModeWorktreePool:
+		return d.acquireLocalDirectoryWorktreePool(ctx, task, assignment, taskLog)
+	default:
+		return d.acquireLocalDirectoryInPlace(ctx, task, assignment, taskLog)
+	}
+}
+
+// acquireLocalDirectoryInPlace is the pre-MUL-3483 code path: take the
+// per-realpath mutex, mark the task waiting_local_directory on contention,
+// return a release func that unlocks. Kept as the default so any user
+// (self-host or SaaS) whose ref doesn't opt into worktree_pool sees zero
+// behavioural change from this change set.
+func (d *Daemon) acquireLocalDirectoryInPlace(ctx context.Context, task Task, assignment *localDirectoryAssignment, taskLog *slog.Logger) (release func(), abort bool) {
+	// Publish the lease so runTask feeds the same AbsPath into
+	// execenv.PrepareParams.LocalWorkDir, unified with the worktree_pool
+	// branch even though the value here is unchanged.
+	d.localLeases.Store(task.ID, localDirectoryLease{
+		Mode:    localDirectoryModeInPlace,
+		WorkDir: assignment.AbsPath,
+	})
+	clearLease := func() {
+		d.localLeases.Delete(task.ID)
 	}
 
 	// While the lock is contended the daemon would otherwise sit blocked on
@@ -3084,8 +3124,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			}()
 		})
 	}
-	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	unlock, err := d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
 	if err != nil {
+		clearLease()
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a
 		// terminal state — return silently the same way the run-phase poller
@@ -3110,7 +3151,156 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, true
 	}
 	taskLog.Info("local_directory: lock acquired")
-	return release, false
+	return func() {
+		unlock()
+		clearLease()
+	}, false
+}
+
+// acquireLocalDirectoryWorktreePool implements the MUL-3483 worktree_pool
+// binding: instead of taking a per-realpath mutex on the shared tree, ask
+// the pool manager for a fresh `git worktree` under the ref's pool_root
+// and pin the agent to that isolated directory. Two worker tasks bound
+// to the same local_directory can then run truly in parallel while the
+// pool manager keeps `git worktree add/remove/prune` serialised through
+// its per-repo mutex.
+//
+// When the pool is saturated (MaxParallel already in use) we park the
+// task in waiting_local_directory with a structured wait_reason, retry
+// on a short interval, and abort if the server cancels the row in the
+// meantime. The retry cadence matches the existing path-mutex wait so
+// operators see consistent behaviour across the two modes.
+func (d *Daemon) acquireLocalDirectoryWorktreePool(ctx context.Context, task Task, assignment *localDirectoryAssignment, taskLog *slog.Logger) (release func(), abort bool) {
+	// Reject before the retry loop if the base isn't actually a git
+	// worktree — the pool has nothing to hand out otherwise, and the
+	// error is exactly the same on every attempt.
+	if !isGitWorkTree(ctx, assignment.AbsPath) {
+		msg := fmt.Sprintf("local_directory: worktree_pool mode requires %q to be a git working tree", assignment.AbsPath)
+		taskLog.Error("local_directory: base path is not a git worktree", "path", assignment.AbsPath)
+		if failErr := d.client.FailTask(ctx, task.ID, msg, "", "", "local_directory_error"); failErr != nil {
+			taskLog.Error("fail task after worktree_pool base check", "error", failErr)
+		}
+		return nil, true
+	}
+
+	poolRoot := strings.TrimSpace(assignment.Ref.PoolRoot)
+	if poolRoot == "" {
+		poolRoot = defaultWorktreePoolRoot(assignment.RealPath)
+	}
+	maxParallel := assignment.Ref.maxParallelOrDefault()
+	taskLog = taskLog.With("mode", localDirectoryModeWorktreePool, "pool_root", poolRoot, "max_parallel", maxParallel)
+
+	// Set up the cancellation watcher the same way the in_place path does
+	// so a server-side cancel during a `pool_saturated` wait aborts the
+	// retry loop promptly instead of parking for the full pollInterval.
+	waitCtx, waitCancel := context.WithCancel(ctx)
+	defer waitCancel()
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
+	var (
+		watcherOnce      sync.Once
+		prepareLeaseOnce sync.Once
+		cancelledByPoll  <-chan struct{}
+		stopPrepareLease func()
+	)
+	defer func() {
+		if stopPrepareLease != nil {
+			stopPrepareLease()
+		}
+	}()
+	startWatcher := func() {
+		watcherOnce.Do(func() {
+			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+			go func() {
+				select {
+				case <-cancelledByPoll:
+					waitCancel()
+				case <-waitCtx.Done():
+				}
+			}()
+		})
+	}
+	startPrepareLease := func() {
+		prepareLeaseOnce.Do(func() {
+			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
+		})
+	}
+
+	// Retry Acquire while the pool is saturated. Every other error path
+	// bubbles out immediately (submodule refusal, git worktree add
+	// failure, disk-full, etc.) since a retry would just repeat the
+	// same failure.
+	for {
+		alloc, err := d.worktreePool.Acquire(waitCtx, assignment.RealPath, poolRoot, maxParallel, task.ID)
+		if err == nil {
+			taskLog.Info("worktree_pool: allocated", "workdir", alloc.WorkDir, "branch", alloc.Branch)
+			d.localLeases.Store(task.ID, localDirectoryLease{
+				Mode:    localDirectoryModeWorktreePool,
+				WorkDir: alloc.WorkDir,
+				Branch:  alloc.Branch,
+			})
+			return func() {
+				alloc.Release()
+				d.localLeases.Delete(task.ID)
+			}, false
+		}
+
+		var saturated *PoolSaturatedError
+		if !errors.As(err, &saturated) {
+			taskLog.Error("worktree_pool: acquire failed", "error", err)
+			failureReason := "local_directory_error"
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				failureReason = "cancelled"
+			}
+			if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
+				taskLog.Error("fail task after worktree_pool acquire error", "error", failErr)
+			}
+			return nil, true
+		}
+
+		// Saturation: publish a structured wait_reason, then park until
+		// either a slot frees up or the server cancels the row. We reuse
+		// the pollInterval as the retry cadence so the wait behaves the
+		// same as the in_place path-mutex wait from the operator's view.
+		reason := fmt.Sprintf("local_directory worktree_pool saturated (%d/%d) on %s", len(saturated.Holders), saturated.MaxParallel, assignment.AbsPath)
+		if len(saturated.Holders) > 0 {
+			short := make([]string, 0, len(saturated.Holders))
+			for _, h := range saturated.Holders {
+				short = append(short, shortID(h))
+			}
+			reason = fmt.Sprintf("%s (holders: %s)", reason, strings.Join(short, ", "))
+		}
+		taskLog.Info("worktree_pool: pool saturated, waiting", "in_use", len(saturated.Holders), "max_parallel", saturated.MaxParallel)
+		if waitErr := d.client.MarkTaskWaitingLocalDirectory(ctx, task.ID, reason); waitErr != nil {
+			taskLog.Warn("worktree_pool: mark waiting status failed", "error", waitErr)
+		}
+		startPrepareLease()
+		startWatcher()
+
+		select {
+		case <-waitCtx.Done():
+			// Either the outer ctx was cancelled (daemon shutdown) or the
+			// watcher fired (row went terminal / was deleted).
+			if cancelledByPoll != nil {
+				select {
+				case <-cancelledByPoll:
+					taskLog.Info("worktree_pool: wait aborted by server-side terminal state")
+					return nil, true
+				default:
+				}
+			}
+			taskLog.Warn("worktree_pool: wait cancelled", "error", waitCtx.Err())
+			failureReason := "cancelled"
+			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("local_directory worktree_pool wait cancelled: %s", waitCtx.Err().Error()), "", "", failureReason); failErr != nil {
+				taskLog.Error("fail task after worktree_pool wait cancel", "error", failErr)
+			}
+			return nil, true
+		case <-time.After(pollInterval):
+			// Loop back and try Acquire again.
+		}
+	}
 }
 
 // reportTaskResult writes the final task disposition back to the server.
@@ -3570,12 +3760,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path; this call is a pure JSON parse over the same task payload.
-	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	// path for worker tasks; leader tasks intentionally skip the assignment.
+	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	// The lease is the source of truth for WorkDir when handleTask has
+	// finished acquireLocalDirectoryLockIfNeeded — it captures either the
+	// in_place AbsPath or the freshly allocated worktree_pool path so
+	// runTask never has to re-derive the worktree_pool selection here.
+	// The nil-check gates on both leader tasks (which skip Acquire) and
+	// tests that call runTask directly without going through handleTask.
+	var localLease *localDirectoryLease
+	if raw, ok := d.localLeases.Load(task.ID); ok {
+		if l, ok := raw.(localDirectoryLease); ok {
+			localLease = &l
+		}
+	}
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
+	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
+	// against the user's local_directory cannot be re-entered without a lock.
 	var agentMcpConfig json.RawMessage
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
@@ -3589,7 +3793,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	if task.PriorWorkDir != "" && localAssignment == nil {
+	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:         task.PriorWorkDir,
 			Provider:        provider,
@@ -3615,7 +3819,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:            taskCtx,
 		}
 		if localAssignment != nil {
-			prepParams.LocalWorkDir = localAssignment.AbsPath
+			// Prefer the lease publish from handleTask: it may point at a
+			// pool worktree that was allocated after assignment resolution
+			// (worktree_pool mode). Fall back to the assignment's AbsPath
+			// when no lease exists — that covers the leader-task path and
+			// direct-runTask test setups that skip Acquire.
+			if localLease != nil && localLease.WorkDir != "" {
+				prepParams.LocalWorkDir = localLease.WorkDir
+			} else {
+				prepParams.LocalWorkDir = localAssignment.AbsPath
+			}
 		}
 		env, err = execenv.Prepare(prepParams, d.logger)
 		if err != nil {
@@ -3627,6 +3840,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.RootDir != predictedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.ID)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
@@ -3709,6 +3926,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+		"TMPDIR":               taskTempDir,
+		"TMP":                  taskTempDir,
+		"TEMP":                 taskTempDir,
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -4635,6 +4855,30 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 	return strings.Join(parts, string(os.PathListSeparator)), true
 }
 
+func ensureTaskTempDir(envRoot string, taskID string) (string, error) {
+	envRoot = strings.TrimSpace(envRoot)
+	if envRoot == "" {
+		return "", errors.New("env root is empty")
+	}
+	dir := filepath.Join(envRoot, "tmp", safeTempPathComponent(taskID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func safeTempPathComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "task"
+	}
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_")
+	return replacer.Replace(value)
+}
+
 // isBlockedEnvKey returns true if the key must not be overridden by user-
 // configured custom_env. This prevents accidental or malicious override of
 // daemon-internal variables and critical system paths.
@@ -4644,7 +4888,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

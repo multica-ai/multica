@@ -259,6 +259,30 @@ describe("canAssignAgentToIssue", () => {
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("not_authenticated");
   });
+
+  // Regression: GH #4915. Legacy self-host backends / stale caches may
+  // return an agent without `invocation_targets` even though the modern
+  // type says required-array. The gate must degrade to "no grants" instead
+  // of throwing on `.some()` of undefined.
+  it("does not throw when invocation_targets is undefined", () => {
+    const a = makeAgent({
+      permission_mode: "public_to",
+      invocation_targets:
+        undefined as unknown as Agent["invocation_targets"],
+      owner_id: ALICE,
+    });
+    // Non-owner: no grants means denied.
+    expect(() =>
+      canAssignAgentToIssue(a, { userId: BOB, role: "member" }),
+    ).not.toThrow();
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "member" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
+    // Owner path still allows.
+    expect(
+      canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
+    ).toBe(true);
+  });
 });
 
 describe("canEditSkill / canDeleteSkill", () => {

@@ -52,18 +52,32 @@ export type AccessChange = {
   invocation_targets: AgentInvocationTargetInput[];
 };
 
-function hasWorkspaceTarget(targets: AgentInvocationTarget[]): boolean {
-  return targets.some((t) => t.target_type === "workspace");
+// The helpers below defensively coerce a missing (`undefined` / `null`) list
+// to an empty array. `Agent.invocation_targets` is TYPED as a required array,
+// and the modern backend always serialises `[]` when there are no grants,
+// but older self-host servers / stale query caches / template create
+// responses (see `MinimalAgentSchema` in api/schemas.ts) can still surface an
+// undefined value at runtime. Without the fallback, opening an agent detail
+// page against a legacy backend crashes the whole route with
+// "Cannot read properties of undefined (reading 'some')" (GH #4915).
+function hasWorkspaceTarget(
+  targets: AgentInvocationTarget[] | undefined | null,
+): boolean {
+  return (targets ?? []).some((t) => t.target_type === "workspace");
 }
 
-function selectedMemberIds(targets: AgentInvocationTarget[]): string[] {
-  return targets
+function selectedMemberIds(
+  targets: AgentInvocationTarget[] | undefined | null,
+): string[] {
+  return (targets ?? [])
     .filter((t) => t.target_type === "member" && t.target_id !== null)
     .map((t) => t.target_id as string);
 }
 
-function selectedTeamIds(targets: AgentInvocationTarget[]): string[] {
-  return targets
+function selectedTeamIds(
+  targets: AgentInvocationTarget[] | undefined | null,
+): string[] {
+  return (targets ?? [])
     .filter((t) => t.target_type === "team" && t.target_id !== null)
     .map((t) => t.target_id as string);
 }
@@ -78,7 +92,13 @@ export function AccessPicker({
   onChange,
 }: {
   permissionMode: AgentPermissionMode;
-  invocationTargets: AgentInvocationTarget[];
+  /**
+   * The agent's invocation grants. Typed loose (may be `undefined`) because
+   * the schema is `optional()` and older self-host backends / template create
+   * responses can omit the field even though the modern shape is a
+   * required-array. The internal helpers `?? []` this before reading.
+   */
+  invocationTargets: AgentInvocationTarget[] | undefined;
   /**
    * Legacy derived visibility. No longer rendered directly (the read-only and
    * editable states both summarise permission_mode + targets), but kept in the

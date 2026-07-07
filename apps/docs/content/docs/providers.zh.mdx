@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: Multica 支持 13 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: Multica 支持 14 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 内置支持 **14 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -26,6 +26,7 @@ Multica 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接
 | **OpenClaw** | 开源项目 | ✅ | ✅ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 动态发现 |
+| **Trae CLI** | ByteDance | ✅（ACP `session/load`）| ✅ | `.traecli/skills/` | 动态发现 |
 
 ## 每款工具的定位
 
@@ -89,15 +90,19 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 
 Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Kimi、Kiro CLI 共享传输层）。会话恢复通过 ACP `session/resume` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现，skill 复制到 `.qoder/skills/` 做原生发现。
 
+### Trae
+
+ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `bytedance/trae-agent`）。它是 ACP 原生工具，Multica 通过 `traecli acp serve --yolo` 在 stdio 上驱动它，传输层和 Kiro、Qoder 相同。会话恢复通过 ACP `session/load` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现并可通过 `session/set_model` 在任务中切换，skill 复制到 `.traecli/skills/`。
+
 ## 会话恢复：谁真的支持
 
 会话恢复的机制在 [执行任务](/tasks#任务能接着上次的上下文继续吗) 里讲过。**所有支持的工具都能恢复会话**——传 resume id，任务就会从上次的上下文接着继续。唯一的特例是 Pi：它的 resume id 是磁盘上的会话文件路径，而不是字符串 ID（见上文 [Pi](#pi)）。
 
 ## MCP 配置：按工具不同
 
-**13 款工具里有 10 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder**。其他 3 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
+**14 款工具里有 11 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI**。其他 3 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
 
-各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
+各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder、Trae CLI 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
 
 <Callout type="warning">
 如果你在智能体配置里设置了 `mcp_config`，但选了矩阵 MCP 列没有标 ✅ 的工具，你的 MCP server 对这个智能体**没有效果**。MCP 集成是按工具实现的。
@@ -119,6 +124,7 @@ Alibaba 出品。一款 agentic 编程 CLI。使用 ACP 协议（和 Hermes、Ki
 | OpenCode | `.opencode/skills/` | ✅ 原生 |
 | Pi | `.pi/skills/` | ✅ 原生 |
 | Qoder | `.qoder/skills/` | ✅ 原生 |
+| Trae CLI | `.traecli/skills/` | ✅ 原生 |
 | Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
 | Hermes | `.agent_context/skills/` | ⚠️ 通用 fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |

@@ -281,3 +281,35 @@ func TestSlimBriefIsSubstantiallyShorter(t *testing.T) {
 	}
 	t.Logf("slim brief reduction: %.1f%% (legacy=%d, slim=%d, Δ=%d)", ratio*100, len(legacy), len(slim), len(legacy)-len(slim))
 }
+
+// TestBackgroundTaskSafetySlimHardPins asserts the slim brief carries the
+// same hardened Background Task Safety pins as the legacy brief (MUL-4140).
+// The verbose path is covered by
+// TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic; this locks
+// the compressed slim path so a future slim-brief trim can't quietly drop
+// the no-background-and-yield / no-"standing by" guardrails that address
+// the MUL-4091 mechanism.
+func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
+	withSlimBrief(t)
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID: "i-1", TriggerCommentID: "tc-1",
+		AgentName: "Eve", AgentID: "eve-1",
+	})
+
+	for _, want := range []string{
+		"## Background Task Safety",
+		"Do NOT end your turn while background tasks",
+		"wait for a future notification/reminder",
+		"run the work synchronously instead",
+		"Never background-and-yield",
+		"foreground tool call that blocks",
+		"gh run watch",
+		"running in the background so you can keep working",
+		"standing by",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
+		}
+	}
+}

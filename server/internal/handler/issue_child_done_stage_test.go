@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -144,6 +145,40 @@ func TestStageProgressSummary_SkipsUnstaged(t *testing.T) {
 	if next != 2 {
 		t.Fatalf("nextStage = %d, want 2", next)
 	}
+}
+
+// stageAdvanceInstruction must point at a known next stage when one exists,
+// and — the core of MUL-4062 — must NOT assert finality when no later stage
+// exists yet, because a lazily-created intermediate stage reaches nextStage==0
+// exactly like a true final stage does.
+func TestStageAdvanceInstruction(t *testing.T) {
+	const parentID = "parent-uuid"
+
+	t.Run("a known next stage points the leader at it", func(t *testing.T) {
+		got := stageAdvanceInstruction(3, parentID)
+		if !strings.Contains(got, "Stage 3 is next") {
+			t.Fatalf("expected next-stage instruction, got %q", got)
+		}
+	})
+
+	t.Run("no created next stage does not assert finality", func(t *testing.T) {
+		got := stageAdvanceInstruction(0, parentID)
+		// Regression guard for MUL-4062: an intermediate stage in a lazily
+		// created workflow also reaches nextStage==0, so the message must not
+		// claim this was definitively the final stage.
+		if strings.Contains(got, "This was the final stage") {
+			t.Fatalf("must not assert finality when the workflow shape is unknown, got %q", got)
+		}
+		// It must make clear that finishing the stage != the whole issue is
+		// done, and hand both paths (wrap up / create the next stage) to the
+		// leader.
+		if !strings.Contains(got, "does not mean the whole issue is done") {
+			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
+		}
+		if !strings.Contains(got, "next stage") {
+			t.Fatalf("expected create-next-stage guidance, got %q", got)
+		}
+	})
 }
 
 // A stage can close because its last open child is *cancelled*, not only

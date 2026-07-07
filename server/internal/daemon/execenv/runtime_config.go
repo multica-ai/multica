@@ -840,10 +840,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 func writeBackgroundTaskSafetyInstructions(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks this task terminal when your top-level agent process/turn exits. Any background work you started but did not collect before exiting can be orphaned: its result may be lost, and the user may see a completed/failed task even though the delegated work was never synthesized.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
-	b.WriteString("- If a tool or runtime offers a background mode, use it only when you can explicitly wait for completion and collect the result before your final response.\n")
-	b.WriteString("- If a tool response says to wait for a future notification/reminder instead of collecting now, do not rely on that in Multica-managed runs. Block on the appropriate wait/output/collect operation before exiting.\n")
+	b.WriteString("Multica marks this task terminal the moment your top-level agent process/turn exits. A Multica-managed run has NO \"background work finishes later and wakes you up\" step: whatever you leave running in the background is orphaned, its result is lost, and the final comment you meant to post once it finished never sends. The user sees a task that ended with no conclusion and has to re-trigger you.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification, reminder, or wakeup to let you resume — that wakeup does not exist here.\n")
+	b.WriteString("- Do every wait synchronously inside a single foreground tool call that blocks until the work is done — e.g. `gh run watch <run-id>` for CI, or a blocking test/build command. Never split \"start the wait\" into this turn and \"collect the result\" into a later turn.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder, or tells you it is now running in the background so you can keep working, do NOT rely on that in Multica-managed runs — that hint comes from the standalone harness and does not apply here. Block on the appropriate wait/output/collect operation before exiting.\n")
 	b.WriteString("- If you cannot observe or collect a background task's result, do not spawn it in the background; run the work synchronously instead.\n")
+	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back once X finishes\" / \"waiting for CI\" message. That message becomes your final output and the task ends immediately — either finish the wait synchronously now and report the real outcome, or post the result you already have.\n")
 	b.WriteString("- Before posting your final result or exiting silently, account for every background task you started and incorporate its output or failure into your response.\n\n")
 }

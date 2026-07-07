@@ -891,6 +891,21 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
 			closingIdents[c] = struct{}{}
 		}
+		// qualifyingIdents are the identifiers that genuinely tie this PR to an
+		// issue: a title prefix, a branch-name reference, or a body closing
+		// keyword. Any identifier that is linked but NOT in this set was matched
+		// only by a bare mention in the PR body ("Related MUL-1", "Follow up in
+		// MUL-1"). Those links are still recorded (auto-link stays generous so
+		// close_intent can be tracked across edits) but are flagged
+		// reference_only and hidden from the issue's PR list — a passing mention
+		// should not surface the PR as a working PR for that issue (MUL-3739).
+		qualifyingIdents := map[string]struct{}{}
+		for _, id := range extractIdentifiers(p.PullRequest.Title, p.PullRequest.Head.Ref) {
+			qualifyingIdents[id] = struct{}{}
+		}
+		for c := range closingIdents {
+			qualifyingIdents[c] = struct{}{}
+		}
 		// close_intent should follow the PR title/body while the PR is still
 		// editable before its terminal close event. Once GitHub has delivered
 		// a terminal event, later edit/synchronize webhooks must not rewrite
@@ -914,10 +929,13 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 			}
 			_, declared := closingIdents[id]
 			closeIntent := declared && !preserveCloseIntent
+			_, qualifies := qualifyingIdents[id]
+			referenceOnly := !qualifies
 			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
 				IssueID:             issue.ID,
 				PullRequestID:       pr.ID,
 				CloseIntent:         closeIntent,
+				ReferenceOnly:       referenceOnly,
 				PreserveCloseIntent: preserveCloseIntent,
 				LinkedByType:        strToText("system"),
 				LinkedByID:          pgtype.UUID{},
@@ -1431,7 +1449,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// it here would leave the parent silent for the dominant completion path.
 	// notifyParentOfChildDone re-checks every guard (prev != done, parent
 	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated, "system", "")
+	h.notifyParentOfChildDone(ctx, issue, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

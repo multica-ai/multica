@@ -11,7 +11,6 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import { captureEvent } from "@multica/core/analytics";
 import { useAuthStore } from "@multica/core/auth";
 import {
   needsSourceBackfill,
@@ -133,13 +132,11 @@ export function SourceBackfillModal() {
         if (next || !open) return;
         // Base UI fires onOpenChange(false) for X, ESC, and outside
         // click — all three count as "dismiss without committing".
-        captureEvent("source_backfill_dismissed", { trigger: "close" });
         bumpDismissCount();
         setOpen(false);
       }}
     >
       <SourceBackfillDialogBody
-        open={open}
         onComplete={() => setOpen(false)}
       />
     </Dialog>
@@ -155,27 +152,14 @@ SourceBackfillModal.displayName = "SourceBackfillModal";
  * starts fresh.
  */
 function SourceBackfillDialogBody({
-  open,
   onComplete,
 }: {
-  open: boolean;
   onComplete: () => void;
 }) {
   const { t } = useT("onboarding");
 
   const [answers, setAnswers] = useState(EMPTY_BACKFILL);
   const [busy, setBusy] = useState(false);
-  const shownEmittedRef = useRef(false);
-
-  // Fire the funnel-open event exactly once per open transition.
-  // `open` flips back when the parent closes us, and a fresh subsequent
-  // open mounts a brand-new body, so the ref starts fresh too.
-  useEffect(() => {
-    if (!open) return;
-    if (shownEmittedRef.current) return;
-    shownEmittedRef.current = true;
-    captureEvent("source_backfill_shown");
-  }, [open]);
 
   const options = useMemo<QuestionOption[]>(
     () => [
@@ -260,10 +244,6 @@ function SourceBackfillDialogBody({
           source_skipped: false,
         }),
       );
-      captureEvent("source_backfill_submitted", {
-        source: answers.source,
-        ...(answers.source_other ? { source_other: answers.source_other } : {}),
-      });
       onComplete();
     } catch (err) {
       setBusy(false);
@@ -284,7 +264,6 @@ function SourceBackfillDialogBody({
           source_skipped: true,
         }),
       );
-      captureEvent("source_backfill_skipped");
       onComplete();
     } catch (err) {
       setBusy(false);

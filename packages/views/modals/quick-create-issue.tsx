@@ -539,6 +539,7 @@ export function AgentCreatePanel({
           <div className="flex min-h-7 items-center gap-2">
             <FileUploadButton
               size="sm"
+              multiple
               disabled={uploading}
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
