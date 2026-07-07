@@ -63,7 +63,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { HighlightText } from "./highlight-text";
-import { useSearchStore } from "./search-store";
+import { useSearchStore } from "@multica/core/search";
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see SearchCommand body).
