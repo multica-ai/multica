@@ -152,6 +152,20 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		t.Fatalf("marker issue_id = %q, want issue id", marker.IssueID)
 	}
 
+	rootMarkerContent, err := os.ReadFile(filepath.Join(workspacesRoot, TaskContextMarkerRelPath))
+	if err != nil {
+		t.Fatalf("failed to read workspaces root task context marker: %v", err)
+	}
+	var rootMarker struct {
+		ManagedBy string `json:"managed_by"`
+	}
+	if err := json.Unmarshal(rootMarkerContent, &rootMarker); err != nil {
+		t.Fatalf("workspaces root task context marker unmarshal: %v\n%s", err, string(rootMarkerContent))
+	}
+	if rootMarker.ManagedBy != TaskContextMarkerManagedBy {
+		t.Fatalf("root marker managed_by = %q, want %q", rootMarker.ManagedBy, TaskContextMarkerManagedBy)
+	}
+
 	// Verify skill files.
 	skillContent, err := os.ReadFile(filepath.Join(env.WorkDir, ".agent_context", "skills", "code-review", "SKILL.md"))
 	if err != nil {

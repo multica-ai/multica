@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // freshAgentEnvSetCmd returns a standalone cobra.Command with the three
 // --custom-env* flags registered identically to agentEnvSetCmd, so
@@ -252,6 +257,48 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 
 		if got := resolveToken(testCmd()); got != "" {
 			t.Fatalf("resolveToken() = %q, want empty in daemon-managed context without MULTICA_TOKEN", got)
+		}
+	})
+
+	t.Run("workspaces root marker covers cwd at task env root", func(t *testing.T) {
+		env, err := execenv.Prepare(execenv.PrepareParams{
+			WorkspacesRoot: t.TempDir(),
+			WorkspaceID:    "ws-root-marker",
+			TaskID:         "task-root-marker",
+			AgentName:      "Root Marker Agent",
+			Task: execenv.TaskContextForEnv{
+				IssueID: "issue-root-marker",
+				AgentID: "agent-root-marker",
+			},
+		}, discardLogger())
+		if err != nil {
+			t.Fatalf("Prepare: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = env.Cleanup(true)
+		})
+
+		prev, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("get cwd: %v", err)
+		}
+		if err := os.Chdir(env.RootDir); err != nil {
+			t.Fatalf("chdir env root: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chdir(prev); err != nil {
+				t.Fatalf("restore cwd: %v", err)
+			}
+		})
+
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty in daemon-managed env root without MULTICA_TOKEN", got)
 		}
 	})
 

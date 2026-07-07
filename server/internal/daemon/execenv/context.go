@@ -142,6 +142,40 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	return nil
 }
 
+// writeWorkspacesRootTaskContextMarker marks the daemon-owned workspaces tree
+// itself as task-managed. The CLI walks upward from its cwd looking for this
+// marker; placing one at WorkspacesRoot keeps subprocesses that cd from
+// envRoot/workdir to envRoot fail-closed even when all MULTICA_* env vars were
+// stripped. It is intentionally not tracked in the per-task sidecar manifest:
+// task cleanup must never delete the root guard.
+func writeWorkspacesRootTaskContextMarker(workspacesRoot string) error {
+	path := filepath.Join(workspacesRoot, TaskContextMarkerRelPath)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create workspaces root .multica dir: %w", err)
+	}
+
+	payload := taskContextMarkerFile{ManagedBy: TaskContextMarkerManagedBy}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal workspaces root task context marker: %w", err)
+	}
+
+	if existing, err := os.ReadFile(path); err == nil {
+		var marker taskContextMarkerFile
+		if json.Unmarshal(existing, &marker) != nil || marker.ManagedBy != TaskContextMarkerManagedBy {
+			return fmt.Errorf("write workspaces root task context marker: %w", errPathPreExists)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read workspaces root task context marker: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write workspaces root task context marker: %w", err)
+	}
+	return nil
+}
+
 // projectResourceFile is the on-disk JSON written into the agent's working
 // directory. Schema is intentionally a thin pass-through of the API response
 // so consumers (skills, future tooling) don't need a separate parser.

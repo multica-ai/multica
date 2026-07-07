@@ -219,6 +219,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	if err := writeWorkspacesRootTaskContextMarker(params.WorkspacesRoot); err != nil {
+		return nil, fmt.Errorf("execenv: write workspaces root task context marker: %w", err)
+	}
 
 	env := &Environment{
 		RootDir:        envRoot,
