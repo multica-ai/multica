@@ -58,26 +58,26 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		t.Fatalf("StartAgentTask: %v", err)
 	}
 
-	var teamID string
+	var spaceID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1`,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&teamID); err != nil {
-		t.Fatalf("load fixture default team: %v", err)
+	).Scan(&spaceID); err != nil {
+		t.Fatalf("load fixture default space: %v", err)
 	}
 
-	// Mint the number from the Team counter (not the workspace counter) so this
-	// test cannot hand out a number that overlaps a team-aware create.
-	number, err := queries.IncrementTeamIssueCounter(ctx, db.IncrementTeamIssueCounterParams{
-		ID:          parseUUID(teamID),
+	// Mint the number from the Space counter (not the workspace counter) so this
+	// test cannot hand out a number that overlaps a space-aware create.
+	number, err := queries.IncrementSpaceIssueCounter(ctx, db.IncrementSpaceIssueCounterParams{
+		ID:          parseUUID(spaceID),
 		WorkspaceID: parseUUID(testWorkspaceID),
 	})
 	if err != nil {
-		t.Fatalf("IncrementTeamIssueCounter: %v", err)
+		t.Fatalf("IncrementSpaceIssueCounter: %v", err)
 	}
 	issue, err := queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
-		TeamID:      parseUUID(teamID),
+		SpaceID:     parseUUID(spaceID),
 		Title:       "agent-filed bug",
 		Status:      "todo",
 		Priority:    "none",

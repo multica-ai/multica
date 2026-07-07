@@ -4,7 +4,7 @@
   },
   "welcome": {
     "wordmark": "Welcome to Multica",
-    "headline_line1": "Your AI teammates,",
+    "headline_line1": "Your AI spacemates,",
     "headline_line2": "in",
     "headline_emphasis": "one workspace.",
     "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
@@ -14,7 +14,7 @@
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
-    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents.",
+    "illustration_caption": "Every issue, every thread, every decision — shared by your space and agents.",
     "illustration": {
       "card1_actor_name": "You",
       "card1_actor_initial": "N",
@@ -112,7 +112,7 @@
     "swap_title": "Swap anytime",
     "swap_body": "Each agent's runtime is just a setting. Change it whenever you want.",
     "add_more_title": "Add more later",
-    "add_more_body": "You can connect another computer for a teammate, or a dedicated one per agent.",
+    "add_more_body": "You can connect another computer for a spacemate, or a dedicated one per agent.",
     "learn_more": "Learn about agent runtimes →"
   },
   "cli_install": {
@@ -143,7 +143,7 @@
   },
   "step_agent": {
     "eyebrow": "Your first agent",
-    "headline": "Meet your first teammate.",
+    "headline": "Meet your first spacemate.",
     "lede_prefix": "Your answers point to a ",
     "lede_suffix": ". Pick whichever of the four fits you — each template ships ready to take its first issue. You can retune its instructions from the agent settings page later.",
     "footer_hint": "One agent is enough to start. Add more from the sidebar later.",
@@ -154,7 +154,7 @@
       "coding": {
         "label": "Coding Agent",
         "blurb": "Writes, refactors, and ships code. Reads your repo.",
-        "instructions": "You are a Coding Agent on a product team. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous."
+        "instructions": "You are a Coding Agent on a product space. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous."
       },
       "planning": {
         "label": "Planning Agent",
@@ -169,11 +169,11 @@
       "assistant": {
         "label": "Assistant",
         "blurb": "General-purpose. Good default when the task is unclear.",
-        "instructions": "You are a general-purpose teammate. Handle varied tasks — light coding, writing, research, planning — and stay pragmatic about scope. When the task is ambiguous, ask one clarifying question before diving in. Default to short, useful outputs over exhaustive ones."
+        "instructions": "You are a general-purpose spacemate. Handle varied tasks — light coding, writing, research, planning — and stay pragmatic about scope. When the task is ambiguous, ask one clarifying question before diving in. Default to short, useful outputs over exhaustive ones."
       }
     },
     "about_eyebrow": "What's an agent",
-    "about_headline": "An AI teammate that lives in your workspace.",
+    "about_headline": "An AI spacemate that lives in your workspace.",
     "about_body": "Agents show up in every assignee picker, just like any other colleague — except they can work 24/7 on whatever runtime you give them.",
     "ways_eyebrow": "Ways to work with an agent",
     "way_assign_title": "Assign it an issue",
@@ -184,7 +184,7 @@
     "way_chat_body": "Ask quick questions without creating an issue.",
     "way_autopilot_title": "Put it on Autopilot",
     "way_autopilot_body": "Daily triage, weekly digest, monthly audit — on a schedule.",
-    "add_more_hint": "Add more agents anytime. A small team of specialized agents beats one jack-of-all-trades.",
+    "add_more_hint": "Add more agents anytime. A small space of specialized agents beats one jack-of-all-trades.",
     "docs_link": "Creating your first agent →"
   },
   "welcome_after_onboarding": {
@@ -248,7 +248,7 @@
     "eyebrow_resume": "Pick up or start fresh",
     "headline_first": "Name your workspace.",
     "headline_resume": "Continue with {{name}}, or start another.",
-    "lede_first": "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later.",
+    "lede_first": "A workspace is where your issues, agents, and projects live. You can invite spacemates or spin up more workspaces later.",
     "lede_resume": "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces.",
     "name_label": "Workspace name",
     "name_placeholder": "Acme Inc, My Lab, Side Projects…",
@@ -277,9 +277,9 @@
     "side_next_eyebrow": "What's next",
     "side_preview_name": "Your workspace",
     "side_preview_slug": "workspace",
-    "perk_assign": "Assign issues to agents like you would a teammate",
+    "perk_assign": "Assign issues to agents like you would a spacemate",
     "perk_chat": "Chat with any agent without creating an issue",
-    "perk_invite": "Invite teammates — they see only this workspace",
+    "perk_invite": "Invite spacemates — they see only this workspace",
     "perk_switch": "Switch to other workspaces anytime from the top-left",
     "next_runtime": "Connect a computer so your agents have somewhere to run",
     "next_agent": "Create Multica Helper from your connected runtime",
@@ -290,7 +290,7 @@
       "issues_label": "Issues",
       "issues_meta": "shared task board",
       "agents_label": "Agents",
-      "agents_meta": "your AI teammates",
+      "agents_meta": "your AI spacemates",
       "projects_label": "Projects",
       "projects_meta": "group related issues",
       "autopilot_label": "Autopilot",
@@ -327,7 +327,7 @@
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
     "empty_skip_title": "Skip for now",
-    "empty_skip_subtitle": "Enter your workspace in read-only mode. Your agent can't run tasks until an agent runtime is connected on this computer — but you can still browse, plan, and invite teammates.",
+    "empty_skip_subtitle": "Enter your workspace in read-only mode. Your agent can't run tasks until an agent runtime is connected on this computer — but you can still browse, plan, and invite spacemates.",
     "empty_skip_action": "Skip",
     "empty_waitlist_title": "Use a cloud computer",
     "empty_waitlist_subtitle": "We'll run a computer for you in the cloud. Not live yet.",

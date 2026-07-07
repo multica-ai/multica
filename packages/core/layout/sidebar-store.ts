@@ -7,7 +7,7 @@ import { defaultStorage } from "../platform/storage";
 
 // Sidebar group collapse state, persisted per workspace (same
 // workspace-aware storage the quick-create prefs use). Keys are group ids:
-// "pinned", "workspace", "more", "teams", and `team:{teamId}` for each team
+// "pinned", "workspace", "more", "spaces", and `space:{spaceId}` for each space
 // group. Absent key = expanded — groups default open so a fresh workspace
 // shows its whole structure.
 interface SidebarState {

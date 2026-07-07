@@ -12,21 +12,21 @@ import (
 )
 
 const getIssueByIdentifierAlias = `-- name: GetIssueByIdentifierAlias :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.team_id FROM issue_identifier_alias a
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.space_id, i.properties FROM issue_identifier_alias a
 JOIN issue i ON i.id = a.issue_id
 WHERE a.workspace_id = $1
-  AND a.team_key_lower = $2
+  AND a.space_key_lower = $2
   AND a.number = $3
 `
 
 type GetIssueByIdentifierAliasParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	TeamKeyLower string      `json:"team_key_lower"`
-	Number       int32       `json:"number"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	SpaceKeyLower string      `json:"space_key_lower"`
+	Number        int32       `json:"number"`
 }
 
 func (q *Queries) GetIssueByIdentifierAlias(ctx context.Context, arg GetIssueByIdentifierAliasParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, getIssueByIdentifierAlias, arg.WorkspaceID, arg.TeamKeyLower, arg.Number)
+	row := q.db.QueryRow(ctx, getIssueByIdentifierAlias, arg.WorkspaceID, arg.SpaceKeyLower, arg.Number)
 	var i Issue
 	err := row.Scan(
 		&i.ID,
@@ -54,29 +54,30 @@ func (q *Queries) GetIssueByIdentifierAlias(ctx context.Context, arg GetIssueByI
 		&i.StartDate,
 		&i.Metadata,
 		&i.Stage,
-		&i.TeamID,
+		&i.SpaceID,
+		&i.Properties,
 	)
 	return i, err
 }
 
 const upsertIssueIdentifierAlias = `-- name: UpsertIssueIdentifierAlias :exec
-INSERT INTO issue_identifier_alias (workspace_id, team_key_lower, number, issue_id)
+INSERT INTO issue_identifier_alias (workspace_id, space_key_lower, number, issue_id)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (workspace_id, team_key_lower, number)
+ON CONFLICT (workspace_id, space_key_lower, number)
 DO UPDATE SET issue_id = EXCLUDED.issue_id
 `
 
 type UpsertIssueIdentifierAliasParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	TeamKeyLower string      `json:"team_key_lower"`
-	Number       int32       `json:"number"`
-	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	SpaceKeyLower string      `json:"space_key_lower"`
+	Number        int32       `json:"number"`
+	IssueID       pgtype.UUID `json:"issue_id"`
 }
 
 func (q *Queries) UpsertIssueIdentifierAlias(ctx context.Context, arg UpsertIssueIdentifierAliasParams) error {
 	_, err := q.db.Exec(ctx, upsertIssueIdentifierAlias,
 		arg.WorkspaceID,
-		arg.TeamKeyLower,
+		arg.SpaceKeyLower,
 		arg.Number,
 		arg.IssueID,
 	)

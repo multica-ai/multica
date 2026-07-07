@@ -54,7 +54,7 @@ import { isReservedSlug } from "@multica/core/paths";
  * The create-fields block doubles as a pedagogical preview: the URL is
  * rendered as a `<host>/[slug]` pill (host derived from the deployment's
  * app URL so self-hosted instances show their own domain). The default
- * team's issue key is derived server-side from the slug, so the form
+ * space's issue key is derived server-side from the slug, so the form
  * only asks for name and URL.
  *
  * Resume path ships two picker cards (existing + create-new) and the

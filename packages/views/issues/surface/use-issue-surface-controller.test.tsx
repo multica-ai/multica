@@ -200,9 +200,9 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  it("server-filters the workspace issue list by the selected team", async () => {
+  it("server-filters the workspace issue list by the selected space", async () => {
     const store = getIssueSurfaceViewStore("workspace:all");
-    store.getState().setTeamFilter("team-1");
+    store.getState().setSpaceFilter("space-1");
 
     const { result } = renderHook(
       () =>
@@ -218,17 +218,17 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.sort).toEqual({
       sort_by: "position",
       sort_direction: undefined,
-      team_id: "team-1",
+      space_id: "space-1",
     });
     expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ team_id: "team-1" }),
+      expect.objectContaining({ space_id: "space-1" }),
     );
   });
 
-  it("server-filters assignee groups by the selected team", async () => {
+  it("server-filters assignee groups by the selected space", async () => {
     const store = getIssueSurfaceViewStore("workspace:all");
     store.getState().setGrouping("assignee");
-    store.getState().setTeamFilter("team-1");
+    store.getState().setSpaceFilter("space-1");
 
     const { result } = renderHook(
       () =>
@@ -242,10 +242,10 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(listGroupedIssues).toHaveBeenCalled());
 
     expect(result.current.assigneeGroupFilter).toEqual(
-      expect.objectContaining({ team_id: "team-1" }),
+      expect.objectContaining({ space_id: "space-1" }),
     );
     expect(listGroupedIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ team_id: "team-1" }),
+      expect.objectContaining({ space_id: "space-1" }),
     );
   });
 

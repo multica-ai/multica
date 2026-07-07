@@ -36,9 +36,9 @@ export type IssueMetadata = Record<string, IssueMetadataValue>;
 export interface Issue {
   id: string;
   workspace_id: string;
-  team_id?: string | null;
-  team_key?: string | null;
-  team_name?: string | null;
+  space_id?: string | null;
+  space_key?: string | null;
+  space_name?: string | null;
   number: number;
   identifier: string;
   title: string;

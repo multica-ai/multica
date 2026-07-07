@@ -11,7 +11,7 @@
  *
  * Convention for new global routes (CLAUDE.md): use a single word
  * (`/login`, `/inbox`) or `/{noun}/{verb}` (`/workspaces/new`). Hyphenated
- * root-level word groups (`/new-workspace`, `/create-team`) collide with
+ * root-level word groups (`/new-workspace`, `/create-space`) collide with
  * common user workspace names — see PR for full discussion.
  */
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
@@ -76,7 +76,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // Reserving each segment name prevents `/{slug}/{view}` from being visually
   // ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two
   // things). `workspaces` covers the global `/workspaces/new` workspace-creation
-  // page; `teams` is reserved for future team management.
+  // page; `spaces` is reserved for future space management.
   "issues",
   "projects",
   "autopilots",
@@ -89,8 +89,8 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "skills",
   "settings",
   "workspaces",
-  "teams",
-  "team",
+  "spaces",
+  "space",
 
   // API / integration prefixes
   // `api` above already covers `/api/*`; these guard against future top-level

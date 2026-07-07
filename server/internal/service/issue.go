@@ -52,7 +52,7 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
 	WorkspaceID    pgtype.UUID
-	TeamID         pgtype.UUID
+	SpaceID        pgtype.UUID
 	Title          string
 	Description    pgtype.Text
 	Status         string
@@ -84,9 +84,9 @@ type IssueCreateOpts struct {
 	// package to depend on handler-layer types. If nil, the service
 	// emits a minimal `{"issue_id": <uuid>}` payload — enough for cache
 	// invalidation, but front-ends that expect the full response shape
-	// must provide BroadcastPayload. teamKey is the resolved Team key so
-	// the callback can build the identifier without re-querying the Team.
-	BroadcastPayload func(issue db.Issue, attachments []db.Attachment, teamKey string) map[string]any
+	// must provide BroadcastPayload. spaceKey is the resolved Space key so
+	// the callback can build the identifier without re-querying the Space.
+	BroadcastPayload func(issue db.Issue, attachments []db.Attachment, spaceKey string) map[string]any
 
 	// ActorID overrides the actor ID used for broadcast + analytics
 	// when it differs from the creator on the row. Agent-created issues
@@ -136,34 +136,34 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
-// ErrTeamNotFound signals that the requested or fallback Team does not exist
+// ErrSpaceNotFound signals that the requested or fallback Space does not exist
 // in the workspace. Callers translate this into 400.
-var ErrTeamNotFound = errors.New("team not found in this workspace")
+var ErrSpaceNotFound = errors.New("space not found in this workspace")
 
-// ErrTeamArchived signals that the resolved Team exists but is archived and
-// cannot receive new work. Kept distinct from ErrTeamNotFound so callers can
-// return a clear "team is archived" message instead of a misleading "not found".
-var ErrTeamArchived = errors.New("team is archived")
+// ErrSpaceArchived signals that the resolved Space exists but is archived and
+// cannot receive new work. Kept distinct from ErrSpaceNotFound so callers can
+// return a clear "space is archived" message instead of a misleading "not found".
+var ErrSpaceArchived = errors.New("space is archived")
 
-// ErrProjectTeamAmbiguous signals that a Team was not specified for an issue
-// whose Project belongs to more than one Team, so no single Team can be
-// inferred. Callers translate this into a 400 that names the candidate Team
-// keys; matched via errors.Is against a *ProjectTeamAmbiguousError.
-var ErrProjectTeamAmbiguous = errors.New("project has multiple teams; specify team_id")
+// ErrProjectSpaceAmbiguous signals that a Space was not specified for an issue
+// whose Project belongs to more than one Space, so no single Space can be
+// inferred. Callers translate this into a 400 that names the candidate Space
+// keys; matched via errors.Is against a *ProjectSpaceAmbiguousError.
+var ErrProjectSpaceAmbiguous = errors.New("project has multiple spaces; specify space_id")
 
-// ProjectTeamAmbiguousError carries the candidate Team keys so the transport
-// layer can produce a guided message. It matches ErrProjectTeamAmbiguous under
+// ProjectSpaceAmbiguousError carries the candidate Space keys so the transport
+// layer can produce a guided message. It matches ErrProjectSpaceAmbiguous under
 // errors.Is.
-type ProjectTeamAmbiguousError struct {
-	TeamKeys []string
+type ProjectSpaceAmbiguousError struct {
+	SpaceKeys []string
 }
 
-func (e *ProjectTeamAmbiguousError) Error() string {
-	return fmt.Sprintf("project has multiple teams (%s); specify team_id", strings.Join(e.TeamKeys, ", "))
+func (e *ProjectSpaceAmbiguousError) Error() string {
+	return fmt.Sprintf("project has multiple spaces (%s); specify space_id", strings.Join(e.SpaceKeys, ", "))
 }
 
-func (e *ProjectTeamAmbiguousError) Is(target error) bool {
-	return target == ErrProjectTeamAmbiguous
+func (e *ProjectSpaceAmbiguousError) Is(target error) bool {
+	return target == ErrProjectSpaceAmbiguous
 }
 
 // IssueCreateResult is the typed return from IssueService.Create.
@@ -175,10 +175,10 @@ func (e *ProjectTeamAmbiguousError) Is(target error) bool {
 type IssueCreateResult struct {
 	Issue       db.Issue
 	Attachments []db.Attachment
-	// TeamKey is the identifier prefix of the resolved Team, captured during
+	// SpaceKey is the identifier prefix of the resolved Space, captured during
 	// creation so callers building the broadcast payload and HTTP response do
-	// not each re-query the Team that Create already resolved.
-	TeamKey        string
+	// not each re-query the Space that Create already resolved.
+	SpaceKey       string
 	DuplicateIssue *db.Issue
 	// EnqueueErr carries a non-fatal agent/squad task enqueue failure that
 	// happened AFTER the issue was committed. The issue itself is valid; the
@@ -222,7 +222,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
-	teamID := p.TeamID
+	spaceID := p.SpaceID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -237,11 +237,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
-		// Team is a creation-time default, not a constraint: a sub-issue
-		// seeds its team from the parent only when the caller didn't pick
+		// Space is a creation-time default, not a constraint: a sub-issue
+		// seeds its space from the parent only when the caller didn't pick
 		// one. Parent and child may diverge afterwards.
-		if !teamID.Valid && parent.TeamID.Valid {
-			teamID = parent.TeamID
+		if !spaceID.Valid && parent.SpaceID.Valid {
+			spaceID = parent.SpaceID
 		}
 	}
 	if projectID.Valid {
@@ -252,23 +252,23 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
 	}
-	team, err := ResolveTeam(ctx, qtx, p.WorkspaceID, teamID, projectID)
+	space, err := ResolveSpace(ctx, qtx, p.WorkspaceID, spaceID, projectID)
 	if err != nil {
 		return IssueCreateResult{}, err
 	}
-	teamID = team.ID
+	spaceID = space.ID
 
-	// Invariant: an issue's team is always part of its project's team set.
+	// Invariant: an issue's space is always part of its project's space set.
 	// The UI resolves a mismatch with an explicit dialog whose default is
-	// "add the team to the project"; headless callers (agents, CLI, API)
+	// "add the space to the project"; headless callers (agents, CLI, API)
 	// get that same default applied here, so the invariant holds on every
-	// path and a team's Projects page never misses a project that holds
+	// path and a space's Projects page never misses a project that holds
 	// its issues.
-	if err := EnsureProjectHasTeam(ctx, qtx, p.WorkspaceID, projectID, teamID); err != nil {
+	if err := EnsureProjectHasSpace(ctx, qtx, p.WorkspaceID, projectID, spaceID); err != nil {
 		return IssueCreateResult{}, err
 	}
 
-	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, teamID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
+	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, spaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("duplicate guard: %w", err)
 	}
@@ -277,24 +277,24 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := qtx.IncrementTeamIssueCounter(ctx, db.IncrementTeamIssueCounterParams{
-		ID:          teamID,
+	issueNumber, err := qtx.IncrementSpaceIssueCounter(ctx, db.IncrementSpaceIssueCounterParams{
+		ID:          spaceID,
 		WorkspaceID: p.WorkspaceID,
 	})
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("increment counter: %w", err)
 	}
 
-	// New issues sort to the top of their (workspace, team, status) column for
-	// manual ordering. Computed inside the tx, after IncrementTeamIssueCounter
-	// has already taken the team row lock, so two concurrent creates
-	// in the same team see each other's positions and don't both
+	// New issues sort to the top of their (workspace, space, status) column for
+	// manual ordering. Computed inside the tx, after IncrementSpaceIssueCounter
+	// has already taken the space row lock, so two concurrent creates
+	// in the same space see each other's positions and don't both
 	// land on the same min-1 slot. Concurrent manual reorder via
 	// UpdateIssue(position) does NOT take this lock, so a create racing
 	// a reorder is still allowed to collide on position — manual ordering
 	// is best-effort and the UI tolerates equal positions by falling back
 	// to the secondary ORDER BY key.
-	newPosition, err := issueposition.NextTopPositionForTeam(ctx, tx, p.WorkspaceID, teamID, p.Status)
+	newPosition, err := issueposition.NextTopPositionForSpace(ctx, tx, p.WorkspaceID, spaceID, p.Status)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
 	}
@@ -303,7 +303,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 			WorkspaceID:   p.WorkspaceID,
-			TeamID:        teamID,
+			SpaceID:       spaceID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -325,7 +325,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
 			WorkspaceID:   p.WorkspaceID,
-			TeamID:        teamID,
+			SpaceID:       spaceID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -364,103 +364,103 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	s.publishIssueCreated(issue, attachments, team.Key, p.CreatorType, actorID, opts)
+	s.publishIssueCreated(issue, attachments, space.Key, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
 	enqueueErr := s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.InitiatorUserID)
 
-	return IssueCreateResult{Issue: issue, Attachments: attachments, TeamKey: team.Key, EnqueueErr: enqueueErr}, nil
+	return IssueCreateResult{Issue: issue, Attachments: attachments, SpaceKey: space.Key, EnqueueErr: enqueueErr}, nil
 }
 
-// ResolveTeam is the single authority for choosing an issue's Team. It is used
+// ResolveSpace is the single authority for choosing an issue's Space. It is used
 // by IssueService.Create and by the HTTP quick-create / autopilot handlers so
 // every issue-producing path shares one inference and validation policy:
 //
-//   - an explicit requestedTeamID is validated and used;
-//   - otherwise, when a Project is given: a single-team Project infers that
-//     Team, a multi-team Project is ambiguous (ErrProjectTeamAmbiguous), and a
-//     Project with no Team links falls through;
-//   - otherwise the workspace default Team is used.
+//   - an explicit requestedSpaceID is validated and used;
+//   - otherwise, when a Project is given: a single-space Project infers that
+//     Space, a multi-space Project is ambiguous (ErrProjectSpaceAmbiguous), and a
+//     Project with no Space links falls through;
+//   - otherwise the workspace default Space is used.
 //
-// The chosen Team must be active (ErrTeamNotFound / ErrTeamArchived). The
-// project association is a creation-time default only — an explicit team is
-// never validated against the project's team set.
-func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamID, projectID pgtype.UUID) (db.WorkspaceTeam, error) {
-	teamID := requestedTeamID
-	if !teamID.Valid && projectID.Valid {
-		teams, err := q.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+// The chosen Space must be active (ErrSpaceNotFound / ErrSpaceArchived). The
+// project association is a creation-time default only — an explicit space is
+// never validated against the project's space set.
+func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpaceID, projectID pgtype.UUID) (db.WorkspaceSpace, error) {
+	spaceID := requestedSpaceID
+	if !spaceID.Valid && projectID.Valid {
+		spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
 			WorkspaceID: workspaceID,
 			ProjectID:   projectID,
 		})
 		if err != nil {
-			return db.WorkspaceTeam{}, fmt.Errorf("list project teams: %w", err)
+			return db.WorkspaceSpace{}, fmt.Errorf("list project spaces: %w", err)
 		}
 		switch {
-		case len(teams) == 1:
-			teamID = teams[0].ID
-		case len(teams) > 1:
-			keys := make([]string, len(teams))
-			for i, t := range teams {
+		case len(spaces) == 1:
+			spaceID = spaces[0].ID
+		case len(spaces) > 1:
+			keys := make([]string, len(spaces))
+			for i, t := range spaces {
 				keys[i] = t.Key
 			}
-			return db.WorkspaceTeam{}, &ProjectTeamAmbiguousError{TeamKeys: keys}
+			return db.WorkspaceSpace{}, &ProjectSpaceAmbiguousError{SpaceKeys: keys}
 		}
 	}
-	if !teamID.Valid {
-		team, err := q.GetDefaultWorkspaceTeam(ctx, workspaceID)
+	if !spaceID.Valid {
+		space, err := q.GetDefaultWorkspaceSpace(ctx, workspaceID)
 		if err != nil {
-			return db.WorkspaceTeam{}, ErrTeamNotFound
+			return db.WorkspaceSpace{}, ErrSpaceNotFound
 		}
-		teamID = team.ID
+		spaceID = space.ID
 	}
-	return ValidateActiveTeam(ctx, q, workspaceID, teamID)
+	return ValidateActiveSpace(ctx, q, workspaceID, spaceID)
 }
 
-// EnsureProjectHasTeam upholds the invariant that an issue's team is part of
-// its project's team set, by adding the association when it is missing (the
+// EnsureProjectHasSpace upholds the invariant that an issue's space is part of
+// its project's space set, by adding the association when it is missing (the
 // same default the UI's conflict dialog offers). No-op without a project.
-// Exported via the issue create/update paths only — project↔team stays a
+// Exported via the issue create/update paths only — project↔space stays a
 // creation-time default for everything else.
-func EnsureProjectHasTeam(ctx context.Context, q *db.Queries, workspaceID, projectID, teamID pgtype.UUID) error {
-	if !projectID.Valid || !teamID.Valid {
+func EnsureProjectHasSpace(ctx context.Context, q *db.Queries, workspaceID, projectID, spaceID pgtype.UUID) error {
+	if !projectID.Valid || !spaceID.Valid {
 		return nil
 	}
-	teams, err := q.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+	spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 	})
 	if err != nil {
-		return fmt.Errorf("list project teams: %w", err)
+		return fmt.Errorf("list project spaces: %w", err)
 	}
-	for _, t := range teams {
-		if t.ID == teamID {
+	for _, t := range spaces {
+		if t.ID == spaceID {
 			return nil
 		}
 	}
-	if err := q.AddProjectTeam(ctx, db.AddProjectTeamParams{
+	if err := q.AddProjectSpace(ctx, db.AddProjectSpaceParams{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
-		TeamID:      teamID,
+		SpaceID:     spaceID,
 	}); err != nil {
-		return fmt.Errorf("add project team: %w", err)
+		return fmt.Errorf("add project space: %w", err)
 	}
 	return nil
 }
 
-// ValidateActiveTeam loads a Team by ID and returns it only if it exists in the
-// workspace and is not archived. Shared active-team validation for ResolveTeam
-// and for handlers validating a Team-id list.
-func ValidateActiveTeam(ctx context.Context, q *db.Queries, workspaceID, teamID pgtype.UUID) (db.WorkspaceTeam, error) {
-	team, err := q.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-		ID:          teamID,
+// ValidateActiveSpace loads a Space by ID and returns it only if it exists in the
+// workspace and is not archived. Shared active-space validation for ResolveSpace
+// and for handlers validating a Space-id list.
+func ValidateActiveSpace(ctx context.Context, q *db.Queries, workspaceID, spaceID pgtype.UUID) (db.WorkspaceSpace, error) {
+	space, err := q.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
 		WorkspaceID: workspaceID,
 	})
-	if err != nil || !team.ID.Valid {
-		return db.WorkspaceTeam{}, ErrTeamNotFound
+	if err != nil || !space.ID.Valid {
+		return db.WorkspaceSpace{}, ErrSpaceNotFound
 	}
-	if team.ArchivedAt.Valid {
-		return db.WorkspaceTeam{}, ErrTeamArchived
+	if space.ArchivedAt.Valid {
+		return db.WorkspaceSpace{}, ErrSpaceArchived
 	}
-	return team, nil
+	return space, nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created
@@ -495,13 +495,13 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	return list
 }
 
-func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, teamKey, creatorType, actorID string, opts IssueCreateOpts) {
+func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, spaceKey, creatorType, actorID string, opts IssueCreateOpts) {
 	if s.Bus == nil {
 		return
 	}
 	var payload map[string]any
 	if opts.BroadcastPayload != nil {
-		payload = opts.BroadcastPayload(issue, attachments, teamKey)
+		payload = opts.BroadcastPayload(issue, attachments, spaceKey)
 	} else {
 		// Minimal fallback so cache invalidations still fire even if the
 		// caller forgot to supply a builder. Front-ends that expect the

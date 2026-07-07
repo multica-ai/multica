@@ -220,7 +220,7 @@ const ROUTE_ICONS: Record<string, string> = {
   "my-issues": "CircleUser",
   issue: "ListTodo",
   issues: "ListTodo",
-  team: "Users",
+  space: "Users",
   projects: "FolderKanban",
   autopilots: "ListTodo",
   agents: "Bot",

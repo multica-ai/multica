@@ -6,7 +6,7 @@ import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
-import type { Team } from "./team";
+import type { Space } from "./space";
 import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -112,10 +112,10 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
-  // Moving an issue between teams renumbers it and moves it across
-  // team-filtered lists; the flag drives the same membership reconcile as
+  // Moving an issue between spaces renumbers it and moves it across
+  // space-filtered lists; the flag drives the same membership reconcile as
   // project_changed.
-  team_changed?: boolean;
+  space_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {
@@ -204,9 +204,9 @@ export interface CommentUnresolvedPayload {
 
 export interface WorkspaceUpdatedPayload {
   workspace?: Workspace;
-  // Team create/update/archive is broadcast on the same channel; the payload
-  // carries the affected team instead of the workspace in that case.
-  team?: Team;
+  // Space create/update/archive is broadcast on the same channel; the payload
+  // carries the affected space instead of the workspace in that case.
+  space?: Space;
 }
 
 export interface WorkspaceDeletedPayload {

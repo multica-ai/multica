@@ -121,7 +121,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const copyLink = useCallback(async () => {
     if (!issueId) return;
     // Shared links are identifier-canonical (readable, and they survive a
-    // team move via the server-side identifier alias); internal navigation
+    // space move via the server-side identifier alias); internal navigation
     // keeps passing UUIDs to the same route.
     const url = navigation.getShareableUrl(paths.issueDetail(issue?.identifier || issueId));
     if (await copyText(url)) {

@@ -38,7 +38,7 @@ func setupAutopilotScheduleJob(t *testing.T, cron string) (db.AutopilotTrigger, 
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Schedule dispatch fixture",
 		Description:        pgtype.Text{String: "schedule dispatch test", Valid: true},
 		AssigneeType:       "agent",
@@ -615,7 +615,7 @@ func seedColdStartTrigger(t *testing.T, cron string) (db.AutopilotTrigger, *db.Q
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Cold-start regression",
 		Description:        pgtype.Text{String: "deterministic cold-start", Valid: true},
 		AssigneeType:       "agent",

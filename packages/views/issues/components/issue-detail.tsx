@@ -56,7 +56,7 @@ import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
-import { TeamPicker } from "../../teams/components/team-picker";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -75,9 +75,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions, projectListOptions } from "@multica/core/projects/queries";
-import { activeTeamListOptions } from "@multica/core/teams/queries";
-import type { Team } from "@multica/core/types";
-import { TeamProjectConflictDialog } from "../../teams/components/team-project-conflict-dialog";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
+import { SpaceProjectConflictDialog } from "../../spaces/components/space-project-conflict-dialog";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
@@ -1384,25 +1384,25 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
-  // Attaching the issue to a project whose team set misses the issue's team
-  // pauses behind the Linear-style resolution dialog (add team vs move issue).
+  // Attaching the issue to a project whose space set misses the issue's space
+  // pauses behind the Linear-style resolution dialog (add space vs move issue).
   const { data: allProjects = [] } = useQuery(projectListOptions(wsId));
-  const { data: allTeams = [] } = useQuery(activeTeamListOptions(wsId));
+  const { data: allSpaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const [projectConflict, setProjectConflict] = useState<{
     projectId: string;
     projectTitle: string;
-    projectTeams: Team[];
+    projectSpaces: Space[];
   } | null>(null);
   const handleProjectUpdate = (updates: Partial<UpdateIssueRequest>) => {
     const pid = updates.project_id;
-    if (pid && issue?.team_id) {
+    if (pid && issue?.space_id) {
       const proj = allProjects.find((p) => p.id === pid);
-      const ids = proj?.team_ids ?? [];
-      if (ids.length > 0 && !ids.includes(issue.team_id)) {
+      const ids = proj?.space_ids ?? [];
+      if (ids.length > 0 && !ids.includes(issue.space_id)) {
         setProjectConflict({
           projectId: pid,
           projectTitle: proj?.title ?? "",
-          projectTeams: allTeams.filter((tm) => ids.includes(tm.id)),
+          projectSpaces: allSpaces.filter((tm) => ids.includes(tm.id)),
         });
         return;
       }
@@ -1605,12 +1605,12 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered. Team leads: it owns the issue's
+          {/* Core props — always rendered. Space leads: it owns the issue's
               identifier namespace. Display-only in v1 — moving an issue
-              between teams was cut from the UI (the server capability and
+              between spaces was cut from the UI (the server capability and
               identifier aliasing remain for a later surface). */}
-          <PropRow label={t(($) => $.detail.prop_team)}>
-            <TeamPicker teamId={issue.team_id ?? null} onChange={() => {}} align="start" disabled />
+          <PropRow label={t(($) => $.detail.prop_space)}>
+            <SpacePicker spaceId={issue.space_id ?? null} onChange={() => {}} align="start" disabled />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
@@ -1625,17 +1625,17 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
             />
           </PropRow>
           {projectConflict && (
-            <TeamProjectConflictDialog
+            <SpaceProjectConflictDialog
               open
-              teamName={allTeams.find((tm) => tm.id === issue.team_id)?.name ?? ""}
+              spaceName={allSpaces.find((tm) => tm.id === issue.space_id)?.name ?? ""}
               projectName={projectConflict.projectTitle}
-              projectTeams={projectConflict.projectTeams}
-              onAddTeam={() => {
+              projectSpaces={projectConflict.projectSpaces}
+              onAddSpace={() => {
                 handleUpdateField({ project_id: projectConflict.projectId });
                 setProjectConflict(null);
               }}
-              onMoveToTeam={(tid) => {
-                handleUpdateField({ project_id: projectConflict.projectId, team_id: tid });
+              onMoveToSpace={(tid) => {
+                handleUpdateField({ project_id: projectConflict.projectId, space_id: tid });
                 setProjectConflict(null);
               }}
               onCancel={() => setProjectConflict(null)}

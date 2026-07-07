@@ -110,7 +110,7 @@ func init() {
 
 	// list
 	autopilotListCmd.Flags().String("status", "", "Filter by status (active, paused)")
-	autopilotListCmd.Flags().String("team", "", "Filter by Team UUID or key")
+	autopilotListCmd.Flags().String("space", "", "Filter by Space UUID or key")
 	autopilotListCmd.Flags().String("output", "table", "Output format: table or json")
 	autopilotListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
@@ -123,7 +123,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
-	autopilotCreateCmd.Flags().String("team", "", "Team UUID or key")
+	autopilotCreateCmd.Flags().String("space", "", "Space UUID or key")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
 	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
@@ -133,7 +133,7 @@ func init() {
 	autopilotUpdateCmd.Flags().String("title", "", "New title")
 	autopilotUpdateCmd.Flags().String("description", "", "New description")
 	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID)")
-	autopilotUpdateCmd.Flags().String("team", "", "New Team UUID or key")
+	autopilotUpdateCmd.Flags().String("space", "", "New Space UUID or key")
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
 	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
@@ -193,12 +193,12 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	if status, _ := cmd.Flags().GetString("status"); status != "" {
 		params.Set("status", status)
 	}
-	if v, _ := cmd.Flags().GetString("team"); v != "" {
-		teamID, err := resolveTeamRef(ctx, client, v)
+	if v, _ := cmd.Flags().GetString("space"); v != "" {
+		spaceID, err := resolveSpaceRef(ctx, client, v)
 		if err != nil {
-			return fmt.Errorf("resolve team: %w", err)
+			return fmt.Errorf("resolve space: %w", err)
 		}
-		params.Set("team_id", teamID)
+		params.Set("space_id", spaceID)
 	}
 	path := "/api/autopilots"
 	if len(params) > 0 {
@@ -327,12 +327,12 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["project_id"] = projectRef.ID
 	}
-	if v, _ := cmd.Flags().GetString("team"); v != "" {
-		teamID, err := resolveTeamRef(ctx, client, v)
+	if v, _ := cmd.Flags().GetString("space"); v != "" {
+		spaceID, err := resolveSpaceRef(ctx, client, v)
 		if err != nil {
-			return fmt.Errorf("resolve team: %w", err)
+			return fmt.Errorf("resolve space: %w", err)
 		}
-		body["team_id"] = teamID
+		body["space_id"] = spaceID
 	}
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
@@ -401,16 +401,16 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 			body["project_id"] = projectRef.ID
 		}
 	}
-	if cmd.Flags().Changed("team") {
-		v, _ := cmd.Flags().GetString("team")
+	if cmd.Flags().Changed("space") {
+		v, _ := cmd.Flags().GetString("space")
 		if v == "" {
-			body["team_id"] = nil
+			body["space_id"] = nil
 		} else {
-			teamID, err := resolveTeamRef(ctx, client, v)
+			spaceID, err := resolveSpaceRef(ctx, client, v)
 			if err != nil {
-				return fmt.Errorf("resolve team: %w", err)
+				return fmt.Errorf("resolve space: %w", err)
 			}
-			body["team_id"] = teamID
+			body["space_id"] = spaceID
 		}
 	}
 	if cmd.Flags().Changed("priority") {

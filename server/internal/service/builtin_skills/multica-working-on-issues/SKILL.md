@@ -22,10 +22,10 @@ The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`TEAM_KEY-NUMBER`, e.g. `MUL-2759`). The prefix is the issue's Team key — a team
-owns its issue-number namespace, and each workspace has a default team whose key
-is the legacy workspace prefix, so a bare `MUL-2759` still routes. Each match
-writes an issue ↔ PR link row. This is the link that `multica issue
+(`SPACE_KEY-NUMBER`, e.g. `MUL-2759`). The prefix is the issue's Space key — a
+space owns its issue-number namespace, and each workspace has a default space
+whose key is the legacy workspace prefix, so a bare `MUL-2759` still routes.
+Each match writes an issue ↔ PR link row. This is the link that `multica issue
 pull-requests` reads back — but see the reference-only rule below: a key that
 appears **only** as a bare mention in the body is linked yet hidden from that
 list.
@@ -197,21 +197,21 @@ On an agent-assigned issue, create status decides whether the assignee fires
 immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
 time; `backlog` sets the assignee without triggering.
 
-`multica issue create` files the issue under a team: pass `--team <UUID>` to pick
-one explicitly (the team owns the `TEAM_KEY-NUMBER` identifier namespace), or omit
-it to fall back to the workspace's default team, whose key is the legacy workspace
-prefix. `multica issue list --team <UUID>` filters a listing to one team.
+`multica issue create` files the issue under a space: pass `--space <UUID>` to pick
+one explicitly (the space owns the `SPACE_KEY-NUMBER` identifier namespace), or omit
+it to fall back to the workspace's default space, whose key is the legacy workspace
+prefix. `multica issue list --space <UUID>` filters a listing to one space.
 
-Team binds at creation time only, and it can change later:
+Space binds at creation time only, and it can change later:
 
-- `multica issue update <id> --team <UUID-or-key>` moves the issue to another
-  team. It is renumbered under the target team's key; the old identifier is
+- `multica issue update <id> --space <UUID-or-key>` moves the issue to another
+  space. It is renumbered under the target space's key; the old identifier is
   recorded as an alias and keeps resolving (CLI lookups, API, GitHub branch/PR
   linking), so existing references never break.
-- Parent and child issues may live in different teams. A child only inherits
-  its parent's team as a creation-time default when you don't pass `--team`.
-- A project's team set is likewise a creation-time default, not a constraint —
-  an issue in a project may belong to any team.
+- Parent and child issues may live in different spaces. A child only inherits
+  its parent's space as a creation-time default when you don't pass `--space`.
+- A project's space set is likewise a creation-time default, not a constraint —
+  an issue in a project may belong to any space.
 
 Parallel children — all start now:
 

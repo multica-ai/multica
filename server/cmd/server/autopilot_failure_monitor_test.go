@@ -33,7 +33,7 @@ func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string,
 	ctx := context.Background()
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:   parseUUID(testWorkspaceID),
-		TeamID:        defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:       defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:         title,
 		AssigneeType:  "agent",
 		AssigneeID:    agentID,

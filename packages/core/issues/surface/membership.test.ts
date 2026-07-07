@@ -84,15 +84,15 @@ describe("issueMatchesListFilter", () => {
     ).toBe(false);
   });
 
-  it("judges team filters — a moved issue leaves the old team's list", () => {
+  it("judges space filters — a moved issue leaves the old space's list", () => {
     expect(
-      issueMatchesListFilter(makeIssue({ team_id: "t1" }), "team:t1", { team_id: "t1" }),
+      issueMatchesListFilter(makeIssue({ space_id: "t1" }), "space:t1", { space_id: "t1" }),
     ).toBe(true);
     expect(
-      issueMatchesListFilter(makeIssue({ team_id: "t2" }), "team:t1", { team_id: "t1" }),
+      issueMatchesListFilter(makeIssue({ space_id: "t2" }), "space:t1", { space_id: "t1" }),
     ).toBe(false);
     expect(
-      issueMatchesListFilter(makeIssue({ team_id: undefined }), "team:t1", { team_id: "t1" }),
+      issueMatchesListFilter(makeIssue({ space_id: undefined }), "space:t1", { space_id: "t1" }),
     ).toBe("unknown");
   });
 
@@ -123,13 +123,13 @@ describe("issueChangedDims", () => {
       assignee: true,
       project: false,
       status: false,
-      team: false,
+      space: false,
     });
     expect(issueChangedDims({ project_id: null })).toEqual({
       assignee: false,
       project: true,
       status: false,
-      team: false,
+      space: false,
     });
   });
 
@@ -139,13 +139,13 @@ describe("issueChangedDims", () => {
       assignee: false,
       project: false,
       status: false,
-      team: false,
+      space: false,
     });
     expect(issueChangedDims({ status: "todo" }, base).status).toBe(false);
     expect(issueChangedDims({ status: "done" }, base).status).toBe(true);
     expect(issueChangedDims({ project_id: "p2" }, base).project).toBe(true);
-    expect(issueChangedDims({ team_id: "t2" }, makeIssue({ team_id: "t1" })).team).toBe(true);
-    expect(issueChangedDims({ team_id: "t1" }, makeIssue({ team_id: "t1" })).team).toBe(false);
+    expect(issueChangedDims({ space_id: "t2" }, makeIssue({ space_id: "t1" })).space).toBe(true);
+    expect(issueChangedDims({ space_id: "t1" }, makeIssue({ space_id: "t1" })).space).toBe(false);
   });
 
   it("ignores non-membership fields", () => {
@@ -153,13 +153,13 @@ describe("issueChangedDims", () => {
       assignee: false,
       project: false,
       status: false,
-      team: false,
+      space: false,
     });
   });
 });
 
 describe("listFilterDependsOn", () => {
-  const none = { assignee: false, project: false, status: false, team: false };
+  const none = { assignee: false, project: false, status: false, space: false };
 
   it("my:all reacts to assignee changes only", () => {
     expect(listFilterDependsOn("all", {}, { ...none, assignee: true })).toBe(true);
@@ -194,12 +194,12 @@ describe("listFilterDependsOn", () => {
     ).toBe(false);
   });
 
-  it("team filters react to team changes", () => {
+  it("space filters react to space changes", () => {
     expect(
-      listFilterDependsOn("team:t1", { team_id: "t1" }, { ...none, team: true }),
+      listFilterDependsOn("space:t1", { space_id: "t1" }, { ...none, space: true }),
     ).toBe(true);
     expect(
-      listFilterDependsOn("team:t1", { team_id: "t1" }, { ...none, status: true }),
+      listFilterDependsOn("space:t1", { space_id: "t1" }, { ...none, status: true }),
     ).toBe(false);
   });
 
@@ -208,14 +208,14 @@ describe("listFilterDependsOn", () => {
       listFilterDependsOn(
         "created",
         { creator_id: "me" },
-        { assignee: true, project: true, status: true, team: true },
+        { assignee: true, project: true, status: true, space: true },
       ),
     ).toBe(false);
   });
 
   it("the unfiltered workspace list never reacts", () => {
     expect(
-      listFilterDependsOn(undefined, {}, { assignee: true, project: true, status: true, team: true }),
+      listFilterDependsOn(undefined, {}, { assignee: true, project: true, status: true, space: true }),
     ).toBe(false);
   });
 });

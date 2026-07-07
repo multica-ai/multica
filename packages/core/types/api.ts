@@ -11,7 +11,7 @@ export interface CreateIssueRequest {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
-  team_id?: string;
+  space_id?: string;
   project_id?: string;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
@@ -32,10 +32,10 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
-  /** Move the issue to another team. Numbers are per-team, so the move
+  /** Move the issue to another space. Numbers are per-space, so the move
    *  renumbers the issue server-side (the old identifier keeps resolving
-   *  via an alias); never null — every issue belongs to exactly one team. */
-  team_id?: string;
+   *  via an alias); never null — every issue belongs to exactly one space. */
+  space_id?: string;
   /** Ordered stage (>= 1); null clears it (unstaged). */
   stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.
@@ -93,7 +93,7 @@ export interface ListIssuesParams {
    */
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
-  team_id?: string;
+  space_id?: string;
   project_id?: string;
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
@@ -140,7 +140,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
-  team_id?: string;
+  space_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;

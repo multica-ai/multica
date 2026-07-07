@@ -13,11 +13,11 @@ import {
 } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import {
-  TeamIssuesRoute,
-  TeamProjectsRoute,
-  TeamAutopilotsRoute,
-  TeamDetailRoute,
-} from "./pages/team-surface-pages";
+  SpaceIssuesRoute,
+  SpaceProjectsRoute,
+  SpaceAutopilotsRoute,
+  SpaceDetailRoute,
+} from "./pages/space-surface-pages";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
@@ -153,24 +153,24 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Projects" },
           },
           {
-            path: "team/:teamKey/issues",
-            element: <TeamIssuesRoute />,
-            handle: { title: "Team issues" },
+            path: "space/:spaceKey/issues",
+            element: <SpaceIssuesRoute />,
+            handle: { title: "Space issues" },
           },
           {
-            path: "team/:teamKey/projects",
-            element: <TeamProjectsRoute />,
-            handle: { title: "Team projects" },
+            path: "space/:spaceKey/projects",
+            element: <SpaceProjectsRoute />,
+            handle: { title: "Space projects" },
           },
           {
-            path: "team/:teamKey/autopilots",
-            element: <TeamAutopilotsRoute />,
-            handle: { title: "Team autopilots" },
+            path: "space/:spaceKey/autopilots",
+            element: <SpaceAutopilotsRoute />,
+            handle: { title: "Space autopilots" },
           },
           {
-            path: "team/:teamKey",
-            element: <TeamDetailRoute />,
-            handle: { title: "Team detail" },
+            path: "space/:spaceKey",
+            element: <SpaceDetailRoute />,
+            handle: { title: "Space detail" },
           },
           {
             path: "projects/:id",

@@ -246,7 +246,7 @@ func createChildIssue(t *testing.T, title, status, parentID string) IssueRespons
 // newScrambledChildren creates a parent plus four children whose issue numbers
 // ascend in creation order while their position values are set in the opposite
 // order and their statuses are mixed. This reproduces the real-world layout:
-// NextTopPositionForTeam assigns MIN(position)-1 per (workspace, team, status),
+// NextTopPositionForSpace assigns MIN(position)-1 per (workspace, space, status),
 // so newer children get ever-smaller positions and different statuses draw from
 // different pools. A position-ordered query would interleave them; only a
 // number-ordered query returns them in creation order. Returns the parent and

@@ -5,15 +5,15 @@
 -- member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
 -- because that is already the meaning of the `assignee_id` filter (tab 1
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
-SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
+SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage,
-       i.properties, COALESCE(wt.key, '')::text AS team_key, COALESCE(wt.name, '')::text AS team_name
+       i.properties, COALESCE(wt.key, '')::text AS space_key, COALESCE(wt.name, '')::text AS space_name
 FROM issue i
-LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
+LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
-  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
+  AND (sqlc.narg('space_id')::uuid IS NULL OR i.space_id = sqlc.narg('space_id'))
+  AND (sqlc.narg('space_ids')::uuid[] IS NULL OR i.space_id = ANY(sqlc.narg('space_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -75,7 +75,7 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateIssue :one
 INSERT INTO issue (
-    workspace_id, team_id, title, description, status, priority,
+    workspace_id, space_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     stage
@@ -84,15 +84,15 @@ INSERT INTO issue (
     sqlc.narg('stage')
 ) RETURNING *;
 
--- name: GetIssueByTeamKeyAndNumber :one
--- TODO(migration-b): remove null-team fallback after migration 132 has run in production
+-- name: GetIssueBySpaceKeyAndNumber :one
+-- TODO(migration-b): remove null-space fallback after migration 132 has run in production
 SELECT i.* FROM issue i
-LEFT JOIN workspace_team issue_team ON issue_team.id = i.team_id AND issue_team.workspace_id = i.workspace_id
-LEFT JOIN workspace_team default_team ON default_team.workspace_id = i.workspace_id AND default_team.is_default
+LEFT JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id
+LEFT JOIN workspace_space default_space ON default_space.workspace_id = i.workspace_id AND default_space.is_default
 WHERE i.workspace_id = $1
-  AND lower(COALESCE(issue_team.key, default_team.key)) = lower($2)
+  AND lower(COALESCE(issue_space.key, default_space.key)) = lower($2)
   AND i.number = $3
-  AND (i.team_id IS NOT NULL OR default_team.id IS NOT NULL);
+  AND (i.space_id IS NOT NULL OR default_space.id IS NOT NULL);
 
 -- name: UpdateIssue :one
 UPDATE issue SET
@@ -122,7 +122,7 @@ RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
-    workspace_id, team_id, title, description, status, priority,
+    workspace_id, space_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage
@@ -138,7 +138,7 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 SELECT * FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
-  AND team_id = sqlc.arg('team_id')::uuid
+  AND space_id = sqlc.arg('space_id')::uuid
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -175,15 +175,15 @@ DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
 -- name: ListOpenIssues :many
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
 -- filter; member-direct assignment is intentionally excluded).
-SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
+SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage,
-       i.properties, COALESCE(wt.key, '')::text AS team_key, COALESCE(wt.name, '')::text AS team_name
+       i.properties, COALESCE(wt.key, '')::text AS space_key, COALESCE(wt.name, '')::text AS space_name
 FROM issue i
-LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
+LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
-  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
+  AND (sqlc.narg('space_id')::uuid IS NULL OR i.space_id = sqlc.narg('space_id'))
+  AND (sqlc.narg('space_ids')::uuid[] IS NULL OR i.space_id = ANY(sqlc.narg('space_ids')::uuid[]))
   AND i.status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -246,8 +246,8 @@ ORDER BY i.position ASC, i.created_at DESC;
 -- See ListIssues for the semantics of involves_user_id.
 SELECT count(*) FROM issue i
 WHERE i.workspace_id = $1
-  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
-  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
+  AND (sqlc.narg('space_id')::uuid IS NULL OR i.space_id = sqlc.narg('space_id'))
+  AND (sqlc.narg('space_ids')::uuid[] IS NULL OR i.space_id = ANY(sqlc.narg('space_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -379,12 +379,12 @@ SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
 
--- name: MoveIssueToTeam :one
--- Moving an issue between teams renumbers it: numbers are allocated
--- per-team (uq_issue_team_number), so the caller passes a fresh number from
--- IncrementTeamIssueCounter and a fresh position in the destination column.
+-- name: MoveIssueToSpace :one
+-- Moving an issue between spaces renumbers it: numbers are allocated
+-- per-space (uq_issue_space_number), so the caller passes a fresh number from
+-- IncrementSpaceIssueCounter and a fresh position in the destination column.
 UPDATE issue
-SET team_id = $2,
+SET space_id = $2,
     number = $3,
     position = $4,
     updated_at = now()

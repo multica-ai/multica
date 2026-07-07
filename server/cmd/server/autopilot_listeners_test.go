@@ -60,7 +60,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 				WorkspaceID:        parseUUID(testWorkspaceID),
-				TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+				SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 				Title:              "Run-only listener " + tc.name,
 				Description:        pgtype.Text{String: "Run listener regression test", Valid: true},
 				AssigneeType:       "agent",
@@ -156,7 +156,7 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              title,
 		Description:        pgtype.Text{String: "VEN-661 / VEN-662 regression test", Valid: true},
 		AssigneeType:       "agent",
@@ -354,7 +354,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Offline-runtime autopilot",
 		Description:        pgtype.Text{String: "MUL-1899 admission test", Valid: true},
 		AssigneeType:       "agent",
@@ -556,7 +556,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Manual-trigger skip autopilot",
 		Description:        pgtype.Text{String: "PR #2888 review fix #2", Valid: true},
 		AssigneeType:       "agent",

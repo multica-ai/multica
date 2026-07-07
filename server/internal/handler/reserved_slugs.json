@@ -1,5 +1,5 @@
 {
-  "$comment": "Source of truth for reserved workspace slugs. Edit this file only. The Go side embeds this JSON directly; the TS side (packages/core/paths/reserved-slugs.ts) is regenerated from this file by `pnpm generate:reserved-slugs`. CI re-runs the generator and fails on any diff, so the two sides cannot drift. Convention for new global routes: single word (`/login`, `/inbox`) or `/{noun}/{verb}` (`/workspaces/new`). Never add hyphenated root-level word groups (`/new-workspace`, `/create-team`) — they collide with common user workspace names.",
+  "$comment": "Source of truth for reserved workspace slugs. Edit this file only. The Go side embeds this JSON directly; the TS side (packages/core/paths/reserved-slugs.ts) is regenerated from this file by `pnpm generate:reserved-slugs`. CI re-runs the generator and fails on any diff, so the two sides cannot drift. Convention for new global routes: single word (`/login`, `/inbox`) or `/{noun}/{verb}` (`/workspaces/new`). Never add hyphenated root-level word groups (`/new-workspace`, `/create-space`) — they collide with common user workspace names.",
   "groups": [
     {
       "label": "Auth flow",
@@ -66,7 +66,7 @@
     },
     {
       "label": "Workspace route segments",
-      "description": "Reserving each segment name prevents `/{slug}/{view}` from being visually ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two things). `workspaces` covers the global `/workspaces/new` workspace-creation page; `teams` is reserved for future team management.",
+      "description": "Reserving each segment name prevents `/{slug}/{view}` from being visually ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two things). `workspaces` covers the global `/workspaces/new` workspace-creation page; `spaces` is reserved for future space management.",
       "slugs": [
         "issues",
         "projects",
@@ -80,8 +80,8 @@
         "skills",
         "settings",
         "workspaces",
-        "teams",
-        "team"
+        "spaces",
+        "space"
       ]
     },
     {

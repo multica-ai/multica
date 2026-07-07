@@ -18,8 +18,8 @@ func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, 
 
 	var number int
 	if err := testPool.QueryRow(ctx, `
-		UPDATE workspace_team
-		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE team_id = workspace_team.id)) + 1
+		UPDATE workspace_space
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE space_id = workspace_space.id)) + 1
 		WHERE workspace_id = $1 AND is_default RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)

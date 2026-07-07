@@ -68,23 +68,23 @@ auto-link flag (`workspaceAutoLinkPRsEnabled`, `github.go:1074`).
 - call site: `server/internal/handler/github.go:727` —
   `extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)`
 
-Every `TEAM_KEY-NUMBER` mention in **title, body, or branch** resolves to an issue
+Every `SPACE_KEY-NUMBER` mention in **title, body, or branch** resolves to an issue
 in the workspace and writes a link row (`LinkIssueToPullRequest`, ~`github.go:762`).
-This is what `multica issue pull-requests` later reads back. The prefix is a Team
+This is what `multica issue pull-requests` later reads back. The prefix is a Space
 key — letter-first, 1-7 chars total (`[a-z][a-z0-9]{0,6}`, narrowed from the old
-`{1,9}`/1-10 char bound) — because a Team now owns the issue-number namespace. Each
-workspace has a default team whose key is the legacy workspace prefix, so a bare
-`MUL-2759` routes through that default team.
+`{1,9}`/1-10 char bound) — because a Space now owns the issue-number namespace. Each
+workspace has a default space whose key is the legacy workspace prefix, so a bare
+`MUL-2759` routes through that default space.
 
-**Move-to-team (issue update `--team`).** `UpdateIssue`'s `team_id` branch
-(`handler/issue.go`, move block) renumbers the issue under the target team's
+**Move-to-space (issue update `--space`).** `UpdateIssue`'s `space_id` branch
+(`handler/issue.go`, move block) renumbers the issue under the target space's
 counter and records the old `key-number` in `issue_identifier_alias`
 (`UpsertIssueIdentifierAlias`). Identifier resolution falls back to that alias
 in `resolveIssueByIdentifier` (`handler.go`) and in GitHub branch/PR linking
 (`github.go`), so pre-move references keep resolving. The CLI exposes this as
-`multica issue update <id> --team <UUID-or-key>` (`cmd_issue.go`,
-`resolveTeamRef` accepts a key or UUID). Team is a creation-time default
-elsewhere: parent/child and project↔team carry no cross-team validation.
+`multica issue update <id> --space <UUID-or-key>` (`cmd_issue.go`,
+`resolveSpaceRef` accepts a key or UUID). Space is a creation-time default
+elsewhere: parent/child and project↔space carry no cross-space validation.
 
 **Reference-only flag (MUL-3739).** The link row carries a `reference_only`
 boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler
@@ -111,7 +111,7 @@ call-site location for the link logic.
 - call site: `server/internal/handler/github.go:736` —
   `extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body)` (no branch arg)
 
-Only a `TEAM_KEY-NUMBER` immediately after a closing keyword
+Only a `SPACE_KEY-NUMBER` immediately after a closing keyword
 (`Closes`/`Fixes`/`Resolves`, optional `:` then whitespace) sets the link row's
 `close_intent` flag — the gate that auto-advances the issue to `done` on merge.
 `Fix MUL-1` closes; `Fix login MUL-1` does not (adjacency). Branch names are

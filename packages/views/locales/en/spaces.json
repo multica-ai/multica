@@ -1,0 +1,94 @@
+{
+  "page": {
+    "title": "Spaces",
+    "new_space": "New space",
+    "loading": "Loading spaces...",
+    "empty_title": "No spaces yet",
+    "create_first": "Create your first space"
+  },
+  "table": {
+    "key": "Identifier",
+    "name": "Name",
+    "issues": "Issues",
+    "state": "State",
+    "actions": "Actions"
+  },
+  "state": {
+    "default": "Default",
+    "active": "Active",
+    "archived": "Archived"
+  },
+  "actions": {
+    "edit": "Edit space",
+    "archive": "Archive space",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving..."
+  },
+  "dialog": {
+    "create_title": "Create space",
+    "edit_title": "Edit space",
+    "description": "Spaces own issue identifiers and stable work areas. Membership is informational in v1.",
+    "tab_main": "Main",
+    "tab_members": "Members ({{count}})",
+    "member_search": "Search members…",
+    "member_search_empty": "No matching members",
+    "creator_row": "Creator · Lead",
+    "name_required": "Name is required",
+    "members_entry": "Members",
+    "member_count": "{{count}} selected",
+    "members_pick_title": "Pick members",
+    "back": "Back"
+  },
+  "form": {
+    "name": "Name",
+    "name_placeholder": "Engineering",
+    "key": "Identifier",
+    "key_hint": "Numbers this space’s issues — e.g. ENG-123. 1-7 uppercase letters or numbers, starting with a letter.",
+    "key_locked": "The identifier is locked because issues have already been created.",
+    "icon": "Icon",
+    "description": "Description",
+    "description_placeholder": "Add a description…",
+    "members": "Members",
+    "members_placeholder": "Add spacemates…",
+    "members_selected": "{{count}} spacemates selected",
+    "icon_name": "Icon & name",
+    "description_limit": "Up to {{max}} characters ({{count}} now)"
+  },
+  "picker": {
+    "placeholder": "Space",
+    "empty": "No active spaces",
+    "selected_count_one": "{{count}} space",
+    "selected_count_other": "{{count}} spaces"
+  },
+  "toast_created": "Space created",
+  "toast_updated": "Space updated",
+  "toast_archived": "Space archived",
+  "toast_archive_failed": "Failed to archive space",
+  "toast_save_failed": "Failed to save space",
+  "surface": {
+    "not_found": "Space not found"
+  },
+  "settings": {
+    "stats_title": "At a glance",
+    "stats_issues": "Issues",
+    "stats_projects": "Projects",
+    "stats_autopilots": "Autopilots",
+    "danger_title": "Danger zone",
+    "archive_hint": "Archiving stops new work; existing issues stay readable.",
+    "members": "Members",
+    "members_empty": "No members yet",
+    "archive_confirm_title": "Archive space?",
+    "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
+    "default_cannot_archive": "The default space cannot be archived",
+    "archive_admin_only": "Only admins can archive a space",
+    "goto": "Go to"
+  },
+  "conflict": {
+    "title": "{{space}} is not part of the project",
+    "body": "The {{space}} space is not currently part of the {{project}} project. Add the space to the project, or move the issue to one of the project's spaces.",
+    "add_space": "Add {{space}} to the project",
+    "project_spaces": "Project spaces",
+    "move_issue": "Move issue to {{space}}"
+  }
+}

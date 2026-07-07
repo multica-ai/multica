@@ -1225,9 +1225,9 @@ type QuickCreateContext struct {
 	RequesterID   string   `json:"requester_id"`
 	WorkspaceID   string   `json:"workspace_id"`
 	ProjectID     string   `json:"project_id,omitempty"`
-	TeamID        string   `json:"team_id,omitempty"`
-	TeamKey       string   `json:"team_key,omitempty"`
-	TeamName      string   `json:"team_name,omitempty"`
+	SpaceID       string   `json:"space_id,omitempty"`
+	SpaceKey      string   `json:"space_key,omitempty"`
+	SpaceName     string   `json:"space_name,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// ParentIssueID is the optional UUID of the parent issue the new issue
@@ -1261,7 +1261,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, teamID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, spaceID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1282,14 +1282,14 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
 	}
-	if teamID.Valid {
-		payload.TeamID = util.UUIDToString(teamID)
-		if team, err := s.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-			ID:          teamID,
+	if spaceID.Valid {
+		payload.SpaceID = util.UUIDToString(spaceID)
+		if space, err := s.Queries.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+			ID:          spaceID,
 			WorkspaceID: workspaceID,
 		}); err == nil {
-			payload.TeamKey = team.Key
-			payload.TeamName = team.Name
+			payload.SpaceKey = space.Key
+			payload.SpaceName = space.Name
 		}
 	}
 	if squadID.Valid {
@@ -4017,8 +4017,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
-		"team_id":         util.UUIDToPtr(issue.TeamID),
-		"team_key":        issuePrefix,
+		"space_id":        util.UUIDToPtr(issue.SpaceID),
+		"space_key":       issuePrefix,
 		"number":          issue.Number,
 		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
 		"title":           issue.Title,

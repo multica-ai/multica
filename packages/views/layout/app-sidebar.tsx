@@ -84,11 +84,11 @@ import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
-import { myTeamListOptions } from "@multica/core/teams/queries";
-import { useUpdateTeamMembership } from "@multica/core/teams/mutations";
+import { mySpaceListOptions } from "@multica/core/spaces/queries";
+import { useUpdateSpaceMembership } from "@multica/core/spaces/mutations";
 import { useSidebarStore } from "@multica/core/layout/sidebar-store";
-import { TeamIcon } from "../teams/components/team-icon";
-import type { Team } from "@multica/core/types";
+import { SpaceIcon } from "../spaces/components/space-icon";
+import type { Space } from "@multica/core/types";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
@@ -141,7 +141,7 @@ type NavLabelKey =
   | "inbox"
   | "chat"
   | "my_issues"
-  | "teams"
+  | "spaces"
   | "projects"
   | "autopilots"
   | "agents"
@@ -152,9 +152,9 @@ type NavLabelKey =
   | "skills"
   | "settings";
 
-// Re-measure droppable rects during a team drag: groups collapse on drag
+// Re-measure droppable rects during a space drag: groups collapse on drag
 // start, so the rects cached at gesture start are immediately stale.
-const teamDragMeasuring = { droppable: { strategy: MeasuringStrategy.Always } };
+const spaceDragMeasuring = { droppable: { strategy: MeasuringStrategy.Always } };
 
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "inbox", labelKey: "inbox", icon: Inbox },
@@ -162,12 +162,12 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
-// The workspace-wide issues list left the nav with the team rollout: issues
-// live under their team (Teams section below) or under My Issues. Team
-// management lives on each team's detail page (the /teams overview was cut
+// The workspace-wide issues list left the nav with the space rollout: issues
+// live under their space (Spaces section below) or under My Issues. Space
+// management lives on each space's detail page (the /spaces overview was cut
 // from v1), and Usage/Runtimes are demoted into the More subgroup.
-// Autopilots are team-scoped like issues (team_id NOT NULL, their output
-// lands in their team), so they live under each team below — no global
+// Autopilots are space-scoped like issues (space_id NOT NULL, their output
+// lands in their space), so they live under each space below — no global
 // entry, same rationale as the removed workspace-wide Issues.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "projects", labelKey: "projects", icon: FolderKanban },
@@ -181,11 +181,11 @@ const moreNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
 ];
 
-// Per-team children under the Teams group. Hrefs are built per team key.
-const teamChildNav = [
-  { pathKey: "teamIssues", labelKey: "issues", icon: ListTodo },
-  { pathKey: "teamProjects", labelKey: "projects", icon: FolderKanban },
-  { pathKey: "teamAutopilots", labelKey: "autopilots", icon: Zap },
+// Per-space children under the Spaces group. Hrefs are built per space key.
+const spaceChildNav = [
+  { pathKey: "spaceIssues", labelKey: "issues", icon: ListTodo },
+  { pathKey: "spaceProjects", labelKey: "projects", icon: FolderKanban },
+  { pathKey: "spaceAutopilots", labelKey: "autopilots", icon: Zap },
 ] as const;
 
 function DraftDot() {
@@ -206,29 +206,29 @@ function useGroupCollapse(key: string) {
   return { open: !collapsed, onOpenChange };
 }
 
-// One team's collapsible nav group inside the Teams section: draggable via
+// One space's collapsible nav group inside the Spaces section: draggable via
 // the same dnd-kit setup the Pinned section uses (PointerSensor distance 5,
-// so plain clicks still toggle the collapse), children are the team's
-// surfaces addressed by team key.
-function SortableTeamGroup({
-  team,
+// so plain clicks still toggle the collapse), children are the space's
+// surfaces addressed by space key.
+function SortableSpaceGroup({
+  space,
   pathname,
   buildHref,
   detailHref,
   forceCollapsed,
 }: {
-  team: Team;
+  space: Space;
   pathname: string;
-  buildHref: (pathKey: (typeof teamChildNav)[number]["pathKey"], teamKey: string) => string;
+  buildHref: (pathKey: (typeof spaceChildNav)[number]["pathKey"], spaceKey: string) => string;
   detailHref: string;
-  /** True while any team drag is in flight: every group renders collapsed so
+  /** True while any space drag is in flight: every group renders collapsed so
       all sortable items are the same height — variable-height blocks make
       dnd-kit's rect math (and thus the whole gesture) feel broken. */
   forceCollapsed: boolean;
 }) {
   const { t } = useT("layout");
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: team.id });
-  const collapse = useGroupCollapse(`team:${team.id}`);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: space.id });
+  const collapse = useGroupCollapse(`space:${space.id}`);
   // Same trap the pinned rows hit: the click that ends a drag would follow
   // the row's link and reload the page. Mirror SortablePinItem's guard —
   // remember the drag and swallow exactly that one click.
@@ -236,10 +236,10 @@ function SortableTeamGroup({
   useEffect(() => {
     if (isDragging) wasDragged.current = true;
   }, [isDragging]);
-  // The row itself is the team's home (detail page). It stays highlighted
-  // anywhere inside the team (issues/projects/autopilots too) so the sidebar
-  // always shows which team you're in.
-  const isTeamActive = isNavActive(pathname, detailHref);
+  // The row itself is the space's home (detail page). It stays highlighted
+  // anywhere inside the space (issues/projects/autopilots too) so the sidebar
+  // always shows which space you're in.
+  const isSpaceActive = isNavActive(pathname, detailHref);
   return (
     <div
       ref={setNodeRef}
@@ -247,7 +247,7 @@ function SortableTeamGroup({
       className={cn(isDragging && "opacity-30")}
     >
       <Collapsible open={collapse.open && !forceCollapsed} onOpenChange={collapse.onOpenChange}>
-        {/* The whole row navigates to the team page (and expands the group —
+        {/* The whole row navigates to the space page (and expands the group —
             navigation is context). The chevron sits right after the name like
             every other group label — always visible, secondary color, primary
             only when hovered (the one independently-clickable element: it
@@ -266,12 +266,12 @@ function SortableTeamGroup({
             }}
             className={cn(
               "w-full cursor-pointer gap-1.5 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
-              isTeamActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+              isSpaceActive && "bg-sidebar-accent text-sidebar-accent-foreground",
               isDragging && "pointer-events-none",
             )}
           >
-            <TeamIcon team={team} className="size-3.5" />
-            <span className="truncate">{team.name}</span>
+            <SpaceIcon space={space} className="size-3.5" />
+            <span className="truncate">{space.name}</span>
             <button
               type="button"
               onClick={(e) => {
@@ -292,12 +292,12 @@ function SortableTeamGroup({
           </SidebarGroupLabel>
         </div>
         <CollapsibleContent>
-          {/* pt-0.5 breathes the children away from their team row; the
+          {/* pt-0.5 breathes the children away from their space row; the
               group container's gap-0.5 covers the space below. pl-5 lands
-              child icons exactly under the team name's text start. */}
+              child icons exactly under the space name's text start. */}
           <SidebarMenu className="gap-0.5 pt-0.5 pl-5">
-            {teamChildNav.map((child) => {
-              const href = buildHref(child.pathKey, team.key);
+            {spaceChildNav.map((child) => {
+              const href = buildHref(child.pathKey, space.key);
               const isActive = isNavActive(pathname, href);
               return (
                 <SidebarMenuItem key={child.pathKey}>
@@ -576,58 +576,58 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  // Persisted collapse state per group; per-team groups manage their own
-  // inside SortableTeamGroup.
+  // Persisted collapse state per group; per-space groups manage their own
+  // inside SortableSpaceGroup.
   const pinnedCollapse = useGroupCollapse("pinned");
   const workspaceCollapse = useGroupCollapse("workspace");
-  const teamsCollapse = useGroupCollapse("teams");
+  const spacesCollapse = useGroupCollapse("spaces");
 
-  // Teams section: only teams the user joined, in their personal order.
-  const { data: myTeams = [] } = useQuery({
-    ...myTeamListOptions(wsId ?? ""),
+  // Spaces section: only spaces the user joined, in their personal order.
+  const { data: mySpaces = [] } = useQuery({
+    ...mySpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const updateTeamMembership = useUpdateTeamMembership();
+  const updateSpaceMembership = useUpdateSpaceMembership();
   // Local presentational copy for drop-animation stability — same trick as
   // the pinned rows below: follow TQ at rest, freeze during a drag so the
   // optimistic cache re-sort can't reorder the DOM while dnd-kit's drop
   // animation is still interpolating (that's what made drops snap back).
-  const [localTeams, setLocalTeams] = useState(myTeams);
-  const [localTeamsWsId, setLocalTeamsWsId] = useState<string | null>(wsId ?? null);
-  const isTeamDraggingRef = useRef(false);
-  const [teamDragActive, setTeamDragActive] = useState(false);
+  const [localSpaces, setLocalSpaces] = useState(mySpaces);
+  const [localSpacesWsId, setLocalSpacesWsId] = useState<string | null>(wsId ?? null);
+  const isSpaceDraggingRef = useRef(false);
+  const [spaceDragActive, setSpaceDragActive] = useState(false);
   useEffect(() => {
-    if (!isTeamDraggingRef.current) {
-      setLocalTeams(myTeams);
+    if (!isSpaceDraggingRef.current) {
+      setLocalSpaces(mySpaces);
     }
-  }, [myTeams]);
+  }, [mySpaces]);
   useEffect(() => {
-    setLocalTeamsWsId(wsId ?? null);
+    setLocalSpacesWsId(wsId ?? null);
   }, [wsId]);
-  const visibleTeams = localTeamsWsId === (wsId ?? null) ? localTeams : [];
-  const handleTeamDragStart = useCallback(() => {
-    isTeamDraggingRef.current = true;
-    setTeamDragActive(true);
+  const visibleSpaces = localSpacesWsId === (wsId ?? null) ? localSpaces : [];
+  const handleSpaceDragStart = useCallback(() => {
+    isSpaceDraggingRef.current = true;
+    setSpaceDragActive(true);
   }, []);
-  const handleTeamDragCancel = useCallback(() => {
-    isTeamDraggingRef.current = false;
-    setTeamDragActive(false);
+  const handleSpaceDragCancel = useCallback(() => {
+    isSpaceDraggingRef.current = false;
+    setSpaceDragActive(false);
   }, []);
-  // Fractional reorder (Linear-style): the dragged team takes the midpoint
+  // Fractional reorder (Linear-style): the dragged space takes the midpoint
   // of its new neighbors, so a drag is a single-row membership update. The
   // local array is rearranged first so the dropped row lands exactly where
   // the animation ends.
-  const handleTeamDragEnd = useCallback(
+  const handleSpaceDragEnd = useCallback(
     (event: DragEndEvent) => {
-      isTeamDraggingRef.current = false;
-      setTeamDragActive(false);
+      isSpaceDraggingRef.current = false;
+      setSpaceDragActive(false);
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const oldIndex = localTeams.findIndex((t) => t.id === active.id);
-      const newIndex = localTeams.findIndex((t) => t.id === over.id);
+      const oldIndex = localSpaces.findIndex((t) => t.id === active.id);
+      const newIndex = localSpaces.findIndex((t) => t.id === over.id);
       if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(localTeams, oldIndex, newIndex);
-      setLocalTeams(reordered);
+      const reordered = arrayMove(localSpaces, oldIndex, newIndex);
+      setLocalSpaces(reordered);
       const prev = reordered[newIndex - 1];
       const next = reordered[newIndex + 1];
       const sortOrder =
@@ -638,9 +638,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             : next
               ? next.sort_order - 1
               : 1;
-      updateTeamMembership.mutate({ id: String(active.id), sort_order: sortOrder });
+      updateSpaceMembership.mutate({ id: String(active.id), sort_order: sortOrder });
     },
-    [localTeams, updateTeamMembership],
+    [localSpaces, updateSpaceMembership],
   );
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
@@ -1024,62 +1024,62 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroup>
           </Collapsible>
 
-          {/* Teams — joined teams only, in the user's personal order.
-              Drag a team header to reorder; the first team doubles as the
+          {/* Spaces — joined spaces only, in the user's personal order.
+              Drag a space header to reorder; the first space doubles as the
               issue-creation default. Always rendered: a user with no joined
-              teams gets an empty-state row (join/create) instead of losing
+              spaces gets an empty-state row (join/create) instead of losing
               the section — and with it every create/browse entry point. */}
-          <Collapsible open={teamsCollapse.open} onOpenChange={teamsCollapse.onOpenChange}>
-              <SidebarGroup className="group/teams relative py-1">
+          <Collapsible open={spacesCollapse.open} onOpenChange={spacesCollapse.onOpenChange}>
+              <SidebarGroup className="group/spaces relative py-1">
                 <SidebarGroupLabel
                   render={<CollapsibleTrigger />}
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                 >
-                  <span>{t(($) => $.nav.teams)}</span>
+                  <span>{t(($) => $.nav.spaces)}</span>
                   <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
                 </SidebarGroupLabel>
                 {/* Hover-revealed, secondary until hovered itself — mirrors
-                    the pinned-count affordance. Opens the create-team modal
-                    directly; sized like the team-row chevron buttons. */}
+                    the pinned-count affordance. Opens the create-space modal
+                    directly; sized like the space-row chevron buttons. */}
                 {/* right-4 = group px-2 + label px-2, so the icon's right
                     edge sits on the same inset line as row content; top-3
                     centers the 16px button in the 32px label row (group
                     py-1). */}
                 <SidebarGroupAction
-                  title={t(($) => $.sidebar.new_team)}
-                  className="top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/teams:opacity-100 [&>svg]:size-3"
-                  onClick={() => useModalStore.getState().open("create-team")}
+                  title={t(($) => $.sidebar.new_space)}
+                  className="top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/spaces:opacity-100 [&>svg]:size-3"
+                  onClick={() => useModalStore.getState().open("create-space")}
                 >
                   <Plus />
                 </SidebarGroupAction>
                 <CollapsibleContent>
-                  {/* pt-0.5 mirrors the team rows' own children breathing
-                      (py-0.5): team rows are row-styled, not plain content,
+                  {/* pt-0.5 mirrors the space rows' own children breathing
+                      (py-0.5): space rows are row-styled, not plain content,
                       so they need the same gap above as below. */}
-                  {/* gap-0.5 keeps a constant 2px rhythm between team
+                  {/* gap-0.5 keeps a constant 2px rhythm between space
                       blocks whether they're collapsed (row→row) or expanded
                       (children→next row) — same spacing as SidebarMenu rows
                       everywhere else. */}
                   <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
-                    {myTeams.length === 0 && (
+                    {mySpaces.length === 0 && (
                       <button
                         type="button"
-                        onClick={() => useModalStore.getState().open("create-team")}
+                        onClick={() => useModalStore.getState().open("create-space")}
                         className="flex h-8 cursor-pointer items-center rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                       >
-                        {t(($) => $.sidebar.teams_empty)}
+                        {t(($) => $.sidebar.spaces_empty)}
                       </button>
                     )}
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={teamDragMeasuring} onDragStart={handleTeamDragStart} onDragEnd={handleTeamDragEnd} onDragCancel={handleTeamDragCancel}>
-                      <SortableContext items={visibleTeams.map((team) => team.id)} strategy={verticalListSortingStrategy}>
-                        {visibleTeams.map((team) => (
-                          <SortableTeamGroup
-                            key={team.id}
-                            forceCollapsed={teamDragActive}
-                            team={team}
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={spaceDragMeasuring} onDragStart={handleSpaceDragStart} onDragEnd={handleSpaceDragEnd} onDragCancel={handleSpaceDragCancel}>
+                      <SortableContext items={visibleSpaces.map((space) => space.id)} strategy={verticalListSortingStrategy}>
+                        {visibleSpaces.map((space) => (
+                          <SortableSpaceGroup
+                            key={space.id}
+                            forceCollapsed={spaceDragActive}
+                            space={space}
                             pathname={pathname}
-                            buildHref={(pathKey, teamKey) => p[pathKey](teamKey)}
-                            detailHref={p.teamDetail(team.key)}
+                            buildHref={(pathKey, spaceKey) => p[pathKey](spaceKey)}
+                            detailHref={p.spaceDetail(space.key)}
                           />
                         ))}
                       </SortableContext>

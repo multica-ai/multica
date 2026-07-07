@@ -39,7 +39,7 @@
     "./workspace/welcome-after-onboarding": "./workspace/welcome-after-onboarding.tsx",
     "./workspace/use-workspace-seen": "./workspace/use-workspace-seen.ts",
     "./layout": "./layout/index.ts",
-    "./teams": "./teams/index.ts",
+    "./spaces": "./spaces/index.ts",
     "./auth": "./auth/index.ts",
     "./search": "./search/index.ts",
     "./chat": "./chat/index.ts",

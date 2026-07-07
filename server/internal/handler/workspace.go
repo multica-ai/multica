@@ -18,24 +18,24 @@ import (
 )
 
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-var teamKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
-var nonTeamKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
+var spaceKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
+var nonSpaceKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
 
-// defaultTeamKeyFromSlug derives the default team key by normalizing the
+// defaultSpaceKeyFromSlug derives the default space key by normalizing the
 // slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
-func defaultTeamKeyFromSlug(slug string) string {
-	key := normalizeTeamKey(slug)
+func defaultSpaceKeyFromSlug(slug string) string {
+	key := normalizeSpaceKey(slug)
 	if key == "" {
 		return "T"
 	}
 	return key
 }
 
-// normalizeTeamKey mirrors pg_temp.normalize_team_key in migration 131 (minus
-// the 'TEAM' fallback, which callers decide): uppercase, strip characters
+// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 131 (minus
+// the 'SPACE' fallback, which callers decide): uppercase, strip characters
 // outside [A-Z0-9], truncate to 7, and prefix digit-leading keys with 'T'.
-func normalizeTeamKey(raw string) string {
-	key := nonTeamKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(raw)), "")
+func normalizeSpaceKey(raw string) string {
+	key := nonSpaceKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(raw)), "")
 	if len(key) > 7 {
 		key = key[:7]
 	}
@@ -48,8 +48,8 @@ func normalizeTeamKey(raw string) string {
 	return key
 }
 
-func validTeamKey(key string) bool {
-	return teamKeyPattern.MatchString(key)
+func validSpaceKey(key string) bool {
+	return spaceKeyPattern.MatchString(key)
 }
 
 type WorkspaceResponse struct {
@@ -150,12 +150,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateWorkspaceRequest struct {
-	Name           string  `json:"name"`
-	Slug           string  `json:"slug"`
-	Description    *string `json:"description"`
-	Context        *string `json:"context"`
-	DefaultTeamKey *string `json:"default_team_key"`
-	IssuePrefix    *string `json:"issue_prefix"`
+	Name            string  `json:"name"`
+	Slug            string  `json:"slug"`
+	Description     *string `json:"description"`
+	Context         *string `json:"context"`
+	DefaultSpaceKey *string `json:"default_space_key"`
+	IssuePrefix     *string `json:"issue_prefix"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -202,15 +202,15 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	defaultTeamKey := defaultTeamKeyFromSlug(req.Slug)
+	defaultSpaceKey := defaultSpaceKeyFromSlug(req.Slug)
 	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
-		defaultTeamKey = normalizeTeamKey(*req.IssuePrefix)
+		defaultSpaceKey = normalizeSpaceKey(*req.IssuePrefix)
 	}
-	if req.DefaultTeamKey != nil && strings.TrimSpace(*req.DefaultTeamKey) != "" {
-		defaultTeamKey = normalizeTeamKey(*req.DefaultTeamKey)
+	if req.DefaultSpaceKey != nil && strings.TrimSpace(*req.DefaultSpaceKey) != "" {
+		defaultSpaceKey = normalizeSpaceKey(*req.DefaultSpaceKey)
 	}
-	if !validTeamKey(defaultTeamKey) {
-		writeError(w, http.StatusBadRequest, "default_team_key must match ^[A-Z][A-Z0-9]{0,6}$")
+	if !validSpaceKey(defaultSpaceKey) {
+		writeError(w, http.StatusBadRequest, "default_space_key must match ^[A-Z][A-Z0-9]{0,6}$")
 		return
 	}
 
@@ -220,7 +220,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Slug:        req.Slug,
 		Description: ptrToText(req.Description),
 		Context:     ptrToText(req.Context),
-		IssuePrefix: defaultTeamKey,
+		IssuePrefix: defaultSpaceKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -241,30 +241,30 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team, err := qtx.CreateWorkspaceTeam(r.Context(), db.CreateWorkspaceTeamParams{
+	space, err := qtx.CreateWorkspaceSpace(r.Context(), db.CreateWorkspaceSpaceParams{
 		WorkspaceID: ws.ID,
 		Name:        ws.Name,
-		Key:         defaultTeamKey,
+		Key:         defaultSpaceKey,
 		IsDefault:   true,
 		Description: pgtype.Text{},
-		// No icon on purpose: the default team renders TeamIcon's colored
+		// No icon on purpose: the default space renders SpaceIcon's colored
 		// fallback block, which is the designated landing spot for the
-		// planned per-team colors (see TeamIcon).
+		// planned per-space colors (see SpaceIcon).
 		Icon:      pgtype.Text{},
 		CreatedBy: parseUUID(userID),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create default team: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to create default space: "+err.Error())
 		return
 	}
-	if err := qtx.AddWorkspaceTeamMember(r.Context(), db.AddWorkspaceTeamMemberParams{
+	if err := qtx.AddWorkspaceSpaceMember(r.Context(), db.AddWorkspaceSpaceMemberParams{
 		WorkspaceID: ws.ID,
-		TeamID:      team.ID,
+		SpaceID:     space.ID,
 		UserID:      parseUUID(userID),
 		Role:        "lead",
 		SortOrder:   1,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to add default team member: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to add default space member: "+err.Error())
 		return
 	}
 
@@ -387,16 +387,16 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		params.Repos = reposJSON
 	}
-	var updateDefaultTeamKey bool
+	var updateDefaultSpaceKey bool
 	if req.IssuePrefix != nil {
-		prefix := normalizeTeamKey(*req.IssuePrefix)
+		prefix := normalizeSpaceKey(*req.IssuePrefix)
 		if prefix != "" {
-			if !validTeamKey(prefix) {
+			if !validSpaceKey(prefix) {
 				writeError(w, http.StatusBadRequest, "issue_prefix must match ^[A-Z][A-Z0-9]{0,6}$")
 				return
 			}
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
-			updateDefaultTeamKey = true
+			updateDefaultSpaceKey = true
 		}
 	}
 	if req.AvatarURL != nil {
@@ -405,7 +405,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	var ws db.Workspace
 	var err error
-	if updateDefaultTeamKey {
+	if updateDefaultSpaceKey {
 		tx, txErr := h.TxStarter.Begin(r.Context())
 		if txErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -414,25 +414,25 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 
-		defaultTeam, teamErr := qtx.GetDefaultWorkspaceTeam(r.Context(), idUUID)
-		if teamErr != nil {
-			writeError(w, http.StatusBadRequest, "default team not found")
+		defaultSpace, spaceErr := qtx.GetDefaultWorkspaceSpace(r.Context(), idUUID)
+		if spaceErr != nil {
+			writeError(w, http.StatusBadRequest, "default space not found")
 			return
 		}
-		if _, teamErr := updateWorkspaceTeamLocked(r.Context(), qtx, db.UpdateWorkspaceTeamParams{
-			ID:          defaultTeam.ID,
+		if _, spaceErr := updateWorkspaceSpaceLocked(r.Context(), qtx, db.UpdateWorkspaceSpaceParams{
+			ID:          defaultSpace.ID,
 			WorkspaceID: idUUID,
 			Key:         params.IssuePrefix,
-		}); teamErr != nil {
-			if teamErr == errTeamKeyFrozen {
-				writeError(w, http.StatusConflict, "team identifier cannot be changed after issues have been created")
+		}); spaceErr != nil {
+			if spaceErr == errSpaceKeyFrozen {
+				writeError(w, http.StatusConflict, "space identifier cannot be changed after issues have been created")
 				return
 			}
-			if isUniqueViolation(teamErr) || isCheckViolation(teamErr) {
+			if isUniqueViolation(spaceErr) || isCheckViolation(spaceErr) {
 				writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "failed to update default team key")
+			writeError(w, http.StatusInternalServerError, "failed to update default space key")
 			return
 		}
 		ws, err = qtx.UpdateWorkspace(r.Context(), params)
@@ -605,9 +605,9 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Member creation + default-team join are atomic: the sidebar shows
-	// joined teams only, so a member outside every team would see an empty
-	// Teams section and issue creation would lose its per-user default.
+	// Member creation + default-space join are atomic: the sidebar shows
+	// joined spaces only, so a member outside every space would see an empty
+	// Spaces section and issue creation would lose its per-user default.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
@@ -630,19 +630,19 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}
-	// Hard failure (rolls the member insert back) — a missing default team is
-	// data corruption, and silently skipping would mint a team-less member.
-	defTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), requester.WorkspaceID)
+	// Hard failure (rolls the member insert back) — a missing default space is
+	// data corruption, and silently skipping would mint a space-less member.
+	defSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), requester.WorkspaceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
 		return
 	}
-	teamRole := "member"
+	spaceRole := "member"
 	if role == "owner" || role == "admin" {
-		teamRole = "lead"
+		spaceRole = "lead"
 	}
-	if _, err := addTeamMember(r.Context(), qtx, requester.WorkspaceID, defTeam.ID, user.ID, teamRole); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to join default team")
+	if _, err := addSpaceMember(r.Context(), qtx, requester.WorkspaceID, defSpace.ID, user.ID, spaceRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default space")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {

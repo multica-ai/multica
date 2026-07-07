@@ -159,11 +159,11 @@ export function buildIssueSurfaceQueryPlan(
             : {},
       };
     }
-    case "team": {
-      // Mirrors the project plan: team_id is a real server filter on both
-      // the list and grouped endpoints, so the team surface gets its own
-      // cache entry, and issues created from it default into the team.
-      const queryFilter = { team_id: scope.teamId };
+    case "space": {
+      // Mirrors the project plan: space_id is a real server filter on both
+      // the list and grouped endpoints, so the space surface gets its own
+      // cache entry, and issues created from it default into the space.
+      const queryFilter = { space_id: scope.spaceId };
       return {
         kind: "scoped",
         scopeKey,
@@ -173,7 +173,7 @@ export function buildIssueSurfaceQueryPlan(
         loadMoreScope: scopeKey,
         loadMoreFilter: queryFilter,
         userId: undefined,
-        createDefaults: { team_id: scope.teamId },
+        createDefaults: { space_id: scope.spaceId },
       };
     }
   }

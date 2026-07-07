@@ -427,21 +427,21 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Every system-placed member joins the default team: the sidebar shows
-	// joined teams only, and issue creation needs a per-user default. Hard
-	// failure (rolls the whole accept back) — a missing default team is data
-	// corruption, and silently skipping would mint a team-less member.
-	defTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), accepted.WorkspaceID)
+	// Every system-placed member joins the default space: the sidebar shows
+	// joined spaces only, and issue creation needs a per-user default. Hard
+	// failure (rolls the whole accept back) — a missing default space is data
+	// corruption, and silently skipping would mint a space-less member.
+	defSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), accepted.WorkspaceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
 		return
 	}
-	teamRole := "member"
+	spaceRole := "member"
 	if accepted.Role == "owner" || accepted.Role == "admin" {
-		teamRole = "lead"
+		spaceRole = "lead"
 	}
-	if _, err := addTeamMember(r.Context(), qtx, accepted.WorkspaceID, defTeam.ID, user.ID, teamRole); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to join default team")
+	if _, err := addSpaceMember(r.Context(), qtx, accepted.WorkspaceID, defSpace.ID, user.ID, spaceRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default space")
 		return
 	}
 

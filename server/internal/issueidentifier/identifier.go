@@ -1,18 +1,18 @@
 // Package issueidentifier is the single authority for turning an issue into its
 // human-readable "PREFIX-NUMBER" identifier and for resolving the bare prefix
-// (Team key) of an issue or workspace.
+// (Space key) of an issue or workspace.
 //
 // It replaces four drifted copies of the same fallback chain that previously
 // lived in the handler, task service, autopilot service, and channel router.
 // The chain is, in order:
 //
-//  1. the issue's own Team key (when the issue has a Team);
-//  2. the workspace's default Team key;
+//  1. the issue's own Space key (when the issue has a Space);
+//  2. the workspace's default Space key;
 //  3. the legacy workspace issue_prefix (compatibility window);
 //  4. a prefix generated from the workspace name.
 //
 // Step 4 is the defensive fallback-of-last-resort: callers never emit "-42" or
-// "#42" for an issue whose Team/workspace lookups all failed.
+// "#42" for an issue whose Space/workspace lookups all failed.
 package issueidentifier
 
 import (
@@ -28,15 +28,15 @@ import (
 // Queries is the read surface the resolver needs. Both *db.Queries and the
 // channel engine's SessionReader satisfy it.
 type Queries interface {
-	GetWorkspaceTeam(ctx context.Context, arg db.GetWorkspaceTeamParams) (db.WorkspaceTeam, error)
-	GetDefaultWorkspaceTeam(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceTeam, error)
+	GetWorkspaceSpace(ctx context.Context, arg db.GetWorkspaceSpaceParams) (db.WorkspaceSpace, error)
+	GetDefaultWorkspaceSpace(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceSpace, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 }
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 
 // GeneratePrefix produces a 2-3 char uppercase prefix from a workspace name.
-// Examples: "Jiayuan's Workspace" -> "JIA", "My Team" -> "MYT", "AB" -> "AB".
+// Examples: "Jiayuan's Workspace" -> "JIA", "My Space" -> "MYT", "AB" -> "AB".
 func GeneratePrefix(name string) string {
 	letters := nonAlpha.ReplaceAllString(name, "")
 	if len(letters) == 0 {
@@ -49,27 +49,27 @@ func GeneratePrefix(name string) string {
 	return letters
 }
 
-// PrefixForIssue returns the identifier prefix (Team key) for a single issue,
+// PrefixForIssue returns the identifier prefix (Space key) for a single issue,
 // following the full fallback chain.
 func PrefixForIssue(ctx context.Context, q Queries, issue db.Issue) string {
-	if issue.TeamID.Valid {
-		team, err := q.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-			ID:          issue.TeamID,
+	if issue.SpaceID.Valid {
+		space, err := q.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+			ID:          issue.SpaceID,
 			WorkspaceID: issue.WorkspaceID,
 		})
-		if err == nil && team.Key != "" {
-			return team.Key
+		if err == nil && space.Key != "" {
+			return space.Key
 		}
 	}
 	return PrefixForWorkspace(ctx, q, issue.WorkspaceID)
 }
 
 // PrefixForWorkspace returns the workspace-level identifier prefix: the default
-// Team key, then the legacy issue_prefix, then a generated prefix.
+// Space key, then the legacy issue_prefix, then a generated prefix.
 func PrefixForWorkspace(ctx context.Context, q Queries, workspaceID pgtype.UUID) string {
-	team, err := q.GetDefaultWorkspaceTeam(ctx, workspaceID)
-	if err == nil && team.Key != "" {
-		return team.Key
+	space, err := q.GetDefaultWorkspaceSpace(ctx, workspaceID)
+	if err == nil && space.Key != "" {
+		return space.Key
 	}
 	ws, err := q.GetWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -86,48 +86,48 @@ func ForIssue(ctx context.Context, q Queries, issue db.Issue) string {
 	return fmt.Sprintf("%s-%d", PrefixForIssue(ctx, q, issue), issue.Number)
 }
 
-// Resolver memoizes Team-key lookups so list/batch paths that resolve
-// identifiers for many issues avoid a per-row GetWorkspaceTeam query. It is not
+// Resolver memoizes Space-key lookups so list/batch paths that resolve
+// identifiers for many issues avoid a per-row GetWorkspaceSpace query. It is not
 // safe for concurrent use; construct one per request/loop.
 type Resolver struct {
-	q        Queries
-	teamKeys map[pgtype.UUID]string // resolved Team ID -> Team key ("" = lookup failed/empty)
-	wsPrefix map[pgtype.UUID]string // workspace ID -> fallback prefix
+	q         Queries
+	spaceKeys map[pgtype.UUID]string // resolved Space ID -> Space key ("" = lookup failed/empty)
+	wsPrefix  map[pgtype.UUID]string // workspace ID -> fallback prefix
 }
 
 // NewResolver returns a memoizing Resolver over the given queries.
 func NewResolver(q Queries) *Resolver {
 	return &Resolver{
-		q:        q,
-		teamKeys: make(map[pgtype.UUID]string),
-		wsPrefix: make(map[pgtype.UUID]string),
+		q:         q,
+		spaceKeys: make(map[pgtype.UUID]string),
+		wsPrefix:  make(map[pgtype.UUID]string),
 	}
 }
 
-// PrefixForIssue mirrors the package-level function but caches Team and
+// PrefixForIssue mirrors the package-level function but caches Space and
 // workspace lookups across calls on the same Resolver.
 func (r *Resolver) PrefixForIssue(ctx context.Context, issue db.Issue) string {
-	if issue.TeamID.Valid {
-		if key := r.teamKey(ctx, issue.TeamID, issue.WorkspaceID); key != "" {
+	if issue.SpaceID.Valid {
+		if key := r.spaceKey(ctx, issue.SpaceID, issue.WorkspaceID); key != "" {
 			return key
 		}
 	}
 	return r.prefixForWorkspace(ctx, issue.WorkspaceID)
 }
 
-func (r *Resolver) teamKey(ctx context.Context, teamID, workspaceID pgtype.UUID) string {
-	if key, ok := r.teamKeys[teamID]; ok {
+func (r *Resolver) spaceKey(ctx context.Context, spaceID, workspaceID pgtype.UUID) string {
+	if key, ok := r.spaceKeys[spaceID]; ok {
 		return key
 	}
 	key := ""
-	team, err := r.q.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-		ID:          teamID,
+	space, err := r.q.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
 		WorkspaceID: workspaceID,
 	})
 	if err == nil {
-		key = team.Key
+		key = space.Key
 	}
-	r.teamKeys[teamID] = key
+	r.spaceKeys[spaceID] = key
 	return key
 }
 

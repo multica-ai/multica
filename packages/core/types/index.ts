@@ -69,7 +69,7 @@ export type {
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
-export type { Team, CreateTeamRequest, UpdateTeamRequest, ListTeamsResponse, TeamMembership, TeamMember, ListTeamMembersResponse } from "./team";
+export type { Space, CreateSpaceRequest, UpdateSpaceRequest, ListSpacesResponse, SpaceMembership, SpaceMember, ListSpaceMembersResponse } from "./space";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";

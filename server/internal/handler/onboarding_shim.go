@@ -76,7 +76,7 @@ const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI
 
 ## What Multica is
 
-Multica is an open-source, AI-native team workspace (source: https://github.com/multica-ai/multica). The core idea: AI agents are treated as real teammates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
+Multica is an open-source, AI-native space workspace (source: https://github.com/multica-ai/multica). The core idea: AI agents are treated as real spacemates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
 
 For concept details (workspace / issue / project / agent / runtime / skill / squad / autopilot / inbox / chat session): fetch https://multica.ai/docs via WebFetch — that's authoritative. For the "why" or implementation, fetch the GitHub repo above. Never paraphrase concepts from memory.
 
@@ -104,7 +104,7 @@ This is your guided first run. Multica Helper is assigned to this issue and will
 1. Read Multica Helper's first comment.
 2. Reply with something you want to build, fix, write, or plan.
 3. @mention Multica Helper when you want it to continue.
-4. Open Agents and Runtimes later when you want to customize the teammate or the computer it runs on.
+4. Open Agents and Runtimes later when you want to customize the spacemate or the computer it runs on.
 
 You can close this issue when the workflow makes sense.`
 
@@ -240,13 +240,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 
 	var emptyUUID pgtype.UUID
-	defaultTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
+	defaultSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), wsUUID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
 		return
 	}
 	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, defaultTeam.ID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultSpace.ID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -255,8 +255,8 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := qtx.IncrementTeamIssueCounter(r.Context(), db.IncrementTeamIssueCounterParams{
-			ID:          defaultTeam.ID,
+		issueNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
+			ID:          defaultSpace.ID,
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
@@ -269,7 +269,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
-			TeamID:        defaultTeam.ID,
+			SpaceID:       defaultSpace.ID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
 			Status:        "todo",
@@ -407,13 +407,13 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	var emptyUUID pgtype.UUID
-	defaultTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
+	defaultSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), wsUUID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
 		return
 	}
 	existing, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, defaultTeam.ID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultSpace.ID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap no-runtime onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -426,8 +426,8 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := qtx.IncrementTeamIssueCounter(r.Context(), db.IncrementTeamIssueCounterParams{
-			ID:          defaultTeam.ID,
+		issueNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
+			ID:          defaultSpace.ID,
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
@@ -436,7 +436,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
-			TeamID:        defaultTeam.ID,
+			SpaceID:       defaultSpace.ID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
 			Status:        "todo",

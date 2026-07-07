@@ -11,7 +11,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
-import { teamKeys } from "../teams/queries";
+import { spaceKeys } from "../spaces/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -341,21 +341,21 @@ export function applyWorkspaceUpdatedToCache(
   qc: QueryClient,
   payload: WorkspaceUpdatedPayload,
 ): void {
-  // Team create/update/archive rides the same `workspace:updated` channel but
-  // carries a `team` instead of a `workspace`. The global query client uses
+  // Space create/update/archive rides the same `workspace:updated` channel but
+  // carries a `space` instead of a `workspace`. The global query client uses
   // staleTime: Infinity, so without an explicit invalidation other clients
-  // never refetch the team list. Archiving a team also shifts issue
-  // identifiers/filters, so mirror the team mutations' onSettled issue-key
+  // never refetch the space list. Archiving a space also shifts issue
+  // identifiers/filters, so mirror the space mutations' onSettled issue-key
   // invalidation here.
-  const team = payload.team;
-  if (team?.workspace_id) {
-    qc.invalidateQueries({ queryKey: teamKeys.list(team.workspace_id) });
-    qc.invalidateQueries({ queryKey: issueKeys.all(team.workspace_id) });
-    // Mirror useArchiveTeam.onSettled: projects carry team_ids, autopilots
-    // carry team_id, and both group under teams in the sidebar — an archive
+  const space = payload.space;
+  if (space?.workspace_id) {
+    qc.invalidateQueries({ queryKey: spaceKeys.list(space.workspace_id) });
+    qc.invalidateQueries({ queryKey: issueKeys.all(space.workspace_id) });
+    // Mirror useArchiveSpace.onSettled: projects carry space_ids, autopilots
+    // carry space_id, and both group under spaces in the sidebar — an archive
     // or rename on another client must refresh them too.
-    qc.invalidateQueries({ queryKey: projectKeys.all(team.workspace_id) });
-    qc.invalidateQueries({ queryKey: autopilotKeys.all(team.workspace_id) });
+    qc.invalidateQueries({ queryKey: projectKeys.all(space.workspace_id) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(space.workspace_id) });
   }
   const next = payload.workspace;
   if (next?.id) {
@@ -814,7 +814,7 @@ export function useRealtimeSync(
           assigneeChanged: payload.assignee_changed,
           statusChanged: payload.status_changed,
           projectChanged: payload.project_changed,
-          teamChanged: payload.team_changed,
+          spaceChanged: payload.space_changed,
         });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);

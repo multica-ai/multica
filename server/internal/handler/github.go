@@ -1337,9 +1337,9 @@ func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID p
 	return *s.GitHubAutoLinkPRsEnabled
 }
 
-// the Team key and number resolve to a real issue in the workspace.
+// the Space key and number resolve to a real issue in the workspace.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
-	_ = prefix // compatibility parameter; Team key now comes from identifier itself.
+	_ = prefix // compatibility parameter; Space key now comes from identifier itself.
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
 		return db.Issue{}, false
@@ -1349,18 +1349,18 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByTeamKeyAndNumber(ctx, db.GetIssueByTeamKeyAndNumberParams{
+	issue, err := h.Queries.GetIssueBySpaceKeyAndNumber(ctx, db.GetIssueBySpaceKeyAndNumberParams{
 		WorkspaceID: workspaceID,
 		Lower:       gotPrefix,
 		Number:      int32(n),
 	})
 	if err != nil {
 		// Branch names / PR titles keep referencing the pre-move identifier
-		// after an issue moves teams; the alias keeps auto-linking working.
+		// after an issue moves spaces; the alias keeps auto-linking working.
 		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
-			WorkspaceID:  workspaceID,
-			TeamKeyLower: gotPrefix,
-			Number:       int32(n),
+			WorkspaceID:   workspaceID,
+			SpaceKeyLower: gotPrefix,
+			Number:        int32(n),
 		})
 		if err != nil {
 			return db.Issue{}, false

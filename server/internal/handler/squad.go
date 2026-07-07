@@ -1048,7 +1048,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 	// exactly like EnqueueTaskForSquadLeader* does (via the issue's origin
 	// link). triggerCommentID is always empty on the assign/promote path, so we
 	// pass an invalid UUID to match. A still-unresolved originator leaves
-	// leaderOriginator empty, which correctly fails closed for member/team
+	// leaderOriginator empty, which correctly fails closed for member/space
 	// targets while a workspace target still admits the agent principal.
 	leaderOriginator := ""
 	if authorType == "member" {

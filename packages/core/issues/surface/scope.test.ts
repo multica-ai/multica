@@ -22,7 +22,7 @@ describe("issue surface scope", () => {
         relation: "created",
       }),
     ).toBe("actor:agent:a1:created");
-    expect(issueScopeKey({ type: "team", teamId: "t1" })).toBe("team:t1");
+    expect(issueScopeKey({ type: "space", spaceId: "t1" })).toBe("space:t1");
   });
 
   it("builds the workspace query plan", () => {
@@ -142,16 +142,16 @@ describe("issue surface scope", () => {
     });
   });
 
-  it("builds the team query plan mirroring the project shape", () => {
+  it("builds the space query plan mirroring the project shape", () => {
     expect(
-      buildIssueSurfaceQueryPlan({ type: "team", teamId: "t1" }),
+      buildIssueSurfaceQueryPlan({ type: "space", spaceId: "t1" }),
     ).toMatchObject({
       kind: "scoped",
-      scopeKey: "team:t1",
-      queryScope: "team:t1",
-      queryFilter: { team_id: "t1" },
-      groupedScopeFilter: { team_id: "t1" },
-      createDefaults: { team_id: "t1" },
+      scopeKey: "space:t1",
+      queryScope: "space:t1",
+      queryFilter: { space_id: "t1" },
+      groupedScopeFilter: { space_id: "t1" },
+      createDefaults: { space_id: "t1" },
     });
   });
 });

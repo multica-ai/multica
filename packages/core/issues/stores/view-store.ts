@@ -95,7 +95,7 @@ export interface IssueViewState {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
-  teamFilter: string | null;
+  spaceFilter: string | null;
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
@@ -143,7 +143,7 @@ export interface IssueViewState {
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
   toggleCreatorFilter: (value: ActorFilterValue) => void;
-  setTeamFilter: (teamId: string | null) => void;
+  setSpaceFilter: (spaceId: string | null) => void;
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
@@ -174,7 +174,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   assigneeFilters: [],
   includeNoAssignee: false,
   creatorFilters: [],
-  teamFilter: null,
+  spaceFilter: null,
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
@@ -247,7 +247,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
           : [...state.creatorFilters, value],
       };
     }),
-  setTeamFilter: (teamId) => set({ teamFilter: teamId }),
+  setSpaceFilter: (spaceId) => set({ spaceFilter: spaceId }),
   toggleProjectFilter: (projectId) =>
     set((state) => ({
       projectFilters: state.projectFilters.includes(projectId)
@@ -299,7 +299,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       assigneeFilters: [],
       includeNoAssignee: false,
       creatorFilters: [],
-      teamFilter: null,
+      spaceFilter: null,
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],

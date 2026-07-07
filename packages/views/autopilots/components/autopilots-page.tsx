@@ -143,7 +143,7 @@ const TEMPLATES: AutopilotTemplate[] = [
   {
     id: "daily_news",
     prompt: `1. Search the web for news and announcements published today only (strictly today's date)
-2. Filter for topics relevant to our team and industry
+2. Filter for topics relevant to our space and industry
 3. For each item, write a short summary including: title, source, key takeaways
 4. Compile everything into a single digest post
 5. Post the digest as a comment on this issue and @mention all workspace members`,
@@ -157,7 +157,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 2. Identify PRs that have been open for more than 24 hours without a review
 3. For each stale PR, note the author, age, and a one-line summary of the change
 4. Post a comment on this issue listing all stale PRs with links
-5. @mention the team to remind them to review`,
+5. @mention the space to remind them to review`,
     icon: GitPullRequest,
     frequency: "weekdays",
     time: "10:00",
@@ -601,10 +601,10 @@ function LoadingSkeleton() {
 // Page
 // ---------------------------------------------------------------------------
 
-// `teamId` narrows the list to that team's autopilots — used by the team
-// surface pages (/team/:key/autopilots). Client-side filter over the shared
+// `spaceId` narrows the list to that space's autopilots — used by the space
+// surface pages (/space/:key/autopilots). Client-side filter over the shared
 // list cache.
-export function AutopilotsPage({ teamId }: { teamId?: string } = {}) {
+export function AutopilotsPage({ spaceId }: { spaceId?: string } = {}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -616,8 +616,8 @@ export function AutopilotsPage({ teamId }: { teamId?: string } = {}) {
     refetch: refetchList,
   } = useQuery(autopilotListOptions(wsId));
   const autopilots = useMemo(
-    () => (teamId ? allAutopilots.filter((a) => a.team_id === teamId) : allAutopilots),
-    [allAutopilots, teamId],
+    () => (spaceId ? allAutopilots.filter((a) => a.space_id === spaceId) : allAutopilots),
+    [allAutopilots, spaceId],
   );
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -975,9 +975,9 @@ export function AutopilotsPage({ teamId }: { teamId?: string } = {}) {
           open={createOpen}
           onOpenChange={setCreateOpen}
           initial={{
-            // Opening from a team surface injects that team as the seed —
+            // Opening from a space surface injects that space as the seed —
             // the dialog itself stays the same everywhere (switchable).
-            ...(teamId ? { team_id: teamId } : {}),
+            ...(spaceId ? { space_id: spaceId } : {}),
             ...(selectedTemplate
               ? {
                   // Template title pulls from i18n so the user-visible default

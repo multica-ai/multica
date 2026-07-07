@@ -762,18 +762,18 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByTeamKeyAndNumber(ctx, db.GetIssueByTeamKeyAndNumberParams{
+	issue, err := h.Queries.GetIssueBySpaceKeyAndNumber(ctx, db.GetIssueBySpaceKeyAndNumberParams{
 		WorkspaceID: wsUUID,
 		Lower:       parts.prefix,
 		Number:      parts.number,
 	})
 	if err != nil {
-		// The identifier may be pre-move: moving an issue between teams
+		// The identifier may be pre-move: moving an issue between spaces
 		// renumbers it but records the old identifier as an alias.
 		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
-			WorkspaceID:  wsUUID,
-			TeamKeyLower: parts.prefix,
-			Number:       parts.number,
+			WorkspaceID:   wsUUID,
+			SpaceKeyLower: parts.prefix,
+			Number:        parts.number,
 		})
 		if err != nil {
 			return db.Issue{}, false

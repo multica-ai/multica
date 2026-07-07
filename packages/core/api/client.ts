@@ -77,12 +77,12 @@ import type {
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
   CancelTaskResponse,
-  Team,
-  TeamMembership,
-  ListTeamMembersResponse,
-  CreateTeamRequest,
-  UpdateTeamRequest,
-  ListTeamsResponse,
+  Space,
+  SpaceMembership,
+  ListSpaceMembersResponse,
+  CreateSpaceRequest,
+  UpdateSpaceRequest,
+  ListSpacesResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -191,7 +191,7 @@ import {
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
-  EMPTY_LIST_TEAMS_RESPONSE,
+  EMPTY_LIST_SPACES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -209,11 +209,11 @@ import {
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
-  ListTeamsResponseSchema,
-  ListTeamMembersResponseSchema,
-  EMPTY_LIST_TEAM_MEMBERS_RESPONSE,
-  TeamSchema,
-  TeamMembershipSchema,
+  ListSpacesResponseSchema,
+  ListSpaceMembersResponseSchema,
+  EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
+  SpaceSchema,
+  SpaceMembershipSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -571,7 +571,7 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
-    if (params?.team_id) search.set("team_id", params.team_id);
+    if (params?.space_id) search.set("space_id", params.space_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
@@ -605,7 +605,7 @@ export class ApiClient {
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
-    if (params.team_id) search.set("team_id", params.team_id);
+    if (params.space_id) search.set("space_id", params.space_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
@@ -680,7 +680,7 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
-    team_id?: string | null;
+    space_id?: string | null;
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
@@ -1674,58 +1674,58 @@ export class ApiClient {
     });
   }
 
-  // Teams
-  async listTeams(): Promise<ListTeamsResponse> {
-    const raw = await this.fetch<unknown>("/api/teams");
-    return parseWithFallback(raw, ListTeamsResponseSchema, EMPTY_LIST_TEAMS_RESPONSE, {
-      endpoint: "GET /api/teams",
+  // Spaces
+  async listSpaces(): Promise<ListSpacesResponse> {
+    const raw = await this.fetch<unknown>("/api/spaces");
+    return parseWithFallback(raw, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, {
+      endpoint: "GET /api/spaces",
     });
   }
 
-  async createTeam(data: CreateTeamRequest): Promise<Team> {
-    const raw = await this.fetch<unknown>("/api/teams", {
+  async createSpace(data: CreateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>("/api/spaces", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    return parseOrWarn(raw, TeamSchema, { endpoint: "POST /api/teams" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "POST /api/spaces" });
   }
 
-  async updateTeam(id: string, data: UpdateTeamRequest): Promise<Team> {
-    const raw = await this.fetch<unknown>(`/api/teams/${id}`, {
+  async updateSpace(id: string, data: UpdateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
-    return parseOrWarn(raw, TeamSchema, { endpoint: "PATCH /api/teams/:id" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "PATCH /api/spaces/:id" });
   }
 
-  async updateTeamMembership(id: string, data: { sort_order: number }): Promise<TeamMembership> {
-    const raw = await this.fetch<unknown>(`/api/teams/${id}/membership`, {
+  async updateSpaceMembership(id: string, data: { sort_order: number }): Promise<SpaceMembership> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/membership`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
-    return parseOrWarn(raw, TeamMembershipSchema, { endpoint: "PATCH /api/teams/:id/membership" });
+    return parseOrWarn(raw, SpaceMembershipSchema, { endpoint: "PATCH /api/spaces/:id/membership" });
   }
 
-  async replaceTeamMembers(id: string, memberIds: string[]): Promise<ListTeamMembersResponse> {
-    const raw = await this.fetch<unknown>(`/api/teams/${id}/members`, {
+  async replaceSpaceMembers(id: string, memberIds: string[]): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`, {
       method: "PUT",
       body: JSON.stringify({ member_ids: memberIds }),
     });
-    return parseWithFallback(raw, ListTeamMembersResponseSchema, EMPTY_LIST_TEAM_MEMBERS_RESPONSE, {
-      endpoint: "PUT /api/teams/:id/members",
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "PUT /api/spaces/:id/members",
     });
   }
 
-  async listTeamMembers(id: string): Promise<ListTeamMembersResponse> {
-    const raw = await this.fetch<unknown>(`/api/teams/${id}/members`);
-    return parseWithFallback(raw, ListTeamMembersResponseSchema, EMPTY_LIST_TEAM_MEMBERS_RESPONSE, {
-      endpoint: "GET /api/teams/:id/members",
+  async listSpaceMembers(id: string): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`);
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "GET /api/spaces/:id/members",
     });
   }
 
-  async archiveTeam(id: string): Promise<Team> {
-    const raw = await this.fetch<unknown>(`/api/teams/${id}`, { method: "DELETE" });
-    return parseOrWarn(raw, TeamSchema, { endpoint: "DELETE /api/teams/:id" });
+  async archiveSpace(id: string): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, { method: "DELETE" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "DELETE /api/spaces/:id" });
   }
 
   // Members
@@ -2133,10 +2133,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string; team_id?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; space_id?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    if (params?.team_id) search.set("team_id", params.team_id);
+    if (params?.space_id) search.set("space_id", params.space_id);
     return this.fetch(`/api/projects?${search}`);
   }
 
@@ -2446,10 +2446,10 @@ export class ApiClient {
   }
 
   // Autopilots
-  async listAutopilots(params?: { status?: string; team_id?: string }): Promise<ListAutopilotsResponse> {
+  async listAutopilots(params?: { status?: string; space_id?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    if (params?.team_id) search.set("team_id", params.team_id);
+    if (params?.space_id) search.set("space_id", params.space_id);
     const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
     return parseWithFallback(
       raw,

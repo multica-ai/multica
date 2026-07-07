@@ -20,9 +20,9 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
-  ListTeamsResponseSchema,
-  TeamSchema,
-  EMPTY_LIST_TEAMS_RESPONSE,
+  ListSpacesResponseSchema,
+  SpaceSchema,
+  EMPTY_LIST_SPACES_RESPONSE,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -726,10 +726,10 @@ describe("InboxUnreadSummarySchema", () => {
   });
 });
 
-describe("TeamSchema / ListTeamsResponseSchema drift", () => {
-  const ENDPOINT = { endpoint: "GET /api/teams" };
-  const baseTeam = {
-    id: "team-1",
+describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/spaces" };
+  const baseSpace = {
+    id: "space-1",
     workspace_id: "ws-1",
     name: "Frontend",
     key: "FE",
@@ -743,15 +743,15 @@ describe("TeamSchema / ListTeamsResponseSchema drift", () => {
     updated_at: "2026-05-01T00:00:00Z",
   };
 
-  it("parses a well-formed team and tolerates extra fields", () => {
-    const parsed = TeamSchema.parse({ ...baseTeam, future_field: "ignored" });
-    expect(parsed.id).toBe("team-1");
+  it("parses a well-formed space and tolerates extra fields", () => {
+    const parsed = SpaceSchema.parse({ ...baseSpace, future_field: "ignored" });
+    expect(parsed.id).toBe("space-1");
     expect(parsed.key).toBe("FE");
     expect(parsed.is_default).toBe(true);
   });
 
   it("defaults scalar fields when an older backend omits them", () => {
-    const parsed = TeamSchema.parse({ id: "team-2", workspace_id: "ws-1" });
+    const parsed = SpaceSchema.parse({ id: "space-2", workspace_id: "ws-1" });
     expect(parsed.name).toBe("");
     expect(parsed.key).toBe("");
     expect(parsed.description).toBe("");
@@ -763,45 +763,45 @@ describe("TeamSchema / ListTeamsResponseSchema drift", () => {
 
   it("parses a list response and coerces total", () => {
     const parsed = parseWithFallback(
-      { teams: [baseTeam], total: 1 },
-      ListTeamsResponseSchema,
-      EMPTY_LIST_TEAMS_RESPONSE,
+      { spaces: [baseSpace], total: 1 },
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.teams).toHaveLength(1);
+    expect(parsed.spaces).toHaveLength(1);
     expect(parsed.total).toBe(1);
   });
 
-  it("defaults teams and total when the body omits them", () => {
+  it("defaults spaces and total when the body omits them", () => {
     const parsed = parseWithFallback(
       {},
-      ListTeamsResponseSchema,
-      EMPTY_LIST_TEAMS_RESPONSE,
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.teams).toEqual([]);
+    expect(parsed.spaces).toEqual([]);
     expect(parsed.total).toBe(0);
   });
 
-  it("falls back to empty when a team row has a wrong-typed id", () => {
+  it("falls back to empty when a space row has a wrong-typed id", () => {
     expect(
       parseWithFallback(
-        { teams: [{ ...baseTeam, id: 42 }], total: 1 },
-        ListTeamsResponseSchema,
-        EMPTY_LIST_TEAMS_RESPONSE,
+        { spaces: [{ ...baseSpace, id: 42 }], total: 1 },
+        ListSpacesResponseSchema,
+        EMPTY_LIST_SPACES_RESPONSE,
         ENDPOINT,
       ),
-    ).toBe(EMPTY_LIST_TEAMS_RESPONSE);
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
   });
 
   it("falls back to empty for a non-object body", () => {
     expect(
-      parseWithFallback(null, ListTeamsResponseSchema, EMPTY_LIST_TEAMS_RESPONSE, ENDPOINT),
-    ).toBe(EMPTY_LIST_TEAMS_RESPONSE);
+      parseWithFallback(null, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
   });
 });
 
-describe("ProjectSchema team_ids drift", () => {
+describe("ProjectSchema space_ids drift", () => {
   const ENDPOINT = { endpoint: "GET /api/projects/search" };
   const baseProject = {
     id: "proj-1",
@@ -818,34 +818,34 @@ describe("ProjectSchema team_ids drift", () => {
     match_source: "title",
   };
 
-  it("preserves a populated team_ids array", () => {
+  it("preserves a populated space_ids array", () => {
     const parsed = parseWithFallback(
-      { projects: [{ ...baseProject, team_ids: ["team-1", "team-2"] }], total: 1 },
+      { projects: [{ ...baseProject, space_ids: ["space-1", "space-2"] }], total: 1 },
       SearchProjectsResponseSchema,
       EMPTY_SEARCH_PROJECTS_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.projects[0]?.team_ids).toEqual(["team-1", "team-2"]);
+    expect(parsed.projects[0]?.space_ids).toEqual(["space-1", "space-2"]);
   });
 
-  it("defaults team_ids to an empty array when the field is missing", () => {
+  it("defaults space_ids to an empty array when the field is missing", () => {
     const parsed = parseWithFallback(
       { projects: [baseProject], total: 1 },
       SearchProjectsResponseSchema,
       EMPTY_SEARCH_PROJECTS_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.projects[0]?.team_ids).toEqual([]);
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
   });
 
-  it("coerces a null team_ids to an empty array", () => {
+  it("coerces a null space_ids to an empty array", () => {
     const parsed = parseWithFallback(
-      { projects: [{ ...baseProject, team_ids: null }], total: 1 },
+      { projects: [{ ...baseProject, space_ids: null }], total: 1 },
       SearchProjectsResponseSchema,
       EMPTY_SEARCH_PROJECTS_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.projects[0]?.team_ids).toEqual([]);
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
   });
 });
 

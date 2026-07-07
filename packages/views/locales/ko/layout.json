@@ -4,7 +4,7 @@
     "chat": "채팅",
     "my_issues": "내 이슈",
     "issues": "이슈",
-    "teams": "팀",
+    "spaces": "Space",
     "projects": "프로젝트",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
@@ -47,7 +47,7 @@
       "description": "팀과 다른 사용자들과 교류해 보세요.",
       "dismiss": "닫기"
     },
-    "new_team": "새 팀",
-    "teams_empty": "첫 팀 만들기"
+    "new_space": "새 Space",
+    "spaces_empty": "첫 Space 만들기"
   }
 }

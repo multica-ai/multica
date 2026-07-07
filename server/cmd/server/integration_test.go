@@ -129,13 +129,13 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
-	// Seed the default Team so team-aware issue creates resolve a Team the same
+	// Seed the default Space so space-aware issue creates resolve a Space the same
 	// way migration 131 backfills production workspaces. Without this every
-	// team-aware create fails "team not found in this workspace". The team's
+	// space-aware create fails "space not found in this workspace". The space's
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_team (workspace_id, name, key, issue_counter, is_default, created_by)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
 		VALUES ($1, 'Default', $2, $3, true, $4)
 	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
@@ -175,18 +175,18 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 	return nil
 }
 
-// defaultTeamUUID returns the seeded default workspace_team for the given
-// workspace. Direct issue/autopilot inserts that bypass the team-aware service
-// layer must carry this so the NOT NULL team_id (migration 132) is satisfied
-// the same way a real create would resolve it via ResolveTeam.
-func defaultTeamUUID(t *testing.T, ctx context.Context, workspaceID string) pgtype.UUID {
+// defaultSpaceUUID returns the seeded default workspace_space for the given
+// workspace. Direct issue/autopilot inserts that bypass the space-aware service
+// layer must carry this so the NOT NULL space_id (migration 132) is satisfied
+// the same way a real create would resolve it via ResolveSpace.
+func defaultSpaceUUID(t *testing.T, ctx context.Context, workspaceID string) pgtype.UUID {
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1`,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1`,
 		workspaceID,
 	).Scan(&id); err != nil {
-		t.Fatalf("load default team: %v", err)
+		t.Fatalf("load default space: %v", err)
 	}
 	return parseUUID(id)
 }
@@ -888,8 +888,8 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, team_id, title, creator_type, creator_id)
-		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'Dedup fixture', 'member', $2)
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Dedup fixture', 'member', $2)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("failed to seed issue: %v", err)

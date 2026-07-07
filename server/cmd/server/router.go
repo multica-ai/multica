@@ -457,7 +457,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE
 	// Slack app, workspaces self-install via OAuth, and inbound runs on a single
-	// deployment-level Socket Mode connection routed by team_id — replacing the
+	// deployment-level Socket Mode connection routed by space_id — replacing the
 	// stage-3 per-installation connection model (MUL-3516).
 	//
 	// Two deployment-level env vars gate the two halves:
@@ -1114,19 +1114,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Teams
-			r.Route("/api/teams", func(r chi.Router) {
-				r.Get("/", h.ListTeams)
-				r.Post("/", h.CreateTeam)
+			// Spaces
+			r.Route("/api/spaces", func(r chi.Router) {
+				r.Get("/", h.ListSpaces)
+				r.Post("/", h.CreateSpace)
 				r.Route("/{id}", func(r chi.Router) {
-					r.Patch("/", h.UpdateTeam)
-					r.Put("/", h.UpdateTeam)
-					r.Delete("/", h.ArchiveTeam)
+					r.Patch("/", h.UpdateSpace)
+					r.Put("/", h.UpdateSpace)
+					r.Delete("/", h.ArchiveSpace)
 					// Caller's own membership row (per-user sidebar sort).
-					r.Patch("/membership", h.UpdateTeamMembership)
+					r.Patch("/membership", h.UpdateSpaceMembership)
 					// Member set is configured wholesale — anyone can edit.
-					r.Get("/members", h.ListTeamMembers)
-					r.Put("/members", h.ReplaceTeamMembers)
+					r.Get("/members", h.ListSpaceMembers)
+					r.Put("/members", h.ReplaceSpaceMembers)
 				})
 			})
 

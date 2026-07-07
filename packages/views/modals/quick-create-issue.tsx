@@ -11,8 +11,8 @@ import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { activeTeamListOptions } from "@multica/core/teams/queries";
-import { creationDefaultTeamId } from "@multica/core/teams/default-team";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
@@ -33,8 +33,8 @@ import { contentReferencesAttachment, type Agent, type Attachment, type Squad } 
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
-import { TeamPicker } from "../teams/components/team-picker";
-import { TeamProjectConflictDialog } from "../teams/components/team-project-conflict-dialog";
+import { SpacePicker } from "../spaces/components/space-picker";
+import { SpaceProjectConflictDialog } from "../spaces/components/space-project-conflict-dialog";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -205,10 +205,10 @@ export function AgentCreatePanel({
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
   });
-  // No "last picked" memory for teams: the default is always the first team
+  // No "last picked" memory for spaces: the default is always the first space
   // in the user's personal order (predictable), unless context seeds one.
-  const [teamId, setTeamId] = useState<string | null>(
-    (data?.team_id as string | undefined) ?? null,
+  const [spaceId, setSpaceId] = useState<string | null>(
+    (data?.space_id as string | undefined) ?? null,
   );
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
@@ -221,24 +221,24 @@ export function AgentCreatePanel({
   const parentIssueIdentifier =
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
-  // Every issue belongs to exactly one team, so the header picker always
+  // Every issue belongs to exactly one space, so the header picker always
   // resolves to a value. Associations are creation-time defaults, never
-  // constraints: explicit pick (incl. remembered) → parent's team →
-  // single-team project → workspace default.
-  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
-  const defaultTeamId = useMemo(() => creationDefaultTeamId(teams), [teams]);
+  // constraints: explicit pick (incl. remembered) → parent's space →
+  // single-space project → workspace default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const defaultSpaceId = useMemo(() => creationDefaultSpaceId(spaces), [spaces]);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const parentTeamId = parentIssueId ? parentIssue?.team_id ?? undefined : undefined;
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
-  const projectTeamId =
-    selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;
-  const effectiveTeamId = teamId ?? parentTeamId ?? projectTeamId ?? defaultTeamId ?? null;
+  const projectSpaceId =
+    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const effectiveSpaceId = spaceId ?? parentSpaceId ?? projectSpaceId ?? defaultSpaceId ?? null;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -313,27 +313,27 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Linear-style interception: team ∉ project's team set pauses the submit
-  // behind a resolution dialog (see TeamProjectConflictDialog).
-  const teamProjectConflict = useMemo(() => {
-    if (!selectedProject || !effectiveTeamId) return null;
-    const ids = selectedProject.team_ids ?? [];
-    if (ids.length === 0 || ids.includes(effectiveTeamId)) return null;
-    const team = teams.find((tm) => tm.id === effectiveTeamId);
-    if (!team) return null;
-    return { team, projectTeams: teams.filter((tm) => ids.includes(tm.id)) };
-  }, [selectedProject, effectiveTeamId, teams]);
+  // Linear-style interception: space ∉ project's space set pauses the submit
+  // behind a resolution dialog (see SpaceProjectConflictDialog).
+  const spaceProjectConflict = useMemo(() => {
+    if (!selectedProject || !effectiveSpaceId) return null;
+    const ids = selectedProject.space_ids ?? [];
+    if (ids.length === 0 || ids.includes(effectiveSpaceId)) return null;
+    const space = spaces.find((tm) => tm.id === effectiveSpaceId);
+    if (!space) return null;
+    return { space, projectSpaces: spaces.filter((tm) => ids.includes(tm.id)) };
+  }, [selectedProject, effectiveSpaceId, spaces]);
   const [conflictOpen, setConflictOpen] = useState(false);
 
   const submit = async () => {
-    if (teamProjectConflict) {
+    if (spaceProjectConflict) {
       setConflictOpen(true);
       return;
     }
-    await doSubmit(effectiveTeamId);
+    await doSubmit(effectiveSpaceId);
   };
 
-  const doSubmit = async (finalTeamId: string | null) => {
+  const doSubmit = async (finalSpaceId: string | null) => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
     // Belt-and-suspenders against the multi-file upload race fixed in
@@ -355,7 +355,7 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
-        team_id: finalTeamId ?? undefined,
+        space_id: finalSpaceId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
@@ -446,7 +446,7 @@ export function AgentCreatePanel({
     // through.
     const carry: Record<string, unknown> = {};
     if (projectId) carry.project_id = projectId;
-    if (effectiveTeamId) carry.team_id = effectiveTeamId;
+    if (effectiveSpaceId) carry.space_id = effectiveSpaceId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -459,11 +459,11 @@ export function AgentCreatePanel({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            {/* The issue's team namespace — leads the breadcrumb like the
+            {/* The issue's space namespace — leads the breadcrumb like the
                 workspace name used to, but as a required single-select. */}
-            <TeamPicker
-              teamId={effectiveTeamId}
-              onChange={setTeamId}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
               triggerRender={<PillButton />}
               align="start"
             />
@@ -654,19 +654,19 @@ export function AgentCreatePanel({
             </Button>
           </div>
         </div>
-      {teamProjectConflict && (
-        <TeamProjectConflictDialog
+      {spaceProjectConflict && (
+        <SpaceProjectConflictDialog
           open={conflictOpen}
-          teamName={teamProjectConflict.team.name}
+          spaceName={spaceProjectConflict.space.name}
           projectName={selectedProject?.title ?? ""}
-          projectTeams={teamProjectConflict.projectTeams}
-          onAddTeam={() => {
+          projectSpaces={spaceProjectConflict.projectSpaces}
+          onAddSpace={() => {
             setConflictOpen(false);
-            void doSubmit(effectiveTeamId);
+            void doSubmit(effectiveSpaceId);
           }}
-          onMoveToTeam={(tid) => {
+          onMoveToSpace={(tid) => {
             setConflictOpen(false);
-            setTeamId(tid);
+            setSpaceId(tid);
             void doSubmit(tid);
           }}
           onCancel={() => setConflictOpen(false)}

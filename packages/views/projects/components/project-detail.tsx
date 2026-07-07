@@ -27,8 +27,8 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { SpaceMultiPicker } from "../../spaces/components/space-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
-import { TeamMultiPicker } from "../../teams/components/team-picker";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -407,11 +407,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
-          {/* Display-only in v1: the project↔team set binds at creation.
-              Post-create editing was cut together with issue move-to-team. */}
-          <PropRow label={t(($) => $.table.teams)}>
-            <TeamMultiPicker
-              teamIds={project.team_ids ?? []}
+          {/* Display-only in v1: the project↔space set binds at creation.
+              Post-create editing was cut together with issue move-to-space. */}
+          <PropRow label={t(($) => $.table.spaces)}>
+            <SpaceMultiPicker
+              spaceIds={project.space_ids ?? []}
               onChange={() => {}}
               align="start"
               disabled

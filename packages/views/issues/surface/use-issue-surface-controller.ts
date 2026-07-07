@@ -129,7 +129,7 @@ export function useIssueSurfaceController({
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const teamFilter = useViewStore((s) => s.teamFilter);
+  const spaceFilter = useViewStore((s) => s.spaceFilter);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
@@ -206,9 +206,9 @@ export function useIssueSurfaceController({
       ...(Object.keys(effectivePropertyFilters).length > 0
         ? { properties: effectivePropertyFilters }
         : {}),
-      ...(teamFilter ? { team_id: teamFilter } : {}),
+      ...(spaceFilter ? { space_id: spaceFilter } : {}),
     };
-  }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection, teamFilter]);
+  }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection, spaceFilter]);
 
   const selection = useCreateIssueSurfaceSelection(
     scopeKey,
@@ -241,7 +241,7 @@ export function useIssueSurfaceController({
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
-    teamFilter,
+    spaceFilter,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,

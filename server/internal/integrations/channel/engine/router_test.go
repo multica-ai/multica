@@ -173,11 +173,11 @@ func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return 
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
 
 type fakeReader struct {
-	session db.ChatSession
-	ws      db.Workspace
-	team    db.WorkspaceTeam
-	teamErr error
-	sessErr error
+	session  db.ChatSession
+	ws       db.Workspace
+	space    db.WorkspaceSpace
+	spaceErr error
+	sessErr  error
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {
@@ -186,17 +186,17 @@ func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSe
 func (f *fakeReader) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspace, error) {
 	return f.ws, nil
 }
-func (f *fakeReader) GetWorkspaceTeam(_ context.Context, _ db.GetWorkspaceTeamParams) (db.WorkspaceTeam, error) {
-	if f.teamErr != nil {
-		return db.WorkspaceTeam{}, f.teamErr
+func (f *fakeReader) GetWorkspaceSpace(_ context.Context, _ db.GetWorkspaceSpaceParams) (db.WorkspaceSpace, error) {
+	if f.spaceErr != nil {
+		return db.WorkspaceSpace{}, f.spaceErr
 	}
-	return f.team, nil
+	return f.space, nil
 }
-func (f *fakeReader) GetDefaultWorkspaceTeam(_ context.Context, _ pgtype.UUID) (db.WorkspaceTeam, error) {
-	if f.teamErr != nil {
-		return db.WorkspaceTeam{}, f.teamErr
+func (f *fakeReader) GetDefaultWorkspaceSpace(_ context.Context, _ pgtype.UUID) (db.WorkspaceSpace, error) {
+	if f.spaceErr != nil {
+		return db.WorkspaceSpace{}, f.spaceErr
 	}
-	return f.team, nil
+	return f.space, nil
 }
 
 // ---- harness ----
@@ -414,12 +414,12 @@ func TestRouter_ClaimLost_Drops(t *testing.T) {
 func TestRouter_IssueCommand_Creates(t *testing.T) {
 	h := newHarness(t)
 	h.binder.appendResult = AppendResult{DedupMarked: true, IssueCommand: &IssueCommand{Title: "Fix login", Description: "details"}}
-	teamID := uuidFromString(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	h.reader.team = db.WorkspaceTeam{ID: teamID, WorkspaceID: h.inst.inst.WorkspaceID, Key: "ENG"}
+	spaceID := uuidFromString(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	h.reader.space = db.WorkspaceSpace{ID: spaceID, WorkspaceID: h.inst.inst.WorkspaceID, Key: "ENG"}
 	h.issues.result = service.IssueCreateResult{Issue: db.Issue{
 		ID:          uuidFromString(t, "77777777-7777-7777-7777-777777777777"),
 		WorkspaceID: h.inst.inst.WorkspaceID,
-		TeamID:      teamID,
+		SpaceID:     spaceID,
 		Number:      42,
 		Title:       "Fix login",
 	}}
@@ -440,7 +440,7 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 		}
 		return false
 	}) {
-		t.Fatalf("expected an issue-created reply with the team-qualified identifier")
+		t.Fatalf("expected an issue-created reply with the space-qualified identifier")
 	}
 }
 

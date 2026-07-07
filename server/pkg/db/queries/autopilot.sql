@@ -30,20 +30,20 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND (sqlc.narg('team_id')::uuid IS NULL OR a.team_id = sqlc.narg('team_id'))
+  AND (sqlc.narg('space_id')::uuid IS NULL OR a.space_id = sqlc.narg('space_id'))
   AND (
     (sqlc.narg('status')::text IS NULL AND a.status <> 'archived')
     OR a.status = sqlc.narg('status')
   )
 ORDER BY a.created_at DESC;
 
--- name: CountActiveAutopilotsByTeam :one
--- Counts non-archived autopilots pinned to a Team. Used to block archiving a
--- Team that still drives live autopilots (mirrors CountActiveProjectAutopilotsByTeam,
+-- name: CountActiveAutopilotsBySpace :one
+-- Counts non-archived autopilots pinned to a Space. Used to block archiving a
+-- Space that still drives live autopilots (mirrors CountActiveProjectAutopilotsBySpace,
 -- which scopes the same liveness column to a single project).
 SELECT count(*) FROM autopilot
 WHERE workspace_id = $1
-  AND team_id = $2
+  AND space_id = $2
   AND status <> 'archived';
 
 -- name: GetAutopilot :one
@@ -57,7 +57,7 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
-    status, execution_mode, issue_title_template, project_id, team_id,
+    status, execution_mode, issue_title_template, project_id, space_id,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
@@ -75,7 +75,7 @@ UPDATE autopilot SET
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
-    team_id = COALESCE(sqlc.narg('team_id')::uuid, team_id),
+    space_id = COALESCE(sqlc.narg('space_id')::uuid, space_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

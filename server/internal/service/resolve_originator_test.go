@@ -149,6 +149,12 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	`, workspaceID, userIDStr); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
+		VALUES ($1, 'Default', 'DEF', true, $2)
+	`, workspaceID, userIDStr); err != nil {
+		t.Fatalf("seed default space: %v", err)
+	}
 
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
@@ -186,8 +192,8 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	}
 
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
-		VALUES ($1, 'fanout-issue', 'member', $2)
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'fanout-issue', 'member', $2)
 		RETURNING id
 	`, workspaceID, userIDStr).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
@@ -458,6 +464,12 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	`, workspaceIDStr, userIDStr); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
+		VALUES ($1, 'Default', 'DEF', true, $2)
+	`, workspaceIDStr, userIDStr); err != nil {
+		t.Fatalf("seed default space: %v", err)
+	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
 			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
@@ -480,9 +492,9 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO issue (
-			workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority
+			workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority
 		)
-		VALUES ($1, 'runtime overlay issue', 'member', $2, 'agent', $3, 'medium')
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'runtime overlay issue', 'member', $2, 'agent', $3, 'medium')
 		RETURNING id
 	`, workspaceIDStr, userIDStr, agentIDStr).Scan(&issueIDStr); err != nil {
 		t.Fatalf("seed issue: %v", err)

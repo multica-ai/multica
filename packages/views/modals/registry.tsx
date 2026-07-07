@@ -5,7 +5,7 @@ import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
-import { CreateTeamModal } from "./create-team";
+import { CreateSpaceModal } from "./create-space";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
@@ -30,8 +30,8 @@ export function ModalRegistry() {
       return <CreateProjectModal onClose={close} />;
     case "create-squad":
       return <CreateSquadModal onClose={close} />;
-    case "create-team":
-      return <CreateTeamModal onClose={close} />;
+    case "create-space":
+      return <CreateSpaceModal onClose={close} />;
     case "feedback":
       return <FeedbackModal onClose={close} data={data} />;
     case "issue-set-parent":

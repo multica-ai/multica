@@ -9,8 +9,8 @@ import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
 
-// Exported for team surface pages, which render the same filter header over
-// a team-scoped IssueSurface. Must render inside IssueSurface's renderHeader
+// Exported for space surface pages, which render the same filter header over
+// a space-scoped IssueSurface. Must render inside IssueSurface's renderHeader
 // (it reads the surface's view-store context).
 export function IssuesSurfaceHeader({
   issues,

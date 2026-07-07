@@ -20,18 +20,18 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    // Issue detail is identifier-first (Linear-style /issue/NAI-3): the team
+    // Issue detail is identifier-first (Linear-style /issue/NAI-3): the space
     // rides in the identifier, never in a nested path segment, so moving an
-    // issue between teams can't orphan the URL (old identifiers keep
+    // issue between spaces can't orphan the URL (old identifiers keep
     // resolving via the server-side alias). The same route accepts a UUID —
     // internal navigation passes ids, shared links pass identifiers.
     issueDetail: (idOrIdentifier: string) => `${ws}/issue/${encode(idOrIdentifier)}`,
-    // Team-scoped surfaces, addressed by team key (readable, stable: keys
-    // freeze once a team has issues) — /team/ENG/issues, Linear-style.
-    teamIssues: (key: string) => `${ws}/team/${encode(key)}/issues`,
-    teamProjects: (key: string) => `${ws}/team/${encode(key)}/projects`,
-    teamAutopilots: (key: string) => `${ws}/team/${encode(key)}/autopilots`,
-    teamDetail: (key: string) => `${ws}/team/${encode(key)}`,
+    // Space-scoped surfaces, addressed by space key (readable, stable: keys
+    // freeze once a space has issues) — /space/ENG/issues, Linear-style.
+    spaceIssues: (key: string) => `${ws}/space/${encode(key)}/issues`,
+    spaceProjects: (key: string) => `${ws}/space/${encode(key)}/projects`,
+    spaceAutopilots: (key: string) => `${ws}/space/${encode(key)}/autopilots`,
+    spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

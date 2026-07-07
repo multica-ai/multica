@@ -50,8 +50,8 @@ import { TimezonePicker } from "./pickers/timezone-picker";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { activeTeamListOptions } from "@multica/core/teams/queries";
-import { creationDefaultTeamId } from "@multica/core/teams/default-team";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -71,7 +71,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PillButton } from "../../common/pill-button";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
-import { TeamPicker } from "../../teams/components/team-picker";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
@@ -96,7 +96,7 @@ export interface AutopilotInitial {
   title: string;
   description: string;
   project_id: string | null;
-  team_id: string | null;
+  space_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -287,7 +287,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -298,7 +298,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
-  const [teamId, setTeamId] = useState<string | null>(initial.team_id ?? null);
+  const [spaceId, setSpaceId] = useState<string | null>(initial.space_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
@@ -370,14 +370,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
-  // Team is required and always resolves to a value — same model as the
+  // Space is required and always resolves to a value — same model as the
   // issue modal. Associations are creation-time defaults, never constraints:
-  // explicit pick → single-team project → the user's first team. The picker
-  // is never restricted to the project's team set.
-  const defaultTeamId = useMemo(() => creationDefaultTeamId(teams), [teams]);
-  const projectTeamId =
-    selectedProject?.team_ids?.length === 1 ? selectedProject.team_ids[0] : undefined;
-  const effectiveTeamId = teamId ?? projectTeamId ?? defaultTeamId ?? null;
+  // explicit pick → single-space project → the user's first space. The picker
+  // is never restricted to the project's space set.
+  const defaultSpaceId = useMemo(() => creationDefaultSpaceId(spaces), [spaces]);
+  const projectSpaceId =
+    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const effectiveSpaceId = spaceId ?? projectSpaceId ?? defaultSpaceId ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -408,7 +408,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: executionMode === "create_issue" ? projectId : null,
-          team_id: effectiveTeamId,
+          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -462,7 +462,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || null,
           project_id: executionMode === "create_issue" ? projectId : null,
-          team_id: effectiveTeamId,
+          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -564,12 +564,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0 border-b">
           <div className="flex items-center gap-2 text-xs">
-            {/* Owning team leads the breadcrumb — same grammar as the
-                issue/project modals: [team] › action. Required single-select,
+            {/* Owning space leads the breadcrumb — same grammar as the
+                issue/project modals: [space] › action. Required single-select,
                 seeded from context, switchable. */}
-            <TeamPicker
-              teamId={effectiveTeamId}
-              onChange={setTeamId}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
               triggerRender={<PillButton />}
               align="start"
             />

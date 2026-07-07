@@ -30,8 +30,8 @@ import {
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { activeTeamListOptions } from "@multica/core/teams/queries";
-import { creationDefaultTeamId } from "@multica/core/teams/default-team";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -52,7 +52,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
-import { TeamMultiPicker } from "../teams/components/team-picker";
+import { SpaceMultiPicker } from "../spaces/components/space-picker";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -104,7 +104,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const { getActorName } = useActorName();
   const projectStatusLabels = useProjectStatusLabels();
   const projectPriorityLabels = useProjectPriorityLabels();
@@ -119,7 +119,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
-  const [teamIds, setTeamIds] = useState<string[]>([]);
+  const [spaceIds, setSpaceIds] = useState<string[]>([]);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
@@ -217,39 +217,39 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
-  // Seed the default team exactly once, when teams first load. Guarding only
-  // on `teamIds.length` re-seeded the moment the user cleared the selection,
+  // Seed the default space exactly once, when spaces first load. Guarding only
+  // on `spaceIds.length` re-seeded the moment the user cleared the selection,
   // fighting the deselection; the ref makes seeding a one-shot so clearing
   // sticks.
-  const seededDefaultTeamRef = useRef(false);
+  const seededDefaultSpaceRef = useRef(false);
   useEffect(() => {
-    if (seededDefaultTeamRef.current || teams.length === 0) return;
-    seededDefaultTeamRef.current = true;
-    if (teamIds.length > 0) return;
+    if (seededDefaultSpaceRef.current || spaces.length === 0) return;
+    seededDefaultSpaceRef.current = true;
+    if (spaceIds.length > 0) return;
     // Same personal default as the issue/quick-create/autopilot forms: my
-    // first team, falling back to the workspace default team.
-    const defaultTeamId = creationDefaultTeamId(teams);
-    if (defaultTeamId) setTeamIds([defaultTeamId]);
-  }, [teamIds.length, teams]);
+    // first space, falling back to the workspace default space.
+    const defaultSpaceId = creationDefaultSpaceId(spaces);
+    if (defaultSpaceId) setSpaceIds([defaultSpaceId]);
+  }, [spaceIds.length, spaces]);
 
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
 
-  // A project always keeps at least one team (server rule) — otherwise it
-  // would vanish from every team's Projects page. Single source for the
+  // A project always keeps at least one space (server rule) — otherwise it
+  // would vanish from every space's Projects page. Single source for the
   // inline hint, the disabled submit button, and the submit guard; moot
-  // while the workspace has no teams loaded yet.
-  const teamSelectionMissing = useMemo(
-    () => teams.length > 0 && teamIds.length === 0,
-    [teams.length, teamIds.length],
+  // while the workspace has no spaces loaded yet.
+  const spaceSelectionMissing = useMemo(
+    () => spaces.length > 0 && spaceIds.length === 0,
+    [spaces.length, spaceIds.length],
   );
 
   const createProject = useCreateProject();
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
-    if (teamSelectionMissing) {
-      toast.error(t(($) => $.create_project.team_required));
+    if (spaceSelectionMissing) {
+      toast.error(t(($) => $.create_project.space_required));
       return;
     }
     // `sourceMode` decides which side's stash gets persisted — the other
@@ -291,7 +291,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        team_ids: teamIds.length > 0 ? teamIds : undefined,
+        space_ids: spaceIds.length > 0 ? spaceIds : undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -340,12 +340,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            {/* Owning teams lead the breadcrumb — same slot as the issue
-                modal's team picker, multi-select since projects can span
-                teams. */}
-            <TeamMultiPicker
-              teamIds={teamIds}
-              onChange={setTeamIds}
+            {/* Owning spaces lead the breadcrumb — same slot as the issue
+                modal's space picker, multi-select since projects can span
+                spaces. */}
+            <SpaceMultiPicker
+              spaceIds={spaceIds}
+              onChange={setSpaceIds}
               triggerRender={<PillButton />}
               align="start"
             />
@@ -388,11 +388,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* At-least-one-team nudge on its own line, aligned under the team
+        {/* At-least-one-space nudge on its own line, aligned under the space
             picker; the submit button disables on the same condition. */}
-        {teamSelectionMissing && (
+        {spaceSelectionMissing && (
           <div className="px-5 -mt-1 pb-1 text-[11px] text-destructive/80 shrink-0">
-            {t(($) => $.create_project.team_min_hint)}
+            {t(($) => $.create_project.space_min_hint)}
           </div>
         )}
 
@@ -889,7 +889,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!title.trim() || submitting || teamSelectionMissing}
+            disabled={!title.trim() || submitting || spaceSelectionMissing}
             className="shrink-0"
           >
             {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}

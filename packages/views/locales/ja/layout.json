@@ -4,7 +4,7 @@
     "chat": "チャット",
     "my_issues": "マイイシュー",
     "issues": "イシュー",
-    "teams": "チーム",
+    "spaces": "Space",
     "projects": "プロジェクト",
     "autopilots": "オートパイロット",
     "agents": "エージェント",
@@ -47,7 +47,7 @@
       "description": "チームや他のユーザーと交流しましょう。",
       "dismiss": "閉じる"
     },
-    "new_team": "新しいチーム",
-    "teams_empty": "最初のチームを作成"
+    "new_space": "新しい Space",
+    "spaces_empty": "最初の Space を作成"
   }
 }

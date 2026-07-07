@@ -168,13 +168,13 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 		t.Fatalf("create member: %v", err)
 	}
 
-	// Seed the default Team so direct issue inserts can carry the NOT NULL
-	// team_id (migration 132), matching how migration 131 backfills production.
+	// Seed the default Space so direct issue inserts can carry the NOT NULL
+	// space_id (migration 132), matching how migration 131 backfills production.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_team (workspace_id, name, key, is_default, created_by)
+		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
 		VALUES ($1, 'Default', 'CCR', true, $2)
 	`, workspaceID, userID); err != nil {
-		t.Fatalf("create default team: %v", err)
+		t.Fatalf("create default space: %v", err)
 	}
 
 	var runtimeID string
@@ -214,8 +214,8 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 	for i := 0; i < 2; i++ {
 		var issueID string
 		if err := pool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_id, creator_type, number, position)
-			VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'in_progress', 'none', $3, 'member', $4, $5)
+			INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+			VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'in_progress', 'none', $3, 'member', $4, $5)
 			RETURNING id
 		`, workspaceID, fmt.Sprintf("claim capacity issue %d", i+1), userID, 900000+i, i).Scan(&issueID); err != nil {
 			t.Fatalf("create issue %d: %v", i+1, err)

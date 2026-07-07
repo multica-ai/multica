@@ -1,10 +1,10 @@
 # Projects and resources source map
 
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
-- `project list --team` (single UUID or key) sets `team_id`; `project create`/`project update` take a repeatable `--team` (`StringArray`, UUID or key) resolved via `resolveTeamRefs` into `team_ids`. On `update` the resolved list **replaces** the project's team set.
-- `server/cmd/multica/cmd_team.go` registers team `list`, `create`, `update`, and `archive`. `create` requires `--name`; `--key` (issue prefix), `--description`, `--icon` are optional; `update` accepts the same optional flags. The CLI maps to `/api/teams` (GET/POST) and `/api/teams/{id}` (PATCH/PUT update, DELETE archive), routes registered at `server/cmd/server/router.go:951`.
-- `resolveTeamRef`/`resolveTeamRefs` (`cmd_team.go`) resolve a `--team` value by exact UUID or case-insensitive key against `GET /api/teams`. `teamCLIResponse` carries `key`, `issue_counter`, and `is_default`.
-- A team owns the issue-key prefix and its own issue-number counter, so identifiers read `TEAM_KEY-NUMBER`. Each workspace has a default team whose key is the legacy workspace prefix; omitting `--team` uses that default team.
+- `project list --space` (single UUID or key) sets `space_id`; `project create`/`project update` take a repeatable `--space` (`StringArray`, UUID or key) resolved via `resolveSpaceRefs` into `space_ids`. On `update` the resolved list **replaces** the project's space set.
+- `server/cmd/multica/cmd_space.go` registers space `list`, `create`, `update`, and `archive`. `create` requires `--name`; `--key` (issue prefix), `--description`, `--icon` are optional; `update` accepts the same optional flags. The CLI maps to `/api/spaces` (GET/POST) and `/api/spaces/{id}` (PATCH/PUT update, DELETE archive), routes registered at `server/cmd/server/router.go:951`.
+- `resolveSpaceRef`/`resolveSpaceRefs` (`cmd_space.go`) resolve a `--space` value by exact UUID or case-insensitive key against `GET /api/spaces`. `spaceCLIResponse` carries `key`, `issue_counter`, and `is_default`.
+- A space owns the issue-key prefix and its own issue-number counter, so identifiers read `SPACE_KEY-NUMBER`. Each workspace has a default space whose key is the legacy workspace prefix; omitting `--space` uses that default space.
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project create` / `project update` accept `--start-date` / `--due-date` (calendar days, `YYYY-MM-DD`), mapping to the project `start_date` / `due_date` columns (migration `166_project_dates`); an empty `--start-date ""`/`--due-date ""` on update clears the date, mirroring the issue date flags in `cmd_issue.go`.

@@ -25,14 +25,14 @@ import type {
   IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
-  ListTeamsResponse,
-  ListTeamMembersResponse,
+  ListSpacesResponse,
+  ListSpaceMembersResponse,
   ListWebhookDeliveriesResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   Squad,
-  Team,
+  Space,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -424,9 +424,9 @@ const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number()
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
-  team_id: z.string().nullable().default(null),
-  team_key: z.string().nullable().default(null),
-  team_name: z.string().nullable().default(null),
+  space_id: z.string().nullable().default(null),
+  space_key: z.string().nullable().default(null),
+  space_name: z.string().nullable().default(null),
   number: z.number(),
   identifier: z.string(),
   title: z.string(),
@@ -482,7 +482,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
-export const TeamSchema = z.object({
+export const SpaceSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   name: z.string().default(""),
@@ -499,13 +499,13 @@ export const TeamSchema = z.object({
   sort_order: z.number().default(0),
 }).loose();
 
-// PATCH /api/teams/{id}/membership — the caller's own sort position.
-export const TeamMembershipSchema = z.object({
-  team_id: z.string().default(""),
+// PATCH /api/spaces/{id}/membership — the caller's own sort position.
+export const SpaceMembershipSchema = z.object({
+  space_id: z.string().default(""),
   sort_order: z.number().default(0),
 }).loose();
 
-export const TeamMemberSchema = z.object({
+export const SpaceMemberSchema = z.object({
   user_id: z.string(),
   name: z.string().default(""),
   email: z.string().default(""),
@@ -514,22 +514,22 @@ export const TeamMemberSchema = z.object({
   created_at: z.string().default(""),
 }).loose();
 
-export const ListTeamMembersResponseSchema = z.object({
-  members: z.array(TeamMemberSchema).default([]),
+export const ListSpaceMembersResponseSchema = z.object({
+  members: z.array(SpaceMemberSchema).default([]),
   total: z.number().default(0),
 });
 
-export const EMPTY_LIST_TEAM_MEMBERS_RESPONSE: ListTeamMembersResponse = {
+export const EMPTY_LIST_SPACE_MEMBERS_RESPONSE: ListSpaceMembersResponse = {
   members: [],
   total: 0,
 };
 
-export const ListTeamsResponseSchema = z.object({
-  teams: z.array(TeamSchema).default([]),
+export const ListSpacesResponseSchema = z.object({
+  spaces: z.array(SpaceSchema).default([]),
   total: z.number().default(0),
 }).loose();
 
-export const EMPTY_TEAM: Team = {
+export const EMPTY_SPACE: Space = {
   id: "",
   workspace_id: "",
   name: "",
@@ -546,8 +546,8 @@ export const EMPTY_TEAM: Team = {
   sort_order: 0,
 };
 
-export const EMPTY_LIST_TEAMS_RESPONSE: ListTeamsResponse = {
-  teams: [],
+export const EMPTY_LIST_SPACES_RESPONSE: ListSpacesResponse = {
+  spaces: [],
   total: 0,
 };
 
@@ -573,7 +573,7 @@ const ProjectSchema = z.object({
   resource_count: z.number().default(0),
   // Tolerate a missing key or an explicit null (older backends) by defaulting
   // to an empty membership list.
-  team_ids: z.array(z.string()).nullish().transform((ids) => ids ?? []),
+  space_ids: z.array(z.string()).nullish().transform((ids) => ids ?? []),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
@@ -1203,7 +1203,7 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
-  team_id: z.string().nullable().optional(),
+  space_id: z.string().nullable().optional(),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),

@@ -43,7 +43,7 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
-		TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Dispatch for plan idempotency",
 		Description:        pgtype.Text{String: "Dispatch for plan test", Valid: true},
 		AssigneeType:       "agent",
@@ -291,7 +291,7 @@ func TestDispatchAutopilotForPlanRecoversPartialRun(t *testing.T) {
 
 			ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 				WorkspaceID:        parseUUID(testWorkspaceID),
-				TeamID:             defaultTeamUUID(t, ctx, testWorkspaceID),
+				SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 				Title:              "Partial recovery " + mode,
 				Description:        pgtype.Text{String: "partial run recovery test", Valid: true},
 				AssigneeType:       "agent",

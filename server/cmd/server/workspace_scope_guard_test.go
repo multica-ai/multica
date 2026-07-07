@@ -137,8 +137,8 @@ func seedIssue(t *testing.T, ctx context.Context) pgtype.UUID {
 	// avoid colliding with concurrent integration tests in the same DB.
 	n := 1_000_000 + rand.IntN(1_000_000)
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_type, creator_id, position, number)
-		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'scope-guard test issue', 'todo', 'none', 'member', $2, 0, $3)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, position, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'scope-guard test issue', 'todo', 'none', 'member', $2, 0, $3)
 		RETURNING id
 	`, testWorkspaceID, testUserID, n).Scan(&s); err != nil {
 		t.Fatalf("seed issue: %v", err)

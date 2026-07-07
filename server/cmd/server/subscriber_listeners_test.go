@@ -23,8 +23,8 @@ func createTestIssue(t *testing.T, workspaceID, creatorID string) string {
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, team_id, title, status, priority, creator_type, creator_id, position, number)
-		VALUES ($1, (SELECT id FROM workspace_team WHERE workspace_id = $1 AND is_default LIMIT 1), 'subscriber test issue', 'todo', 'medium', 'member', $2, 0,
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, position, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'subscriber test issue', 'todo', 'medium', 'member', $2, 0,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, workspaceID, creatorID).Scan(&issueID)
