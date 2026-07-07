@@ -14,14 +14,19 @@
 3. [Problems Identified](#problems-identified)
 4. [Phase 0 — Foundation & Quick Wins](#phase-0--foundation--quick-wins)
 5. [Phase 1 — Media Review Module (Video + Graphics)](#phase-1--media-review-module-video--graphics)
-6. [Phase 2 — Marketing & Creative Workflow Features](#phase-2--marketing--creative-workflow-features)
-7. [Phase 3 — Rich Text Editor Upgrade](#phase-3--rich-text-editor-upgrade)
-8. [Phase 4 — Project Architecture & Access Control](#phase-4--project-architecture--access-control)
-9. [Phase 5 — Enhanced GitHub Integration](#phase-5--enhanced-github-integration)
-10. [Phase 6 — Communication Layer](#phase-6--communication-layer)
-11. [Phase 7 — Mobile & Cross-Platform Polish](#phase-7--mobile--cross-platform-polish)
-12. [Reference Architecture Decisions](#reference-architecture-decisions)
-13. [Open-Source Libraries & References](#open-source-libraries--references)
+6. [Phase 1.5 — Advanced Media Review Workflow](#phase-15--advanced-media-review-workflow)
+7. [Phase 2 — Marketing & Creative Workflow Features](#phase-2--marketing--creative-workflow-features)
+8. [Phase 3 — Rich Text Editor Upgrade](#phase-3--rich-text-editor-upgrade)
+9. [Phase 4 — Project Architecture & Access Control](#phase-4--project-architecture--access-control)
+10. [Phase 5 — Enhanced GitHub Integration](#phase-5--enhanced-github-integration)
+11. [Phase 6 — Communication Layer](#phase-6--communication-layer)
+12. [Phase 7 — PWA, Mobile & Cross-Platform Polish](#phase-7--pwa-mobile--cross-platform-polish)
+13. [Phase 8 — Dynamic Custom Fields](#phase-8--dynamic-custom-fields)
+14. [Phase 9 — Project & Issue Templates](#phase-9--project--issue-templates)
+15. [Phase 10 — Autopilot Automation Presets](#phase-10--autopilot-automation-presets)
+16. [Phase 11 — Web Performance & "Instant DB" Optimizations](#phase-11--web-performance--instant-db-optimizations)
+17. [Reference Architecture Decisions](#reference-architecture-decisions)
+18. [Open-Source Libraries & References](#open-source-libraries--references)
 
 ---
 
@@ -302,6 +307,29 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Glassmorphism Controls:** Dropped native HTML5 video `<controls>` in favor of a custom floating control bar with a `backdrop-blur-md` frosted-glass effect.
 - [x] **Native Tooltips:** Wrapped custom player controls (Play, Pause, Frame Step, Fullscreen) with `@multica/ui`'s native Tooltip component for premium micro-interactions.
 - [x] **Scrubber Animations:** Added a glowing `boxShadow` and hover `scale` animation to single-frame comment dots on the video timeline scrubber.
+
+---
+
+## Phase 1.5 — Advanced Media Review Workflow
+
+> **Goal:** Elevate the video review experience to feel like a premium, dedicated tool.
+> **Effort:** 5-7 days
+> **Dependencies:** Phase 1
+
+### 1.5.1 Advanced Video Scrubber & Playback
+- [x] **Frame-accurate Preview:** Render a hidden `<video>` element alongside a canvas to extract and display point-in-time frame thumbnails when hovering over the progress bar.
+- [x] **Keyboard Shortcuts:** Implement standard video editing shortcuts (`J`, `K`, `L` for seek back/play/seek forward, `Space` for play/pause, Arrows for micro-scrubbing).
+- [x] **Timecode Formatting:** Add a format toggle allowing users to view the scrubber time in Standard (00:00), Frames (0123), or true SMPTE Timecode (00:00:00:00).
+- [ ] **Adaptive Quality & Loop:** Add HLS support for adaptive resolution switching and a dedicated loop button for reviewing short sequences.
+
+### 1.5.2 Rich Progress Bar & Visual Comment Markers
+- [x] **Point-in-time Markers:** Display distinct user avatar dots below the progress track at the exact timestamp of their comment.
+- [x] **Range Highlights:** If a comment spans a duration (e.g., from 0:05 to 0:10), highlight that specific segment of the progress bar in a translucent warning color (e.g., yellow).
+- [x] **Hover Tooltips:** Hovering over a comment marker should portally render a detailed tooltip (escaping container overflow) showing the commenter's avatar, name, exact timestamp, and the comment text.
+
+### 1.5.3 Guest Share Mode & Approval Flow
+- [ ] **Pre-fetched Stream URLs:** Support a "Guest Share" view where the stream URL is pre-fetched and signed, allowing external clients or stakeholders to view and comment without full authentication.
+- [x] **Version Switcher:** Provide a seamless UI for users to upload and toggle between v1, v2, v3 of an asset, carrying forward unresolved comments where applicable.
 
 ---
 
@@ -612,11 +640,16 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ---
 
-## Phase 7 — Mobile & Cross-Platform Polish
+## Phase 7 — PWA, Mobile & Cross-Platform Polish
 
-> **Goal:** Ensure the mobile app covers critical daily-use features.
+> **Goal:** Ensure the web app works flawlessly as a PWA, and cover critical daily-use features for mobile.
 > **Effort:** 3-5 days
 > **Dependencies:** All previous phases (mobile reflects web features)
+
+### 7.0 Progressive Web App (PWA) Foundation
+- [x] **PWA Configuration:** Implement `next-pwa` to generate service workers and manifest files.
+- [ ] **Install Prompt:** Add custom UI offering users the option to "Install as App" on their phone's home screen.
+- [x] **Offline Resilience:** Ensure the app shell loads offline and leverages the IndexedDB cache (from Phase 11) to show previously loaded issues without a network connection.
 
 ### 7.1 Mobile Feature Parity Audit
 
@@ -785,6 +818,25 @@ All new features must follow the existing pattern:
 - [ ] **Autopilot Gallery:** A marketplace-like view allowing users to "enable" or "install" specific automations.
 - [ ] **Configuration UI:** For enabled automations, allow configuring parameters (e.g., "Run every [Monday] at [9am]").
 
+## Phase 11 — Web Performance & "Instant DB" Optimizations
+
+> **Goal:** Ensure the web app feels instantly responsive, addressing slow page navigations and providing an optimistic data feel.
+> **Effort:** 3-5 days
+> **Dependencies:** None
+
+### 11.1 Frontend React Query Persistence (loc DB)
+- [ ] **Implementation:** Install `@tanstack/react-query-persist-client` and `idb-keyval`.
+- [ ] **Setup:** Configure the `QueryClient` to persist server state into the browser's IndexedDB. When users navigate, data instantly loads from the local cache while a background revalidation fetches fresh data.
+- [ ] **UX Polish:** Add subtle background fetching indicators so the user knows data is syncing, even when UI is instantly populated.
+
+### 11.2 Next.js Navigation Optimization
+- [ ] **Prefetching:** Audit all `<Link>` components to ensure `prefetch={true}` is utilized for high-traffic routes to prevent waterfalls during client-side navigation.
+- [ ] **Bundle Splitting:** Check for heavy dependencies causing main-thread blocking during route transitions.
+
+### 11.3 Database Query Optimization
+- [ ] **Audit:** Identify slow Postgres queries (especially in issue lists and grouped board views).
+- [ ] **Indexes:** Write `sqlc` migrations to add targeted compound indexes, ensuring the backend resolves queries within <100ms.
+
 ---
 
 ## Progress Tracker
@@ -793,15 +845,17 @@ All new features must follow the existing pattern:
 | ------------ | ------------------------------ | -------------- | ------- | --------- |
 | **Phase 0**  | Foundation & Quick Wins        | ✅ Completed   | Yes     | Yes       |
 | **Phase 1**  | Media Review Module            | ✅ Completed   | Yes     | Yes       |
+| **Phase 1.5**| Advanced Media Review Workflow | 🟡 In Progress | Yes     | —         |
 | **Phase 2**  | Marketing & Creative Workflows | ✅ Completed   | Yes     | Yes       |
 | **Phase 3**  | Rich Text Editor Upgrade       | ⬜ Not Started | —       | —         |
 | **Phase 4**  | Project Architecture & RBAC    | ⬜ Not Started | —       | —         |
 | **Phase 5**  | Enhanced GitHub Integration    | ⬜ Not Started | —       | —         |
 | **Phase 6**  | Communication Layer            | ⬜ Not Started | —       | —         |
-| **Phase 7**  | Mobile & Cross-Platform Polish | ⬜ Not Started | —       | —         |
+| **Phase 7**  | PWA & Mobile Polish            | 🟡 In Progress | Yes     | —         |
 | **Phase 8**  | Dynamic Custom Fields          | ⬜ Not Started | —       | —         |
 | **Phase 9**  | Project & Issue Templates      | ⬜ Not Started | —       | —         |
 | **Phase 10** | Autopilot Automation Presets   | ⬜ Not Started | —       | —         |
+| **Phase 11** | Web Perf & Instant DB Caching  | ✅ Completed   | Yes     | Yes       |
 
 ---
 
