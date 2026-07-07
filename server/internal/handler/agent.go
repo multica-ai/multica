@@ -501,12 +501,44 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 			return normalized[idx:]
 		}
 	}
+	if workspaceID != "" {
+		if suffix, ok := managedWorkspaceWorkDirSuffix(normalized, workspaceID); ok {
+			return suffix
+		}
+	}
 
 	if stripped, ok := stripHomePrefix(normalized); ok {
 		return stripped
 	}
 
 	return basename(normalized)
+}
+
+func managedWorkspaceWorkDirSuffix(normalized, workspaceID string) (string, bool) {
+	idx := strings.Index(normalized, workspaceID+"/")
+	if idx < 0 {
+		return "", false
+	}
+	suffix := normalized[idx:]
+	rest := strings.TrimPrefix(suffix, workspaceID+"/")
+	dir, _, _ := strings.Cut(rest, "/")
+	if !isShortHexID(dir) {
+		return "", false
+	}
+	return suffix, true
+}
+
+func isShortHexID(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // shortTaskID mirrors execenv.shortID — first 8 hex chars of the UUID

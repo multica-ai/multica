@@ -1427,6 +1427,57 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 	return i, err
 }
 
+const getLastGithubRepoIssueWorkDir = `-- name: GetLastGithubRepoIssueWorkDir :one
+SELECT atq.work_dir, atq.runtime_id
+FROM issue i
+JOIN agent_task_queue atq
+  ON atq.issue_id = i.id
+ AND atq.runtime_id = $1
+WHERE i.id = $2
+  AND i.workspace_id = $3
+  AND i.project_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM project_resource pr
+    WHERE pr.project_id = i.project_id
+      AND pr.workspace_id = i.workspace_id
+      AND pr.resource_type = 'github_repo'
+  )
+  AND atq.work_dir IS NOT NULL
+  AND atq.work_dir <> ''
+  AND (
+    atq.status = 'completed'
+    OR (
+      atq.status = 'failed'
+      AND COALESCE(atq.failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND NOT (COALESCE(atq.error, '') ILIKE '%400%' AND COALESCE(atq.error, '') ILIKE '%invalid_request_error%')
+    )
+  )
+ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
+LIMIT 1
+`
+
+type GetLastGithubRepoIssueWorkDirParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetLastGithubRepoIssueWorkDirRow struct {
+	WorkDir   pgtype.Text `json:"work_dir"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Returns the most recent reusable work_dir for an issue on the claiming
+// runtime, regardless of which agent produced it. This is a worktree reuse
+// hint only: callers must not inherit session_id across agents.
+func (q *Queries) GetLastGithubRepoIssueWorkDir(ctx context.Context, arg GetLastGithubRepoIssueWorkDirParams) (GetLastGithubRepoIssueWorkDirRow, error) {
+	row := q.db.QueryRow(ctx, getLastGithubRepoIssueWorkDir, arg.RuntimeID, arg.IssueID, arg.WorkspaceID)
+	var i GetLastGithubRepoIssueWorkDirRow
+	err := row.Scan(&i.WorkDir, &i.RuntimeID)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2

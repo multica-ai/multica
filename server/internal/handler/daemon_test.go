@@ -3537,6 +3537,261 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+func TestClaimTask_GithubRepoIssueWorkDirSharedAcrossAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var secondAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		RETURNING id
+	`, testWorkspaceID, "Second Runtime Guard Agent "+t.Name(), runtimeID).Scan(&secondAgentID); err != nil {
+		t.Fatalf("setup: create second runtime guard agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, secondAgentID) })
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'shared issue worktree fixture')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("setup: create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'github_repo', '{"url":"https://github.com/acme/repo"}'::jsonb, 0)
+	`, projectID, testWorkspaceID); err != nil {
+		t.Fatalf("setup: create github_repo project_resource: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority,
+			creator_id, creator_type, number, position
+		)
+		VALUES ($1, $2, 'shared issue worktree', 'in_progress', 'none',
+		        $3, 'member', 81511, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(),
+		        'first-agent-session', '/tmp/shared-github-workdir')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create first-agent prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, secondAgentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create second-agent task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ThreadName != "shared issue worktree" {
+		t.Fatalf("claimed task thread_name = %q, want issue title", task.ThreadName)
+	}
+	if task.PriorSessionID != "" {
+		t.Fatalf("different agent must not inherit prior session, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/shared-github-workdir" {
+		t.Fatalf("different agent should inherit issue github_repo workdir, got %q", task.PriorWorkDir)
+	}
+}
+
+func TestClaimTask_GithubRepoIssueWorkDirNotSharedAcrossRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	firstAgentID, oldRuntimeID, _ := createRuntimeGuardAgent(t, ctx)
+	currentRuntimeID := createRuntimeGuardRuntime(t, ctx, "codex")
+
+	var secondAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		RETURNING id
+	`, testWorkspaceID, "Second Runtime Guard Agent "+t.Name(), currentRuntimeID).Scan(&secondAgentID); err != nil {
+		t.Fatalf("setup: create second runtime guard agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, secondAgentID) })
+
+	currentDaemonID := "runtime-guard-current-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'runtime isolated issue worktree fixture')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("setup: create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'github_repo', '{"url":"https://github.com/acme/repo"}'::jsonb, 0)
+	`, projectID, testWorkspaceID); err != nil {
+		t.Fatalf("setup: create github_repo project_resource: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority,
+			creator_id, creator_type, number, position
+		)
+		VALUES ($1, $2, 'runtime isolated issue worktree', 'in_progress', 'none',
+		        $3, 'member', 81512, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(),
+		        'other-runtime-session', '/tmp/other-runtime-workdir')
+	`, firstAgentID, oldRuntimeID, issueID); err != nil {
+		t.Fatalf("setup: create other-runtime prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, secondAgentID, currentRuntimeID, issueID); err != nil {
+		t.Fatalf("setup: create current-runtime task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, currentRuntimeID, currentDaemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("different runtime must not inherit prior session, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "" {
+		t.Fatalf("different runtime must not inherit prior workdir, got %q", task.PriorWorkDir)
+	}
+}
+
+func TestClaimTask_LocalDirectoryIssueWorkDirNotSharedAcrossAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var secondAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		RETURNING id
+	`, testWorkspaceID, "Second Runtime Guard Agent "+t.Name(), runtimeID).Scan(&secondAgentID); err != nil {
+		t.Fatalf("setup: create second runtime guard agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, secondAgentID) })
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'local directory issue worktree fixture')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("setup: create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'local_directory', '{"path":"/tmp/project"}'::jsonb, 0)
+	`, projectID, testWorkspaceID); err != nil {
+		t.Fatalf("setup: create local_directory project_resource: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority,
+			creator_id, creator_type, number, position
+		)
+		VALUES ($1, $2, 'local directory issue worktree', 'in_progress', 'none',
+		        $3, 'member', 81513, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(),
+		        'local-directory-session', '/tmp/local-directory-workdir')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create first-agent prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, secondAgentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create second-agent task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("local_directory different agent must not inherit prior session, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "" {
+		t.Fatalf("local_directory different agent must not inherit prior workdir, got %q", task.PriorWorkDir)
+	}
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

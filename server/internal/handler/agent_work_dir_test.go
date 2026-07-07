@@ -54,6 +54,13 @@ func TestRelativeWorkDir(t *testing.T) {
 			expected: wsID + "/5c57b65b",
 		},
 		{
+			name:     "issue-stable envRoot path strips workspaces root when task short differs",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/aabbccdd/workdir",
+			wsID:     wsID,
+			taskID:   taskID,
+			expected: wsID + "/aabbccdd/workdir",
+		},
+		{
 			name:     "local_directory path under /Users home is stripped",
 			workDir:  "/Users/df007df/repos/foo",
 			wsID:     wsID,
@@ -145,11 +152,11 @@ func TestRelativeWorkDir(t *testing.T) {
 			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
 		},
 		{
-			name:     "missing task_id under home strips home prefix instead of envRoot",
+			name:     "missing task_id under home still strips managed workspace root",
 			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
 			wsID:     wsID,
 			taskID:   "",
-			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			expected: wsID + "/5c57b65b/workdir",
 		},
 		{
 			name:     "trailing slash on envRoot path is preserved in returned suffix",

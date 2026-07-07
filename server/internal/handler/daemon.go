@@ -1373,8 +1373,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// project explicitly attached its repos, those are the authoritative set
 	// for issues inside that project. When the project has no github_repo
 	// resources (or no project at all), we fall back to the workspace repos.
+	var issueWorkspaceID pgtype.UUID
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
+			issueWorkspaceID = issue.WorkspaceID
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
 
@@ -1546,6 +1548,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
+				}
+			}
+			if resp.PriorWorkDir == "" && issueWorkspaceID.Valid {
+				if issuePrior, err := h.Queries.GetLastGithubRepoIssueWorkDir(r.Context(), db.GetLastGithubRepoIssueWorkDirParams{
+					IssueID:     task.IssueID,
+					WorkspaceID: issueWorkspaceID,
+					RuntimeID:   task.RuntimeID,
+				}); err == nil && issuePrior.WorkDir.Valid {
+					resp.PriorWorkDir = issuePrior.WorkDir.String
 				}
 			}
 		}

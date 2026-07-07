@@ -54,6 +54,68 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestWorkDirIdentityForTask_GithubRepoIssueUsesIssueID(t *testing.T) {
+	t.Parallel()
+
+	issueID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	task := Task{
+		ID:      "11111111-2222-3333-4444-555555555555",
+		IssueID: issueID,
+		Repos: []RepoData{
+			{URL: "https://github.com/acme/repo.git"},
+		},
+	}
+	if got := workDirIdentityForTask(task, nil); got != issueID {
+		t.Fatalf("github repo issue workdir identity = %q, want issue ID %q", got, issueID)
+	}
+
+	sameIssueDifferentTask := task
+	sameIssueDifferentTask.ID = "99999999-2222-3333-4444-555555555555"
+	sameIssueDifferentTask.AgentID = "agent-2"
+	sameIssueDifferentTask.RuntimeID = "runtime-2"
+	if got := workDirIdentityForTask(sameIssueDifferentTask, nil); got != issueID {
+		t.Fatalf("same issue with different task/agent/runtime identity = %q, want issue ID %q", got, issueID)
+	}
+}
+
+func TestWorkDirIdentityForTask_ProjectGithubRepoUsesIssueID(t *testing.T) {
+	t.Parallel()
+
+	issueID := "bbbbbbbb-2222-3333-4444-555555555555"
+	task := Task{
+		ID:      "22222222-2222-3333-4444-555555555555",
+		IssueID: issueID,
+		ProjectResources: []ProjectResourceData{
+			{ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://github.com/acme/repo.git"}`)},
+		},
+	}
+	if got := workDirIdentityForTask(task, nil); got != issueID {
+		t.Fatalf("project github_repo workdir identity = %q, want issue ID %q", got, issueID)
+	}
+}
+
+func TestWorkDirIdentityForTask_FallsBackToTaskID(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:      "33333333-2222-3333-4444-555555555555",
+		IssueID: "cccccccc-2222-3333-4444-555555555555",
+	}
+	if got := workDirIdentityForTask(task, nil); got != task.ID {
+		t.Fatalf("non-repo task workdir identity = %q, want task ID %q", got, task.ID)
+	}
+
+	localTask := Task{
+		ID:      "44444444-2222-3333-4444-555555555555",
+		IssueID: "dddddddd-2222-3333-4444-555555555555",
+		Repos:   []RepoData{{URL: "https://github.com/acme/repo.git"}},
+	}
+	local := &localDirectoryAssignment{AbsPath: filepath.Clean("/tmp/project"), RealPath: filepath.Clean("/tmp/project")}
+	if got := workDirIdentityForTask(localTask, local); got != localTask.ID {
+		t.Fatalf("local_directory task workdir identity = %q, want task ID %q", got, localTask.ID)
+	}
+}
+
 func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix

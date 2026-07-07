@@ -207,6 +207,12 @@ type Daemon struct {
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
 
+	// issueWorktreeLocks serialises git-repo tasks that share the same
+	// issue-stable workdir on this daemon. Fixed issue workdirs are reused
+	// across agents and runtimes on the same machine, so concurrent tasks for
+	// one issue must not write the same checkout at the same time.
+	issueWorktreeLocks *LocalPathLocker
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -242,6 +248,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
+		issueWorktreeLocks:        NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
@@ -2732,6 +2739,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if localRelease != nil {
 		defer localRelease()
 	}
+	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources)
+
+	issueWorktreeRelease, abort := d.acquireIssueWorktreeLockIfNeeded(ctx, task, localAssignment, taskLog)
+	if abort {
+		return
+	}
+	if issueWorktreeRelease != nil {
+		defer issueWorktreeRelease()
+	}
 
 	// Hold a process-wide active-root guard for the rest of this task so
 	// the GC loop never sees a window where the env root has neither the
@@ -2742,7 +2758,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	workDirIdentity := workDirIdentityForTask(task, localAssignment)
+	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, workDirIdentity)
 	if predictedEnvRoot != "" {
 		d.markActiveEnvRoot(predictedEnvRoot)
 		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
@@ -2959,6 +2976,33 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, true
 	}
 	taskLog.Info("local_directory: lock acquired")
+	return release, false
+}
+
+func (d *Daemon) acquireIssueWorktreeLockIfNeeded(ctx context.Context, task Task, localAssignment *localDirectoryAssignment, taskLog *slog.Logger) (release func(), abort bool) {
+	workDirIdentity := workDirIdentityForTask(task, localAssignment)
+	if task.IssueID == "" || workDirIdentity != task.IssueID {
+		return nil, false
+	}
+	envRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, workDirIdentity)
+	if envRoot == "" {
+		return nil, false
+	}
+	workDir := filepath.Join(envRoot, "workdir")
+	if d.issueWorktreeLocks == nil {
+		d.issueWorktreeLocks = NewLocalPathLocker()
+	}
+	release, err := d.issueWorktreeLocks.Acquire(ctx, filepath.Clean(workDir), task.ID, func(holder string) {
+		taskLog.Info("issue_worktree: waiting on path mutex", "holder", shortID(holder), "workdir", workDir)
+	})
+	if err != nil {
+		taskLog.Error("issue_worktree: lock acquire failed", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("issue worktree wait cancelled: %s", err.Error()), "", "", "cancelled"); failErr != nil {
+			taskLog.Error("fail task after issue worktree lock cancel", "error", failErr)
+		}
+		return nil, true
+	}
+	taskLog.Debug("issue_worktree: lock acquired", "workdir", workDir)
 	return release, false
 }
 
@@ -3184,11 +3228,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 	}
 
+	// Resolve any local_directory assignment again here so runTask can plumb
+	// LocalWorkDir into execenv. handleTask already validated + locked the
+	// path; this call is a pure JSON parse over the same task payload.
+	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources)
+
+	workDirIdentity := workDirIdentityForTask(task, localAssignment)
 	// Mark candidate env roots as active before any env work so the GC loop
-	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
-	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	// can't reclaim artifacts inside them mid-execution. Git repo issue tasks
+	// use the issue ID as the directory identity so the worktree stays stable
+	// across task IDs, agents, and runtimes on this machine.
+	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, workDirIdentity)
 	d.markActiveEnvRoot(predictedRoot)
 	defer d.unmarkActiveEnvRoot(predictedRoot)
 	if task.PriorWorkDir != "" {
@@ -3206,10 +3256,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	// Resolve any local_directory assignment again here so runTask can plumb
-	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path; this call is a pure JSON parse over the same task payload.
-	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources)
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -3227,7 +3273,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	if task.PriorWorkDir != "" && localAssignment == nil {
+
+	fixedIssueWorkDir := ""
+	if task.IssueID != "" && workDirIdentity == task.IssueID && localAssignment == nil {
+		fixedIssueWorkDir = filepath.Join(predictedRoot, "workdir")
+	}
+	if fixedIssueWorkDir != "" {
+		env = execenv.Reuse(execenv.ReuseParams{
+			WorkDir:         fixedIssueWorkDir,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
+		}, d.logger)
+	} else if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:         task.PriorWorkDir,
 			Provider:        provider,
@@ -3243,7 +3304,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:  d.cfg.WorkspacesRoot,
 			WorkspaceID:     task.WorkspaceID,
-			TaskID:          task.ID,
+			TaskID:          workDirIdentity,
 			AgentName:       agentName,
 			Provider:        provider,
 			CodexVersion:    codexVersion,
