@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Plus, Check, Info, RotateCw } from "lucide-react";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import type { RuntimeModel } from "@multica/core/types";
 import {
@@ -201,12 +201,45 @@ export function ModelDropdown({
               ))}
 
             {!modelsQuery.isLoading &&
+              !modelsQuery.isError &&
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                   {t(($) => $.pickers.model_empty_with_dot)}
                 </div>
               )}
+
+            {modelsQuery.isError && (
+              <div className="flex flex-col gap-2 p-3 text-xs border-t border-border bg-destructive/5 text-destructive-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{t(($) => $.pickers.model_discovery_error)}</span>
+                  <button
+                    type="button"
+                    onClick={() => void modelsQuery.refetch()}
+                    disabled={modelsQuery.isFetching}
+                    className="inline-flex items-center gap-1 rounded bg-destructive/10 px-2 py-1 font-medium transition-colors hover:bg-destructive/20 disabled:opacity-50"
+                  >
+                    {modelsQuery.isFetching ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RotateCw className="h-3.5 w-3.5" />
+                    )}
+                    {t(($) => $.pickers.model_discovery_retry)}
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground break-all">
+                  {modelsQuery.error instanceof Error ? modelsQuery.error.message : String(modelsQuery.error)}
+                </p>
+                <div className="mt-1 border-t border-destructive/10 pt-2 text-[10px] text-muted-foreground">
+                  <div className="font-medium mb-1 text-foreground">{t(($) => $.pickers.model_troubleshoot_title)}</div>
+                  <ul className="list-none space-y-1 pl-0">
+                    <li>{t(($) => $.pickers.model_troubleshoot_step1)}</li>
+                    <li>{t(($) => $.pickers.model_troubleshoot_step2)}</li>
+                    <li>{t(($) => $.pickers.model_troubleshoot_step3)}</li>
+                  </ul>
+                </div>
+              </div>
+            )}
 
             {canCreate && (
               <button
