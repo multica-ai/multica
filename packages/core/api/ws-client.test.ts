@@ -322,28 +322,37 @@ describe("WSClient", () => {
       expect(lastTimerDelay()).toBe(30000);
     });
 
-    it("applies jitter so delays are not identical across runs", () => {
+    it("applies jitter so delays vary with Math.random", () => {
+      // Stub Math.random to alternate between 0 (jitter = -20%) and
+      // 1 (jitter = +20%), producing deterministic min/max delays.
+      let callCount = 0;
+      vi.stubGlobal(
+        "Math",
+        new Proxy(Math, {
+          get(target, prop) {
+            if (prop === "random") return () => (callCount++ % 2 === 0 ? 0 : 1);
+            return (target as any)[prop];
+          },
+        }),
+      );
+
       const ws = new WSClient("ws://example.test/ws");
+
+      // First disconnect: random()=0 → jitter = 1000 * 0.2 * (0*2-1) = -200 → 800ms
       ws.connect();
+      simulateDisconnect();
+      const delay1 = lastTimerDelay();
 
-      // Collect 20 first-attempt delays; they should not all be identical
-      // because Math.random() produces different values.
-      const seenDelays = new Set<number>();
-      for (let i = 0; i < 20; i++) {
-        ws.disconnect();
-        ws.connect();
-        simulateDisconnect();
-        seenDelays.add(lastTimerDelay());
-        vi.clearAllTimers();
-      }
+      // Second disconnect: random()=1 → jitter = 1000 * 0.2 * (1*2-1) = +200 → 1200ms
+      vi.clearAllTimers();
+      ws.disconnect();
+      ws.connect();
+      simulateDisconnect();
+      const delay2 = lastTimerDelay();
 
-      // With ±20% jitter on a 1000ms base, we expect range [800, 1200].
-      // 20 samples should produce at least 2 distinct values.
-      expect(seenDelays.size).toBeGreaterThan(1);
-      for (const d of seenDelays) {
-        expect(d).toBeGreaterThanOrEqual(800);
-        expect(d).toBeLessThanOrEqual(1200);
-      }
+      // The two delays must differ and fall within [800, 1200].
+      expect(delay1).toBe(800);
+      expect(delay2).toBe(1200);
     });
 
     it("resets the attempt counter on successful authentication", () => {

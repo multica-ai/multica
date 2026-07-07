@@ -174,7 +174,9 @@ export class WSClient {
     // ±20 % jitter so clients that disconnected at the same time don't
     // reconnect in lockstep.
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
-    const delay = Math.round(base + jitter);
+    const delay = Math.round(
+      Math.min(base + jitter, RECONNECT_MAX_DELAY_MS),
+    );
 
     this.reconnectAttempt++;
     this.logger.warn(
