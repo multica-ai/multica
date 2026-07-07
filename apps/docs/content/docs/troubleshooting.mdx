@@ -61,6 +61,31 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 - Agent archived → `multica agent restore <id>`
 - Runtime not registered → `multica daemon restart`, and the daemon will re-register
 
+## Antigravity opens browser login then times out on macOS Desktop
+
+**Symptom**: Antigravity (`agy`) works from a terminal, but a task launched by the macOS Desktop app opens a Google login page and then fails with `authentication failed or timed out`.
+
+**Likely cause**: the Desktop app was launched from Finder / Dock and did not inherit proxy variables from your shell. If `agy` needs a local proxy to reach Google services, the Desktop-launched daemon may miss `HTTP_PROXY` / `HTTPS_PROXY` even though your terminal has them.
+
+**How to diagnose**:
+
+```bash
+env | grep -Ei '^(http|https|no)_proxy='
+/usr/sbin/scutil --proxy
+multica daemon logs --lines 100
+```
+
+**How to fix**: on current Desktop builds, macOS system proxy settings are inherited automatically when those env vars are absent. If you need a temporary workaround, set the variables in the GUI launch session and reopen Multica Desktop:
+
+```bash
+launchctl setenv HTTP_PROXY http://127.0.0.1:7897
+launchctl setenv HTTPS_PROXY http://127.0.0.1:7897
+launchctl setenv http_proxy http://127.0.0.1:7897
+launchctl setenv https_proxy http://127.0.0.1:7897
+launchctl setenv NO_PROXY '127.0.0.1,localhost,*.local'
+launchctl setenv no_proxy '127.0.0.1,localhost,*.local'
+```
+
 ## WebSocket can't connect
 
 **Symptom**: the browser console logs `WebSocket is closed`; the page doesn't show real-time updates (task progress, comments, inbox), and a refresh is needed to see them; backend tasks still execute.

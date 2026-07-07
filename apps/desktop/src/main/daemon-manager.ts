@@ -30,6 +30,7 @@ import {
   isAuthStatusError,
   type AuthProbeResult,
 } from "./daemon-auth-probe";
+import { desktopSpawnEnv } from "./daemon-proxy-env";
 
 const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
@@ -808,15 +809,6 @@ async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false;
 
 function profileArgs(active: ActiveProfile): string[] {
   return active.name ? ["--profile", active.name] : [];
-}
-
-// Env passed to every CLI child so the daemon process knows it was spawned
-// by the Desktop app. The server uses this to mark runtimes as managed and
-// hide CLI self-update UI. Computed lazily so it picks up the PATH fix
-// applied by fix-path in main/index.ts — as a top-level const it would
-// snapshot process.env at import time, before that block runs.
-function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
