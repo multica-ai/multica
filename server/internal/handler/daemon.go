@@ -1617,14 +1617,26 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// Layer the per-task overlay (set at enqueue from the initiator
-		// user's active integrations — currently Composio) on top of the
-		// agent's saved mcp_config. Overlay wins on server-name collisions
-		// because it carries the live user-scoped session URL. Errors are
-		// logged but never fail the claim: a broken overlay must not prevent
-		// the agent from running with its base config.
-		if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
-			if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+		runtimeMCPOverlay := json.RawMessage(task.RuntimeMcpOverlay)
+		if composioMCPEnabled {
+			// Rehydrate the Composio MCP overlay at claim time from durable
+			// connection rows. Enqueue-time overlays are retained as a fallback,
+			// but fresh claim-time sessions keep daemon/runtime restarts from
+			// handing the agent an old short-lived session URL.
+			freshOverlay := h.TaskService.BuildRuntimeMCPOverlay(r.Context(), task.OriginatorUserID, agent)
+			if len(freshOverlay.Overlay) > 0 {
+				runtimeMCPOverlay = freshOverlay.Overlay
+				resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(freshOverlay.ConnectedApps, task.ID)
+			}
+		}
+		// Layer the per-task overlay (freshly rehydrated at claim when possible,
+		// otherwise the enqueue-time fallback) on top of the agent's saved
+		// mcp_config. Overlay wins on server-name collisions because it carries
+		// the live user-scoped session URL. Errors are logged but never fail the
+		// claim: a broken overlay must not prevent the agent from running with
+		// its base config.
+		if composioMCPEnabled && len(runtimeMCPOverlay) > 0 {
+			if merged, err := mergeMCPOverlay(mcpConfig, runtimeMCPOverlay); err != nil {
 				slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
 			} else {
 				mcpConfig = merged

@@ -16,11 +16,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -88,6 +92,26 @@ type popRecordingLocalSkillImportStore struct {
 func (s *popRecordingLocalSkillImportStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {
 	s.popCalls++
 	return s.LocalSkillImportStore.PopPending(ctx, runtimeID)
+}
+
+type claimOverlayBuilder struct {
+	calls int
+	resp  json.RawMessage
+	apps  []runtimeapps.ConnectedApp
+}
+
+func (b *claimOverlayBuilder) BuildTaskOverlay(context.Context, pgtype.UUID, db.Agent) (runtimeapps.MCPOverlayResult, error) {
+	b.calls++
+	return runtimeapps.MCPOverlayResult{
+		MCPOverlay:    b.resp,
+		ConnectedApps: b.apps,
+	}, nil
+}
+
+func composioClaimTestFlags(enabled bool) *featureflag.Service {
+	provider := featureflag.NewStaticProvider()
+	provider.Set(featureflags.ComposioMCPApps, featureflag.Rule{Default: enabled})
+	return featureflag.NewService(provider)
 }
 
 func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
@@ -603,6 +627,93 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+func TestClaimTaskByRuntime_RehydratesRuntimeMCPOverlayAtClaim(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Runtime MCP overlay claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Runtime MCP overlay claim agent")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent
+		SET composio_toolkit_allowlist = ARRAY['notion']
+		WHERE id = $1
+	`, agentID); err != nil {
+		t.Fatalf("setup: update agent allowlist: %v", err)
+	}
+
+	staleOverlay := []byte(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session/stale"}}}`)
+	staleApps := []byte(`[{"provider":"composio","server_name":"composio","toolkit_slug":"old","toolkit_name":"Old"}]`)
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+		)
+		VALUES ($1, $2, $3, 'queued', 0, $4, $5::jsonb, $6::jsonb)
+		RETURNING id
+	`, agentID, runtimeID, issueID, testUserID, staleOverlay, staleApps).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create queued task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	builder := &claimOverlayBuilder{
+		resp: json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session/fresh"}}}`),
+		apps: []runtimeapps.ConnectedApp{{
+			Provider:    "composio",
+			ServerName:  "composio",
+			ToolkitSlug: "notion",
+			ToolkitName: "Notion",
+		}},
+	}
+	origComposio := testHandler.TaskService.Composio
+	origFlags := testHandler.TaskService.FeatureFlags
+	testHandler.TaskService.Composio = builder
+	testHandler.TaskService.FeatureFlags = composioClaimTestFlags(true)
+	t.Cleanup(func() {
+		testHandler.TaskService.Composio = origComposio
+		testHandler.TaskService.FeatureFlags = origFlags
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "runtime-mcp-overlay-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if builder.calls != 1 {
+		t.Fatalf("BuildTaskOverlay calls = %d, want 1", builder.calls)
+	}
+
+	var resp struct {
+		Task *struct {
+			Agent *struct {
+				McpConfig json.RawMessage `json:"mcp_config"`
+			} `json:"agent"`
+			ConnectedApps []runtimeapps.ConnectedApp `json:"connected_apps"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.Agent == nil {
+		t.Fatalf("expected claimed task with agent data, got %s", w.Body.String())
+	}
+	var cfg map[string]map[string]map[string]any
+	if err := json.Unmarshal(resp.Task.Agent.McpConfig, &cfg); err != nil {
+		t.Fatalf("unmarshal mcp_config: %v (%s)", err, string(resp.Task.Agent.McpConfig))
+	}
+	gotURL, _ := cfg["mcpServers"]["composio"]["url"].(string)
+	if gotURL != "https://mcp.example/session/fresh" {
+		t.Fatalf("composio URL = %q, want fresh claim-time URL", gotURL)
+	}
+	if len(resp.Task.ConnectedApps) != 1 || resp.Task.ConnectedApps[0].ToolkitSlug != "notion" {
+		t.Fatalf("connected_apps = %+v, want fresh notion metadata", resp.Task.ConnectedApps)
 	}
 }
 
