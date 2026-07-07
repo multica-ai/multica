@@ -429,8 +429,19 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	pruneOn := costModes[savingPruneToolResults] == savingModeOn
 	pruneHeldOut := pruneOn && costSavingHeldOut(task.ID, savingPruneToolResults, e.resolveHoldoutPct(parent, plan.workspaceID, savingPruneToolResults))
 
-	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
-	defer cancel()
+	// FIR-2803: no whole-run wall-clock cap by default — a healthy run on a
+	// slow model must not be killed merely for running long (the daemon
+	// runtime follows the same principle via MULTICA_AGENT_TIMEOUT=0). Each
+	// model call is bounded by cfg.CallTimeout and each tool dispatch by
+	// cfg.ToolCallTimeout, and the tool loop is bounded by max rounds, so an
+	// uncapped run still cannot hang forever. TaskTimeout > 0 restores an
+	// operator-set hard ceiling.
+	runCtx := parent
+	if cfg.TaskTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(parent, cfg.TaskTimeout)
+		defer cancel()
+	}
 	meta := GatewayRequestMeta{
 		TaskID:         taskID,
 		AgentID:        util.UUIDToString(task.AgentID),
@@ -768,7 +779,19 @@ func anthropicContentChars(content any) int64 {
 	}
 }
 
+// gatewayCallContext bounds one model call against the gateway. With no
+// whole-run cap by default (FIR-2803), the per-call deadline is what stops a
+// hung upstream from stalling a run forever.
+func gatewayCallContext(ctx context.Context, cfg FirtalGatewayRuntimeConfig) (context.Context, context.CancelFunc) {
+	if cfg.CallTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, cfg.CallTimeout)
+}
+
 func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -785,6 +808,8 @@ func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalG
 }
 
 func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -805,6 +830,8 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // so the transcript stays valid for Anthropic while the model is constrained to
 // produce text instead of another tool call. See FIR-2421.
 func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -1439,7 +1466,7 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 				})
 				continue
 			}
-			result, dur := e.dispatchTool(ctx, toolSrv, call)
+			result, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
 			e.logger.Info("firtal gateway tool call",
 				"task_id", meta.TaskID,
 				"agent_id", meta.AgentID,
@@ -1594,7 +1621,9 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			}
 			if !isError {
 				var err error
-				resultText, err = registry.Call(ctx, call.Function.Name, args)
+				toolCtx, cancelTool := toolCallContext(ctx, cfg)
+				resultText, err = registry.Call(toolCtx, call.Function.Name, args)
+				cancelTool()
 				if err != nil {
 					resultText = fmt.Sprintf("tool error: %v", err)
 					isError = true
@@ -1783,11 +1812,13 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 					}
 				}
 				if !isError {
-					resultText, err = registry.Call(ctx, call.Function.Name, args)
+					toolCtx, cancelTool := toolCallContext(ctx, cfg)
+					resultText, err = registry.Call(toolCtx, call.Function.Name, args)
+					cancelTool()
 					if err != nil {
 						// Fall through to MCP server if registry doesn't know this tool.
 						if toolSrv != nil {
-							mcpResult, dur := e.dispatchTool(ctx, toolSrv, call)
+							mcpResult, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
 							e.logger.Info("firtal gateway anthropic tool call (mcp fallback)",
 								"task_id", meta.TaskID,
 								"agent_id", meta.AgentID,
@@ -1805,7 +1836,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 					}
 				}
 			} else if toolSrv != nil {
-				mcpResult, _ := e.dispatchTool(ctx, toolSrv, call)
+				mcpResult, _ := e.dispatchTool(ctx, cfg, toolSrv, call)
 				resultText = toolResultText(mcpResult)
 				isError = mcpResult.IsError
 			} else {
@@ -1898,13 +1929,25 @@ func buildAnthropicAssistantContent(c GatewayCompletion) []AnthropicContentBlock
 	return blocks
 }
 
-func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
+// toolCallContext bounds one server-side tool dispatch. With no whole-run cap
+// by default (FIR-2803), the per-dispatch deadline is what stops a tool that
+// never returns from hanging a run forever.
+func toolCallContext(ctx context.Context, cfg FirtalGatewayRuntimeConfig) (context.Context, context.CancelFunc) {
+	if cfg.ToolCallTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, cfg.ToolCallTimeout)
+}
+
+func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, cfg FirtalGatewayRuntimeConfig, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
 	args := map[string]any{}
 	if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &args); err != nil {
 			return mcp.ErrorResult(fmt.Sprintf("invalid tool arguments JSON: %v", err)), 0
 		}
 	}
+	ctx, cancel := toolCallContext(ctx, cfg)
+	defer cancel()
 	start := time.Now()
 	result, err := srv.Call(ctx, call.Function.Name, args)
 	dur := time.Since(start)

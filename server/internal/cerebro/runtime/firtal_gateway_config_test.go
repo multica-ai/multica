@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -256,10 +257,34 @@ func TestWithFirtalGatewayDefaultsFillsRuntimeSafetyValues(t *testing.T) {
 	if cfg.Model != defaultFirtalGatewayModel {
 		t.Fatalf("Model = %q", cfg.Model)
 	}
-	if cfg.MaxTokens <= 0 || cfg.PollInterval <= 0 || cfg.SyncInterval <= 0 || cfg.TaskTimeout <= 0 {
+	if cfg.MaxTokens <= 0 || cfg.PollInterval <= 0 || cfg.SyncInterval <= 0 {
 		t.Fatalf("runtime defaults not filled: %+v", cfg)
+	}
+	// FIR-2803: no whole-run cap by default; runs are bounded per model call
+	// and per tool dispatch instead.
+	if cfg.TaskTimeout != 0 {
+		t.Fatalf("TaskTimeout default = %v, want 0 (uncapped run)", cfg.TaskTimeout)
+	}
+	if cfg.CallTimeout != defaultFirtalGatewayCallTimeout {
+		t.Fatalf("CallTimeout = %v, want %v", cfg.CallTimeout, defaultFirtalGatewayCallTimeout)
+	}
+	if cfg.ToolCallTimeout != defaultFirtalGatewayToolCallTimeout {
+		t.Fatalf("ToolCallTimeout = %v, want %v", cfg.ToolCallTimeout, defaultFirtalGatewayToolCallTimeout)
 	}
 	if cfg.HistoryLimit != defaultFirtalGatewayHistoryLimit || cfg.MaxConcurrency != defaultFirtalGatewayMaxConcurrency {
 		t.Fatalf("limits not filled: %+v", cfg)
+	}
+}
+
+// TestWithFirtalGatewayDefaultsKeepsOperatorTaskTimeout verifies an explicit
+// whole-run ceiling set by the operator survives default-filling (FIR-2803).
+func TestWithFirtalGatewayDefaultsKeepsOperatorTaskTimeout(t *testing.T) {
+	cfg := withFirtalGatewayDefaults(FirtalGatewayRuntimeConfig{TaskTimeout: 2 * time.Hour})
+	if cfg.TaskTimeout != 2*time.Hour {
+		t.Fatalf("TaskTimeout = %v, want 2h", cfg.TaskTimeout)
+	}
+	cfg = withFirtalGatewayDefaults(FirtalGatewayRuntimeConfig{TaskTimeout: -1})
+	if cfg.TaskTimeout != 0 {
+		t.Fatalf("negative TaskTimeout should normalize to 0, got %v", cfg.TaskTimeout)
 	}
 }

@@ -20,13 +20,29 @@ const (
 	FirtalGatewayEntryModeCompat = "compat"
 	FirtalGatewayEntryModeNative = "native"
 
-	defaultFirtalGatewayModel          = "claude-sonnet-4-6"
-	defaultFirtalGatewayRuntimeName    = "Firtal Gateway"
-	defaultFirtalGatewayPollInterval   = 2 * time.Second
-	defaultFirtalGatewaySyncInterval   = 30 * time.Second
-	defaultFirtalGatewayTaskTimeout    = 10 * time.Minute
-	defaultFirtalGatewayHistoryLimit   = 30
-	defaultFirtalGatewayMaxConcurrency = 4
+	defaultFirtalGatewayModel        = "claude-sonnet-4-6"
+	defaultFirtalGatewayRuntimeName  = "Firtal Gateway"
+	defaultFirtalGatewayPollInterval = 2 * time.Second
+	defaultFirtalGatewaySyncInterval = 30 * time.Second
+	// defaultFirtalGatewayTaskTimeout is the whole-run wall-clock cap. 0 = no
+	// cap: a healthy run on a slow model must not be killed merely for running
+	// long — the same principle as the daemon runtime's MULTICA_AGENT_TIMEOUT=0
+	// (FIR-2803: the old 10-minute default killed glm-5.2 runs mid-call). Each
+	// gateway model call and each tool dispatch carries its own timeout below,
+	// so a hung upstream or tool still cannot stall a run forever. Operators
+	// who want a hard cost ceiling set MULTICA_SERVER_FIRTAL_GATEWAY_TASK_TIMEOUT.
+	defaultFirtalGatewayTaskTimeout = 0
+	// defaultFirtalGatewayCallTimeout bounds ONE model call against the
+	// gateway. It must comfortably exceed the gateway's own upstream timeout
+	// (60s default) so the gateway's 504 — which names the slow provider —
+	// wins over an anonymous client-side cut.
+	defaultFirtalGatewayCallTimeout = 10 * time.Minute
+	// defaultFirtalGatewayToolCallTimeout bounds one server-side tool dispatch
+	// so a tool that never returns cannot hang an uncapped run forever. It is
+	// deliberately generous — real API-connection calls finish in seconds.
+	defaultFirtalGatewayToolCallTimeout = 30 * time.Minute
+	defaultFirtalGatewayHistoryLimit    = 30
+	defaultFirtalGatewayMaxConcurrency  = 4
 
 	// firtalGatewayMaxToolRounds caps how many tool-call rounds the model may
 	// use before the loop forces a final no-tool gateway call to extract the
@@ -40,20 +56,29 @@ const (
 // the Data Registry AI Gateway. Server env is a fallback/bootstrap layer;
 // workspace owners can override credentials in workspace settings.
 type FirtalGatewayRuntimeConfig struct {
-	Enabled        bool
-	BaseURL        string
-	APIKey         string
-	Model          string
-	MaxTokens      int
-	Temperature    *float64
-	RuntimeName    string
-	PollInterval   time.Duration
-	SyncInterval   time.Duration
-	TaskTimeout    time.Duration
-	HistoryLimit   int
-	MaxConcurrency int
-	WorkspaceIDs   []pgtype.UUID
-	EntryMode      string
+	Enabled      bool
+	BaseURL      string
+	APIKey       string
+	Model        string
+	MaxTokens    int
+	Temperature  *float64
+	RuntimeName  string
+	PollInterval time.Duration
+	SyncInterval time.Duration
+	// TaskTimeout is the optional whole-run wall-clock cap. 0 (the default)
+	// means no cap — runs are bounded per call by CallTimeout/ToolCallTimeout
+	// and by the tool-round limit, never by total duration (FIR-2803).
+	TaskTimeout time.Duration
+	// CallTimeout bounds a single model call against the gateway. Loaded from
+	// MULTICA_SERVER_FIRTAL_GATEWAY_CALL_TIMEOUT.
+	CallTimeout time.Duration
+	// ToolCallTimeout bounds a single server-side tool dispatch. Loaded from
+	// MULTICA_SERVER_FIRTAL_GATEWAY_TOOL_CALL_TIMEOUT.
+	ToolCallTimeout time.Duration
+	HistoryLimit    int
+	MaxConcurrency  int
+	WorkspaceIDs    []pgtype.UUID
+	EntryMode       string
 
 	// ToolsEnabledAgentIDs is loaded from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS
 	// for backward compatibility only. Tool-loop gating uses the runtime tools
@@ -142,8 +167,15 @@ func withFirtalGatewayDefaults(cfg FirtalGatewayRuntimeConfig) FirtalGatewayRunt
 	if cfg.SyncInterval <= 0 {
 		cfg.SyncInterval = defaultFirtalGatewaySyncInterval
 	}
-	if cfg.TaskTimeout <= 0 {
-		cfg.TaskTimeout = defaultFirtalGatewayTaskTimeout
+	// TaskTimeout deliberately has no floor: 0 = uncapped run (FIR-2803).
+	if cfg.TaskTimeout < 0 {
+		cfg.TaskTimeout = 0
+	}
+	if cfg.CallTimeout <= 0 {
+		cfg.CallTimeout = defaultFirtalGatewayCallTimeout
+	}
+	if cfg.ToolCallTimeout <= 0 {
+		cfg.ToolCallTimeout = defaultFirtalGatewayToolCallTimeout
 	}
 	if cfg.HistoryLimit <= 0 {
 		cfg.HistoryLimit = defaultFirtalGatewayHistoryLimit
@@ -179,18 +211,20 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 	}
 
 	cfg := withFirtalGatewayDefaults(FirtalGatewayRuntimeConfig{
-		Enabled:        enabled,
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		Model:          firstNonEmptyEnv("FIRTAL_REGISTRY_MODEL"),
-		EntryMode:      firstNonEmptyEnv("MULTICA_SERVER_FIRTAL_GATEWAY_ENTRY_MODE", "FIRTAL_REGISTRY_ENTRY_MODE"),
-		MaxTokens:      positiveIntFromEnv(4096, "FIRTAL_REGISTRY_MAX_TOKENS"),
-		RuntimeName:    stringFromEnv(defaultFirtalGatewayRuntimeName, "MULTICA_SERVER_FIRTAL_GATEWAY_RUNTIME_NAME"),
-		PollInterval:   durationFromEnv(defaultFirtalGatewayPollInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL"),
-		SyncInterval:   durationFromEnv(defaultFirtalGatewaySyncInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_SYNC_INTERVAL"),
-		TaskTimeout:    durationFromEnv(defaultFirtalGatewayTaskTimeout, "MULTICA_SERVER_FIRTAL_GATEWAY_TASK_TIMEOUT"),
-		HistoryLimit:   positiveIntFromEnv(defaultFirtalGatewayHistoryLimit, "MULTICA_SERVER_FIRTAL_GATEWAY_HISTORY_LIMIT"),
-		MaxConcurrency: positiveIntFromEnv(defaultFirtalGatewayMaxConcurrency, "MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY"),
+		Enabled:         enabled,
+		BaseURL:         baseURL,
+		APIKey:          apiKey,
+		Model:           firstNonEmptyEnv("FIRTAL_REGISTRY_MODEL"),
+		EntryMode:       firstNonEmptyEnv("MULTICA_SERVER_FIRTAL_GATEWAY_ENTRY_MODE", "FIRTAL_REGISTRY_ENTRY_MODE"),
+		MaxTokens:       positiveIntFromEnv(4096, "FIRTAL_REGISTRY_MAX_TOKENS"),
+		RuntimeName:     stringFromEnv(defaultFirtalGatewayRuntimeName, "MULTICA_SERVER_FIRTAL_GATEWAY_RUNTIME_NAME"),
+		PollInterval:    durationFromEnv(defaultFirtalGatewayPollInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL"),
+		SyncInterval:    durationFromEnv(defaultFirtalGatewaySyncInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_SYNC_INTERVAL"),
+		TaskTimeout:     durationFromEnv(defaultFirtalGatewayTaskTimeout, "MULTICA_SERVER_FIRTAL_GATEWAY_TASK_TIMEOUT"),
+		CallTimeout:     durationFromEnv(defaultFirtalGatewayCallTimeout, "MULTICA_SERVER_FIRTAL_GATEWAY_CALL_TIMEOUT"),
+		ToolCallTimeout: durationFromEnv(defaultFirtalGatewayToolCallTimeout, "MULTICA_SERVER_FIRTAL_GATEWAY_TOOL_CALL_TIMEOUT"),
+		HistoryLimit:    positiveIntFromEnv(defaultFirtalGatewayHistoryLimit, "MULTICA_SERVER_FIRTAL_GATEWAY_HISTORY_LIMIT"),
+		MaxConcurrency:  positiveIntFromEnv(defaultFirtalGatewayMaxConcurrency, "MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY"),
 	})
 
 	if raw := firstNonEmptyEnv("FIRTAL_REGISTRY_TEMPERATURE"); raw != "" {
