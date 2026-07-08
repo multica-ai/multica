@@ -10,6 +10,7 @@ import {
   HardDrive,
   Loader2,
   RefreshCw,
+  Search,
   SkipForward,
   XCircle,
 } from "lucide-react";
@@ -508,6 +509,7 @@ export function RuntimeLocalSkillImportPanel({
   const [conflictResolutions, setConflictResolutions] = useState<
     Record<string, ConflictResolutionState>
   >({});
+  const [skillSearchQuery, setSkillSearchQuery] = useState("");
   const cancelRef = useRef(false);
   // Single-select inline edit fields (shown when exactly 1 skill is checked)
   const [editName, setEditName] = useState("");
@@ -525,6 +527,7 @@ export function RuntimeLocalSkillImportPanel({
     setSelectedKeys(new Set());
     setBulkState(INITIAL_BULK_STATE);
     setConflictResolutions({});
+    setSkillSearchQuery("");
     setEditName("");
     setEditDescription("");
   }, [selectedRuntimeId]);
@@ -540,6 +543,21 @@ export function RuntimeLocalSkillImportPanel({
     () => skillsQuery.data?.skills ?? [],
     [skillsQuery.data],
   );
+  const filteredRuntimeSkills = useMemo(() => {
+    const query = skillSearchQuery.trim().toLowerCase();
+    if (!query) return runtimeSkills;
+
+    return runtimeSkills.filter((skill) =>
+      [
+        skill.name,
+        skill.key,
+        skill.description,
+        skill.provider,
+        skill.source_path,
+      ]
+        .some((value) => value?.toLowerCase().includes(query) ?? false),
+    );
+  }, [runtimeSkills, skillSearchQuery]);
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
   const singleSelectedSkill =
@@ -567,16 +585,34 @@ export function RuntimeLocalSkillImportPanel({
   };
 
   const toggleAll = () => {
-    if (selectedKeys.size === runtimeSkills.length) {
-      setSelectedKeys(new Set());
-    } else {
-      setSelectedKeys(new Set(runtimeSkills.map((s) => s.key)));
-    }
+    const visibleKeys = new Set(filteredRuntimeSkills.map((s) => s.key));
+    const visibleSelected =
+      visibleKeys.size > 0 &&
+      filteredRuntimeSkills.every((s) => selectedKeys.has(s.key));
+
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (visibleSelected) {
+        for (const key of visibleKeys) next.delete(key);
+      } else {
+        for (const key of visibleKeys) next.add(key);
+      }
+      if (next.size === 1) {
+        const only = runtimeSkills.find((s) => next.has(s.key));
+        if (only) {
+          setEditName(only.name);
+          setEditDescription(only.description ?? "");
+        }
+      }
+      return next;
+    });
   };
 
   const allSelected =
-    runtimeSkills.length > 0 && selectedKeys.size === runtimeSkills.length;
-  const someSelected = selectedKeys.size > 0 && !allSelected;
+    filteredRuntimeSkills.length > 0 &&
+    filteredRuntimeSkills.every((s) => selectedKeys.has(s.key));
+  const someSelected =
+    filteredRuntimeSkills.some((s) => selectedKeys.has(s.key)) && !allSelected;
   const pendingConflicts = bulkState.results.filter(
     (r) => r.status === "conflict" && r.conflict,
   );
@@ -1010,41 +1046,70 @@ export function RuntimeLocalSkillImportPanel({
       );
     }
     return (
-      <div className="space-y-2">
-        {/* Select all header */}
-        <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(el) => {
-              if (el) el.indeterminate = someSelected;
-            }}
-            onChange={toggleAll}
-            className="cursor-pointer accent-primary"
+      <div className="flex flex-col gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={skillSearchQuery}
+            onChange={(e) => setSkillSearchQuery(e.target.value)}
+            placeholder={t(($) => $.runtime_import.search_placeholder)}
+            className="h-9 pl-8 text-sm"
           />
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.select_all, {
-              count: runtimeSkills.length,
-            })}
-          </span>
-        </label>
+        </div>
 
-        {runtimeSkills.map((s) => (
-          <SkillItem
-            key={s.key}
-            skill={s}
-            checked={selectedKeys.has(s.key)}
-            onToggle={() => toggleSkill(s.key)}
-            disabled={importing}
-            expanded={singleSelectedSkill?.key === s.key}
-            editName={singleSelectedSkill?.key === s.key ? editName : undefined}
-            editDescription={
-              singleSelectedSkill?.key === s.key ? editDescription : undefined
-            }
-            onNameChange={setEditName}
-            onDescriptionChange={setEditDescription}
-          />
-        ))}
+        {filteredRuntimeSkills.length === 0 ? (
+          <div className="rounded-lg border border-dashed px-4 py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              {t(($) => $.runtime_import.no_search_results_title)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(($) => $.runtime_import.no_search_results_hint, {
+                query: skillSearchQuery.trim(),
+              })}
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Select all header */}
+            <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someSelected;
+                }}
+                onChange={toggleAll}
+                className="cursor-pointer accent-primary"
+              />
+              <span className="text-xs text-muted-foreground">
+                {t(($) => $.runtime_import.select_all, {
+                  count: filteredRuntimeSkills.length,
+                })}
+              </span>
+            </label>
+
+            {filteredRuntimeSkills.map((s) => (
+              <SkillItem
+                key={s.key}
+                skill={s}
+                checked={selectedKeys.has(s.key)}
+                onToggle={() => toggleSkill(s.key)}
+                disabled={importing}
+                expanded={singleSelectedSkill?.key === s.key}
+                editName={
+                  singleSelectedSkill?.key === s.key ? editName : undefined
+                }
+                editDescription={
+                  singleSelectedSkill?.key === s.key
+                    ? editDescription
+                    : undefined
+                }
+                onNameChange={setEditName}
+                onDescriptionChange={setEditDescription}
+              />
+            ))}
+          </>
+        )}
       </div>
     );
   })();
