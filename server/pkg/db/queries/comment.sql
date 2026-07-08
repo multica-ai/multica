@@ -312,6 +312,23 @@ WHERE issue_id = @issue_id
   AND id <> @anchor_id
   AND NOT (author_type = 'agent' AND author_id = @author_id);
 
+-- name: GetLatestMemberCommentForIssueSince :one
+-- MUL-4195 completion reconciliation: the newest MEMBER-authored comment on an
+-- issue created strictly after @since (a run's started_at). Used when a task
+-- completes to detect deliberate user input that landed while the agent was
+-- busy — or that was merged into the running task after its context was
+-- already built — so a single follow-up run can be scheduled for it. Restricted
+-- to author_type = 'member' on purpose: only human input earns the guaranteed
+-- follow-up, which preserves the existing anti-loop guarantees (agent replies,
+-- acknowledgements, and self-triggers never qualify). Returns pgx.ErrNoRows
+-- when nothing newer exists, i.e. the run already covered the latest input.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'member'
+  AND created_at > @since
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;

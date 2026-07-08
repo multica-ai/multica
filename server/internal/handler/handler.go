@@ -326,9 +326,29 @@ func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToStr
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
 func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
-func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
-func int4ToPtr(v pgtype.Int4) *int32                { return util.Int4ToPtr(v) }
-func ptrToInt4(v *int32) pgtype.Int4                { return util.PtrToInt4(v) }
+
+// uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
+// entries. Returns nil (not an empty slice) when there is nothing to emit so
+// `omitempty` JSON fields drop out cleanly (MUL-4195).
+func uuidsToStrings(us []pgtype.UUID) []string {
+	if len(us) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(us))
+	for _, u := range us {
+		if u.Valid {
+			out = append(out, uuidToString(u))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func int8ToPtr(v pgtype.Int8) *int64 { return util.Int8ToPtr(v) }
+func int4ToPtr(v pgtype.Int4) *int32 { return util.Int4ToPtr(v) }
+func ptrToInt4(v *int32) pgtype.Int4 { return util.PtrToInt4(v) }
 
 // parseUUIDOrBadRequest validates a UUID string sourced from user input
 // (URL params, request body, headers). On invalid input it writes a 400

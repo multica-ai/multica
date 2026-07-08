@@ -71,6 +71,7 @@ type Task struct {
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
 	TriggerCommentID         string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
+	CoalescedCommentIDs      []string              `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run while it was still queued; the agent must address these in addition to the (newest) triggering comment. Empty for old servers / non-merged runs
 	TriggerThreadID          string                `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
 	TriggerCommentContent    string                `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
 	TriggerAuthorType        string                `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind for the triggering comment

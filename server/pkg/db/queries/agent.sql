@@ -730,6 +730,38 @@ WHERE issue_id = @issue_id
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
   );
 
+-- name: MergeCommentIntoPendingTask :one
+-- MUL-4195: fold a newly-arrived comment into an existing not-yet-started task
+-- for (issue, agent) instead of letting the HasPendingTaskForIssueAndAgent
+-- dedup silently DROP it. The task's prior trigger_comment_id becomes a
+-- coalesced ("also cover") comment and @new_trigger_comment_id becomes the new
+-- trigger, so the injected prompt shows the latest deliberate instruction while
+-- the single run is still told to address every folded comment.
+--
+-- Targets the newest task in any NOT-YET-STARTED status (queued, dispatched,
+-- waiting_local_directory, deferred). A running task is intentionally excluded:
+-- its context is already built, so its new comments are handled by completion
+-- reconciliation (GetLatestMemberCommentForIssueSince), not by merging. Returns
+-- pgx.ErrNoRows when no such task exists (e.g. it was claimed/started between
+-- the dedup check and this call), signalling the caller to enqueue a fresh task
+-- so the comment is never lost.
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
+        WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
+    ),
+    trigger_comment_id = @new_trigger_comment_id::uuid
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND t.status IN ('queued', 'dispatched', 'waiting_local_directory', 'deferred')
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING id, coalesced_comment_ids;
+
 -- name: GetLatestTaskRoleForIssueAndAgent :one
 -- Returns the role markers from the agent's most recent task on this issue.
 -- Used by the squad-leader self-trigger guard to tell apart leader tasks,
