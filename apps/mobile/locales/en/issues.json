@@ -1,20 +1,4 @@
 {
-  "status_label": {
-    "backlog": "Backlog",
-    "todo": "Todo",
-    "in_progress": "In Progress",
-    "in_review": "In Review",
-    "done": "Done",
-    "blocked": "Blocked",
-    "cancelled": "Cancelled"
-  },
-  "priority_label": {
-    "urgent": "Urgent",
-    "high": "High",
-    "medium": "Medium",
-    "low": "Low",
-    "none": "No priority"
-  },
   "error": {
     "load_prefix": "Failed to load issues:",
     "unknown": "unknown error",

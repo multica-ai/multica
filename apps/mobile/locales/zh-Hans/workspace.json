@@ -28,7 +28,7 @@
     "section": {
       "recent": "最近",
       "projects": "项目",
-      "issues": "Issues"
+      "issues": "issue"
     },
     "no_results": "未找到与“{{query}}”匹配的结果",
     "empty_prompt": "输入关键词搜索 issue 和项目。"
@@ -36,7 +36,7 @@
   "more_dropdown": {
     "nav": {
       "pinned": "固定",
-      "issues": "Issues",
+      "issues": "issue",
       "projects": "项目"
     },
     "account_settings_a11y": "账号设置",
