@@ -33,7 +33,8 @@
     "no_results": "未找到与“{{query}}”匹配的结果",
     "empty_prompt": "输入关键词搜索 issue 和项目。"
   },
-  "more_dropdown": {
+  "more_page": {
+    "section_title": "工作区",
     "nav": {
       "pinned": "固定",
       "issues": "issue",
