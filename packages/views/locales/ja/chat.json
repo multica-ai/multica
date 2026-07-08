@@ -18,7 +18,7 @@
     "send_failed_toast": "メッセージを送信できませんでした",
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
-    "upload_file": "画像"
+    "upload_file": "画像・ファイル"
   },
   "message_list": {
     "show_details": "詳細を表示",

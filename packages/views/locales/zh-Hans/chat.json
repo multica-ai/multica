@@ -18,7 +18,7 @@
     "send_failed_toast": "发送消息失败",
     "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。",
     "add_tooltip": "添加",
-    "upload_file": "图片"
+    "upload_file": "图片或文件"
   },
   "message_list": {
     "show_details": "查看详情",

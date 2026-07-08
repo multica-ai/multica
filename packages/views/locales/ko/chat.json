@@ -18,7 +18,7 @@
     "send_failed_toast": "메시지를 보내지 못했습니다",
     "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "add_tooltip": "추가",
-    "upload_file": "이미지"
+    "upload_file": "이미지 또는 파일"
   },
   "message_list": {
     "show_details": "세부 정보 보기",
