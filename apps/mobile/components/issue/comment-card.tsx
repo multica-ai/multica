@@ -241,10 +241,11 @@ function ResolvedThreadBar({
 
   const total = 1 + replies.length;
   // Chinese doesn't inflect for count, but English does ("message" vs
-  // "messages") — select the key manually rather than relying on i18next's
-  // `_one`/`_other` suffix convention, which isn't used elsewhere in this
-  // bundle and would fail the zh-Hans/en key-parity test (parity.test.ts)
-  // since Chinese has no singular form to pair with it.
+  // "messages") — select the key manually rather than i18next's `_one`/
+  // `_other` suffix convention. chat.json's `steps_one`/`steps_other` shows
+  // that convention does work (zh-Hans keeps a permanently-dead `_one` key
+  // since Intl.PluralRules has no "one" category for zh-Hans) — this file
+  // just predates that pattern and hasn't been converted to it.
   const unitSuffix = total === 1 ? "message" : "messages";
 
   return (

@@ -104,6 +104,13 @@ Start minimal. Add to this list when actually adopted — do NOT pre-list librar
 
 When upgrading any of these, update this list.
 
+### Pluralization
+
+Two conventions coexist for count-dependent strings; both are correct, pick either:
+
+- **i18next `_one`/`_other` suffixes** (e.g. `chat.json`'s `timeline.steps_one`/`steps_other`) — the default choice for new keys. zh-Hans still needs a `_one` variant even though `Intl.PluralRules` has no "one" category for Chinese and it never renders — the parity test (`lib/i18n/parity.test.ts`) checks key sets match across locales, not that every key is reachable at runtime.
+- **Manual key-name branching** (e.g. `comment-card.tsx`'s `resolved_bar_message`/`resolved_bar_messages`) — an older pattern from before the suffix convention was adopted. Fine to leave as-is; no need to convert on sight, but prefer the suffix convention for anything new.
+
 ## UI components & theming
 
 The full plan, file inventory, and migration phases live in `apps/mobile/docs/rnr-migration.md`. The rules below are the durable ones that must survive after the migration completes — read this section first when working on any UI.
