@@ -254,9 +254,7 @@ func TestRunNoteReferenceAddResolvesIssueFlag(t *testing.T) {
 }
 
 func TestRunNoteReferenceAddRejectsIssueWithObject(t *testing.T) {
-	withNoteTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("no request expected; got %s %s", r.Method, r.URL.Path)
-	})
+	t.Setenv("HOME", t.TempDir())
 	cmd := newNoteReferenceAddTestCmd()
 	_ = cmd.Flags().Set("issue", "FIR-1")
 	_ = cmd.Flags().Set("object", "issue")
@@ -266,9 +264,7 @@ func TestRunNoteReferenceAddRejectsIssueWithObject(t *testing.T) {
 }
 
 func TestRunNoteReferenceAddRequiresTarget(t *testing.T) {
-	withNoteTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("no request expected; got %s %s", r.Method, r.URL.Path)
-	})
+	t.Setenv("HOME", t.TempDir())
 	cmd := newNoteReferenceAddTestCmd()
 	if err := runNoteReferenceAdd(cmd, []string{"note-1"}); err == nil {
 		t.Fatal("expected error when neither --issue nor --object/--ref-id given")

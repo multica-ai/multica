@@ -302,14 +302,7 @@ func runNoteSearch(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 
 func runNoteCommentAdd(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	if _, err := requireWorkspaceID(cmd); err != nil {
-		return err
-	}
-
+	// CEREBRO-PATCH(note-cli-local-validation): return local flag errors before profile/server lookup.
 	body, _ := cmd.Flags().GetString("body")
 	if strings.TrimSpace(body) == "" {
 		return fmt.Errorf("--body is required")
@@ -317,6 +310,14 @@ func runNoteCommentAdd(cmd *cobra.Command, args []string) error {
 	payload := map[string]any{"body": body}
 	if replyTo, _ := cmd.Flags().GetString("reply-to"); strings.TrimSpace(replyTo) != "" {
 		payload["thread_root_id"] = strings.TrimSpace(replyTo)
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	if _, err := requireWorkspaceID(cmd); err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -462,6 +463,25 @@ func runNoteReferenceList(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 
 func runNoteReferenceAdd(cmd *cobra.Command, args []string) error {
+	// CEREBRO-PATCH(note-cli-local-validation): validate static target flags before profile/server lookup.
+	object, _ := cmd.Flags().GetString("object")
+	refID, _ := cmd.Flags().GetString("ref-id")
+	issueRef, _ := cmd.Flags().GetString("issue")
+	object = strings.TrimSpace(object)
+	refID = strings.TrimSpace(refID)
+	issueRef = strings.TrimSpace(issueRef)
+
+	// --issue is a convenience: resolve an issue key/id/prefix to its UUID and
+	// pin object=issue, so agents can couple by "FIR-2821" without a manual lookup.
+	if issueRef != "" {
+		if object != "" || refID != "" {
+			return fmt.Errorf("--issue cannot be combined with --object/--ref-id")
+		}
+	}
+	if issueRef == "" && (object == "" || refID == "") {
+		return fmt.Errorf("either --issue, or both --object and --ref-id, are required")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -470,30 +490,16 @@ func runNoteReferenceAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	object, _ := cmd.Flags().GetString("object")
-	refID, _ := cmd.Flags().GetString("ref-id")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// --issue is a convenience: resolve an issue key/id/prefix to its UUID and
-	// pin object=issue, so agents can couple by "FIR-2821" without a manual lookup.
-	if issueRef, _ := cmd.Flags().GetString("issue"); strings.TrimSpace(issueRef) != "" {
-		if object != "" || refID != "" {
-			return fmt.Errorf("--issue cannot be combined with --object/--ref-id")
-		}
+	if issueRef != "" {
 		resolved, err := resolveIssueRef(ctx, client, issueRef)
 		if err != nil {
 			return fmt.Errorf("resolve issue %q: %w", issueRef, err)
 		}
 		object = "issue"
 		refID = resolved.ID
-	}
-
-	object = strings.TrimSpace(object)
-	refID = strings.TrimSpace(refID)
-	if object == "" || refID == "" {
-		return fmt.Errorf("either --issue, or both --object and --ref-id, are required")
 	}
 
 	payload := map[string]any{"object": object, "ref_id": refID}
