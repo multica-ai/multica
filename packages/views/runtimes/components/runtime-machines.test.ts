@@ -52,6 +52,33 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("uses a machine-wide custom name as the machine title, over the local name", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-claude", provider: "claude", custom_name: "Bohan's MacBook" }),
+        makeRuntime({ id: "rt-codex", provider: "codex", custom_name: "Bohan's MacBook" }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1", localMachineName: "dev-machine.local" },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.title).toBe("Bohan's MacBook");
+  });
+
+  it("ignores a one-off per-runtime custom name for the machine title", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-claude", provider: "claude", custom_name: "just this one" }),
+        makeRuntime({ id: "rt-codex", provider: "codex" }),
+      ],
+      { now: NOW, localDaemonId: "daemon-1" },
+    );
+
+    // Not shared across all runtimes on the machine, so it must not stand in
+    // for the whole machine's name — the device name wins instead.
+    expect(machines[0]?.title).toBe("dev-machine.local");
+  });
+
   it("counts machines with any offline runtime as issues", () => {
     const machines = buildRuntimeMachines(
       [

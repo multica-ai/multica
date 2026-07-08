@@ -778,6 +778,13 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// No accessible agents → every row would be filtered out anyway. Skip the
+	// DB round-trip and return an empty list (mirrors HasPendingChatTasks).
+	if len(allowed) == 0 {
+		writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: []PendingChatTaskItem{}})
+		return
+	}
+
 	rows, err := h.Queries.ListPendingChatTasksByCreator(r.Context(), db.ListPendingChatTasksByCreatorParams{
 		WorkspaceID: parseUUID(workspaceID),
 		CreatorID:   parseUUID(userID),
@@ -787,39 +794,83 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map session → agent so we can filter without an N+1. The user's own
-	// session list is small, so one extra query is cheaper than per-row
-	// lookups.
-	sessions, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
-		WorkspaceID: parseUUID(workspaceID),
-		CreatorID:   parseUUID(userID),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve chat session agents")
-		return
-	}
-	sessionAgent := make(map[string]string, len(sessions))
-	for _, s := range sessions {
-		sessionAgent[uuidToString(s.ID)] = uuidToString(s.AgentID)
-	}
-
+	// The pending query now returns cs.agent_id per row, so we can filter
+	// out private agents the caller has lost access to directly against the
+	// already-loaded `allowed` set — no second ListAllChatSessionsByCreator
+	// scan on this hot path (MUL-4159).
 	items := make([]PendingChatTaskItem, 0, len(rows))
 	for _, row := range rows {
-		sessionID := uuidToString(row.ChatSessionID)
-		agentID, hasAgent := sessionAgent[sessionID]
-		if !hasAgent {
-			continue
-		}
+		agentID := uuidToString(row.AgentID)
 		if _, ok := allowed[agentID]; !ok {
 			continue
 		}
 		items = append(items, PendingChatTaskItem{
 			TaskID:        uuidToString(row.TaskID),
 			Status:        row.Status,
-			ChatSessionID: sessionID,
+			ChatSessionID: uuidToString(row.ChatSessionID),
 		})
 	}
 	writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: items})
+}
+
+// HasPendingChatTasksResponse is the boolean fast-path payload consumed by the
+// FAB, which only needs to know whether any in-flight chat task exists — not
+// the full list.
+type HasPendingChatTasksResponse struct {
+	HasPending bool `json:"has_pending"`
+}
+
+// HasPendingChatTasks answers "does the current user have any in-flight chat
+// task in this workspace?" with a single EXISTS query, for the FAB's running
+// indicator. It is the boolean sibling of ListPendingChatTasks: the detailed
+// list is reserved for the ChatWindow history / stop-task flows.
+//
+// Permission filtering is preserved end-to-end: the set of agents the caller
+// may currently see is resolved the same way as ListPendingChatTasks and
+// pushed into the query as agent_ids, so a member who lost access to a private
+// agent never sees a true from a task on that agent (MUL-4159). An empty
+// accessible-agent set short-circuits to false without hitting the DB.
+func (h *Handler) HasPendingChatTasks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	// No accessible agents → nothing the caller may see can be pending.
+	// Skip the round-trip and return false.
+	if len(allowed) == 0 {
+		writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: false})
+		return
+	}
+
+	agentIDs := make([]pgtype.UUID, 0, len(allowed))
+	for id := range allowed {
+		agentIDs = append(agentIDs, parseUUID(id))
+	}
+
+	hasPending, err := h.Queries.HasPendingChatTasksByCreator(r.Context(), db.HasPendingChatTasksByCreatorParams{
+		WorkspaceID: parseUUID(workspaceID),
+		CreatorID:   parseUUID(userID),
+		AgentIds:    agentIDs,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check pending chat tasks")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: hasPending})
 }
 
 // GetPendingChatTask returns the most recent in-flight task (queued / dispatched

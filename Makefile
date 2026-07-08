@@ -309,7 +309,7 @@ cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 multica: ## Run the multica CLI entrypoint directly from the Go source tree
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 

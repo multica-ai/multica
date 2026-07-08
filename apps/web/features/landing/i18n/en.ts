@@ -101,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 12 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 14 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 12 supported coding tools \u2014 Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 14 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 12 supported coding tools (Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 14 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 12 coding tools out of the box: Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 14 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -293,6 +293,59 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.40",
+        date: "2026-07-07",
+        title: "In-page find, resumable downloads, and fixes",
+        changes: [],
+        features: [
+          "You can now invite workspace members straight from the command line.",
+          "Issue detail now supports in-page find (Ctrl+F) to jump to and highlight matches.",
+          "Attachment downloads can resume after an interruption instead of restarting from the beginning.",
+        ],
+        improvements: [
+          "The in-progress task indicator in chat refreshes faster and makes fewer background requests.",
+          "More agent providers can now be configured with MCP.",
+          "Opening a workspace no longer auto-opens the chat window — open it yourself from the button.",
+        ],
+        fixes: [
+          "Multiple agent tasks running in parallel on the same machine no longer interfere with each other.",
+          "Reconnecting a Feishu bot to the same agent no longer loses members' account links or chat continuity.",
+          "After login, if you already have a workspace you're no longer sent to the create-workspace page by mistake.",
+          "Deleting a workspace now waits for the server before navigating, and a failed delete leaves you in place.",
+          "Launching Claude as root or with sudo now shows a clear, actionable error instead of just failing.",
+          "You can now delete orphaned custom runtimes.",
+        ],
+      },
+      {
+        version: "0.3.39",
+        date: "2026-07-06",
+        title: "Qoder and Trae CLI as custom runtime bases, plus squad and stability fixes",
+        changes: [],
+        features: [
+          "You can now build custom runtime profiles on top of Qoder, including for Qoder CN users.",
+          "ByteDance Trae CLI is also available as a base for custom runtime profiles.",
+        ],
+        improvements: [
+          "The runtime provider page and public docs now show the full lineup of built-in runtimes, including Qoder and Trae CLI, across every localized site.",
+        ],
+        fixes: [
+          "Multi-stage squad flows no longer stall at the first stage when the squad leader is private and a sub-Issue is closed by an agent.",
+          "A parent Issue's staged sub-task-done note no longer wrongly claims an intermediate stage is the final one — the leader is offered both options and picks.",
+          "Several agents can now share a local repo checkout while a squad leader wraps up — the leader no longer holds the checkout lock.",
+          "Multi-hour agent tasks — long research, training, or codegen runs — are no longer killed by the server while your daemon is still alive.",
+          "Search no longer hangs on self-hosted setups — even large workspaces return results quickly on the first try.",
+          "The Issue and comment editor no longer freezes when you paste a long stacktrace or an unusual long string.",
+          "The Antigravity agent no longer fails to start on machines where Claude is also installed.",
+          "Browser MCP now starts correctly on Windows agents.",
+          "The Codex agent's MCP settings are applied correctly again.",
+          "The Pi agent's task result now shows only the final answer — intermediate thinking is hidden.",
+          "Autopilots no longer accidentally run the same Issue twice in a row when a run takes longer than expected.",
+          "An Issue's PR list only shows PRs that really target that Issue — PRs that just mention the key in passing (\"Related to MUL-…\") no longer appear.",
+          "The Issue action menu's nested \"More\" item is now called \"Relations\", so you can tell what's inside without opening it.",
+          "Every attachment upload button — chat, Issue creation, Issue description, feedback — now lets you pick multiple files at once from the system file dialog.",
+        ],
+      },
       {
         version: "0.3.36",
         date: "2026-07-03",

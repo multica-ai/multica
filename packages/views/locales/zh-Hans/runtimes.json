@@ -82,6 +82,7 @@
     "all_runtimes": "全部运行时",
     "read_only": "只读",
     "delete_button": "删除运行时",
+    "rename_button": "重命名",
     "last_seen": "最后活跃 {{when}}",
     "fact_owner": "所有者",
     "fact_device": "设备",
@@ -105,6 +106,18 @@
     },
     "visibility_toast_updated": "可见性已设为「{{visibility}}」",
     "visibility_toast_failed": "更新可见性失败",
+    "rename_dialog": {
+      "title": "重命名运行时",
+      "description": "为该运行时设置一个自定义名称，方便在创建 agent 时查找。",
+      "hint": "留空则使用默认名称。",
+      "apply_to_machine": "应用到这台机器上的所有运行时",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中...",
+      "toast_saved": "已重命名运行时",
+      "toast_cleared": "已清除自定义名称",
+      "toast_failed": "重命名运行时失败"
+    },
     "delete_dialog": {
       "self_heal_notice": "该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程会在数秒内重新注册一个新的运行时——若想彻底移除，请先停止守护进程。",
       "profile_backed_notice": "该运行时来自自定义运行时配置。删除它只会移除当前运行时实例；只要配置仍存在，运行中的守护进程就可以再次注册它。若要彻底移除，请在“自定义运行时”中删除对应配置。",

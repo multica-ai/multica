@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -95,5 +96,60 @@ func TestWriteMeasuredJSONByteIdenticalToWriteJSON(t *testing.T) {
 	writeJSON(rec, http.StatusOK, map[string]string{"x": "<&>"})
 	if bytes.ContainsRune(rec.Body.Bytes(), '<') {
 		t.Fatalf("expected '<' to be HTML-escaped out of the body, got %q", rec.Body.String())
+	}
+}
+
+// TestWriteJSONSetsContentLength verifies that the JSON response writers advertise
+// an accurate Content-Length header. Encoding straight into the ResponseWriter after
+// WriteHeader forces net/http into chunked transfer encoding (no Content-Length), so
+// both writeJSON and writeMeasuredJSON buffer the body first and set the header
+// explicitly. The value must equal the exact number of bytes written on the wire.
+func TestWriteJSONSetsContentLength(t *testing.T) {
+	cases := []struct {
+		name string
+		v    any
+	}{
+		{"empty_map", map[string]any{}},
+		{"simple", map[string]string{"hello": "world"}},
+		{"html_escapable", map[string]any{"s": `a<b> & "c" <script>`}},
+		{"unicode", map[string]any{"s": "héllo 世界 🚀"}},
+		{"nested", map[string]any{"a": []any{1, "two", true, nil}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			writeJSON(rec, http.StatusOK, tc.v)
+
+			got := rec.Header().Get("Content-Length")
+			if got == "" {
+				t.Fatalf("writeJSON did not set Content-Length header")
+			}
+			cl, err := strconv.Atoi(got)
+			if err != nil {
+				t.Fatalf("Content-Length %q is not an integer: %v", got, err)
+			}
+			if cl != rec.Body.Len() {
+				t.Fatalf("Content-Length = %d, want %d (actual body length)", cl, rec.Body.Len())
+			}
+
+			// writeMeasuredJSON must set the same, accurate Content-Length.
+			recMeasured := httptest.NewRecorder()
+			n, err := writeMeasuredJSON(recMeasured, http.StatusOK, tc.v)
+			if err != nil {
+				t.Fatalf("writeMeasuredJSON returned error: %v", err)
+			}
+			gotMeasured := recMeasured.Header().Get("Content-Length")
+			clMeasured, err := strconv.Atoi(gotMeasured)
+			if err != nil {
+				t.Fatalf("writeMeasuredJSON Content-Length %q is not an integer: %v", gotMeasured, err)
+			}
+			if clMeasured != recMeasured.Body.Len() || clMeasured != n {
+				t.Fatalf("writeMeasuredJSON Content-Length = %d, body = %d, reported = %d; all must match", clMeasured, recMeasured.Body.Len(), n)
+			}
+			if got != gotMeasured {
+				t.Fatalf("Content-Length differs: writeJSON=%q writeMeasuredJSON=%q", got, gotMeasured)
+			}
+		})
 	}
 }

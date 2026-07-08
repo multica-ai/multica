@@ -101,7 +101,7 @@ async function exists(p) {
 }
 
 if (hasGo()) {
-  const version = sh("git describe --tags --always --dirty") || "dev";
+  const version = sh("git describe --tags --match 'v[0-9]*' --always --dirty") || "dev";
   const commit = sh("git rev-parse --short HEAD") || "unknown";
   const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;

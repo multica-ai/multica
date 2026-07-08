@@ -101,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 14 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 14 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 14 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 14 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -293,6 +293,59 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.3.40",
+        date: "2026-07-07",
+        title: "页内查找、断点续传与多项修复",
+        changes: [],
+        features: [
+          "你现在可以直接用命令行邀请成员加入工作区。",
+          "Issue 详情页支持页内查找（Ctrl+F），可以直接跳转并高亮关键词。",
+          "附件下载中断后可以断点续传，不用再从头下载。",
+        ],
+        improvements: [
+          "对话里进行中任务的状态刷新更快，后台请求也更少了。",
+          "更多智能体供应商现在都能配置 MCP 了。",
+          "打开工作区时不再自动弹出对话窗口，你可以自己用悬浮按钮打开。",
+        ],
+        fixes: [
+          "同一台机器上并行运行的多个智能体任务不再互相干扰。",
+          "断开后把飞书机器人重新连回同一个智能体时，成员的账号绑定和会话不再丢失。",
+          "登录后如果你已经有工作区，不会再被错误地带到新建工作区页面。",
+          "删除工作区时会等服务端确认后再跳转，删除失败会停留在原地。",
+          "以 root 或 sudo 启动 Claude 时会给出明确、可操作的报错，而不是直接失败。",
+          "你现在可以删除已失效的孤立运行时了。",
+        ],
+      },
+      {
+        version: "0.3.39",
+        date: "2026-07-06",
+        title: "Qoder 与 TRAE CLI 加入自定义运行时基座，小队与稳定性修复",
+        changes: [],
+        features: [
+          "你现在可以基于 Qoder 搭建自定义运行时了，Qoder CN 用户也能直接用。",
+          "字节 TRAE CLI 也可以作为自定义运行时的基座。",
+        ],
+        improvements: [
+          "运行时供应商页和公开文档更新到当前所有内置运行时的完整名单，包括 Qoder 与 TRAE CLI，四种语言同步。",
+        ],
+        fixes: [
+          "多阶段小队流程在私有 Leader + 子 Issue 由智能体关闭的情况下，不再卡在第一阶段。",
+          "父 Issue 的「子任务完成」提示不再把中间阶段错说成最终阶段，小队 Leader 可以自己选择继续下一阶段还是收尾。",
+          "小队 Leader 在收尾阶段不再占用本地仓库的锁，同一个仓库里的多个智能体可以继续并行工作。",
+          "多小时的智能体任务（研究、训练、代码生成）不再被服务端误杀，只要本机后台还活着就会跑完。",
+          "自托管环境下的搜索不再卡死，大工作区里首次搜索也能秒回。",
+          "在 Issue 或评论编辑器里粘贴长报错堆栈或异常长的字符串时不再卡页面。",
+          "同时装了 Claude 的机器上，Antigravity 智能体不再启动失败。",
+          "Windows 上的 Browser MCP 现在能正常启动。",
+          "Codex 智能体的 MCP 设置能被正确读取了。",
+          "Pi 智能体的任务结果只显示最终答案，不再夹带中间步骤。",
+          "自动驾驶不再在单次运行超时的时候重复派发同一个 Issue。",
+          "Issue 的 PR 列表只显示真正关联到本 Issue 的 PR，仅在描述里顺带提到「Related to MUL-…」的 PR 不再露出。",
+          "Issue 操作菜单里嵌套的「More」项改名为「Relations」，你不用点开也知道里面装的是关系类操作。",
+          "所有附件上传按钮——对话输入、Issue 创建、Issue 描述、反馈——都支持在系统对话框里一次选多个文件。",
+        ],
+      },
       {
         version: "0.3.36",
         date: "2026-07-03",

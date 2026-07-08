@@ -31,7 +31,10 @@ SELECT
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND (sqlc.narg('space_id')::uuid IS NULL OR a.space_id = sqlc.narg('space_id'))
-  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+  AND (
+    (sqlc.narg('status')::text IS NULL AND a.status <> 'archived')
+    OR a.status = sqlc.narg('status')
+  )
 ORDER BY a.created_at DESC;
 
 -- name: CountActiveAutopilotsBySpace :one
@@ -77,8 +80,10 @@ UPDATE autopilot SET
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1;
+-- name: ArchiveAutopilot :exec
+UPDATE autopilot
+SET status = 'archived', updated_at = now()
+WHERE id = $1;
 
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()

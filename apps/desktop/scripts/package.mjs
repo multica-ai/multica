@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Wrapper around `electron-builder` that keeps the Desktop version in
 // lockstep with the CLI. Both are derived from `git describe --tags
-// --always --dirty` — the same source GoReleaser reads for the CLI
+// --match 'v[0-9]*' --always --dirty` — the same source GoReleaser reads
+// for the CLI
 // binary via the `main.version` ldflag — so a single `vX.Y.Z` tag push
 // produces matching CLI and Desktop versions.
 //
@@ -126,7 +127,9 @@ export function normalizeGitVersion(raw) {
 }
 
 function deriveVersion() {
-  return normalizeGitVersion(sh("git describe --tags --always --dirty"));
+  return normalizeGitVersion(
+    sh("git describe --tags --match 'v[0-9]*' --always --dirty"),
+  );
 }
 
 function uniqueOrdered(values) {

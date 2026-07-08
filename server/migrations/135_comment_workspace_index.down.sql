@@ -5,4 +5,4 @@
 -- down migration if operating below the query-rewrite change; otherwise
 -- expect search latency to regress.
 
-DROP INDEX IF EXISTS idx_comment_workspace;
+DROP INDEX CONCURRENTLY IF EXISTS idx_comment_workspace;

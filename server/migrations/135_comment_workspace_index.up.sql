@@ -35,14 +35,12 @@
 -- where pg_bigm was absent the migration "succeeded" while quietly
 -- creating no indexes at all — the exact silent-skip pattern that took
 -- prd search down. This index is the critical support for the fix, not
--- an optional CJK bonus, so a real failure (lock timeout, disk full,
--- permission denied, schema drift) MUST abort the migration and fail
--- deployment, not slip through as a green success. IF NOT EXISTS keeps
--- the migration idempotent for the operator-precreated case; operators
--- who need concurrent creation on a large prd table should run
--- `CREATE INDEX CONCURRENTLY idx_comment_workspace ON comment
--- (workspace_id);` before applying, which turns this statement into a
--- no-op.
+-- an optional CJK bonus, so a real failure (disk full, permission denied,
+-- schema drift) MUST abort the migration and fail
+-- deployment, not slip through as a green success. CONCURRENTLY avoids
+-- blocking writes on the hot comment table while the index builds; this
+-- file must stay single-statement because Postgres rejects CREATE INDEX
+-- CONCURRENTLY in a transaction or multi-command string.
 
-CREATE INDEX IF NOT EXISTS idx_comment_workspace
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_comment_workspace
     ON comment (workspace_id);

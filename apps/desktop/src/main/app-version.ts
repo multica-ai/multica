@@ -20,7 +20,7 @@ export function getAppVersion(): string {
     return app.getVersion();
   }
   try {
-    const raw = execSync("git describe --tags --always --dirty", {
+    const raw = execSync("git describe --tags --match 'v[0-9]*' --always --dirty", {
       cwd: app.getAppPath(),
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],

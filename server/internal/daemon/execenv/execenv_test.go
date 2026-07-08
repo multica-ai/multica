@@ -858,6 +858,15 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"Do NOT end your turn while background tasks",
 				"wait for a future notification/reminder",
 				"run the work synchronously instead",
+				// Hardened pins (MUL-4140): the mechanism that slipped
+				// through in MUL-4091 was a turn ending cleanly with a
+				// "standing by, I'll report when CI finishes" message and
+				// no follow-up wakeup. These pins forbid that shape.
+				"Never background-and-yield",
+				"foreground tool call that blocks",
+				"gh run watch",
+				"running in the background so you can keep working",
+				"standing by",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)

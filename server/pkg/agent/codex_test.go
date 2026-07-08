@@ -2365,6 +2365,86 @@ func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
 	}
 }
 
+func TestEnsureCodexMcpConfigDropsInternalSelectors(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret"},"timeout":30,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.fetch]`,
+		`command = "uvx"`,
+		`args = ["mcp-server-fetch"]`,
+		`env = { API_KEY = "secret" }`,
+		`timeout = 30`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal MCP selector %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigDropsInternalSelectorsFromRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/session","headers":{"Authorization":"Bearer test-token"},"timeout":45,"tools":{"include":["kb_get"]},"prompts":{"include":["daily"]},"resources":{"include":["docs"]}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`http_headers = { Authorization = "Bearer test-token" }`,
+		`timeout = 45`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		"\ntools = ",
+		"\nprompts = ",
+		"\nresources = ",
+		"kb_get",
+		"daily",
+		"docs",
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("internal or provider-incompatible key %q must not render into Codex config.toml:\n%s", unexpected, got)
+		}
+	}
+}
+
 func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
 	t.Parallel()
 

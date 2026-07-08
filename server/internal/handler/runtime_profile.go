@@ -359,31 +359,48 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Confirm the profile exists in this workspace before mutating anything.
-	if _, err := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+	// Confirm the profile exists in this workspace. If the profile row is
+	// already gone but runtime rows still carry this workspace/profile pair,
+	// treat them as orphaned instances and clean them up below.
+	_, profileErr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
 		ID:          profileUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	profileMissing := errors.Is(profileErr, pgx.ErrNoRows)
+	if profileErr != nil && !profileMissing {
+		writeError(w, http.StatusInternalServerError, "failed to load runtime profile")
+		return
+	}
+
+	// Enumerate the runtime instance rows registered against this profile in
+	// this workspace. The workspace predicate is important because profile_id has
+	// no FK and should never let a malformed row in another workspace be cleaned
+	// up from this workspace's profile endpoint.
+	runtimeIDs, err := h.Queries.ListAgentRuntimeIDsByProfile(r.Context(), db.ListAgentRuntimeIDsByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate profile runtimes")
+		return
+	}
+	if profileMissing && len(runtimeIDs) == 0 {
 		writeError(w, http.StatusNotFound, "runtime profile not found")
 		return
 	}
 
-	// Enumerate the runtime instance rows registered against this profile.
 	// The profile-delete cascade must run the SAME teardown the runtime-delete
 	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
 	// archived agent still pointing at one of these rows would turn a bare
 	// delete into a 500. We refuse active agents (409) and clean archived
 	// agents / their archived squad+autopilot references before deleting.
-	runtimeIDs, err := h.Queries.ListAgentRuntimeIDsByProfile(r.Context(), profileUUID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enumerate profile runtimes")
-		return
-	}
-
 	// Guard 1: refuse while any active (non-archived) agent is bound to one of
 	// the profile's runtimes. Keep this a 409 — deleting would orphan live
 	// agents.
-	agentCount, err := h.Queries.CountAgentsByProfile(r.Context(), profileUUID)
+	agentCount, err := h.Queries.CountAgentsByProfile(r.Context(), db.CountAgentsByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check profile usage")
 		return
@@ -449,18 +466,23 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Now the runtime rows have no agent references; remove them, then the
 	// profile itself.
-	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), profileUUID); err != nil {
+	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
 		slog.Error("DeleteAgentRuntimesByProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
 		writeError(w, http.StatusInternalServerError, "failed to clean up runtime instances")
 		return
 	}
-	if err := qtx.DeleteRuntimeProfile(r.Context(), db.DeleteRuntimeProfileParams{
-		ID:          profileUUID,
-		WorkspaceID: wsUUID,
-	}); err != nil {
-		slog.Error("DeleteRuntimeProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
-		writeError(w, http.StatusInternalServerError, "failed to delete runtime profile")
-		return
+	if !profileMissing {
+		if err := qtx.DeleteRuntimeProfile(r.Context(), db.DeleteRuntimeProfileParams{
+			ID:          profileUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			slog.Error("DeleteRuntimeProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
+			writeError(w, http.StatusInternalServerError, "failed to delete runtime profile")
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
