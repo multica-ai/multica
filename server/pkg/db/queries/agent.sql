@@ -745,18 +745,35 @@ WHERE issue_id = @issue_id
 -- pgx.ErrNoRows when no such task exists (e.g. it was claimed/started between
 -- the dedup check and this call), signalling the caller to enqueue a fresh task
 -- so the comment is never lost.
+--
+-- Originator gate (MUL-4195 review must-fix #1): a merge is only allowed when
+-- the pending task's originator_user_id matches the new comment's originator
+-- (IS NOT DISTINCT FROM handles the NULL/NULL "both unattributed" case). This
+-- is the load-bearing correctness guard for permission + audit attribution:
+-- runtime_mcp_overlay / runtime_connected_apps are a pure function of
+-- (originator, agent), and the agent is fixed here, so requiring the originator
+-- to match keeps the already-stored overlay/connected-apps VALID for the new
+-- trigger — no stale connected-app capabilities, no cross-user attribution.
+-- When user B comments on a task originated by user A, the originators differ,
+-- this subquery matches no row, and the caller enqueues a fresh follow-up task
+-- carrying B's own originator/overlay instead of silently reusing A's context.
+-- trigger_summary is refreshed to the new trigger comment's snapshot so the
+-- task label tracks the latest deliberate instruction (NULL narg preserves the
+-- existing summary if the caller can't recompute it).
 UPDATE agent_task_queue
 SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
     ),
-    trigger_comment_id = @new_trigger_comment_id::uuid
+    trigger_comment_id = @new_trigger_comment_id::uuid,
+    trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary)
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
       AND t.status IN ('queued', 'dispatched', 'waiting_local_directory', 'deferred')
+      AND t.originator_user_id IS NOT DISTINCT FROM sqlc.narg('new_originator_user_id')::uuid
     ORDER BY t.created_at DESC
     LIMIT 1
 )

@@ -1528,6 +1528,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// MUL-4195: surface comments that were folded into this run while it
 		// was still queued so the daemon can steer the agent to read them all.
 		resp.CoalescedCommentIDs = uuidsToStrings(task.CoalescedCommentIds)
+		// Embed the folded comments' full detail (thread/author/created_at/
+		// content) so the prompt can address each one without assuming they
+		// share the triggering thread (MUL-4195 review should-fix #3).
+		resp.CoalescedComments = h.buildCoalescedCommentData(r.Context(), task.CoalescedCommentIds)
 
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
@@ -2342,16 +2346,28 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // race: it arrives after the daemon has already claimed the task and built its
 // context, gets folded into the (still not-terminal) row, and the run finishes
 // without ever seeing it. This reconcile pass detects any MEMBER comment newer
-// than the run's started_at and re-runs the standard trigger pipeline for the
-// most recent one, which re-uses all existing routing, the per-(issue, agent)
-// dedup, and the merge path — so at most one follow-up run is scheduled.
+// than the run's started_at and, if it routes to THE AGENT THAT JUST RAN,
+// re-runs the standard trigger pipeline scoped to that one agent — which
+// re-uses all existing routing, the per-(issue, agent) dedup, and the merge
+// path, so at most one follow-up run is scheduled.
+//
+// Scoping to task.AgentID is a correctness guard (MUL-4195 review must-fix #2):
+// the reconcile MUST NOT fan the latest member comment back out to every agent
+// it could route to. Consider agent A running while a member posts an
+// `@B` comment: B was already triggered at comment-creation time. If A's
+// completion replayed that comment through the full pipeline it would trigger a
+// SECOND B run. With multiple agents on one issue, every completing task would
+// replay the same latest member comment and re-wake unrelated agents, breaking
+// the bounded-follow-up guarantee. Restricting to the completing agent means
+// each run only ever schedules a follow-up for itself; other agents' own
+// completions (or their creation-time triggers) cover them.
 //
 // Loop safety: only member-authored comments qualify (agent replies,
-// acknowledgements, and self-triggers never do), and the follow-up terminates
-// because its own triggering comment predates the follow-up run's started_at,
-// so the next completion finds nothing newer.
+// acknowledgements, and self-triggers never do), the follow-up is scoped to a
+// single agent, and it terminates because its own triggering comment predates
+// the follow-up run's started_at, so the next completion finds nothing newer.
 func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
-	if task == nil || !task.TriggerCommentID.Valid || !task.IssueID.Valid || !task.StartedAt.Valid {
+	if task == nil || !task.TriggerCommentID.Valid || !task.IssueID.Valid || !task.StartedAt.Valid || !task.AgentID.Valid {
 		return
 	}
 	latest, err := h.Queries.GetLatestMemberCommentForIssueSince(ctx, db.GetLatestMemberCommentForIssueSinceParams{
@@ -2377,15 +2393,86 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			parentComment = &parent
 		}
 	}
-	// Members are their own originator; drive the normal comment-trigger
-	// pipeline so routing, dedup, and merge all apply exactly as for a fresh
-	// comment.
+	// Members are their own originator. Compute the triggers this comment would
+	// produce, then keep ONLY the agent that just completed — never the full
+	// fan-out (see the must-fix #2 rationale above). If the latest member
+	// comment does not route to this agent (e.g. it @-mentions a different
+	// agent that was already triggered at creation time) there is nothing for
+	// this completion to do.
 	actorID := uuidToString(latest.AuthorID)
+	if isNoteComment(latest.Content) {
+		return
+	}
+	triggers := h.computeCommentAgentTriggers(ctx, issue, latest.Content, parentComment, "member", actorID, commentTriggerComputeOptions{
+		ExcludeTriggerCommentID: latest.ID,
+		OriginatorUserID:        actorID,
+	})
+	scoped := make([]commentAgentTrigger, 0, 1)
+	for _, trigger := range triggers {
+		if uuidToString(trigger.Agent.ID) == uuidToString(task.AgentID) {
+			scoped = append(scoped, trigger)
+		}
+	}
+	if len(scoped) == 0 {
+		return
+	}
 	slog.Info("reconcile comments on completion: scheduling follow-up",
 		"issue_id", uuidToString(task.IssueID),
 		"completed_task_id", uuidToString(task.ID),
+		"agent_id", uuidToString(task.AgentID),
 		"followup_comment_id", uuidToString(latest.ID))
-	h.triggerTasksForComment(ctx, issue, latest, parentComment, "member", actorID, actorID, nil)
+	h.enqueueCommentAgentTriggers(ctx, issue, latest.ID, scoped)
+}
+
+// buildCoalescedCommentData loads the full detail of each comment that was
+// folded into a not-yet-started run (MUL-4195) so the claim response can embed
+// them and the prompt can address each without assuming they share the
+// triggering thread (review should-fix #3). Thread id follows the same rule as
+// the triggering comment (parent id when the comment is a reply, else the
+// comment's own id). Missing comments (deleted / wrong workspace) are skipped
+// rather than failing the claim. The set is bounded by how many comments a user
+// fires before a run starts, so the per-comment lookups stay cheap.
+func (h *Handler) buildCoalescedCommentData(ctx context.Context, ids []pgtype.UUID) []CoalescedCommentData {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]CoalescedCommentData, 0, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		comment, err := h.Queries.GetComment(ctx, id)
+		if err != nil {
+			continue
+		}
+		data := CoalescedCommentData{
+			ID:         uuidToString(comment.ID),
+			ThreadID:   uuidToString(comment.ID),
+			AuthorType: comment.AuthorType,
+			Content:    comment.Content,
+			CreatedAt:  timestampToString(comment.CreatedAt),
+		}
+		if comment.ParentID.Valid {
+			data.ThreadID = uuidToString(comment.ParentID)
+		}
+		if comment.AuthorID.Valid {
+			switch comment.AuthorType {
+			case "agent":
+				if a, err := h.Queries.GetAgent(ctx, comment.AuthorID); err == nil {
+					data.AuthorName = a.Name
+				}
+			case "member":
+				if u, err := h.Queries.GetUser(ctx, comment.AuthorID); err == nil {
+					data.AuthorName = u.Name
+				}
+			}
+		}
+		out = append(out, data)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ReportTaskUsage stores per-task token usage. Called independently of

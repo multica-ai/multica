@@ -144,6 +144,21 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 	return pgtype.Text{String: summary, Valid: true}
 }
 
+// ResolveOriginatorFromTriggerComment is the exported wrapper used by the
+// comment-merge path (MUL-4195) to compute the top-of-chain human originator
+// for a newly-arrived comment, so a merge can be gated on the originator being
+// unchanged. See resolveOriginatorFromTriggerComment for the chain rules.
+func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
+	return s.resolveOriginatorFromTriggerComment(ctx, commentID)
+}
+
+// BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
+// path (MUL-4195) to refresh a coalesced task's trigger_summary to the newest
+// trigger comment's snapshot.
+func (s *TaskService) BuildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
+	return s.buildCommentTriggerSummary(ctx, commentID)
+}
+
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
 	var wakeup TaskWakeupNotifier
 	if len(wakeups) > 0 {

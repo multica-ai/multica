@@ -311,6 +311,7 @@ type AgentTaskResponse struct {
 	RelativeWorkDir          string               `json:"relative_work_dir,omitempty"`
 	TriggerCommentID         *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
 	CoalescedCommentIDs      []string             `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
+	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`        // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
 	TriggerThreadID          string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
 	TriggerCommentContent    string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
 	TriggerSummary           *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -383,6 +384,25 @@ type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
+}
+
+// CoalescedCommentData carries the full detail of a comment that was folded
+// into a not-yet-started run (MUL-4195) so the daemon can embed it directly in
+// the prompt. The earlier merge path only shipped comment IDs plus a
+// "they are in the triggering thread" hint, which is WRONG when the folded
+// comments span multiple threads (an issue's assignee can be triggered from
+// different threads). Shipping thread_id / author / created_at / content lets
+// the prompt address each folded comment without assuming a single thread or
+// relying on a `--recent N` window that may not cover them all. The mirror
+// struct on the daemon side lives in internal/daemon/types.go with the same
+// JSON field names.
+type CoalescedCommentData struct {
+	ID         string `json:"id"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	AuthorType string `json:"author_type,omitempty"`
+	AuthorName string `json:"author_name,omitempty"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

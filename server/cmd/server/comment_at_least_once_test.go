@@ -178,3 +178,87 @@ func pgUUIDToText(u pgtype.UUID) string {
 	s, _ := v.(string)
 	return s
 }
+
+// TestMergeCommentIntoPendingTask_OriginatorGate is the MUL-4195 review
+// must-fix #1 regression test. A pending task carries its originator's
+// runtime_mcp_overlay / runtime_connected_apps and audit attribution. Folding a
+// DIFFERENT member's comment into it would make the run answer B's instruction
+// under A's connected-app capabilities and audit identity — a permission /
+// attribution bug. The merge query must therefore only fold a comment into a
+// pending task whose originator matches; a mismatch returns pgx.ErrNoRows so the
+// caller enqueues a fresh follow-up carrying the correct context.
+func TestMergeCommentIntoPendingTask_OriginatorGate(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Originator gate test", agentID)
+	clearTasks(t, issueID) // drop the assignment task so we start clean
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	now := time.Now()
+	cidA := insertCommentAt(t, issueID, "member", testUserID, "first, from originator A", now.Add(-2*time.Minute))
+	cidB := insertCommentAt(t, issueID, "member", testUserID, "second, folds in", now.Add(-1*time.Minute))
+
+	// Seed a queued task originated by testUserID and triggered by cidA.
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, originator_user_id)
+		VALUES ($1, $2, $3, $4, 'queued', 0, $5)
+	`, agentID, runtimeID, issueID, cidA, testUserID); err != nil {
+		t.Fatalf("seed queued task: %v", err)
+	}
+
+	pgIssue := toPgUUID(t, issueID)
+	pgAgent := toPgUUID(t, agentID)
+	pgCidB := toPgUUID(t, cidB)
+	summary := pgtype.Text{String: "second, folds in", Valid: true}
+
+	// A DIFFERENT originator must NOT merge: the gate blocks it, so the caller
+	// falls back to a fresh follow-up instead of reusing A's overlay/attribution.
+	differentOriginator := toPgUUID(t, "000000ff-0000-0000-0000-0000000000ff")
+	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:             pgIssue,
+		AgentID:             pgAgent,
+		NewTriggerCommentID: pgCidB,
+		NewOriginatorUserID: differentOriginator,
+		NewTriggerSummary:   summary,
+	}); err != pgx.ErrNoRows {
+		t.Fatalf("expected pgx.ErrNoRows when the new comment's originator differs, got %v", err)
+	}
+	// The pending task is untouched: trigger still cidA, nothing coalesced.
+	if got := latestTriggerCommentID(t, issueID); got != cidA {
+		t.Errorf("mismatched-originator merge must leave the trigger at %s, got %s", cidA, got)
+	}
+	if ids := coalescedCommentIDs(t, issueID); len(ids) != 0 {
+		t.Errorf("mismatched-originator merge must not coalesce anything, got %v", ids)
+	}
+
+	// The SAME originator merges as before: trigger repointed to cidB, cidA
+	// preserved as a coalesced comment.
+	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:             pgIssue,
+		AgentID:             pgAgent,
+		NewTriggerCommentID: pgCidB,
+		NewOriginatorUserID: toPgUUID(t, testUserID),
+		NewTriggerSummary:   summary,
+	}); err != nil {
+		t.Fatalf("same-originator merge should succeed, got %v", err)
+	}
+	if got := latestTriggerCommentID(t, issueID); got != cidB {
+		t.Errorf("same-originator merge must repoint the trigger to %s, got %s", cidB, got)
+	}
+	if ids := coalescedCommentIDs(t, issueID); !containsID(ids, cidA) {
+		t.Errorf("same-originator merge must preserve %s as coalesced, got %v", cidA, ids)
+	}
+}

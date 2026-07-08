@@ -1420,15 +1420,35 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // only when no pending task exists anymore (pgx.ErrNoRows: it was
 // claimed/started between the dedup check and now), so the caller enqueues a
 // fresh task and the deliberate comment is never lost.
+//
+// The merge is GATED on the originator being unchanged (MUL-4195 review
+// must-fix #1): the pending task carries its originator's runtime_mcp_overlay /
+// runtime_connected_apps and audit attribution, which are only valid for that
+// originator. If a different member's comment folded into it, the run would
+// respond to the new instruction under the old user's connected-app
+// capabilities and audit identity — a permission/attribution bug. We compute
+// the new comment's top-of-chain originator and pass it as a gate; when it does
+// not match the pending task's originator the query matches no row (ErrNoRows)
+// and the caller enqueues a fresh follow-up carrying the correct context. The
+// gate is safe because the overlay/connected-apps are a pure function of
+// (originator, agent) and the agent is fixed, so a matching originator
+// guarantees the stored overlay still applies. trigger_summary is refreshed to
+// the new trigger comment so the task label tracks the latest instruction.
 func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:             issue.ID,
 		AgentID:             trigger.Agent.ID,
 		NewTriggerCommentID: newTriggerCommentID,
+		NewOriginatorUserID: h.TaskService.ResolveOriginatorFromTriggerComment(ctx, newTriggerCommentID),
+		NewTriggerSummary:   h.TaskService.BuildCommentTriggerSummary(ctx, newTriggerCommentID),
 	})
 	if err != nil {
 		if isNotFound(err) {
-			// The pending task is gone; let the caller enqueue a fresh one.
+			// No pending task with a matching originator is left: either it was
+			// claimed/started between the dedup check and now, or the only
+			// pending task belongs to a different originator. Either way the
+			// caller must enqueue a fresh task so the comment is never lost and
+			// carries the correct originator/overlay.
 			return false
 		}
 		// Unknown error: the pending task most likely still exists, so do NOT
