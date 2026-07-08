@@ -91,13 +91,7 @@
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
     "returning_title_default": "欢迎使用 Multica",
-    "returning_subtitle": "试试问",
     "chat_with_named": "与 {{name}} 对话"
-  },
-  "starter_prompts": {
-    "list_open": "按优先级列出我未完成的任务",
-    "summarize_today": "总结一下我今天做了什么",
-    "plan_next": "规划接下来该做什么"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "offline_banner": {

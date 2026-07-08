@@ -91,13 +91,7 @@
     "first_time_actions": "要約を頼んだり、今日の予定を立てたり、簡単なタスクを任せたりしてみましょう。",
     "returning_title_named": "こんにちは、{{name}} です",
     "returning_title_default": "Multica へようこそ",
-    "returning_subtitle": "こう聞いてみましょう",
     "chat_with_named": "{{name}} とチャット"
-  },
-  "starter_prompts": {
-    "list_open": "オープンなタスクを優先度順にまとめて",
-    "summarize_today": "今日やったことを要約して",
-    "plan_next": "次に取り組むことを計画して"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
   "offline_banner": {
