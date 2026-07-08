@@ -704,6 +704,61 @@ interface IssueDetailProps {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Shared loading placeholder: shown by the IssueDetail wrapper while
+ * resolving an identifier to a UUID, and by IssueDetailInner while fetching
+ * the resolved issue.
+ */
+function IssueDetailSkeleton() {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-4 w-4" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="flex flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
+            <Skeleton className="h-8 w-3/4" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+            <Skeleton className="h-px w-full" />
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-16 w-full rounded-lg" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="hidden md:block w-80 border-l p-4 space-y-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-5 w-24" />
+            </div>
+          ))}
+          <Skeleton className="h-px w-full" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Route boundary: the /issue/:id route is identifier-first (NAI-3) but also
  * accepts a UUID. Everything downstream (detail cache key, WS patches,
  * comments, mutations) is keyed by UUID, so an identifier is resolved to its
@@ -718,8 +773,21 @@ export function IssueDetail({ issueId, ...rest }: IssueDetailProps) {
     enabled: !isUuid,
   });
   const canonicalId = isUuid ? issueId : resolved?.id;
+  // Once resolution fails, commit to the raw-id fallback permanently (per
+  // mount) instead of re-reading live isError on every render: IssueDetailInner
+  // fetches the same query key on mount and (refetchOnMount default) refetches
+  // it, which flips this component's own isError back to false mid-cycle —
+  // without the latch that toggle unmounts IssueDetailInner, which remounts
+  // and refetches again, forever (never a stable frame to reach "not found").
+  const fellBackToRawIdRef = useRef(false);
+  if (isError) fellBackToRawIdRef.current = true;
+  // canonicalId is only ever falsy while !isUuid (isUuid always yields
+  // canonicalId = issueId), so this is the "still resolving" state.
+  if (!canonicalId && !fellBackToRawIdRef.current) {
+    return <IssueDetailSkeleton />;
+  }
   if (!canonicalId) {
-    return isError ? <IssueDetailInner issueId={issueId} {...rest} /> : null;
+    return <IssueDetailInner issueId={issueId} {...rest} />;
   }
   return <IssueDetailInner issueId={canonicalId} {...rest} />;
 }
@@ -1411,53 +1479,7 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
   });
 
   if (loading) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-4" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-        <div className="flex flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
-              <Skeleton className="h-8 w-3/4" />
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-2/3" />
-              </div>
-              <Skeleton className="h-px w-full" />
-              <div className="space-y-3">
-                <Skeleton className="h-4 w-20" />
-                <div className="flex items-start gap-3">
-                  <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-16 w-full rounded-lg" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ))}
-            <Skeleton className="h-px w-full" />
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <IssueDetailSkeleton />;
   }
 
   if (!issue) {

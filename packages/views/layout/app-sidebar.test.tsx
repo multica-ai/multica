@@ -45,6 +45,19 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SidebarGroupAction: ({
+    children,
+    title,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    title?: string;
+    onClick?: () => void;
+  }) => (
+    <button type="button" title={title} onClick={onClick}>
+      {children}
+    </button>
+  ),
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
