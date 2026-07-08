@@ -5,7 +5,7 @@ import { PropRow } from "../../common/prop-row";
 import { useT } from "../../i18n";
 import { estimateCost } from "../../runtimes/utils";
 
-export function formatTokenCount(n: number): string {
+function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
@@ -15,7 +15,6 @@ export function formatTokenCount(n: number): string {
 // rows back into per-run entries for the breakdown list.
 interface RunEntry {
   taskId: string;
-  createdAt: string;
   commentTriggered: boolean;
   tokens: number;
   cost: number;
@@ -26,7 +25,6 @@ function foldRuns(tasks: IssueTaskUsage[]): RunEntry[] {
   for (const t of tasks) {
     const entry = byTask.get(t.task_id) ?? {
       taskId: t.task_id,
-      createdAt: t.created_at,
       commentTriggered: t.comment_triggered,
       tokens: 0,
       cost: 0,
