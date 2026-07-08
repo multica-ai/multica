@@ -1110,65 +1110,115 @@ type issueActorFilter struct {
 }
 
 type issueDateFilter struct {
-	column string
-	start  time.Time
-	end    time.Time
+	column        string
+	start         time.Time
+	end           time.Time
+	scheduleStart pgtype.Date
+	scheduleEnd   pgtype.Date
 }
 
 func parseIssueDateFilter(w http.ResponseWriter, values url.Values) (*issueDateFilter, bool) {
 	field := strings.TrimSpace(values.Get("date_field"))
 	startRaw := strings.TrimSpace(values.Get("date_start"))
 	endRaw := strings.TrimSpace(values.Get("date_end"))
-	if field == "" && startRaw == "" && endRaw == "" {
+	scheduleStartRaw := strings.TrimSpace(values.Get("schedule_start"))
+	scheduleEndRaw := strings.TrimSpace(values.Get("schedule_end"))
+	if field == "" && startRaw == "" && endRaw == "" && scheduleStartRaw == "" && scheduleEndRaw == "" {
 		return nil, true
 	}
-	if field == "" || startRaw == "" || endRaw == "" {
+	filter := &issueDateFilter{}
+	if field != "" || startRaw != "" || endRaw != "" {
+		if field == "" || startRaw == "" || endRaw == "" {
+			writeError(w, http.StatusBadRequest, "date_field, date_start, and date_end are required together")
+			return nil, false
+		}
+
+		column := ""
+		switch field {
+		case "created_at":
+			column = "created_at"
+		case "updated_at":
+			column = "updated_at"
+		default:
+			writeError(w, http.StatusBadRequest, "invalid date_field")
+			return nil, false
+		}
+
+		start, err := time.Parse(time.RFC3339Nano, startRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date_start")
+			return nil, false
+		}
+		end, err := time.Parse(time.RFC3339Nano, endRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date_end")
+			return nil, false
+		}
+		if !start.Before(end) {
+			writeError(w, http.StatusBadRequest, "date_start must be before date_end")
+			return nil, false
+		}
+
+		filter.column = column
+		filter.start = start
+		filter.end = end
+	}
+
+	if scheduleStartRaw != "" || scheduleEndRaw != "" {
+		if scheduleStartRaw == "" || scheduleEndRaw == "" {
+			writeError(w, http.StatusBadRequest, "schedule_start and schedule_end are required together")
+			return nil, false
+		}
+		scheduleStart, err := util.ParseCalendarDate(scheduleStartRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid schedule_start")
+			return nil, false
+		}
+		scheduleEnd, err := util.ParseCalendarDate(scheduleEndRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid schedule_end")
+			return nil, false
+		}
+		if scheduleEnd.Time.Before(scheduleStart.Time) {
+			writeError(w, http.StatusBadRequest, "schedule_start must be before or equal to schedule_end")
+			return nil, false
+		}
+		filter.scheduleStart = scheduleStart
+		filter.scheduleEnd = scheduleEnd
+	}
+
+	if filter.column == "" && !filter.scheduleStart.Valid {
 		writeError(w, http.StatusBadRequest, "date_field, date_start, and date_end are required together")
 		return nil, false
 	}
-
-	column := ""
-	switch field {
-	case "created_at":
-		column = "created_at"
-	case "updated_at":
-		column = "updated_at"
-	default:
-		writeError(w, http.StatusBadRequest, "invalid date_field")
-		return nil, false
-	}
-
-	start, err := time.Parse(time.RFC3339Nano, startRaw)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid date_start")
-		return nil, false
-	}
-	end, err := time.Parse(time.RFC3339Nano, endRaw)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid date_end")
-		return nil, false
-	}
-	if !start.Before(end) {
-		writeError(w, http.StatusBadRequest, "date_start must be before date_end")
-		return nil, false
-	}
-
-	return &issueDateFilter{column: column, start: start, end: end}, true
+	return filter, true
 }
 
 func appendIssueDateFilter(where []string, addArg func(any) string, filter *issueDateFilter) []string {
 	if filter == nil {
 		return where
 	}
-	startRef := addArg(filter.start)
-	endRef := addArg(filter.end)
-	return append(where, fmt.Sprintf(
-		"i.%s >= %s AND i.%s < %s",
-		filter.column,
-		startRef,
-		filter.column,
-		endRef,
-	))
+	if filter.column != "" {
+		startRef := addArg(filter.start)
+		endRef := addArg(filter.end)
+		where = append(where, fmt.Sprintf(
+			"i.%s >= %s AND i.%s < %s",
+			filter.column,
+			startRef,
+			filter.column,
+			endRef,
+		))
+	}
+	if filter.scheduleStart.Valid && filter.scheduleEnd.Valid {
+		startRef := addArg(filter.scheduleStart)
+		endRef := addArg(filter.scheduleEnd)
+		where = append(where, fmt.Sprintf(
+			"i.start_date IS NOT NULL AND i.due_date IS NOT NULL AND i.start_date <= %s AND i.due_date >= %s",
+			endRef,
+			startRef,
+		))
+	}
+	return where
 }
 
 func splitCommaParam(raw string) []string {
