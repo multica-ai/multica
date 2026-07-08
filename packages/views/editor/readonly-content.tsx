@@ -41,7 +41,7 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
-import { isAllowedFileCardHref } from "@multica/ui/markdown";
+import { isAllowedFileCardHref, remarkCjkAutolink } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -432,8 +432,11 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
+  // urls: false — let remark-gfm autolink bare URLs in the parse tree so an
+  // adjacent markdown delimiter (e.g. a closing `**`) is never swallowed into
+  // the href (MUL-4242). remarkCjkAutolink below re-applies the CJK boundary.
   const processed = useMemo(
-    () => highlightToHtml(preprocessMarkdown(content)),
+    () => highlightToHtml(preprocessMarkdown(content, { urls: false })),
     [content],
   );
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -458,6 +461,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
           [remarkMath, { singleDollarTextMath: false }],
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
+          remarkCjkAutolink,
         ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}

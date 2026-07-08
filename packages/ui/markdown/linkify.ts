@@ -35,7 +35,10 @@ const BARE_FILENAME_REGEX = new RegExp(`^[\\w.-]+\\.(?:${FILE_EXTENSIONS})$`, 'i
 // character up to the next whitespace swallowed into the href. We truncate the
 // detected URL at the first occurrence of any of these characters. Character
 // set mirrors the fix applied in mattermost/marked#22.
-const CJK_URL_TERMINATOR_REGEX =
+//
+// Exported so the read-only render pipeline can apply the same boundary to URLs
+// that remark-gfm autolinks in the parse tree (see remark-cjk-autolink.ts).
+export const CJK_URL_TERMINATOR_REGEX =
   /[！-／：-＠［-｀｛-～、。「-】]/
 
 interface DetectedLink {
@@ -270,13 +273,18 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
 }
 
 /**
- * Detect all links (URLs, emails, file paths) in text
+ * Detect all links (URLs, emails, file paths) in text.
+ *
+ * `includeUrls` gates the URL/email pass. Read-only markdown renderers pass
+ * `false` and let remark-gfm autolink URLs in the parse tree instead, which
+ * cannot corrupt adjacent markdown (e.g. a trailing `**`). File paths, which
+ * remark-gfm does not linkify, are always detected. See preprocessLinks.
  */
-export function detectLinks(text: string): DetectedLink[] {
+export function detectLinks(text: string, includeUrls = true): DetectedLink[] {
   const links: DetectedLink[] = []
 
   // 1. Detect URLs and emails with linkify-it, applying CJK boundary handling.
-  collectLinkifyMatches(text, 0, links)
+  if (includeUrls) collectLinkifyMatches(text, 0, links)
 
   // 2. Detect file paths with custom regex
   // Reset regex state
@@ -310,10 +318,20 @@ export function detectLinks(text: string): DetectedLink[] {
 }
 
 /**
- * Preprocess text to convert raw URLs and file paths into markdown links
- * Skips code blocks and already-linked content
+ * Preprocess text to convert raw URLs and file paths into markdown links.
+ * Skips code blocks and already-linked content.
+ *
+ * `opts.urls` (default `true`) controls the URL/email pass. The Tiptap editor
+ * keeps it on because @tiptap/markdown does not autolink bare URLs. Read-only
+ * react-markdown renderers pass `false`: they let remark-gfm autolink URLs in
+ * the parse tree, where a bare URL can no longer swallow an adjacent markdown
+ * delimiter — the string pass here can't tell `https://x**` (URL + bold close)
+ * from a URL that legitimately ends in `*`, so it corrupted both (MUL-4242).
+ * File paths (which remark-gfm never linkifies) are converted in both modes.
  */
-export function preprocessLinks(text: string): string {
+export function preprocessLinks(text: string, opts?: { urls?: boolean }): string {
+  const includeUrls = opts?.urls ?? true
+
   // Quick check - if no potential links, return early
   if (!linkify.pretest(text) && !/[~/.]\//.test(text)) {
     return text
@@ -321,7 +339,7 @@ export function preprocessLinks(text: string): string {
 
   const codeRanges = findCodeRanges(text)
   const markdownLinkRanges = findMarkdownLinkRanges(text)
-  const links = detectLinks(text)
+  const links = detectLinks(text, includeUrls)
 
   if (links.length === 0) return text
 
