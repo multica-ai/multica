@@ -413,9 +413,6 @@ func TestProjectResourceLocalDirectoryValidation(t *testing.T) {
 		{"missing daemon_id", map[string]any{"local_path": "/Users/foo/work"}},
 		{"blank daemon_id", map[string]any{"local_path": "/Users/foo/work", "daemon_id": ""}},
 		{"wrong type in payload", map[string]any{"local_path": 42, "daemon_id": "d1"}},
-		{"unknown mode", map[string]any{"local_path": "/Users/foo/work", "daemon_id": "d1", "mode": "garbled"}},
-		{"pool_root relative", map[string]any{"local_path": "/Users/foo/work", "daemon_id": "d1", "mode": "worktree_pool", "pool_root": "relative/path"}},
-		{"max_parallel negative", map[string]any{"local_path": "/Users/foo/work", "daemon_id": "d1", "mode": "worktree_pool", "max_parallel": -1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -428,52 +425,6 @@ func TestProjectResourceLocalDirectoryValidation(t *testing.T) {
 			testHandler.CreateProjectResource(w, req)
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
-			}
-		})
-	}
-}
-
-// TestValidateLocalDirectoryRef_WorktreePoolRoundTrip pins the shape of the
-// normalised JSON returned by validateLocalDirectoryRef for both modes.
-// The zero-mode ("" / in_place) case is the historical wire format and
-// must NOT emit `mode` / `pool_root` / `max_parallel` even when the
-// client sent explicit zero values — that keeps rows byte-stable across
-// clients that never learnt about the pool fields (MUL-3483).
-func TestValidateLocalDirectoryRef_WorktreePoolRoundTrip(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "default mode strips pool fields",
-			in:   `{"local_path":"/Users/x/repo","daemon_id":"d1","mode":"in_place","pool_root":"/tmp/ignored","max_parallel":8}`,
-			want: `{"local_path":"/Users/x/repo","daemon_id":"d1"}`,
-		},
-		{
-			name: "empty mode is equivalent to in_place",
-			in:   `{"local_path":"/Users/x/repo","daemon_id":"d1"}`,
-			want: `{"local_path":"/Users/x/repo","daemon_id":"d1"}`,
-		},
-		{
-			name: "worktree_pool preserves fields",
-			in:   `{"local_path":"/Users/x/repo","daemon_id":"d1","mode":"worktree_pool","pool_root":"/tmp/pool","max_parallel":3}`,
-			want: `{"local_path":"/Users/x/repo","daemon_id":"d1","mode":"worktree_pool","pool_root":"/tmp/pool","max_parallel":3}`,
-		},
-		{
-			name: "worktree_pool without pool_root or max_parallel keeps mode",
-			in:   `{"local_path":"/Users/x/repo","daemon_id":"d1","mode":"worktree_pool"}`,
-			want: `{"local_path":"/Users/x/repo","daemon_id":"d1","mode":"worktree_pool"}`,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := validateLocalDirectoryRef(json.RawMessage(tc.in))
-			if err != nil {
-				t.Fatalf("validate: %v", err)
-			}
-			if string(out) != tc.want {
-				t.Fatalf("mismatch:\n got: %s\nwant: %s", string(out), tc.want)
 			}
 		})
 	}

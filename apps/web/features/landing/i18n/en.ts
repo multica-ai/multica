@@ -294,6 +294,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.40",
+        date: "2026-07-07",
+        title: "In-page find, resumable downloads, and fixes",
+        changes: [],
+        features: [
+          "You can now invite workspace members straight from the command line.",
+          "Issue detail now supports in-page find (Ctrl+F) to jump to and highlight matches.",
+          "Attachment downloads can resume after an interruption instead of restarting from the beginning.",
+        ],
+        improvements: [
+          "The in-progress task indicator in chat refreshes faster and makes fewer background requests.",
+          "More agent providers can now be configured with MCP.",
+          "Opening a workspace no longer auto-opens the chat window — open it yourself from the button.",
+        ],
+        fixes: [
+          "Multiple agent tasks running in parallel on the same machine no longer interfere with each other.",
+          "Reconnecting a Feishu bot to the same agent no longer loses members' account links or chat continuity.",
+          "After login, if you already have a workspace you're no longer sent to the create-workspace page by mistake.",
+          "Deleting a workspace now waits for the server before navigating, and a failed delete leaves you in place.",
+          "Launching Claude as root or with sudo now shows a clear, actionable error instead of just failing.",
+          "You can now delete orphaned custom runtimes.",
+        ],
+      },
+      {
         version: "0.3.39",
         date: "2026-07-06",
         title: "Qoder and Trae CLI as custom runtime bases, plus squad and stability fixes",

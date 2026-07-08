@@ -98,6 +98,41 @@ SELECT * FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
+-- name: DeleteRevokedChannelInstallationByAppID :one
+-- Hard-delete a REVOKED installation that belongs to a DIFFERENT agent, keyed
+-- by its platform app identity, and RETURN the deleted id. When a Feishu/Lark
+-- Bot is disconnected from agent A (status → 'revoked') and the same Bot (same
+-- app_id) is later bound to a DIFFERENT agent B, agent A's revoked row still
+-- occupies the (channel_type, config->>'app_id') unique slot and blocks the
+-- UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
+-- the upsert create a fresh row for the new agent.
+--
+-- The `agent_id <> arg` fence is load-bearing: re-connecting the SAME agent
+-- must NOT delete its own revoked row. UpsertChannelInstallation conflicts on
+-- (workspace_id, agent_id, channel_type), so the same agent's revoked row is
+-- reactivated in place (status → 'active') with its installation_id — and every
+-- channel_user_binding / channel_chat_session_binding hanging off it —
+-- preserved. Deleting it here would force an INSERT with a fresh installation_id
+-- and orphan all of that agent's member links and chat sessions.
+--
+-- Fenced to one workspace AND status='revoked' so an active installation can
+-- never be silently deleted through this path.
+--
+-- This DELETE is the atomic gate for the whole rebind cleanup: the caller keys
+-- its dependent-row cleanup off the RETURNING id, so cleanup runs ONLY for a row
+-- this statement actually removed. Under READ COMMITTED, a concurrent same-agent
+-- reconnect that reactivates the row to 'active' first makes the WHERE re-check
+-- fail (EvalPlanQual), this deletes nothing (pgx.ErrNoRows), and no dependents
+-- are touched — closing the read-then-delete TOCTOU where a stale "it was
+-- revoked" read could wipe the bindings of a since-reactivated installation.
+DELETE FROM channel_installation
+WHERE channel_type = sqlc.arg('channel_type')
+  AND config ->> 'app_id' = sqlc.arg('app_id')::text
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND agent_id <> sqlc.arg('agent_id')
+  AND status = 'revoked'
+RETURNING id;
+
 -- name: ListChannelInstallationsByWorkspace :many
 -- Scoped by channel_type so a per-channel management surface (e.g. the Lark
 -- installation list) only ever sees its own platform's installations.
@@ -258,6 +293,18 @@ LIMIT 1;
 DELETE FROM channel_user_binding
 WHERE workspace_id = $1 AND multica_user_id = $2;
 
+-- name: DeleteChannelUserBindingsByInstallation :exec
+-- Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+-- every member account link for an installation that is being hard-deleted.
+-- Rebinding a Feishu bot to a DIFFERENT agent starts a fresh installation, so
+-- old links do not follow — a different agent is a distinct connection and
+-- members re-establish their link on first contact. The rows could never be
+-- reused anyway (every Feishu identity lookup is installation_id-scoped, and
+-- FindReusableChannelUserBinding is Slack-only), so removing them just keeps
+-- dead rows from accumulating.
+DELETE FROM channel_user_binding
+WHERE installation_id = $1;
+
 -- =====================
 -- channel_chat_session_binding
 -- =====================
@@ -389,6 +436,17 @@ WHERE installation_id = $1
 ORDER BY received_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: NullChannelInboundAuditInstallationID :exec
+-- Application-layer stand-in for the old ON DELETE SET NULL (MUL-3515 §4,
+-- migration 124 keeps installation_id nullable for exactly this): before an
+-- installation row is hard-deleted, detach its inbound-audit rows by NULLing
+-- installation_id. The drop-audit history is preserved (channel_type,
+-- chat/message ids, drop_reason stay) without a dangling reference to a
+-- removed installation.
+UPDATE channel_inbound_audit
+SET installation_id = NULL
+WHERE installation_id = $1;
+
 -- =====================
 -- channel_outbound_card_message
 -- =====================
@@ -445,3 +503,13 @@ RETURNING *;
 -- name: PurgeExpiredChannelBindingTokens :exec
 DELETE FROM channel_binding_token
 WHERE expires_at < $1;
+
+-- name: DeleteChannelBindingTokensByInstallation :exec
+-- Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
+-- every pending binding token for an installation that is being hard-deleted.
+-- A token stays redeemable for up to 15 min; without this a user who clicks a
+-- still-unexpired bind link right after the bot was rebound to another agent
+-- would consume the token and get a "bound" result written against a deleted
+-- installation — a link that never actually reaches the live bot.
+DELETE FROM channel_binding_token
+WHERE installation_id = $1;

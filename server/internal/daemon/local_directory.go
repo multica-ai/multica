@@ -19,83 +19,13 @@ import (
 // constant — keep in sync if the type string is ever renamed.
 const localDirectoryResourceType = "local_directory"
 
-// localDirectoryModeInPlace / localDirectoryModeWorktreePool mirror the
-// server-side mode strings. Kept as a private, deliberately-duplicated pair
-// to avoid an import cycle between the daemon and the handler package —
-// this constant list is one line, and if the server ever renames either
-// string the daemon must be updated in lockstep anyway.
-const (
-	localDirectoryModeInPlace      = "in_place"
-	localDirectoryModeWorktreePool = "worktree_pool"
-)
-
-// defaultWorktreePoolMaxParallel is the fallback max_parallel when the
-// resource_ref left the field zero. Four covers a typical squad (1 leader
-// + 3 workers) without opening up the machine to unbounded worktree fan-out.
-// The user can raise it by setting max_parallel explicitly on the ref.
-const defaultWorktreePoolMaxParallel = 4
-
 // localDirectoryRef mirrors the server-side ref shape for local_directory
 // project resources. Defined locally so the daemon does not have to import
 // the server handler package.
-//
-// Mode + PoolRoot + MaxParallel are the MUL-3483 worktree_pool opt-in
-// fields. They are omitted (zero-valued) for pre-existing rows and for
-// clients that never learnt about them, in which case the daemon behaves
-// exactly as before — one shared working tree, one path mutex.
 type localDirectoryRef struct {
-	LocalPath   string `json:"local_path"`
-	DaemonID    string `json:"daemon_id"`
-	Label       string `json:"label,omitempty"`
-	Mode        string `json:"mode,omitempty"`
-	PoolRoot    string `json:"pool_root,omitempty"`
-	MaxParallel int    `json:"max_parallel,omitempty"`
-}
-
-// modeOrDefault returns the mode string with the empty default folded to
-// "in_place". Callers should always route through this so a `switch` on
-// the return value never needs a fall-through arm.
-func (r localDirectoryRef) modeOrDefault() string {
-	m := strings.TrimSpace(r.Mode)
-	if m == "" {
-		return localDirectoryModeInPlace
-	}
-	return m
-}
-
-// maxParallelOrDefault applies defaultWorktreePoolMaxParallel to zero-valued
-// requests. Negative values shouldn't reach the daemon (server-side
-// validation rejects them) — clamp them to the default here for safety
-// so a bad row can't make the pool refuse every task.
-func (r localDirectoryRef) maxParallelOrDefault() int {
-	if r.MaxParallel <= 0 {
-		return defaultWorktreePoolMaxParallel
-	}
-	return r.MaxParallel
-}
-
-// localDirectoryLease is the runtime view of a task's local_directory
-// binding, published by acquireLocalDirectoryLockIfNeeded so runTask
-// (and the GC meta writer) can pick the correct WorkDir without
-// re-computing pool allocation. Mode mirrors the ref's mode; WorkDir is
-// the path the agent should actually execute inside — for in_place this
-// is the ref's LocalPath, for worktree_pool it is the freshly allocated
-// worktree.
-type localDirectoryLease struct {
-	Mode    string
-	WorkDir string
-	Branch  string // non-empty for worktree_pool mode; the branch git created
-}
-
-// defaultWorktreePoolRoot returns the fallback pool_root for the given
-// base repo when the ref left the field empty. Keeping the default under
-// a daemon-managed hidden directory (rather than inside the user's repo)
-// stops pool worktrees from polluting `git status` on the base tree and
-// keeps them out of the way when the user manually cleans up.
-func defaultWorktreePoolRoot(base string) string {
-	// filepath.Join is safe on both POSIX and Windows; the ".multica-worktrees"
-	// name mirrors "multica" branding used elsewhere in agent workdirs.
-	return filepath.Join(filepath.Dir(base), ".multica-worktrees", filepath.Base(base))
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
