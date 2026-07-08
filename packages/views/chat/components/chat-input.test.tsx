@@ -248,7 +248,8 @@ describe("ChatInput attachment wiring", () => {
 
     // Wait for the submit button to become enabled (onUpdate has fired and
     // React has re-rendered). SubmitButton has no aria-label, so we pick
-    // the last action button on the bar (FileUploadButton, SubmitButton).
+    // the last action button on the bar (ChatAddMenu "+" is on the left,
+    // SubmitButton is last).
     let sendButton: HTMLElement;
     await waitFor(() => {
       const buttons = screen.getAllByRole("button");
@@ -363,10 +364,10 @@ describe("ChatInput attachment wiring", () => {
 
   it("does not render the file upload button when onUploadFile is omitted", () => {
     renderInput({ onUploadFile: undefined });
-    // FileUploadButton renders an icon button labelled by its tooltip — when
-    // upload wiring is absent the chat input falls back to "submit + extras"
-    // only. Probe by counting buttons: with no upload, only the submit
-    // button is in the action row.
+    // The ChatAddMenu "+" (which hosts file upload) only mounts when upload
+    // wiring is present — without it the chat input falls back to "submit +
+    // extras" only. Probe by counting buttons: with no upload, only the
+    // submit button is in the action row.
     const buttons = screen.getAllByRole("button");
     // The agent picker may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.

@@ -17,7 +17,9 @@
     "send_tooltip": "Send",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
-    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment."
+    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
+    "add_tooltip": "Add",
+    "upload_file": "Image"
   },
   "message_list": {
     "show_details": "Show details",

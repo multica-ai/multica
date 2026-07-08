@@ -9,8 +9,8 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { ChatAddMenu } from "./chat-add-menu";
 import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
@@ -389,20 +389,19 @@ export function ChatInput({
             // continues a bullet list, leaving users stuck after one item.
           />
         </div>
-        {leftAdornment && (
-          <div className="absolute bottom-1.5 left-2 flex items-center">
+        {(uploadEnabled || leftAdornment) && (
+          <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
+            {uploadEnabled && (
+              <ChatAddMenu
+                onSelectFile={(file) => editorRef.current?.uploadFile(file)}
+              />
+            )}
             {leftAdornment}
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          {uploadEnabled && (
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-          )}
           <SubmitButton
+            shape="circle"
             onClick={handleSend}
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             loading={isSubmitting}
