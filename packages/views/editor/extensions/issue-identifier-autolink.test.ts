@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
 import type { RefObject } from "react";
 import { BaseMentionExtension } from "./mention-extension";
@@ -8,6 +9,16 @@ import {
   createIssueIdentifierAutolinkExtension,
   type IssueIdentifierResolver,
 } from "./issue-identifier-autolink";
+
+const LinkExtension = Link.extend({ inclusive: false }).configure({
+  openOnClick: false,
+  autolink: false,
+});
+
+/** Count canonical issue mentions in serialised markdown. */
+function mentionCount(markdown: string): number {
+  return markdown.match(/mention:\/\/issue\//g)?.length ?? 0;
+}
 
 // The real mention extension renders via a React NodeView (IssueChip → workspace
 // hooks) that needs providers we don't mount here. Swap in a plain-DOM NodeView
@@ -33,6 +44,7 @@ function makeEditor(): Editor {
     element,
     extensions: [
       StarterKit.configure({ link: false }),
+      LinkExtension,
       TestMention,
       createIssueIdentifierAutolinkExtension({ resolveRef }),
       Markdown.configure({ indentation: { style: "space", size: 3 } }),
@@ -147,5 +159,91 @@ describe("createIssueIdentifierAutolinkExtension", () => {
 
     expect(resolveMock).not.toHaveBeenCalled();
     expect(editor.getMarkdown()).not.toContain("mention://issue");
+  });
+
+  // --- blocker regressions: replace ONLY the captured range ---------------
+
+  it("converts only the newly-typed occurrence, not a pre-existing identical one", async () => {
+    resolveMock.mockResolvedValue({ id: "uuid-1", identifier: "MUL-1" });
+    editor = makeEditor();
+
+    // Pre-existing MUL-1 arrives via a programmatic (preventUpdate) set — the
+    // path the real editor uses on mount / WS resets — so it is not captured.
+    editor.commands.setContent("old MUL-1 here", {
+      emitUpdate: false,
+      contentType: "markdown",
+    });
+    await flush();
+    expect(resolveMock).not.toHaveBeenCalled();
+
+    // User now types a brand-new MUL-1 at the end of the paragraph.
+    const endOfPara = editor.state.doc.content.size - 1;
+    editor.view.dispatch(editor.state.tr.insertText(" MUL-1 ", endOfPara));
+    await flush();
+
+    const md = editor.getMarkdown();
+    // Exactly the new occurrence became a mention; the old one stays text.
+    expect(mentionCount(md)).toBe(1);
+    expect(md).toContain("old MUL-1 here");
+    expect(md).toContain("mention://issue/uuid-1");
+  });
+
+  it("paste converts identifiers inside the paste range but not identical ones outside it", async () => {
+    resolveMock.mockImplementation(async (identifier) => {
+      const map: Record<string, string> = {
+        "MUL-2": "uuid-2",
+        "MUL-3": "uuid-3",
+        "MUL-9": "uuid-9",
+      };
+      const id = map[identifier];
+      return id ? { id, identifier } : null;
+    });
+    editor = makeEditor();
+
+    // Pre-existing (programmatic) MUL-9 outside any future paste range.
+    editor.commands.setContent("keep MUL-9 outside", {
+      emitUpdate: false,
+      contentType: "markdown",
+    });
+    await flush();
+
+    // Paste two identifiers at the very start of the doc.
+    const tr = editor.state.tr.insertText("MUL-2 plus MUL-3 x ", 1);
+    tr.setMeta("paste", true);
+    editor.view.dispatch(tr);
+    await flush();
+
+    const md = editor.getMarkdown();
+    // Both pasted identifiers converted; the outside MUL-9 did NOT.
+    expect(md).toContain("mention://issue/uuid-2");
+    expect(md).toContain("mention://issue/uuid-3");
+    expect(md).not.toContain("mention://issue/uuid-9");
+    expect(md).toContain("MUL-9");
+    expect(mentionCount(md)).toBe(2);
+    expect(resolveMock).not.toHaveBeenCalledWith("MUL-9");
+  });
+
+  it("does not replace an identifier that already carries an explicit link mark", async () => {
+    resolveMock.mockResolvedValue({ id: "uuid-1", identifier: "MUL-1" });
+    editor = makeEditor();
+
+    // A link-marked "MUL-1" (e.g. an existing markdown link label) followed by
+    // plain text, then the user types a boundary after it.
+    const linkMark = editor.schema.marks.link!.create({ href: "https://x.test" });
+    const linked = editor.schema.text("MUL-1", [linkMark]);
+    const trailing = editor.schema.text(" ");
+    const paragraph = editor.schema.nodes.paragraph!.create(null, [
+      linked,
+      trailing,
+    ]);
+    editor.view.dispatch(
+      editor.state.tr.replaceWith(0, editor.state.doc.content.size, paragraph),
+    );
+    await flush();
+
+    expect(resolveMock).not.toHaveBeenCalled();
+    const md = editor.getMarkdown();
+    expect(md).not.toContain("mention://issue");
+    expect(md).toContain("https://x.test");
   });
 });
