@@ -130,7 +130,7 @@ func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID
 		PageToken:     opts.Before,
 	})
 	if err != nil {
-		return channel.HistoryPage{}, fmt.Errorf("read feishu chat: %w", err)
+		return channel.HistoryPage{}, readError("read feishu chat", err)
 	}
 	page := h.normalizePage(ctx, t, res.Messages, true)
 	page.ChannelType = string(channel.TypeFeishu)
@@ -166,13 +166,34 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 	}
 	res, err := h.client.ListContainerMessages(ctx, t.creds, params)
 	if err != nil {
-		return channel.HistoryPage{}, fmt.Errorf("read feishu thread: %w", err)
+		return channel.HistoryPage{}, readError("read feishu thread", err)
 	}
 	page := h.normalizePage(ctx, t, res.Messages, false)
 	page.ChannelType = string(channel.TypeFeishu)
 	page.ThreadID = ts
 	page.NextCursor = res.PageToken
 	return page, nil
+}
+
+// readError classifies a Lark list-messages failure. A missing-scope error
+// (e.g. im:message.group_msg for group history) is permanent and actionable, so
+// it becomes a channel.HistoryUnavailableError — the handler answers it as a
+// 200 + note so the agent proceeds without history and reports the real,
+// fixable cause instead of retrying a "transient" 5xx forever (MUL-4166). Every
+// other failure (transport, 5xx, unexpected code) stays a plain error → 502.
+func readError(op string, err error) error {
+	if IsMissingPermission(err) {
+		hint := "read this chat's messages"
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Msg != "" {
+			hint = apiErr.Msg // Lark's message names the exact scope, e.g. "need scope: im:message.group_msg"
+		}
+		return &channel.HistoryUnavailableError{Reason: fmt.Sprintf(
+			"Lark channel history is unavailable: the connected Feishu app is missing a required permission (%s). "+
+				"Grant that scope in the Feishu app's permissions, then re-publish and re-authorize the app. "+
+				"For now, answer using the current message without channel history.", hint)}
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 func clampHistoryLimit(n int) int {

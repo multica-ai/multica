@@ -136,6 +136,19 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 			})
 			return
 		}
+		// The channel IS bound but its history can't be read for a known,
+		// non-transient reason (e.g. the app is missing a required scope). Answer
+		// with the actionable reason as a note + 200 — never a retryable 5xx,
+		// which the agent would misreport as a transient platform outage and keep
+		// retrying against a permanent failure.
+		var unavailable *channel.HistoryUnavailableError
+		if errors.As(err, &unavailable) {
+			writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
+				Messages: []channel.HistoryMessage{},
+				Note:     unavailable.Reason,
+			})
+			return
+		}
 		slog.Error("chat channel history read failed", append(logger.RequestAttrs(r),
 			"error", err, "chat_session_id", uuidToString(sessionID))...)
 		writeError(w, http.StatusBadGateway, "failed to read channel history")

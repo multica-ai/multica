@@ -60,7 +60,22 @@ const (
 	// open.feishu.cn/document/server-docs/api-call-guide/server-error-codes.
 	codeTokenExpired = 99991663
 	codeTokenInvalid = 99991664
+	// codeMissingPermission is Lark's "Lack of necessary permissions" code
+	// (returned as HTTP 400) when the app is missing a required scope — e.g.
+	// im:message.group_msg to read group chat history. The history reader
+	// classifies it as a non-transient, actionable failure rather than a
+	// retryable transport error. See MUL-4166.
+	codeMissingPermission = 230027
 )
+
+// IsMissingPermission reports whether err is a Lark APIError signalling the app
+// lacks a required scope (codeMissingPermission). The on-demand history reader
+// uses it to turn a permanent permission failure into an actionable note
+// instead of a retryable 5xx.
+func IsMissingPermission(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Code == codeMissingPermission
+}
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
 type HTTPClientConfig struct {
@@ -974,6 +989,19 @@ func (c *httpAPIClient) doJSON(ctx context.Context, baseURL, method, path, token
 		return fmt.Errorf("read body: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Lark returns its business envelope {code,msg} even on non-2xx (e.g. a
+		// 400 with code 230027 when the app is missing a required scope). Surface
+		// it as a structured *APIError so callers can classify the failure
+		// (permission vs transient) instead of string-matching; fall back to an
+		// opaque transport error when the body is not a Lark envelope (e.g. a bare
+		// 5xx from a gateway).
+		var env struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if json.Unmarshal(rawBody, &env) == nil && env.Code != 0 {
+			return &APIError{Op: fmt.Sprintf("http %d", resp.StatusCode), Code: env.Code, Msg: env.Msg}
+		}
 		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(rawBody), 512))
 	}
 	if out != nil && len(rawBody) > 0 {

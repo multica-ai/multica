@@ -176,6 +176,31 @@ func TestGetChatHistory_NoBindingReturnsNote(t *testing.T) {
 	}
 }
 
+// A HistoryUnavailableError (bound channel, but history unreadable for a known
+// reason like a missing scope) becomes a 200 + the actionable reason as a note,
+// NOT a 502 — so the agent proceeds and reports the fixable cause instead of
+// retrying a "transient" failure forever.
+func TestGetChatHistory_UnavailableReturnsActionableNote(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	taskID := newChatHistoryTask(t, true)
+	reason := "Lark channel history is unavailable: the connected Feishu app is missing a required permission (need scope: im:message.group_msg)."
+	withChatHistory(t, &fakeChatHistoryReader{err: &channel.HistoryUnavailableError{Reason: reason}})
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (not a retryable 5xx): %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Note != reason || len(resp.Messages) != 0 {
+		t.Fatalf("expected the actionable reason as the note, got %+v", resp)
+	}
+}
+
 func TestGetChatHistory_NilReaderReturnsNote(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")

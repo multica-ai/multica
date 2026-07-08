@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -217,5 +218,44 @@ func TestHistoryInactiveInstall(t *testing.T) {
 	h := newTestHistory(historyFakeQueries{binding: ChatSessionBinding{ChannelChatID: "oc_chat"}, inst: inst}, newHistoryFakeClient())
 	if _, err := h.ChannelOverview(context.Background(), pgtype.UUID{}, channel.HistoryOptions{}); !errors.Is(err, channel.ErrNoChannelSession) {
 		t.Fatalf("revoked install should read as no-session, got %v", err)
+	}
+}
+
+// A missing-scope read (Lark code 230027, e.g. group history without
+// im:message.group_msg) is permanent, so it degrades to an actionable
+// HistoryUnavailableError (→ 200 + note), NOT a retryable error.
+func TestHistoryMissingPermissionDegrades(t *testing.T) {
+	client := newHistoryFakeClient()
+	client.listErr = &APIError{Op: "http 400", Code: 230027, Msg: "Lack of necessary permissions, ext=need scope: im:message.group_msg"}
+	h := newTestHistory(historyFakeQueries{binding: ChatSessionBinding{ChannelChatID: "oc_chat"}, inst: activeInstall()}, client)
+
+	_, err := h.ChannelOverview(context.Background(), pgtype.UUID{}, channel.HistoryOptions{})
+	var un *channel.HistoryUnavailableError
+	if !errors.As(err, &un) {
+		t.Fatalf("missing scope should yield HistoryUnavailableError, got %v", err)
+	}
+	if !strings.Contains(un.Reason, "im:message.group_msg") {
+		t.Errorf("note should surface the missing scope, got %q", un.Reason)
+	}
+	// The Thread path degrades the same way.
+	if _, terr := h.Thread(context.Background(), pgtype.UUID{}, "", channel.HistoryOptions{}); !errors.As(terr, &un) {
+		t.Fatalf("Thread should also degrade on missing scope, got %v", terr)
+	}
+}
+
+// A transient / unclassified read failure stays a plain error (→ 502), never a
+// note — the agent should not silently proceed on an ambiguous outage.
+func TestHistoryTransientErrorStaysError(t *testing.T) {
+	client := newHistoryFakeClient()
+	client.listErr = errors.New("http 500: boom")
+	h := newTestHistory(historyFakeQueries{binding: ChatSessionBinding{ChannelChatID: "oc_chat"}, inst: activeInstall()}, client)
+
+	_, err := h.ChannelOverview(context.Background(), pgtype.UUID{}, channel.HistoryOptions{})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	var un *channel.HistoryUnavailableError
+	if errors.As(err, &un) {
+		t.Fatalf("a transient error must NOT degrade to a note: %v", err)
 	}
 }
