@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import {
   Inbox,
   CircleUser,
@@ -7,12 +7,15 @@ import {
   Monitor,
   BookOpenText,
   Settings,
+  Users,
+  FolderKanban,
   X,
   Plus,
   Pin,
   PinOff,
   type LucideIcon,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   PointerSensor,
@@ -45,7 +48,10 @@ import {
   resolveRouteIcon,
   type Tab,
 } from "@/stores/tab-store";
-import { paths } from "@multica/core/paths";
+import { paths, useCurrentWorkspace } from "@multica/core/paths";
+import { spaceListOptions } from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
+import { SpaceIcon } from "@multica/views/spaces";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
@@ -55,12 +61,23 @@ const TAB_ICONS: Record<string, LucideIcon> = {
   Monitor,
   BookOpenText,
   Settings,
+  Users,
+  FolderKanban,
 };
+
+/** Space key from a tab path, or null if the tab isn't a space-scoped route.
+ *  Mirrors resolveRouteIcon's segment convention: `/{slug}/space/{key}/...`. */
+function extractSpaceKey(path: string): string | null {
+  const segments = path.split("/").filter(Boolean);
+  if (segments[1] !== "space" || !segments[2]) return null;
+  return decodeURIComponent(segments[2]);
+}
 
 function SortableTabItem({
   tab,
   isActive,
   isOnly,
+  spacesByKey,
 }: {
   tab: Tab;
   isActive: boolean;
@@ -70,6 +87,9 @@ function SortableTabItem({
    * last-tab reseed kicking in. Pinned tabs always hide X (RFC §3 D3c).
    */
   isOnly: boolean;
+  /** Space-scoped tabs render the actual space's icon instead of a generic
+   *  route glyph — keyed by space key, same cache the sidebar reads. */
+  spacesByKey: Map<string, Space>;
 }) {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
@@ -84,11 +104,9 @@ function SortableTabItem({
     isDragging,
   } = useSortable({ id: tab.id });
 
-  // Pinned tabs swap the route icon for a Pin glyph as the static "I am
-  // pinned" indicator (RFC §3 D1v-iv FINAL). The route information is still
-  // present in the title, and this avoids a hard left accent border that read
-  // as visually heavy in light mode.
-  const LeadingIcon = tab.pinned ? Pin : TAB_ICONS[tab.icon];
+  const spaceKey = extractSpaceKey(tab.path);
+  const space = spaceKey ? spacesByKey.get(spaceKey) : undefined;
+  const RouteIcon = TAB_ICONS[tab.icon];
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -141,7 +159,17 @@ function SortableTabItem({
         isDragging && "opacity-60",
       )}
     >
-      {LeadingIcon && <LeadingIcon className="size-3.5 shrink-0" />}
+      {tab.pinned ? (
+        // Pinned tabs swap the route icon for a Pin glyph as the static "I am
+        // pinned" indicator (RFC §3 D1v-iv FINAL). The route information is
+        // still present in the title, and this avoids a hard left accent
+        // border that read as visually heavy in light mode.
+        <Pin className="size-3.5 shrink-0" />
+      ) : space ? (
+        <SpaceIcon space={space} className="size-3.5 shrink-0" />
+      ) : (
+        RouteIcon && <RouteIcon className="size-3.5 shrink-0" />
+      )}
       <span
         className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
         style={{
@@ -236,6 +264,16 @@ export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
 
+  const wsId = useCurrentWorkspace()?.id;
+  const { data: spaces = [] } = useQuery({
+    ...spaceListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const spacesByKey = useMemo(
+    () => new Map(spaces.map((space) => [space.key, space])),
+    [spaces],
+  );
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
@@ -274,6 +312,7 @@ export function TabBar() {
                 tab={tab}
                 isActive={tab.id === activeTabId}
                 isOnly={tabs.length === 1}
+                spacesByKey={spacesByKey}
               />
               {tab.pinned &&
                 index === pinnedCount - 1 &&

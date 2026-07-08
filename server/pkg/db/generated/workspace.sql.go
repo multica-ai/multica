@@ -113,19 +113,6 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 	return i, err
 }
 
-const incrementIssueCounter = `-- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter
-`
-
-func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementIssueCounter, id)
-	var issue_counter int32
-	err := row.Scan(&issue_counter)
-	return issue_counter, err
-}
-
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,

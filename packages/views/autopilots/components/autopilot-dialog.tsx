@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -46,10 +47,12 @@ import {
 } from "@multica/ui/components/ui/select";
 import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -66,8 +69,10 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PillButton } from "../../common/pill-button";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
@@ -92,6 +97,7 @@ export interface AutopilotInitial {
   title: string;
   description: string;
   project_id: string | null;
+  space_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -278,11 +284,11 @@ function useNowTicker(intervalMs = 30_000): Date {
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { t } = useT("autopilots");
   const { open, onOpenChange } = props;
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -293,6 +299,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
+  const [spaceId, setSpaceId] = useState<string | null>(initial.space_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
@@ -364,6 +371,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
+  // Space is required and always resolves to a value — same model as the
+  // issue modal. Associations are creation-time defaults, never constraints:
+  // explicit pick → single-space project → last used → the user's first space.
+  // The picker is never restricted to the project's space set.
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
+  const projectSpaceId =
+    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId, lastSpaceId }) ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -394,6 +411,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: executionMode === "create_issue" ? projectId : null,
+          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -402,6 +420,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             user_id,
           })),
         });
+        setLastSpaceId(effectiveSpaceId);
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
         let webhookTrigger: AutopilotTrigger | null = null;
@@ -447,6 +466,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || null,
           project_id: executionMode === "create_issue" ? projectId : null,
+          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -548,6 +568,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0 border-b">
           <div className="flex items-center gap-2 text-xs">
+            {/* Owning space leads the breadcrumb — same grammar as the
+                issue/project modals: [space] › action. Required single-select,
+                seeded from context, switchable. */}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
+            <ChevronRight className="size-3 text-muted-foreground/40" />
             <div className="flex items-center gap-1.5">
               <span className="inline-flex size-5 items-center justify-center rounded-md bg-primary/15 text-primary">
                 <Rocket className="size-3" />
@@ -560,12 +590,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             </div>
             <span className="text-muted-foreground/60">·</span>
             <span className="text-muted-foreground">{t(($) => $.dialog.subtitle)}</span>
-            {workspaceName && (
-              <>
-                <ChevronRight className="size-3 text-muted-foreground/40" />
-                <span className="text-muted-foreground">{workspaceName}</span>
-              </>
-            )}
           </div>
           <div className="flex items-center gap-1">
             {!isCreate && props.canManageAccess && (
@@ -728,10 +752,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t shrink-0 bg-background">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
-            <Zap className="size-3.5 text-amber-500 shrink-0" />
-            <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
-          </div>
+          {/* Left slot: blocking-validation warnings take precedence over the
+              ambient auto-run hint — one message at a time, in the order the
+              form asks for them (title, then assignee). */}
+          {title.trim().length === 0 || assigneeId.length === 0 ? (
+            <div className="flex items-center gap-1.5 text-xs text-destructive min-w-0">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {title.trim().length === 0
+                  ? t(($) => $.dialog.title_required)
+                  : t(($) => $.dialog.assignee_required)}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+              <Zap className="size-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 shrink-0">
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
               {t(($) => $.dialog.cancel)}

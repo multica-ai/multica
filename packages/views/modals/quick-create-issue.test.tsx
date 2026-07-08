@@ -63,6 +63,7 @@ vi.mock("@tanstack/react-query", () => ({
         return { data: [] };
     }
   },
+  queryOptions: (options: unknown) => options,
 }));
 
 vi.mock("@multica/core/api", () => ({

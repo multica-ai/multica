@@ -8,7 +8,7 @@
   },
   "create_workspace": {
     "title": "Create a new workspace",
-    "description": "Workspaces are shared environments where teams can work on projects and issues."
+    "description": "Workspaces are shared environments where members can work on projects and issues."
   },
   "delete_issue": {
     "title": "Delete issue",
@@ -119,6 +119,8 @@
     "submitting": "Creating...",
     "toast_created": "Project created",
     "toast_failed": "Failed to create project",
+    "space_required": "Select at least one space",
+    "space_min_hint": "A project belongs to at least one space",
     "repos_pill": "Repos",
     "repos_pill_count_one": "{{count}} repo",
     "repos_pill_count_other": "{{count}} repos",

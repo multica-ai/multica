@@ -54,6 +54,7 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, St
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -70,7 +71,10 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
+import { SpaceProjectConflictDialog } from "../../spaces/components/space-project-conflict-dialog";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -697,7 +701,98 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Shared loading placeholder: shown by the IssueDetail wrapper while
+ * resolving an identifier to a UUID, and by IssueDetailInner while fetching
+ * the resolved issue.
+ */
+function IssueDetailSkeleton() {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-4 w-4" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="flex flex-1 min-h-0">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
+            <Skeleton className="h-8 w-3/4" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+            <Skeleton className="h-px w-full" />
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-16 w-full rounded-lg" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="hidden md:block w-80 border-l p-4 space-y-5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-5 w-24" />
+            </div>
+          ))}
+          <Skeleton className="h-px w-full" />
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-3 w-16 shrink-0" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Route boundary: the /issue/:id route is identifier-first (NAI-3) but also
+ * accepts a UUID. Everything downstream (detail cache key, WS patches,
+ * comments, mutations) is keyed by UUID, so an identifier is resolved to its
+ * UUID once here — the server accepts identifiers on GET /api/issues/:id and
+ * falls back to the alias table for pre-move identifiers.
+ */
+export function IssueDetail({ issueId, ...rest }: IssueDetailProps) {
+  const wsId = useWorkspaceId();
+  const isUuid = UUID_RE.test(issueId);
+  const { data: resolved, isError } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !isUuid,
+  });
+  const canonicalId = isUuid ? issueId : resolved?.id;
+  // Once resolution fails, commit to the raw-id fallback permanently (per
+  // mount) instead of re-reading live isError on every render: IssueDetailInner
+  // fetches the same query key on mount and (refetchOnMount default) refetches
+  // it, which flips this component's own isError back to false mid-cycle —
+  // without the latch that toggle unmounts IssueDetailInner, which remounts
+  // and refetches again, forever (never a stable frame to reach "not found").
+  const fellBackToRawIdRef = useRef(false);
+  if (isError) fellBackToRawIdRef.current = true;
+  // canonicalId is only ever falsy while !isUuid (isUuid always yields
+  // canonicalId = issueId), so this is the "still resolving" state.
+  if (!canonicalId && !fellBackToRawIdRef.current) {
+    return <IssueDetailSkeleton />;
+  }
+  if (!canonicalId) {
+    return <IssueDetailInner issueId={issueId} {...rest} />;
+  }
+  return <IssueDetailInner issueId={canonicalId} {...rest} />;
+}
+
+function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -1274,6 +1369,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
+  // Attaching the issue to a project whose space set misses the issue's space
+  // pauses behind the Linear-style resolution dialog (add space vs move issue).
+  const { data: allProjects = [] } = useQuery(projectListOptions(wsId));
+  const { data: allSpaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const [projectConflict, setProjectConflict] = useState<{
+    projectId: string;
+    projectTitle: string;
+    projectSpaces: Space[];
+  } | null>(null);
+  const handleProjectUpdate = (updates: Partial<UpdateIssueRequest>) => {
+    const pid = updates.project_id;
+    if (pid && issue?.space_id) {
+      const proj = allProjects.find((p) => p.id === pid);
+      const ids = proj?.space_ids ?? [];
+      if (ids.length > 0 && !ids.includes(issue.space_id)) {
+        setProjectConflict({
+          projectId: pid,
+          projectTitle: proj?.title ?? "",
+          projectSpaces: allSpaces.filter((tm) => ids.includes(tm.id)),
+        });
+        return;
+      }
+    }
+    handleUpdateField(updates);
+  };
+
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
   // shown for an issue that already has labels attached.
@@ -1358,53 +1479,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
 
   if (loading) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-4" />
-          <Skeleton className="h-4 w-24" />
-        </div>
-        <div className="flex flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
-              <Skeleton className="h-8 w-3/4" />
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-2/3" />
-              </div>
-              <Skeleton className="h-px w-full" />
-              <div className="space-y-3">
-                <Skeleton className="h-4 w-20" />
-                <div className="flex items-start gap-3">
-                  <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-16 w-full rounded-lg" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-5 w-24" />
-              </div>
-            ))}
-            <Skeleton className="h-px w-full" />
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Skeleton className="h-3 w-16 shrink-0" />
-                <Skeleton className="h-4 w-28" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <IssueDetailSkeleton />;
   }
 
   if (!issue) {
@@ -1434,7 +1509,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered. */}
+          {/* Core props — always rendered. Space leads: it owns the issue's
+              identifier namespace. Display-only in v1 — moving an issue
+              between spaces was cut from the UI (the server capability and
+              identifier aliasing remain for a later surface). */}
+          <PropRow label={t(($) => $.detail.prop_space)}>
+            <SpacePicker spaceId={issue.space_id ?? null} onChange={() => {}} align="start" disabled />
+          </PropRow>
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
@@ -1444,9 +1525,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}
-              onUpdate={handleUpdateField}
+              onUpdate={handleProjectUpdate}
             />
           </PropRow>
+          {projectConflict && (
+            <SpaceProjectConflictDialog
+              open
+              spaceName={allSpaces.find((tm) => tm.id === issue.space_id)?.name ?? ""}
+              projectName={projectConflict.projectTitle}
+              projectSpaces={projectConflict.projectSpaces}
+              onAddSpace={() => {
+                handleUpdateField({ project_id: projectConflict.projectId });
+                setProjectConflict(null);
+              }}
+              onMoveToSpace={(tid) => {
+                handleUpdateField({ project_id: projectConflict.projectId, space_id: tid });
+                setProjectConflict(null);
+              }}
+              onCancel={() => setProjectConflict(null)}
+            />
+          )}
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the

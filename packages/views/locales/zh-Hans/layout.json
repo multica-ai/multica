@@ -4,6 +4,7 @@
     "chat": "Chat",
     "my_issues": "我的 issue",
     "issues": "Issues",
+    "spaces": "空间",
     "projects": "项目",
     "autopilots": "自动化",
     "agents": "智能体",
@@ -11,7 +12,8 @@
     "usage": "用量",
     "runtimes": "运行时",
     "skills": "Skills",
-    "settings": "设置"
+    "settings": "设置",
+    "more": "更多"
   },
   "help": {
     "trigger": "帮助",
@@ -43,6 +45,8 @@
       "title": "加入我们的 Discord",
       "description": "和团队及其他用户一起交流。",
       "dismiss": "关闭"
-    }
+    },
+    "new_space": "新建空间",
+    "spaces_empty": "新建第一个空间"
   }
 }

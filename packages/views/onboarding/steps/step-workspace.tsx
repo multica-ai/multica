@@ -53,23 +53,14 @@ import { isReservedSlug } from "@multica/core/paths";
  *
  * The create-fields block doubles as a pedagogical preview: the URL is
  * rendered as a `<host>/[slug]` pill (host derived from the deployment's
- * app URL so self-hosted instances show their own domain), and a live
- * `Issues will look
- * like ACME-123` line shows the user what their issue IDs will read
- * like before they've created anything.
+ * app URL so self-hosted instances show their own domain). The default
+ * space's issue key is derived server-side from the slug, so the form
+ * only asks for name and URL.
  *
  * Resume path ships two picker cards (existing + create-new) and the
  * user toggles between them. No-existing path just shows the create
  * fields directly.
  */
-
-function issuePrefix(slug: string): string {
-  // Mirrors the server's default prefix derivation — first 4 chars of
-  // the slug, uppercased. Falls back to "WS" when the slug is empty so
-  // the preview line never collapses to a single dangling "-".
-  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 4);
-  return (head || "ws").toUpperCase();
-}
 
 export function StepWorkspace({
   existing,
@@ -148,7 +139,10 @@ export function StepWorkspace({
   const handleCreate = () => {
     if (!canCreate || createWorkspace.isPending) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+      },
       {
         onSuccess: onCreated,
         onError: (error) => {
@@ -262,18 +256,6 @@ export function StepWorkspace({
           />
         </div>
         {slugError && <p className="text-xs text-destructive">{slugError}</p>}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-medium text-muted-foreground">
-          {t(($) => $.step_workspace.issue_prefix_label)}
-        </div>
-        <div className="text-sm leading-[1.55] text-muted-foreground">
-          {t(($) => $.step_workspace.issue_prefix_prefix)}
-          <span className="font-mono text-foreground">
-            {issuePrefix(slug)}-123
-          </span>
-          {t(($) => $.step_workspace.issue_prefix_suffix)}
-        </div>
       </div>
     </div>
   );

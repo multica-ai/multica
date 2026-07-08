@@ -173,9 +173,11 @@ func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return 
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
 
 type fakeReader struct {
-	session db.ChatSession
-	ws      db.Workspace
-	sessErr error
+	session  db.ChatSession
+	ws       db.Workspace
+	space    db.WorkspaceSpace
+	spaceErr error
+	sessErr  error
 }
 
 func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSession, error) {
@@ -183,6 +185,18 @@ func (f *fakeReader) GetChatSession(_ context.Context, _ pgtype.UUID) (db.ChatSe
 }
 func (f *fakeReader) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspace, error) {
 	return f.ws, nil
+}
+func (f *fakeReader) GetWorkspaceSpace(_ context.Context, _ db.GetWorkspaceSpaceParams) (db.WorkspaceSpace, error) {
+	if f.spaceErr != nil {
+		return db.WorkspaceSpace{}, f.spaceErr
+	}
+	return f.space, nil
+}
+func (f *fakeReader) GetDefaultWorkspaceSpace(_ context.Context, _ pgtype.UUID) (db.WorkspaceSpace, error) {
+	if f.spaceErr != nil {
+		return db.WorkspaceSpace{}, f.spaceErr
+	}
+	return f.space, nil
 }
 
 // ---- harness ----
@@ -400,7 +414,15 @@ func TestRouter_ClaimLost_Drops(t *testing.T) {
 func TestRouter_IssueCommand_Creates(t *testing.T) {
 	h := newHarness(t)
 	h.binder.appendResult = AppendResult{DedupMarked: true, IssueCommand: &IssueCommand{Title: "Fix login", Description: "details"}}
-	h.issues.result = service.IssueCreateResult{Issue: db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "Fix login"}}
+	spaceID := uuidFromString(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	h.reader.space = db.WorkspaceSpace{ID: spaceID, WorkspaceID: h.inst.inst.WorkspaceID, Key: "ENG"}
+	h.issues.result = service.IssueCreateResult{Issue: db.Issue{
+		ID:          uuidFromString(t, "77777777-7777-7777-7777-777777777777"),
+		WorkspaceID: h.inst.inst.WorkspaceID,
+		SpaceID:     spaceID,
+		Number:      42,
+		Title:       "Fix login",
+	}}
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -412,13 +434,13 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
-			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
+			if r.IssueIdentifier == "ENG-42" && r.IssueTitle == "Fix login" {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatalf("expected an issue-created reply with the workspace-qualified identifier")
+		t.Fatalf("expected an issue-created reply with the space-qualified identifier")
 	}
 }
 

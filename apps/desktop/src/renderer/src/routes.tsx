@@ -14,6 +14,13 @@ import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
+import {
+  SpaceIssuesRoute,
+  SpaceProjectsRoute,
+  SpaceAutopilotsRoute,
+  SpaceDetailRoute,
+} from "./pages/space-surface-pages";
+import { CreateSpacePage } from "@multica/views/spaces";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
@@ -124,6 +131,15 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issues" },
           },
           {
+            // Canonical issue-detail route: identifier-first (/issue/NAI-3),
+            // also accepts a UUID.
+            path: "issue/:id",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
+            // Legacy alias — persisted tabs from older builds still point at
+            // /issues/:id; keep them opening instead of dropping the tab.
             path: "issues/:id",
             element: <IssueDetailPage />,
             handle: { title: "Issue" },
@@ -132,6 +148,31 @@ export const appRoutes: RouteObject[] = [
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },
+          },
+          {
+            path: "space/new",
+            element: <CreateSpacePage />,
+            handle: { title: "New space" },
+          },
+          {
+            path: "space/:spaceKey/issues",
+            element: <SpaceIssuesRoute />,
+            handle: { title: "Space issues" },
+          },
+          {
+            path: "space/:spaceKey/projects",
+            element: <SpaceProjectsRoute />,
+            handle: { title: "Space projects" },
+          },
+          {
+            path: "space/:spaceKey/autopilots",
+            element: <SpaceAutopilotsRoute />,
+            handle: { title: "Space autopilots" },
+          },
+          {
+            path: "space/:spaceKey",
+            element: <SpaceDetailRoute />,
+            handle: { title: "Space detail" },
           },
           {
             path: "projects/:id",

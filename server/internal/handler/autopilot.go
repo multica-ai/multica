@@ -33,6 +33,7 @@ type AutopilotResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	SpaceID     *string `json:"space_id"`
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
@@ -180,6 +181,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		ProjectID:          uuidToPtr(a.ProjectID),
+		SpaceID:            uuidToPtr(a.SpaceID),
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
@@ -301,6 +303,7 @@ type CreateAutopilotRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	SpaceID     *string `json:"space_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
 	AssigneeType       *string           `json:"assignee_type"`
@@ -314,6 +317,7 @@ type UpdateAutopilotRequest struct {
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
 	ProjectID          *string `json:"project_id"`
+	SpaceID            *string `json:"space_id"`
 	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         *string `json:"assignee_id"`
 	Status             *string `json:"status"`
@@ -384,9 +388,18 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
+	var spaceFilter pgtype.UUID
+	if t := r.URL.Query().Get("space_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "space_id")
+		if !ok {
+			return
+		}
+		spaceFilter = id
+	}
 
 	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
 		WorkspaceID: parseUUID(workspaceID),
+		SpaceID:     spaceFilter,
 		Status:      statusFilter,
 	})
 	if err != nil {
@@ -643,6 +656,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	spaceID, ok := h.resolveAutopilotSpace(w, r, wsUUID, req.SpaceID, projectID, pgtype.UUID{})
+	if !ok {
+		return
+	}
 
 	// Validate before insert so a bad payload doesn't half-create the row.
 	subscriberUUIDs, ok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
@@ -665,6 +682,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         assigneeUUID,
 		Status:             "active",
 		ExecutionMode:      req.ExecutionMode,
+		SpaceID:            spaceID,
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
@@ -783,6 +801,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
 		ProjectID:          prev.ProjectID,
+		SpaceID:            prev.SpaceID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -811,6 +830,17 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	if _, ok := rawFields["space_id"]; ok {
+		spaceID, ok := h.resolveAutopilotSpace(w, r, prev.WorkspaceID, req.SpaceID, params.ProjectID, prev.SpaceID)
+		if !ok {
+			return
+		}
+		params.SpaceID = spaceID
+	} else if _, projectTouched := rawFields["project_id"]; projectTouched {
+		if _, ok := h.resolveAutopilotSpace(w, r, prev.WorkspaceID, nil, params.ProjectID, params.SpaceID); !ok {
+			return
+		}
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -939,6 +969,32 @@ func (h *Handler) parseAutopilotProjectID(
 		return pgtype.UUID{}, false
 	}
 	return projectID, true
+}
+
+func (h *Handler) resolveAutopilotSpace(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID pgtype.UUID,
+	rawSpaceID *string,
+	projectID pgtype.UUID,
+	fallback pgtype.UUID,
+) (pgtype.UUID, bool) {
+	requested := fallback
+	if rawSpaceID != nil && *rawSpaceID != "" {
+		parsed, ok := parseUUIDOrBadRequest(w, *rawSpaceID, "space_id")
+		if !ok {
+			return pgtype.UUID{}, false
+		}
+		requested = parsed
+	}
+	space, err := service.ResolveSpace(r.Context(), h.Queries, workspaceID, requested, projectID)
+	if err != nil {
+		if !writeSpaceResolveError(w, err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return pgtype.UUID{}, false
+	}
+	return space.ID, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {

@@ -26,7 +26,7 @@ export function ModalRegistry() {
     case "quick-create-issue":
       return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
     case "create-project":
-      return <CreateProjectModal onClose={close} />;
+      return <CreateProjectModal onClose={close} data={data} />;
     case "create-squad":
       return <CreateSquadModal onClose={close} />;
     case "feedback":

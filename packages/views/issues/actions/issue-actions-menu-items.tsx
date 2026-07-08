@@ -143,6 +143,9 @@ export function IssueActionsMenuItems({
 
   return (
     <>
+      {/* Move-to-space was cut from v1's menus: the server/CLI capability
+          (renumber + identifier alias) stays, but the UI treats space as
+          creation-time-only until the product needs surfaced moves. */}
       {/* Status */}
       <P.Sub>
         <P.SubTrigger>

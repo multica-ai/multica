@@ -23,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -581,7 +582,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // uppercase. Word boundary on the left prevents matching inside email-style
 // strings (e.g. "abc@MUL-1") and the digit anchor on the right rules out
 // version numbers like "v1.2-3".
-var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
+var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{0,6})-(\d+)\b`)
 
 // closingIdentifierRe extracts identifiers that appear immediately after a
 // GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
@@ -593,7 +594,7 @@ var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
 // title prefixes like "MUL-1: ..." link the PR (via identifierRe) but
 // never auto-close.
 var closingIdentifierRe = regexp.MustCompile(
-	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`,
+	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{0,6})-(\d+)\b`,
 )
 
 // HandleGitHubWebhook (POST /api/webhooks/github) is GitHub's destination for
@@ -911,7 +912,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		// a terminal event, later edit/synchronize webhooks must not rewrite
 		// the merge-time close decision.
 		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
-		prefix := h.getIssuePrefix(ctx, wsID)
+		prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsID)
 		// reevalIssues collects each issue whose link row we just touched so
 		// we can re-run the auto-advance gate against the persisted aggregate
 		// after every link upsert in this event. Driving the gate off
@@ -1408,26 +1409,34 @@ func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID p
 	return *s.GitHubAutoLinkPRsEnabled
 }
 
-// the workspace's configured prefix and the number resolves to a real issue.
+// the Space key and number resolve to a real issue in the workspace.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+	_ = prefix // compatibility parameter; Space key now comes from identifier itself.
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
 		return db.Issue{}, false
 	}
 	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
-	if !strings.EqualFold(gotPrefix, prefix) {
-		return db.Issue{}, false
-	}
 	n, err := strconv.Atoi(numStr)
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := h.Queries.GetIssueBySpaceKeyAndNumber(ctx, db.GetIssueBySpaceKeyAndNumberParams{
 		WorkspaceID: workspaceID,
+		Lower:       gotPrefix,
 		Number:      int32(n),
 	})
 	if err != nil {
-		return db.Issue{}, false
+		// Branch names / PR titles keep referencing the pre-move identifier
+		// after an issue moves spaces; the alias keeps auto-linking working.
+		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
+			WorkspaceID:   workspaceID,
+			SpaceKeyLower: gotPrefix,
+			Number:        int32(n),
+		})
+		if err != nil {
+			return db.Issue{}, false
+		}
 	}
 	return issue, true
 }
@@ -1451,8 +1460,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// exists, parent not terminal), so calling it unconditionally is safe.
 	h.notifyParentOfChildDone(ctx, issue, updated)
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
-	resp := issueToResponse(updated, prefix)
+	resp := issueToResponse(updated, issueidentifier.PrefixForIssue(ctx, h.Queries, updated))
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 		"issue":          resp,
 		"status_changed": true,

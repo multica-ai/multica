@@ -83,6 +83,18 @@ describe("issueMatchesListFilter", () => {
     ).toBe(false);
   });
 
+  it("judges space filters — a moved issue leaves the old space's list", () => {
+    expect(
+      issueMatchesListFilter(makeIssue({ space_id: "t1" }), "space:t1", { space_id: "t1" }),
+    ).toBe(true);
+    expect(
+      issueMatchesListFilter(makeIssue({ space_id: "t2" }), "space:t1", { space_id: "t1" }),
+    ).toBe(false);
+    expect(
+      issueMatchesListFilter(makeIssue({ space_id: undefined }), "space:t1", { space_id: "t1" }),
+    ).toBe("unknown");
+  });
+
   it("never decides involves_user_id — the ownership graph is server-side", () => {
     expect(
       issueMatchesListFilter(makeIssue(), "agents", { involves_user_id: "me" }),
@@ -110,11 +122,13 @@ describe("issueChangedDims", () => {
       assignee: true,
       project: false,
       status: false,
+      space: false,
     });
     expect(issueChangedDims({ project_id: null })).toEqual({
       assignee: false,
       project: true,
       status: false,
+      space: false,
     });
   });
 
@@ -124,10 +138,13 @@ describe("issueChangedDims", () => {
       assignee: false,
       project: false,
       status: false,
+      space: false,
     });
     expect(issueChangedDims({ status: "todo" }, base).status).toBe(false);
     expect(issueChangedDims({ status: "done" }, base).status).toBe(true);
     expect(issueChangedDims({ project_id: "p2" }, base).project).toBe(true);
+    expect(issueChangedDims({ space_id: "t2" }, makeIssue({ space_id: "t1" })).space).toBe(true);
+    expect(issueChangedDims({ space_id: "t1" }, makeIssue({ space_id: "t1" })).space).toBe(false);
   });
 
   it("ignores non-membership fields", () => {
@@ -135,12 +152,13 @@ describe("issueChangedDims", () => {
       assignee: false,
       project: false,
       status: false,
+      space: false,
     });
   });
 });
 
 describe("listFilterDependsOn", () => {
-  const none = { assignee: false, project: false, status: false };
+  const none = { assignee: false, project: false, status: false, space: false };
 
   it("my:all reacts to assignee changes only", () => {
     expect(listFilterDependsOn("all", {}, { ...none, assignee: true })).toBe(true);
@@ -175,19 +193,28 @@ describe("listFilterDependsOn", () => {
     ).toBe(false);
   });
 
+  it("space filters react to space changes", () => {
+    expect(
+      listFilterDependsOn("space:t1", { space_id: "t1" }, { ...none, space: true }),
+    ).toBe(true);
+    expect(
+      listFilterDependsOn("space:t1", { space_id: "t1" }, { ...none, status: true }),
+    ).toBe(false);
+  });
+
   it("creator filters never react — creator is immutable", () => {
     expect(
       listFilterDependsOn(
         "created",
         { creator_id: "me" },
-        { assignee: true, project: true, status: true },
+        { assignee: true, project: true, status: true, space: true },
       ),
     ).toBe(false);
   });
 
   it("the unfiltered workspace list never reacts", () => {
     expect(
-      listFilterDependsOn(undefined, {}, { assignee: true, project: true, status: true }),
+      listFilterDependsOn(undefined, {}, { assignee: true, project: true, status: true, space: true }),
     ).toBe(false);
   });
 });

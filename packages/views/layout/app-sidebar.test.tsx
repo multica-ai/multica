@@ -31,6 +31,7 @@ vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PointerSensor: vi.fn(),
   closestCenter: vi.fn(),
+  MeasuringStrategy: { Always: "always" },
   useSensor: vi.fn(),
   useSensors: vi.fn(),
 }));
@@ -45,6 +46,19 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SidebarGroupAction: ({
+    children,
+    title,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    title?: string;
+    onClick?: () => void;
+  }) => (
+    <button type="button" title={title} onClick={onClick}>
+      {children}
+    </button>
+  ),
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -148,6 +162,8 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: 
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
+vi.mock("@multica/core/spaces/queries", () => ({ mySpaceListOptions: () => ({ queryKey: ["spaces"] }) }));
+vi.mock("@multica/core/spaces/mutations", () => ({ useUpdateSpaceMembership: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -212,7 +228,10 @@ describe("PinRow", () => {
       "data-active",
       "true",
     );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    // The workspace-wide Issues nav left with the space rollout, so the pin
+    // must be the ONLY active element — no nav entry lights up alongside it.
+    expect(container.querySelector('button[data-href="/acme/issues"]')).toBeNull();
+    expect(container.querySelectorAll('[data-active="true"]')).toHaveLength(1);
   });
 });
 

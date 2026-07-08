@@ -63,14 +63,28 @@ auto-link flag (`workspaceAutoLinkPRsEnabled`, `github.go:1074`).
 ### Path 1 — link (title OR body OR branch)
 
 - `extractIdentifiers` regex helper: `server/internal/handler/github.go:1028`
-- driving regex `identifierRe` (`\b([a-z][a-z0-9]{1,9})-(\d+)\b`, case-insensitive):
-  `server/internal/handler/github.go:490`
+- driving regex `identifierRe` (`\b([a-z][a-z0-9]{0,6})-(\d+)\b`, case-insensitive):
+  `server/internal/handler/github.go:584`
 - call site: `server/internal/handler/github.go:727` —
   `extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)`
 
-Every `PREFIX-NUMBER` mention in **title, body, or branch** resolves to an issue
+Every `SPACE_KEY-NUMBER` mention in **title, body, or branch** resolves to an issue
 in the workspace and writes a link row (`LinkIssueToPullRequest`, ~`github.go:762`).
-This is what `multica issue pull-requests` later reads back.
+This is what `multica issue pull-requests` later reads back. The prefix is a Space
+key — letter-first, 1-7 chars total (`[a-z][a-z0-9]{0,6}`, narrowed from the old
+`{1,9}`/1-10 char bound) — because a Space now owns the issue-number namespace. Each
+workspace has a default space whose key is the legacy workspace prefix, so a bare
+`MUL-2759` routes through that default space.
+
+**Move-to-space (issue update `--space`).** `UpdateIssue`'s `space_id` branch
+(`handler/issue.go`, move block) renumbers the issue under the target space's
+counter and records the old `key-number` in `issue_identifier_alias`
+(`UpsertIssueIdentifierAlias`). Identifier resolution falls back to that alias
+in `resolveIssueByIdentifier` (`handler.go`) and in GitHub branch/PR linking
+(`github.go`), so pre-move references keep resolving. The CLI exposes this as
+`multica issue update <id> --space <UUID-or-key>` (`cmd_issue.go`,
+`resolveSpaceRef` accepts a key or UUID). Space is a creation-time default
+elsewhere: parent/child and project↔space carry no cross-space validation.
 
 **Reference-only flag (MUL-3739).** The link row carries a `reference_only`
 boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler
@@ -92,12 +106,12 @@ call-site location for the link logic.
 
 - `extractClosingIdentifiers` regex helper: `server/internal/handler/github.go:1051`
 - driving regex `closingIdentifierRe`
-  (`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`):
-  `server/internal/handler/github.go:501`
+  (`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{0,6})-(\d+)\b`):
+  `server/internal/handler/github.go:596`
 - call site: `server/internal/handler/github.go:736` —
   `extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body)` (no branch arg)
 
-Only a `PREFIX-NUMBER` immediately after a closing keyword
+Only a `SPACE_KEY-NUMBER` immediately after a closing keyword
 (`Closes`/`Fixes`/`Resolves`, optional `:` then whitespace) sets the link row's
 `close_intent` flag — the gate that auto-advances the issue to `done` on merge.
 `Fix MUL-1` closes; `Fix login MUL-1` does not (adjacency). Branch names are

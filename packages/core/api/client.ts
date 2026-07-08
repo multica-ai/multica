@@ -75,6 +75,12 @@ import type {
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
   CancelTaskResponse,
+  Space,
+  SpaceMembership,
+  ListSpaceMembersResponse,
+  CreateSpaceRequest,
+  UpdateSpaceRequest,
+  ListSpacesResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -145,7 +151,7 @@ import type {
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
-import { parseWithFallback } from "./schema";
+import { parseWithFallback, parseOrWarn } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
@@ -171,6 +177,7 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_SPACES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -186,6 +193,11 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
+  ListSpacesResponseSchema,
+  ListSpaceMembersResponseSchema,
+  EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
+  SpaceSchema,
+  SpaceMembershipSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -509,6 +521,7 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.space_id) search.set("space_id", params.space_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
@@ -539,6 +552,7 @@ export class ApiClient {
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
+    if (params.space_id) search.set("space_id", params.space_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
@@ -610,6 +624,7 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
+    space_id?: string | null;
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
@@ -1584,6 +1599,60 @@ export class ApiClient {
     });
   }
 
+  // Spaces
+  async listSpaces(): Promise<ListSpacesResponse> {
+    const raw = await this.fetch<unknown>("/api/spaces");
+    return parseWithFallback(raw, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, {
+      endpoint: "GET /api/spaces",
+    });
+  }
+
+  async createSpace(data: CreateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>("/api/spaces", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "POST /api/spaces" });
+  }
+
+  async updateSpace(id: string, data: UpdateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "PATCH /api/spaces/:id" });
+  }
+
+  async updateSpaceMembership(id: string, data: { sort_order: number }): Promise<SpaceMembership> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/membership`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceMembershipSchema, { endpoint: "PATCH /api/spaces/:id/membership" });
+  }
+
+  async replaceSpaceMembers(id: string, memberIds: string[]): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ member_ids: memberIds }),
+    });
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "PUT /api/spaces/:id/members",
+    });
+  }
+
+  async listSpaceMembers(id: string): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`);
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "GET /api/spaces/:id/members",
+    });
+  }
+
+  async archiveSpace(id: string): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, { method: "DELETE" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "DELETE /api/spaces/:id" });
+  }
+
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
@@ -1942,9 +2011,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; space_id?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.space_id) search.set("space_id", params.space_id);
     return this.fetch(`/api/projects?${search}`);
   }
 
@@ -2135,9 +2205,10 @@ export class ApiClient {
   }
 
   // Autopilots
-  async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
+  async listAutopilots(params?: { status?: string; space_id?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.space_id) search.set("space_id", params.space_id);
     const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
     return parseWithFallback(
       raw,

@@ -16,7 +16,7 @@ export type IssueScope =
       actorId: string;
       relation: "assigned" | "created";
     }
-  | { type: "team"; teamId: string };
+  | { type: "space"; spaceId: string };
 
 export class UnsupportedIssueScopeError extends Error {
   constructor(scope: IssueScope, operation: string) {
@@ -35,7 +35,7 @@ export function issueScopeKey(scope: IssueScope): string {
       return `project:${scope.projectId}`;
     case "actor":
       return `actor:${scope.actorType}:${scope.actorId}:${scope.relation}`;
-    case "team":
-      return `team:${scope.teamId}`;
+    case "space":
+      return `space:${scope.spaceId}`;
   }
 }

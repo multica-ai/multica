@@ -321,7 +321,9 @@
       "thursday": "周四",
       "friday": "周五",
       "saturday": "周六"
-    }
+    },
+    "title_required": "需要填写标题",
+    "assignee_required": "需要选择执行者 —— 选择智能体或小队"
   },
   "trigger_config": {
     "frequencies": {

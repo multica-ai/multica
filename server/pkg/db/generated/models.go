@@ -159,6 +159,7 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	SpaceID            pgtype.UUID        `json:"space_id"`
 }
 
 type AutopilotCollaborator struct {
@@ -520,6 +521,7 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
+	SpaceID            pgtype.UUID        `json:"space_id"`
 }
 
 type IssueDependency struct {
@@ -527,6 +529,14 @@ type IssueDependency struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
 	Type             string      `json:"type"`
+}
+
+type IssueIdentifierAlias struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	SpaceKeyLower string             `json:"space_key_lower"`
+	Number        int32              `json:"number"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueLabel struct {
@@ -713,6 +723,13 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
+}
+
+type ProjectSpace struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type RuntimeProfile struct {
@@ -966,4 +983,28 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceSpace struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Key          string             `json:"key"`
+	Description  string             `json:"description"`
+	Icon         pgtype.Text        `json:"icon"`
+	IssueCounter int32              `json:"issue_counter"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceSpaceMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	SortOrder   float64            `json:"sort_order"`
 }

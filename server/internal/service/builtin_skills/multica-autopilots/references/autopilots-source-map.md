@@ -1,6 +1,7 @@
 # Autopilots source map
 
 - `server/cmd/multica/cmd_autopilot.go` registers `list`, `get`, `create`, `update`, `delete`, `trigger`, `runs`, `trigger-add`, `trigger-update`, `trigger-delete`, and `trigger-rotate-url`.
+- `autopilot create`/`update` take `--space` (single UUID or key, resolved via `resolveSpaceRef` into `space_id`). On `update` a supplied value reassigns the space; `resolveAutopilotSpace` (`server/internal/handler/autopilot.go:974`) falls back to the previous space when the value is nil/empty, and `UpdateAutopilot` SQL uses `space_id = COALESCE(sqlc.narg('space_id')::uuid, space_id)` (`server/pkg/db/queries/autopilot.sql:75`), so `--space ""` is a no-op — there is no clear operation and every autopilot always belongs to a space. `autopilot list --space` sets the `space_id` filter. Omitting `--space` on create files the autopilot under the workspace's default space, whose key is the legacy workspace prefix.
 - The CLI maps reads/writes to `/api/autopilots`, `/api/autopilots/{id}`, `/api/autopilots/{id}/trigger`, `/api/autopilots/{id}/runs`, and trigger subroutes.
 - `server/internal/service/autopilot.go` has `DispatchAutopilot`, creates `autopilot_run`, and switches on `execution_mode`.
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.

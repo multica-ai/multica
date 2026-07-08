@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -588,7 +589,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), squad.WorkspaceID)
+	prefix := issueidentifier.PrefixForWorkspace(r.Context(), h.Queries, squad.WorkspaceID)
 	now := time.Now()
 
 	// Group rows by member_id while preserving the SQL ORDER BY (squad_member
@@ -1041,7 +1042,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 
 	// Member authors are their own originator; agent-authored triggers have no
 	// request context here, so the originator is left empty (canInvokeAgent
-	// then fails closed for member/team targets — a workspace target still
+	// then fails closed for member/space targets — a workspace target still
 	// admits the agent as a workspace principal).
 	leaderOriginator := ""
 	if authorType == "member" {

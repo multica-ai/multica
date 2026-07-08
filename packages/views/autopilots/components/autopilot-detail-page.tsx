@@ -963,6 +963,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             title: autopilot.title,
             description: autopilot.description ?? "",
             project_id: autopilot.project_id ?? null,
+            space_id: autopilot.space_id ?? null,
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,

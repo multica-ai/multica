@@ -9,9 +9,12 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -30,6 +33,8 @@ import { contentReferencesAttachment, type Agent, type Attachment, type Squad } 
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { SpacePicker } from "../spaces/components/space-picker";
+import { SpaceProjectConflictDialog } from "../spaces/components/space-project-conflict-dialog";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -82,7 +87,6 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -200,6 +204,9 @@ export function AgentCreatePanel({
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
   });
+  const [spaceId, setSpaceId] = useState<string | null>(
+    (data?.space_id as string | undefined) ?? null,
+  );
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -210,6 +217,29 @@ export function AgentCreatePanel({
   const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
   const parentIssueIdentifier =
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
+
+  // Every issue belongs to exactly one space, so the header picker always
+  // resolves to a value. Associations are creation-time defaults, never
+  // constraints: explicit pick → parent's space → single-space project →
+  // last used → personal default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
+  const { data: parentIssue } = useQuery({
+    ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  const projectSpaceId =
+    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const effectiveSpaceId =
+    spaceId ??
+    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId }) ??
+    null;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -284,7 +314,27 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
+  // Linear-style interception: space ∉ project's space set pauses the submit
+  // behind a resolution dialog (see SpaceProjectConflictDialog).
+  const spaceProjectConflict = useMemo(() => {
+    if (!selectedProject || !effectiveSpaceId) return null;
+    const ids = selectedProject.space_ids ?? [];
+    if (ids.length === 0 || ids.includes(effectiveSpaceId)) return null;
+    const space = spaces.find((tm) => tm.id === effectiveSpaceId);
+    if (!space) return null;
+    return { space, projectSpaces: spaces.filter((tm) => ids.includes(tm.id)) };
+  }, [selectedProject, effectiveSpaceId, spaces]);
+  const [conflictOpen, setConflictOpen] = useState(false);
+
   const submit = async () => {
+    if (spaceProjectConflict) {
+      setConflictOpen(true);
+      return;
+    }
+    await doSubmit(effectiveSpaceId);
+  };
+
+  const doSubmit = async (finalSpaceId: string | null) => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
     // Belt-and-suspenders against the multi-file upload race fixed in
@@ -306,12 +356,14 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
+        space_id: finalSpaceId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
+      setLastSpaceId(finalSpaceId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -396,6 +448,7 @@ export function AgentCreatePanel({
     // through.
     const carry: Record<string, unknown> = {};
     if (projectId) carry.project_id = projectId;
+    if (effectiveSpaceId) carry.space_id = effectiveSpaceId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -408,7 +461,14 @@ export function AgentCreatePanel({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
+            {/* The issue's space namespace — leads the breadcrumb like the
+                workspace name used to, but as a required single-select. */}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
@@ -584,6 +644,24 @@ export function AgentCreatePanel({
             </Button>
           </div>
         </div>
+      {spaceProjectConflict && (
+        <SpaceProjectConflictDialog
+          open={conflictOpen}
+          spaceName={spaceProjectConflict.space.name}
+          projectName={selectedProject?.title ?? ""}
+          projectSpaces={spaceProjectConflict.projectSpaces}
+          onAddSpace={() => {
+            setConflictOpen(false);
+            void doSubmit(effectiveSpaceId);
+          }}
+          onMoveToSpace={(tid) => {
+            setConflictOpen(false);
+            setSpaceId(tid);
+            void doSubmit(tid);
+          }}
+          onCancel={() => setConflictOpen(false)}
+        />
+      )}
     </>
   );
 }

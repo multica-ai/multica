@@ -112,6 +112,17 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
+	if task.SpaceID != "" {
+		label := task.SpaceName
+		if label == "" {
+			label = task.SpaceKey
+		}
+		if label != "" {
+			fmt.Fprintf(&b, "- **space**: required for this run. Pass `--space %q` so the new issue lands in Space %q. Do not infer a different Space from the prompt text — the modal/context selection is authoritative.\n", task.SpaceID, label)
+		} else {
+			fmt.Fprintf(&b, "- **space**: required for this run. Pass `--space %q` so the new issue lands in the selected Space. Do not infer a different Space from the prompt text — the modal/context selection is authoritative.\n", task.SpaceID)
+		}
+	}
 	// parent — pinned by the modal when the user opened it from "Add sub
 	// issue" on an existing issue. Pass the UUID (never the identifier) so
 	// the create lands the sub-issue under the right parent even when the

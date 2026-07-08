@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/service"
 )
 
@@ -299,11 +300,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		res.IssueID = issueRes.Issue.ID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title
-		if ws, werr := r.reader.GetWorkspace(ctx, inst.WorkspaceID); werr == nil && ws.IssuePrefix != "" {
-			res.IssueIdentifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issueRes.Issue.Number)
-		} else {
-			res.IssueIdentifier = fmt.Sprintf("#%d", issueRes.Issue.Number)
-		}
+		res.IssueIdentifier = issueidentifier.ForIssue(ctx, r.reader, issueRes.Issue)
 	}
 
 	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested

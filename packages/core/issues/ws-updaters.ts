@@ -54,6 +54,7 @@ export function onIssueUpdated(
     assigneeChanged?: boolean;
     statusChanged?: boolean;
     projectChanged?: boolean;
+    spaceChanged?: boolean;
   } = {},
 ) {
   // Look up the OLD parent + cached entity before mutating cache state, so we
@@ -96,6 +97,11 @@ export function onIssueUpdated(
       (cachedIssue !== undefined &&
         issue.status !== undefined &&
         issue.status !== cachedIssue.status),
+    space:
+      meta.spaceChanged ??
+      (cachedIssue !== undefined &&
+        issue.space_id !== undefined &&
+        issue.space_id !== cachedIssue.space_id),
   };
 
   // The coordinator applies the same rules table the local mutations use:

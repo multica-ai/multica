@@ -68,9 +68,10 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 			INSERT INTO issue (
 				workspace_id, title, description, status, priority,
 				assignee_type, assignee_id, creator_type, creator_id,
-				position, number
+				position, number, space_id
 			)
-			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7)
+			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7,
+				(SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 			RETURNING id
 		`, testWorkspaceID, title, assigneeType, assigneeID, testUserID, position, number).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
@@ -152,5 +153,99 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 	}
 	if nextResp.Groups[0].Issues[0].Title != "Grouped member three" {
 		t.Fatalf("unexpected next-page issue: %#v", nextResp.Groups[0].Issues[0])
+	}
+}
+
+func TestListGroupedIssuesFiltersBySpace(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano() % 1_000_000
+	keyA := fmt.Sprintf("A%06d", suffix)
+	keyB := fmt.Sprintf("B%06d", suffix)
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, '', $3)
+		RETURNING id
+	`, "Grouped Space Filter", fmt.Sprintf("grouped-space-filter-%d", suffix), keyA).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	var spaceA, spaceB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Space A', $2)
+		RETURNING id
+	`, workspaceID, keyA).Scan(&spaceA); err != nil {
+		t.Fatalf("create space A: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Space B', $2)
+		RETURNING id
+	`, workspaceID, keyB).Scan(&spaceB); err != nil {
+		t.Fatalf("create space B: %v", err)
+	}
+
+	createIssue := func(title, spaceID string, position float64) {
+		t.Helper()
+		var number int32
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = issue_counter + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		`, workspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue (
+				workspace_id, space_id, title, description, status, priority,
+				assignee_type, assignee_id, creator_type, creator_id,
+				position, number
+			)
+			VALUES ($1, $2, $3, NULL, 'todo', 'none', 'member', $4, 'member', $4, $5, $6)
+		`, workspaceID, spaceID, title, testUserID, position, number); err != nil {
+			t.Fatalf("create issue %q: %v", title, err)
+		}
+	}
+
+	createIssue("Space A first", spaceA, 1)
+	createIssue("Space A second", spaceA, 2)
+	createIssue("Space B hidden", spaceB, 3)
+
+	path := fmt.Sprintf(
+		"/api/issues/grouped?workspace_id=%s&group_by=assignee&statuses=todo&space_id=%s&limit=10",
+		workspaceID,
+		spaceA,
+	)
+	w := httptest.NewRecorder()
+	req := newRequest("GET", path, nil)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	testHandler.ListGroupedIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListGroupedIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp GroupedIssuesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode grouped response: %v", err)
+	}
+	if len(resp.Groups) != 1 {
+		t.Fatalf("expected one assignee group, got %#v", resp.Groups)
+	}
+	if resp.Groups[0].Total != 2 || len(resp.Groups[0].Issues) != 2 {
+		t.Fatalf("expected only Space A issues, total=%d len=%d", resp.Groups[0].Total, len(resp.Groups[0].Issues))
+	}
+	for _, issue := range resp.Groups[0].Issues {
+		if issue.SpaceID == nil || *issue.SpaceID != spaceA {
+			t.Fatalf("grouped space filter leaked wrong space issue: %#v", issue)
+		}
+		if issue.Title == "Space B hidden" {
+			t.Fatalf("grouped space filter leaked Space B issue: %#v", issue)
+		}
 	}
 }

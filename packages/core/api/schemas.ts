@@ -17,10 +17,13 @@ import type {
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
   ListIssuesResponse,
+  ListSpacesResponse,
+  ListSpaceMembersResponse,
   ListWebhookDeliveriesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   Squad,
+  Space,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -265,6 +268,9 @@ const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number()
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  space_id: z.string().nullable().default(null),
+  space_key: z.string().nullable().default(null),
+  space_name: z.string().nullable().default(null),
   number: z.number(),
   identifier: z.string(),
   title: z.string(),
@@ -317,6 +323,73 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
+export const SpaceSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string().default(""),
+  key: z.string().default(""),
+  description: z.string().default(""),
+  icon: z.string().nullable().default(null),
+  issue_counter: z.number().default(0),
+  archived_at: z.string().nullable().default(null),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  is_member: z.boolean().default(false),
+  sort_order: z.number().default(0),
+}).loose();
+
+// PATCH /api/spaces/{id}/membership — the caller's own sort position.
+export const SpaceMembershipSchema = z.object({
+  space_id: z.string().default(""),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const SpaceMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  role: z.string().default("member"),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListSpaceMembersResponseSchema = z.object({
+  members: z.array(SpaceMemberSchema).default([]),
+  total: z.number().default(0),
+});
+
+export const EMPTY_LIST_SPACE_MEMBERS_RESPONSE: ListSpaceMembersResponse = {
+  members: [],
+  total: 0,
+};
+
+export const ListSpacesResponseSchema = z.object({
+  spaces: z.array(SpaceSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SPACE: Space = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  key: "",
+  description: "",
+  icon: null,
+  issue_counter: 0,
+  archived_at: null,
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  is_member: false,
+  sort_order: 0,
+};
+
+export const EMPTY_LIST_SPACES_RESPONSE: ListSpacesResponse = {
+  spaces: [],
+  total: 0,
+};
+
 const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -332,6 +405,9 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  // Tolerate a missing key or an explicit null (older backends) by defaulting
+  // to an empty membership list.
+  space_ids: z.array(z.string()).nullish().transform((ids) => ids ?? []),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
@@ -879,6 +955,7 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
+  space_id: z.string().nullable().optional(),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),

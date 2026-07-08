@@ -42,7 +42,7 @@
   "templates": {
     "daily_news": {
       "title": "Daily news digest",
-      "summary": "Search and summarize today's news for the team"
+      "summary": "Search and summarize today's news for the space"
     },
     "pr_review": {
       "title": "PR review reminder",
@@ -54,7 +54,7 @@
     },
     "weekly_progress": {
       "title": "Weekly progress report",
-      "summary": "Compile a weekly summary of team progress"
+      "summary": "Compile a weekly summary of space progress"
     },
     "dependency_audit": {
       "title": "Dependency audit",
@@ -273,7 +273,7 @@
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",
     "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
-    "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
+    "subscribers_empty": "No subscribers — add a spacemate to notify them on every run",
     "subscribers_add": "Add subscriber",
     "subscribers_search_placeholder": "Search members by name…",
     "subscribers_no_results": "No matching members",
@@ -321,7 +321,9 @@
       "thursday": "Thursday",
       "friday": "Friday",
       "saturday": "Saturday"
-    }
+    },
+    "title_required": "Title is required",
+    "assignee_required": "An assignee is required — pick an agent or squad"
   },
   "trigger_config": {
     "frequencies": {

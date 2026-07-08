@@ -39,8 +39,8 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date)
-			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7) RETURNING id
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date, space_id)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1)) RETURNING id
 		`, testWorkspaceID, title, testUserID, number, projectID, startDate, dueDate).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}

@@ -18,9 +18,9 @@ func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, 
 
 	var number int
 	if err := testPool.QueryRow(ctx, `
-		UPDATE workspace
-		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
-		WHERE id = $1 RETURNING issue_counter
+		UPDATE workspace_space
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE space_id = workspace_space.id)) + 1
+		WHERE workspace_id = $1 RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)
 	}
@@ -36,8 +36,8 @@ func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, 
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, $4, $5, $6)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number, space_id)
+		VALUES ($1, 'member', $2, $3, $4, $5, $6, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, title, assigneeTypeArg, assigneeIDArg, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
