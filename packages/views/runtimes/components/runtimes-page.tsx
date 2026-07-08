@@ -44,6 +44,7 @@ import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  sharedCustomName,
   type RuntimeMachine,
   type RuntimeMachineFilter,
 } from "./runtime-machines";
@@ -254,8 +255,10 @@ export function RuntimesPage({
       ? m.runtimes[0]
       : m.runtimes.find((r) => r.owner_id === currentUserId);
     if (!editable) return null;
-    const currentName =
-      m.runtimes.find((r) => r.custom_name?.trim())?.custom_name?.trim() ?? "";
+    // Pre-fill only a real machine name — the same rule the machine title uses
+    // (every runtime shares one non-empty custom_name). A lone per-runtime
+    // custom name must NOT masquerade as the machine's current name.
+    const currentName = sharedCustomName(m.runtimes) ?? "";
     return { runtimeId: editable.id, currentName };
   }, [selectedMachine, canManageProfiles, currentUserId]);
 
