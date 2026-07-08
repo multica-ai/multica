@@ -90,6 +90,19 @@ describe("Markdown", () => {
     expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
     expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
   });
+
+  it("renders a multica-artifact tag as an ArtifactCard", () => {
+    const artifactXml = `
+<multica-artifact identifier="script.py" type="application/x-python" title="Python Script">
+print("Hello World")
+</multica-artifact>
+`;
+    render(<Markdown>{artifactXml}</Markdown>);
+
+    expect(screen.getByText("Python Script")).toBeDefined();
+    expect(screen.getByText("script.py")).toBeDefined();
+    expect(screen.getByRole("button", { name: /preview/i })).toBeDefined();
+  });
 });
 
 // The base renderer uses a plain <img>; exercising it here (instead of the

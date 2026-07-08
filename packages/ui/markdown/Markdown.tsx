@@ -75,6 +75,10 @@ export interface MarkdownProps {
    * the views-package `<Attachment>` component.
    */
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
+  /**
+   * Custom renderer for multica-artifact tags.
+   */
+  renderArtifact?: (props: { identifier: string; type: string; title: string; content: string }) => React.ReactNode
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -149,6 +153,8 @@ function createComponents(
   renderMention?: (props: { type: string; id: string }) => React.ReactNode,
   renderImage?: (props: { src: string; alt: string }) => React.ReactNode,
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode,
+  renderArtifact?: (props: { identifier: string; type: string; title: string; content: string }) => React.ReactNode,
+  artifacts?: { identifier: string; type: string; title: string; content: string }[],
 ): Partial<Components> {
   const baseComponents: Partial<Components> = {
     // FileCard: intercept <div data-type="fileCard"> from preprocessFileCards
@@ -178,6 +184,17 @@ function createComponents(
             )}
           </div>
         )
+      }
+      if (dataType === 'multica-artifact') {
+        const indexStr = (node?.properties?.dataHref as string) || ''
+        const index = parseInt(indexStr, 10)
+        if (renderArtifact && artifacts && !isNaN(index)) {
+          const artifact = artifacts[index]
+          if (artifact) {
+            return <>{renderArtifact(artifact)}</>
+          }
+        }
+        return null
       }
       return <div {...props}>{children}</div>
     },
@@ -442,22 +459,41 @@ export function Markdown({
   renderMention,
   renderImage,
   renderFileCard,
+  renderArtifact,
   cdnDomain
 }: MarkdownProps): React.JSX.Element {
-  const components = React.useMemo(
-    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
-    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
-  )
-
   // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
-  const processedContent = React.useMemo(
+  // AND extract multica-artifact tags
+  const { processedContent, artifacts } = React.useMemo(
     () => {
-      let result = preprocessMentionShortcodes(children)
+      const parsedArtifacts: { identifier: string; type: string; title: string; content: string }[] = []
+      
+      // Extract artifacts first, replace with <div data-type="multica-artifact" data-href="index"></div>
+      let content = children || ''
+      const artifactRegex = /<multica-artifact\s+([^>]+)>([\s\S]*?)<\/multica-artifact>/g
+      content = content.replace(artifactRegex, (_, attrStr, artifactContent) => {
+        const identifier = attrStr.match(/identifier=["']([^"']*)["']/)?.[1] || ""
+        const type = attrStr.match(/type=["']([^"']*)["']/)?.[1] || ""
+        const title = attrStr.match(/title=["']([^"']*)["']/)?.[1] || ""
+        
+        const index = parsedArtifacts.length
+        parsedArtifacts.push({ identifier, type, title, content: artifactContent })
+        
+        return `<div data-type="multica-artifact" data-href="${index}"></div>`
+      })
+      
+      let result = preprocessMentionShortcodes(content)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
-      return result
+      
+      return { processedContent: result, artifacts: parsedArtifacts }
     },
     [children, cdnDomain]
+  )
+
+  const components = React.useMemo(
+    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderArtifact, artifacts),
+    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderArtifact, artifacts]
   )
 
   return (
