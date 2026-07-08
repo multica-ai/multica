@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { ContentEditor } from "../../../editor/content-editor";
+import { MarkdownModeEditor } from "../../../editor";
 import { useT } from "../../../i18n";
 
 export function InstructionsTab({
@@ -51,31 +51,30 @@ export function InstructionsTab({
         {t(($) => $.tab_body.instructions.intro)}
       </p>
 
-      <div
+      <MarkdownModeEditor
+        // Keyed by agent id so navigating between agents fully remounts the
+        // rich editor — Tiptap's `defaultValue` is read once, so without the
+        // key the second agent's instructions wouldn't load.
+        key={agent.id}
+        value={value}
+        onChange={setValue}
+        placeholder={t(($) => $.tab_body.instructions.placeholder)}
+        labels={{
+          rich: t(($) => $.tab_body.instructions.mode_rich),
+          source: t(($) => $.tab_body.instructions.mode_source),
+        }}
+        debounceMs={150}
+        // Mention has no business meaning in agent system prompts — typing
+        // `@` would just confuse users with a member/agent picker.
+        disableMentions
+        className="flex-1 min-h-0"
         // flex-1 min-h-0 so the wrapper claims the leftover height in the
-        // column. overflow-y-auto so very long prompts scroll inside the
-        // editor instead of pushing the Save row down.
-        className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
-      >
-        <ContentEditor
-          // Keyed by agent id so navigating between agents fully remounts the
-          // editor — Tiptap's `defaultValue` is read once, so without the key
-          // the second agent's instructions wouldn't load.
-          key={agent.id}
-          defaultValue={value}
-          onUpdate={setValue}
-          placeholder={t(($) => $.tab_body.instructions.placeholder)}
-          debounceMs={150}
-          // Mention has no business meaning in agent system prompts — typing
-          // `@` would just confuse users with a member/agent picker.
-          disableMentions
-          // min-h-full lets the editor fill the wrapper even when the user
-          // has typed nothing yet, so the click target matches the visual
-          // box. Combined with the wrapper's overflow-y-auto, long content
-          // grows past the wrapper height and scrolls within it.
-          className="min-h-full"
-        />
-      </div>
+        // column. Rich mode scrolls inside the editor shell; source mode uses
+        // the same shell and lets the textarea own the scroll.
+        contentClassName="flex-1 min-h-0 overflow-hidden rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
+        richEditorClassName="min-h-full"
+        sourceEditorClassName="border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+      />
 
       <div className="flex items-center justify-end gap-3">
         {isDirty && (

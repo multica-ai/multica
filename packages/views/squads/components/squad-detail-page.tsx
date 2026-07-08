@@ -52,7 +52,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { ContentEditor } from "../../editor/content-editor";
+import { MarkdownModeEditor } from "../../editor";
 import {
   PickerItem,
   PickerSection,
@@ -1340,7 +1340,7 @@ function SquadMembersTab({
   );
 }
 
-// Instructions tab body — mirrors agent's InstructionsTab. ContentEditor +
+// Instructions tab body — mirrors agent's InstructionsTab. Markdown editor +
 // Save button. The squad leader's prompt picks these up at task claim time
 // (server/internal/handler/daemon.go).
 function SquadInstructionsTab({
@@ -1382,17 +1382,22 @@ function SquadInstructionsTab({
         {t(($) => $.instructions_tab.description)}
       </p>
 
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
-        <ContentEditor
-          key={squad.id}
-          defaultValue={value}
-          onUpdate={setValue}
-          placeholder="e.g. Always start by writing a failing test. Prefer small, atomic commits."
-          debounceMs={150}
-          disableMentions
-          className="min-h-full"
-        />
-      </div>
+      <MarkdownModeEditor
+        key={squad.id}
+        value={value}
+        onChange={setValue}
+        placeholder="e.g. Always start by writing a failing test. Prefer small, atomic commits."
+        labels={{
+          rich: t(($) => $.instructions_tab.mode_rich),
+          source: t(($) => $.instructions_tab.mode_source),
+        }}
+        debounceMs={150}
+        disableMentions
+        className="flex-1 min-h-0"
+        contentClassName="flex-1 min-h-0 overflow-hidden rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input"
+        richEditorClassName="min-h-full"
+        sourceEditorClassName="border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+      />
 
       <div className="flex items-center justify-end gap-3">
         {isDirty && (

@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, FileText, X } from "lucide-react";
-import { ContentEditor, type ContentEditorRef } from "../../editor";
+import { MarkdownModeEditor } from "../../editor";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -11,7 +11,7 @@ interface InstructionsEditorProps {
   /** Markdown source. Used both as default value when expanded and as
    *  preview text when collapsed. */
   value: string;
-  /** Fires on every keystroke (debounced inside ContentEditor). */
+  /** Fires on every source-mode keystroke and on rich-editor updates. */
   onChange: (value: string) => void;
   /** Optional placeholder override. Defaults to the i18n "click to write"
    *  copy; the create dialog passes the duplicate-specific string for
@@ -27,9 +27,9 @@ interface InstructionsEditorProps {
  * Two states:
  *   collapsed → small clickable card, shows a preview of `value` (or the
  *               placeholder when empty). One click expands.
- *   expanded  → full ContentEditor (markdown, bubble menu, mention support,
- *               attachment upload). "Collapse" button on the right of the
- *               header tucks it back; value is preserved.
+ *   expanded  → markdown editor with rich-text and source modes. "Collapse"
+ *               button on the right of the header tucks it back; value is
+ *               preserved.
  */
 export function InstructionsEditor({
   value,
@@ -38,7 +38,6 @@ export function InstructionsEditor({
 }: InstructionsEditorProps) {
   const { t } = useT("agents");
   const [expanded, setExpanded] = useState(false);
-  const editorRef = useRef<ContentEditorRef>(null);
 
   const label = t(($) => $.create_dialog.instructions.label);
   const resolvedPlaceholder =
@@ -46,8 +45,6 @@ export function InstructionsEditor({
 
   const expand = () => {
     setExpanded(true);
-    // Focus on next tick so the editor mounts first.
-    setTimeout(() => editorRef.current?.focus(), 0);
   };
 
   if (!expanded) {
@@ -101,14 +98,19 @@ export function InstructionsEditor({
           "focus-within:border-primary/40",
         )}
       >
-        <ContentEditor
-          ref={editorRef}
-          defaultValue={value}
-          onUpdate={onChange}
+        <MarkdownModeEditor
+          value={value}
+          onChange={onChange}
           placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
-          className="min-h-[160px] max-h-[320px] overflow-y-auto px-3 py-2.5 text-sm"
-          showBubbleMenu={true}
-          disableMentions={true}
+          labels={{
+            rich: t(($) => $.tab_body.instructions.mode_rich),
+            source: t(($) => $.tab_body.instructions.mode_source),
+          }}
+          disableMentions
+          autoFocus
+          contentClassName="min-h-[160px] max-h-[320px] overflow-hidden px-3 py-2.5"
+          richEditorClassName="min-h-[160px] max-h-[320px] overflow-y-auto text-sm"
+          sourceEditorClassName="min-h-[160px] max-h-[320px] border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         />
       </div>
     </div>

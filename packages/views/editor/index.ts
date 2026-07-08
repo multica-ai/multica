@@ -4,6 +4,11 @@ export {
   type ContentEditorRef,
 } from "./content-editor";
 export {
+  MarkdownModeEditor,
+  type MarkdownModeEditorProps,
+  type MarkdownEditorMode,
+} from "./markdown-mode-editor";
+export {
   TitleEditor,
   type TitleEditorProps,
   type TitleEditorRef,
