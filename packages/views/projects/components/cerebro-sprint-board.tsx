@@ -8,7 +8,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, ArrowLeft } from "lucide-react";
+import { CalendarRange } from "lucide-react";
 
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -22,7 +22,8 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProjectIssuesSurface } from "./project-detail";
-import { AppLink } from "../../navigation";
+// CEREBRO-PATCH(sprint-header-breadcrumb): FIR-2817 reuse the same header chrome as the project page.
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 
 // The sprint board keeps its own view state (filters, board/list mode) so it
 // never bleeds into the project page's saved view.
@@ -70,26 +71,28 @@ export function SprintBoard({ sprintId }: { sprintId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-col gap-1 border-b px-4 py-3">
-        <AppLink
-          href={wsPaths.projectDetail(projectId)}
-          className="flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-3" />
-          {projectQuery.data?.title ?? "Project"}
-        </AppLink>
-        <div className="flex min-w-0 items-center gap-2">
-          <CalendarRange className="size-4 shrink-0 text-muted-foreground" />
-          <h1 className="truncate text-lg font-medium">{sprint.name}</h1>
-          <Badge variant="secondary" className={cn(statusConfig.className)}>
-            {statusConfig.label}
-          </Badge>
-          <span className="truncate text-xs text-muted-foreground">
-            {sprint.start_date} → {sprint.end_date}
-            {sprint.goal ? ` · ${sprint.goal}` : ""}
-          </span>
-        </div>
-      </div>
+      {/* CEREBRO-PATCH(sprint-header-breadcrumb): FIR-2817 same BreadcrumbHeader chrome as the project page (sticky bar, mobile sidebar trigger, chevron breadcrumb) instead of a hand-rolled header. */}
+      <BreadcrumbHeader
+        segments={[
+          {
+            href: wsPaths.projectDetail(projectId),
+            label: projectQuery.data?.title ?? "Project",
+          },
+        ]}
+        leaf={
+          <div className="flex min-w-0 items-center gap-2">
+            <CalendarRange className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate font-medium text-foreground">{sprint.name}</span>
+            <Badge variant="secondary" className={cn("shrink-0", statusConfig.className)}>
+              {statusConfig.label}
+            </Badge>
+            <span className="truncate text-xs text-muted-foreground">
+              {sprint.start_date} → {sprint.end_date}
+              {sprint.goal ? ` · ${sprint.goal}` : ""}
+            </span>
+          </div>
+        }
+      />
       <div className="flex flex-1 flex-col overflow-hidden">
         <ViewStoreProvider store={sprintViewStore}>
           {/* key forces a fresh seed when navigating between sprints. */}
