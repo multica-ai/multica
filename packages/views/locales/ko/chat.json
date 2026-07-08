@@ -138,11 +138,16 @@
     "waiting": "답장 대기 중",
     "pin": "고정",
     "unpin": "고정 해제",
-    "pinned": "고정됨"
+    "pinned": "고정됨",
+    "archive": "보관",
+    "unarchive": "보관 해제",
+    "archived_title": "보관됨"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",
     "rename": "이름 변경",
-    "delete": "채팅 삭제"
+    "delete": "채팅 삭제",
+    "archive": "채팅 보관",
+    "unarchive": "채팅 보관 해제"
   }
 }

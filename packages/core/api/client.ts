@@ -1784,6 +1784,13 @@ export class ApiClient {
     });
   }
 
+  async setChatSessionArchived(id: string, archived: boolean): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}/archive`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived }),
+    });
+  }
+
   // Quick-agent bar: per-user pinned agents.
   async listChatPinnedAgents(): Promise<ChatPinnedAgent[]> {
     return this.fetch("/api/chat/pinned-agents");

@@ -138,11 +138,16 @@
     "waiting": "返信待ち",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
-    "pinned": "ピン留め済み"
+    "pinned": "ピン留め済み",
+    "archive": "アーカイブ",
+    "unarchive": "アーカイブ解除",
+    "archived_title": "アーカイブ済み"
   },
   "header": {
     "view_profile": "Agent のプロフィール",
     "rename": "名前を変更",
-    "delete": "チャットを削除"
+    "delete": "チャットを削除",
+    "archive": "チャットをアーカイブ",
+    "unarchive": "アーカイブを解除"
   }
 }

@@ -72,6 +72,17 @@ SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NUL
 WHERE id = $1
 RETURNING *;
 
+-- name: SetChatSessionArchived :one
+-- Archive/unarchive a chat session by flipping status between 'active' and
+-- 'archived'. Bumps updated_at so the row re-sorts on the receiving list. The
+-- send-message path refuses archived sessions (see SendChatMessage), so the
+-- conversation is effectively read-only until it is unarchived.
+UPDATE chat_session
+SET status = CASE WHEN @archived::bool THEN 'archived' ELSE 'active' END,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateChatSessionSession :exec
 -- Updates the resume pointer for a chat session. Empty/NULL inputs are
 -- ignored via COALESCE so a task that completes without a session_id (e.g.

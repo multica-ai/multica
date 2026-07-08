@@ -814,6 +814,45 @@ func (q *Queries) MarkChatSessionRead(ctx context.Context, id pgtype.UUID) error
 	return err
 }
 
+const setChatSessionArchived = `-- name: SetChatSessionArchived :one
+UPDATE chat_session
+SET status = CASE WHEN $2::bool THEN 'archived' ELSE 'active' END,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, runtime_id, last_read_at, is_agent_intro, pinned_at
+`
+
+type SetChatSessionArchivedParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Archived bool        `json:"archived"`
+}
+
+// Archive/unarchive a chat session by flipping status between 'active' and
+// 'archived'. Bumps updated_at so the row re-sorts on the receiving list. The
+// send-message path refuses archived sessions (see SendChatMessage), so the
+// conversation is effectively read-only until it is unarchived.
+func (q *Queries) SetChatSessionArchived(ctx context.Context, arg SetChatSessionArchivedParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, setChatSessionArchived, arg.ID, arg.Archived)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+	)
+	return i, err
+}
+
 const setChatSessionPinned = `-- name: SetChatSessionPinned :one
 UPDATE chat_session
 SET pinned_at = CASE WHEN $2::bool THEN COALESCE(pinned_at, now()) ELSE NULL END

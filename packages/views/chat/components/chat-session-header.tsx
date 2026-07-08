@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Trash2, UserRound } from "lucide-react";
+import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Trash2, UserRound } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -21,7 +21,11 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useUpdateChatSession, useDeleteChatSession } from "@multica/core/chat/mutations";
+import {
+  useUpdateChatSession,
+  useDeleteChatSession,
+  useSetChatSessionArchived,
+} from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -46,7 +50,10 @@ export function ChatSessionHeader({
   const { push } = useNavigation();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
+  const setArchived = useSetChatSessionArchived();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
+
+  const isArchived = session.status === "archived";
 
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -83,6 +90,9 @@ export function ChatSessionHeader({
     setActiveSession(null);
     deleteSession.mutate(session.id);
   };
+
+  const doArchive = () => setArchived.mutate({ sessionId: session.id, archived: true });
+  const doUnarchive = () => setArchived.mutate({ sessionId: session.id, archived: false });
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
@@ -148,10 +158,24 @@ export function ChatSessionHeader({
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
-            <Trash2 className="h-4 w-4" />
-            {t(($) => $.header.delete)}
-          </DropdownMenuItem>
+          {isArchived ? (
+            <>
+              <DropdownMenuItem onClick={doUnarchive}>
+                <ArchiveRestore className="h-4 w-4" />
+                {t(($) => $.header.unarchive)}
+              </DropdownMenuItem>
+              {/* Hard delete is offered only once a chat is archived. */}
+              <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
+                <Trash2 className="h-4 w-4" />
+                {t(($) => $.header.delete)}
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem onClick={doArchive}>
+              <Archive className="h-4 w-4" />
+              {t(($) => $.header.archive)}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

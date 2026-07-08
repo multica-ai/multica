@@ -141,11 +141,16 @@
     "waiting": "Waiting for reply",
     "pin": "Pin",
     "unpin": "Unpin",
-    "pinned": "Pinned"
+    "pinned": "Pinned",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archived_title": "Archived"
   },
   "header": {
     "view_profile": "View agent profile",
     "rename": "Rename chat",
+    "archive": "Archive chat",
+    "unarchive": "Unarchive chat",
     "delete": "Delete chat"
   }
 }

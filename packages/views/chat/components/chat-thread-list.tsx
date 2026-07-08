@@ -2,13 +2,28 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Loader2, Pin, PinOff, Square, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Loader2,
+  Pin,
+  PinOff,
+  Square,
+  Trash2,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
-import { useDeleteChatSession, useSetChatSessionPinned } from "@multica/core/chat/mutations";
+import {
+  useDeleteChatSession,
+  useSetChatSessionArchived,
+  useSetChatSessionPinned,
+} from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -44,9 +59,16 @@ function toPreview(content: string): string {
  * IM-style conversation list: each row is agent avatar + name + last-message
  * preview + time, with a red unread *count* badge. An in-flight agent shows a
  * "typing…" indicator; a failed last reply shows a destructive hint. Rows are
- * rendered in the server's order (most-recent activity first). Hovering a row
- * reveals delete (or stop, while running). Renaming lives in the conversation
- * header's ⋯ menu, not here.
+ * rendered in the server's order (most-recent activity first). Renaming lives
+ * in the conversation header's ⋯ menu, not here.
+ *
+ * Two views, toggled locally: the default "history" view lists active chats and
+ * hovering a row reveals pin + archive (or stop, while running) — archiving is
+ * the reversible, one-click default so nothing is destroyed by accident. A
+ * footer entry ("Archived · N") switches to the "archived" view, which lists
+ * archived chats and is the ONLY place a chat can be hard-deleted (hover →
+ * unarchive + delete). Both views read the same flat sessions cache and split
+ * on `status` locally.
  */
 export function ChatThreadList({
   sessions,
@@ -63,19 +85,33 @@ export function ChatThreadList({
   const wsId = useWorkspaceId();
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
-  // Legacy soft-archived rows are dead data — excluded from history. Sorted
-  // pinned-first (then by activity) so the list stays ordered even after an
-  // optimistic pin/unpin or a WS patch mutates the flat cache in place.
+  // Split the flat cache locally: active chats fill the default history view,
+  // archived chats fill the "Archived" view. Both sorted pinned-first (then by
+  // activity) so the list stays ordered even after an optimistic pin/archive or
+  // a WS patch mutates the flat cache in place.
   const historySessions = useMemo(
     () => sortChatSessions(sessions.filter((s) => s.status !== "archived")),
     [sessions],
   );
+  const archivedSessions = useMemo(
+    () => sortChatSessions(sessions.filter((s) => s.status === "archived")),
+    [sessions],
+  );
+
+  // Which view is showing. Falls back to history when the archived list drains
+  // (last chat unarchived / deleted) so we never strand the user on an empty
+  // archive.
+  const [view, setView] = useState<"history" | "archived">("history");
+  useEffect(() => {
+    if (view === "archived" && archivedSessions.length === 0) setView("history");
+  }, [view, archivedSessions.length]);
 
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const deleteSession = useDeleteChatSession();
   const setPinned = useSetChatSessionPinned();
+  const setArchived = useSetChatSessionArchived();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
 
@@ -285,28 +321,47 @@ export function ChatThreadList({
         </div>
 
         {/* Hover actions — absolutely positioned so showing/hiding them never
-            changes the row height (which was making the list jump). */}
+            changes the row height (which was making the list jump). The archived
+            view is the only place hard-delete lives; the history view offers the
+            reversible archive instead. */}
         {!isConfirmingAction && (
           <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 group-hover/row:flex">
-            <RowAction
-              icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
-              label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
-              onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
-            />
-            {isRunning ? (
-              <RowAction
-                icon={<Square className="size-3 fill-current" />}
-                label={t(($) => $.session_history.row_stop_aria)}
-                danger
-                onClick={() => setConfirmingStopId(session.id)}
-              />
+            {view === "archived" ? (
+              <>
+                <RowAction
+                  icon={<ArchiveRestore className="size-3.5" />}
+                  label={t(($) => $.list.unarchive)}
+                  onClick={() => setArchived.mutate({ sessionId: session.id, archived: false })}
+                />
+                <RowAction
+                  icon={<Trash2 className="size-3.5" />}
+                  label={t(($) => $.session_history.row_delete_aria)}
+                  danger
+                  onClick={() => setConfirmingDeleteId(session.id)}
+                />
+              </>
             ) : (
-              <RowAction
-                icon={<Trash2 className="size-3.5" />}
-                label={t(($) => $.session_history.row_delete_aria)}
-                danger
-                onClick={() => setConfirmingDeleteId(session.id)}
-              />
+              <>
+                <RowAction
+                  icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
+                  label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
+                  onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
+                />
+                {isRunning ? (
+                  <RowAction
+                    icon={<Square className="size-3 fill-current" />}
+                    label={t(($) => $.session_history.row_stop_aria)}
+                    danger
+                    onClick={() => setConfirmingStopId(session.id)}
+                  />
+                ) : (
+                  <RowAction
+                    icon={<Archive className="size-3.5" />}
+                    label={t(($) => $.list.archive)}
+                    onClick={() => setArchived.mutate({ sessionId: session.id, archived: true })}
+                  />
+                )}
+              </>
             )}
           </div>
         )}
@@ -314,15 +369,60 @@ export function ChatThreadList({
     );
   };
 
-  if (historySessions.length === 0) {
+  // Archived view: a back header, then the archived rows. Delete lives only
+  // here (via each row's hover actions).
+  if (view === "archived") {
     return (
-      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-        {t(($) => $.window.no_previous)}
-      </div>
+      <>
+        <button
+          type="button"
+          onClick={() => setView("history")}
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <ChevronLeft className="size-4 shrink-0" />
+          <span className="truncate">{t(($) => $.list.archived_title)}</span>
+          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+            {archivedSessions.length}
+          </span>
+        </button>
+        {archivedSessions.map(renderRow)}
+      </>
     );
   }
 
-  return <>{historySessions.map(renderRow)}</>;
+  // History (default) view: active rows + a footer entry into the archive.
+  const archivedEntry = archivedSessions.length > 0 && (
+    <button
+      type="button"
+      onClick={() => setView("archived")}
+      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center">
+        <Archive className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground/70">{archivedSessions.length}</span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+    </button>
+  );
+
+  if (historySessions.length === 0) {
+    return (
+      <>
+        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+          {t(($) => $.window.no_previous)}
+        </div>
+        {archivedEntry}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {historySessions.map(renderRow)}
+      {archivedEntry}
+    </>
+  );
 }
 
 function RowAction({
