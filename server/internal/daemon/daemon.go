@@ -3828,25 +3828,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if toolPolicySpawn != nil && provider == "claude" && toolPolicySpawn.SettingsPath != "" {
 		customArgs = append(customArgs, "--settings", toolPolicySpawn.SettingsPath)
 	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
+	// CEREBRO-PATCH(daemon-run-task-model-override): task model_override wins over agent.model for workflow/wakeup runs.
+	model := resolveTaskModel(task, entry)
 	thinkingLevel := ""
+	// CEREBRO-PATCH(daemon-run-task-thinking-override): task thinking_override wins over agent.thinking_level for workflow steps.
+	if task.ThinkingOverride != "" {
+		thinkingLevel = task.ThinkingOverride
+	}
 	if task.Agent != nil {
-		thinkingLevel = task.Agent.ThinkingLevel
+		if thinkingLevel == "" {
+			thinkingLevel = task.Agent.ThinkingLevel
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus

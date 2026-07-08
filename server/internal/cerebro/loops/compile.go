@@ -51,11 +51,13 @@ func splitChecks(programmatic, judge, human []Verification) ([][]string, []Judge
 	judgeChecks := make([]JudgeCheck, 0, len(judge))
 	for _, v := range judge {
 		judgeChecks = append(judgeChecks, JudgeCheck{
-			ID:           v.ID,
-			Rubric:       v.Rubric,
-			AssigneeID:   v.AssigneeID,
-			AssigneeType: v.AssigneeType,
-			Skill:        v.Skill,
+			ID:            v.ID,
+			Rubric:        v.Rubric,
+			AssigneeID:    v.AssigneeID,
+			AssigneeType:  v.AssigneeType,
+			Skill:         v.Skill,
+			Model:         v.Model,
+			ThinkingLevel: v.ThinkingLevel,
 		})
 	}
 	humanChecks := make([]HumanCheck, 0, len(human))
@@ -91,7 +93,9 @@ type CheckGateConfig struct {
 	// skill the loop:dispatch-build rule runs, so a revision looks identical
 	// to the original build round from the worker's point of view — it is
 	// told what failed and asked to fix it.
-	RevisionSkill string `json:"revision_skill,omitempty"`
+	RevisionSkill    string `json:"revision_skill,omitempty"`
+	RevisionModel    string `json:"revision_model,omitempty"`
+	RevisionThinking string `json:"revision_thinking,omitempty"`
 	// JudgeChecks are the spec's judge-type verification criteria: a model
 	// scores a rubric and returns a structured pass/revise verdict instead of
 	// an exit code. The gate treats a judge check exactly like a programmatic
@@ -110,7 +114,9 @@ type CheckGateConfig struct {
 	JudgeAgentID string `json:"judge_agent_id,omitempty"`
 	// JudgeSkill is the skill dispatched to JudgeAgentID for a judge check
 	// that does not carry its own Skill.
-	JudgeSkill string `json:"judge_skill,omitempty"`
+	JudgeSkill    string `json:"judge_skill,omitempty"`
+	JudgeModel    string `json:"judge_model,omitempty"`
+	JudgeThinking string `json:"judge_thinking,omitempty"`
 	// HumanChecks are the spec's human-type verification criteria: a person
 	// (or an agent standing in for one) must explicitly approve or reject.
 	// The gate treats a human check exactly like a programmatic or judge one
@@ -141,12 +147,14 @@ type CheckGateConfig struct {
 // (to BuildAgentID, falling back to the gate's AgentID) when it re-enters or
 // advances into that phase.
 type GatePhase struct {
-	Name         string       `json:"name,omitempty"`
-	BuildSkill   string       `json:"build_skill,omitempty"`
-	BuildAgentID string       `json:"build_agent_id,omitempty"`
-	Checks       [][]string   `json:"checks,omitempty"`
-	JudgeChecks  []JudgeCheck `json:"judge_checks,omitempty"`
-	HumanChecks  []HumanCheck `json:"human_checks,omitempty"`
+	Name          string       `json:"name,omitempty"`
+	BuildSkill    string       `json:"build_skill,omitempty"`
+	BuildAgentID  string       `json:"build_agent_id,omitempty"`
+	Model         string       `json:"model,omitempty"`
+	ThinkingLevel string       `json:"thinking_level,omitempty"`
+	Checks        [][]string   `json:"checks,omitempty"`
+	JudgeChecks   []JudgeCheck `json:"judge_checks,omitempty"`
+	HumanChecks   []HumanCheck `json:"human_checks,omitempty"`
 }
 
 // JudgeCheck is one judge-type verification criterion carried into the gate
@@ -155,11 +163,13 @@ type GatePhase struct {
 // optional per-check assignee/skill override. Empty AssigneeID/Skill fall
 // back to CheckGateConfig.JudgeAgentID/JudgeSkill.
 type JudgeCheck struct {
-	ID           string `json:"id"`
-	Rubric       string `json:"rubric"`
-	AssigneeID   string `json:"assignee_id,omitempty"`
-	AssigneeType string `json:"assignee_type,omitempty"`
-	Skill        string `json:"skill,omitempty"`
+	ID            string `json:"id"`
+	Rubric        string `json:"rubric"`
+	AssigneeID    string `json:"assignee_id,omitempty"`
+	AssigneeType  string `json:"assignee_type,omitempty"`
+	Skill         string `json:"skill,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 }
 
 // HumanCheck is one human-type verification criterion carried into the gate
@@ -198,11 +208,13 @@ type CompileParams struct {
 	// "hold without dispatching" when empty — see gate_evaluator.go — so a
 	// recipe with no pinned agent and an issue with no agent assignee simply
 	// waits at the gate instead of silently picking an arbitrary worker.
-	AgentID      string
-	BuildSkill   string // skill the worker runs each build round
-	BuildStatus  string // status whose entry dispatches a build round
-	ReviewStatus string // status the worker sets when it claims a round done
-	DoneStatus   string // terminal status, set only when the gate passes
+	AgentID       string
+	BuildSkill    string // skill the worker runs each build round
+	BuildModel    string
+	BuildThinking string
+	BuildStatus   string // status whose entry dispatches a build round
+	ReviewStatus  string // status the worker sets when it claims a round done
+	DoneStatus    string // terminal status, set only when the gate passes
 
 	// Planning-phase params — only used when Spec.Planning is true.
 	// PlanSkill is the skill dispatched during the planning phase; if empty,
@@ -211,6 +223,9 @@ type CompileParams struct {
 	// dispatch; it defaults to "todo" so creating the issue in the default
 	// state fires the plan immediately.
 	PlanSkill      string
+	PlanAgentID    string
+	PlanModel      string
+	PlanThinking   string
 	PlanningStatus string
 
 	// Judge params — only used when the spec has judge-type verification
@@ -220,8 +235,10 @@ type CompileParams struct {
 	// want a blind review must set a distinct JudgeAgentID). JudgeSkill is
 	// the skill dispatched to score a judge check; if empty, BuildSkill is
 	// used.
-	JudgeAgentID string
-	JudgeSkill   string
+	JudgeAgentID  string
+	JudgeSkill    string
+	JudgeModel    string
+	JudgeThinking string
 }
 
 func (p *CompileParams) withDefaults() CompileParams {
@@ -308,15 +325,19 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	buildSkill := p.BuildSkill
 	buildAgentID := params.AgentID
 	deliveryGateConfig := CheckGateConfig{
-		Checks:        checks,
-		AgentID:       params.AgentID,
-		Caps:          spec.Caps,
-		RevisionSkill: p.BuildSkill,
-		JudgeChecks:   judgeChecks,
-		JudgeAgentID:  p.JudgeAgentID,
-		JudgeSkill:    p.JudgeSkill,
-		HumanChecks:   humanChecks,
-		RevertStatus:  p.BuildStatus,
+		Checks:           checks,
+		AgentID:          params.AgentID,
+		Caps:             spec.Caps,
+		RevisionSkill:    p.BuildSkill,
+		RevisionModel:    params.BuildModel,
+		RevisionThinking: params.BuildThinking,
+		JudgeChecks:      judgeChecks,
+		JudgeAgentID:     p.JudgeAgentID,
+		JudgeSkill:       p.JudgeSkill,
+		JudgeModel:       params.JudgeModel,
+		JudgeThinking:    params.JudgeThinking,
+		HumanChecks:      humanChecks,
+		RevertStatus:     p.BuildStatus,
 	}
 	if multiPhase {
 		gatePhases := make([]GatePhase, len(spec.Phases))
@@ -327,24 +348,30 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 				filterByType(ph.Verification, CheckHuman),
 			)
 			gatePhases[i] = GatePhase{
-				Name:         ph.Name,
-				BuildSkill:   ph.BuildSkill,
-				BuildAgentID: ph.BuildAgentID,
-				Checks:       pc,
-				JudgeChecks:  pj,
-				HumanChecks:  phm,
+				Name:          ph.Name,
+				BuildSkill:    ph.BuildSkill,
+				BuildAgentID:  ph.BuildAgentID,
+				Model:         ph.Model,
+				ThinkingLevel: ph.ThinkingLevel,
+				Checks:        pc,
+				JudgeChecks:   pj,
+				HumanChecks:   phm,
 			}
 		}
 		buildSkill = spec.Phases[0].BuildSkill
 		if spec.Phases[0].BuildAgentID != "" {
 			buildAgentID = spec.Phases[0].BuildAgentID
 		}
+		params.BuildModel = spec.Phases[0].Model
+		params.BuildThinking = spec.Phases[0].ThinkingLevel
 		// The top-level checks are unused in multi-phase; the evaluator reads
 		// the current phase's checks out of Phases instead.
 		deliveryGateConfig.Checks = nil
 		deliveryGateConfig.JudgeChecks = nil
 		deliveryGateConfig.HumanChecks = nil
 		deliveryGateConfig.RevisionSkill = spec.Phases[0].BuildSkill
+		deliveryGateConfig.RevisionModel = spec.Phases[0].Model
+		deliveryGateConfig.RevisionThinking = spec.Phases[0].ThinkingLevel
 		deliveryGateConfig.Phases = gatePhases
 	}
 
@@ -360,15 +387,19 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			spec.PlanGateProgrammaticChecks(), spec.PlanGateJudgeChecks(), spec.PlanGateHumanChecks())
 		dispatchBuildConditions = append(dispatchBuildConditions, workflows.Condition{
 			Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
-				Checks:        planChecks,
-				AgentID:       params.AgentID,
-				Caps:          spec.Caps,
-				RevisionSkill: p.PlanSkill,
-				JudgeChecks:   planJudgeChecks,
-				JudgeAgentID:  p.JudgeAgentID,
-				JudgeSkill:    p.JudgeSkill,
-				HumanChecks:   planHumanChecks,
-				RevertStatus:  p.PlanningStatus,
+				Checks:           planChecks,
+				AgentID:          params.AgentID,
+				Caps:             spec.Caps,
+				RevisionSkill:    p.PlanSkill,
+				RevisionModel:    params.PlanModel,
+				RevisionThinking: params.PlanThinking,
+				JudgeChecks:      planJudgeChecks,
+				JudgeAgentID:     p.JudgeAgentID,
+				JudgeSkill:       p.JudgeSkill,
+				JudgeModel:       params.JudgeModel,
+				JudgeThinking:    params.JudgeThinking,
+				HumanChecks:      planHumanChecks,
+				RevertStatus:     p.PlanningStatus,
 			},
 		})
 	}
@@ -381,8 +412,10 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			Conditions:    dispatchBuildConditions,
 			ActionType:    workflows.ActionRunSkill,
 			ActionConfig: workflows.ActionConfigRunSkill{
-				SkillName: buildSkill,
-				AgentID:   buildAgentID,
+				SkillName:     buildSkill,
+				AgentID:       buildAgentID,
+				Model:         params.BuildModel,
+				ThinkingLevel: params.BuildThinking,
 				// Phase marker: the build kickoff runs ON the issue in a
 				// session badged "build" (see ActionConfigRunSkill.LoopPhase).
 				LoopPhase: "build",
@@ -415,7 +448,15 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	// The delivery gate is unchanged — planning is a pre-flight phase, not a
 	// separate gate.
 	if spec.Planning {
-		planRule := PlanningDispatchRule(params.AgentID, p.PlanSkill, p.PlanningStatus)
+		planAgentID := params.PlanAgentID
+		if planAgentID == "" {
+			planAgentID = params.AgentID
+		}
+		planRule := PlanningDispatchRule(planAgentID, p.PlanSkill, p.PlanningStatus)
+		ac := planRule.ActionConfig.(workflows.ActionConfigRunSkill)
+		ac.Model = params.PlanModel
+		ac.ThinkingLevel = params.PlanThinking
+		planRule.ActionConfig = ac
 		planRule.Conditions = issueScope
 		rules = append([]Rule{planRule}, rules...)
 	}

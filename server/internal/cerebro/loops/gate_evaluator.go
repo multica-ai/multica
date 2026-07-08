@@ -142,7 +142,7 @@ func (g *GateEvaluator) evaluateGateAt(ctx context.Context, iid pgtype.UUID, gat
 		if err := g.store.EnqueueHuman(ctx, iid, gate, state.Round, decision.EnqueueHuman); err != nil {
 			return false, err
 		}
-		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round); err != nil {
+		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round, cfg.RevisionModel, cfg.RevisionThinking); err != nil {
 			return false, err
 		}
 		if err := g.dispatchPendingJudge(ctx, iid, cfg, gate, state.Round); err != nil {
@@ -242,12 +242,14 @@ func (g *GateEvaluator) evaluateMultiPhase(ctx context.Context, iid pgtype.UUID,
 		agent := firstNonEmpty(next.BuildAgentID, cfg.AgentID)
 		if agent != "" && next.BuildSkill != "" {
 			if derr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
-				AgentID:    agent,
-				IssueID:    util.UUIDToString(iid),
-				Gate:       phaseGateKey(baseGate, np),
-				Round:      gateRound,
-				SkillName:  next.BuildSkill,
-				PhaseLabel: phaseLabel(next, np),
+				AgentID:       agent,
+				IssueID:       util.UUIDToString(iid),
+				Gate:          phaseGateKey(baseGate, np),
+				Round:         gateRound,
+				SkillName:     next.BuildSkill,
+				Model:         next.Model,
+				ThinkingLevel: next.ThinkingLevel,
+				PhaseLabel:    phaseLabel(next, np),
 			}); derr != nil {
 				return false, derr
 			}
@@ -288,12 +290,14 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 		return revertErr
 	}
 	dispatchErr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
-		AgentID:   cfg.AgentID,
-		IssueID:   util.UUIDToString(issueID),
-		Gate:      gate,
-		Round:     next.Round,
-		SkillName: cfg.RevisionSkill,
-		Failures:  outcomes,
+		AgentID:       cfg.AgentID,
+		IssueID:       util.UUIDToString(issueID),
+		Gate:          gate,
+		Round:         next.Round,
+		SkillName:     cfg.RevisionSkill,
+		Model:         cfg.RevisionModel,
+		ThinkingLevel: cfg.RevisionThinking,
+		Failures:      outcomes,
 	})
 	// The actual re-run must never be silently lost behind a status-revert
 	// failure — surface whichever step failed (dispatch takes priority since
@@ -309,7 +313,7 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 // so a later evaluation never re-sends it. A nil dispatcher (the pre-dispatch
 // wiring) or a config without an agent leaves the checks pending without
 // sending them — the gate still holds, it just has no egress.
-func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string, round int32) error {
+func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string, round int32, model, thinking string) error {
 	if g.dispatcher == nil || agentID == "" {
 		return nil
 	}
@@ -320,11 +324,13 @@ func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID
 	issueStr := util.UUIDToString(issueID)
 	for _, argv := range pending {
 		if err := g.dispatcher.DispatchCheck(ctx, CheckDispatch{
-			AgentID: agentID,
-			IssueID: issueStr,
-			Gate:    gate,
-			Round:   round,
-			Argv:    argv,
+			AgentID:       agentID,
+			IssueID:       issueStr,
+			Gate:          gate,
+			Round:         round,
+			Argv:          argv,
+			Model:         model,
+			ThinkingLevel: thinking,
 		}); err != nil {
 			return fmt.Errorf("dispatch pending check: %w", err)
 		}
@@ -361,13 +367,15 @@ func (g *GateEvaluator) dispatchPendingJudge(ctx context.Context, issueID pgtype
 			continue
 		}
 		if err := g.dispatcher.DispatchJudge(ctx, JudgeDispatch{
-			AgentID:   agentID,
-			IssueID:   issueStr,
-			Gate:      gate,
-			Round:     round,
-			CheckID:   check.ID,
-			Rubric:    check.Rubric,
-			SkillName: skill,
+			AgentID:       agentID,
+			IssueID:       issueStr,
+			Gate:          gate,
+			Round:         round,
+			CheckID:       check.ID,
+			Rubric:        check.Rubric,
+			SkillName:     skill,
+			Model:         firstNonEmpty(checkCfg.Model, cfg.JudgeModel),
+			ThinkingLevel: firstNonEmpty(checkCfg.ThinkingLevel, cfg.JudgeThinking),
 		}); err != nil {
 			return fmt.Errorf("dispatch pending judge check: %w", err)
 		}

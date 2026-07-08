@@ -34,7 +34,7 @@
   },
   "_comment_channels_export": "CEREBRO-PATCH(views-channels-export): FIR-2452 — expose ChannelDetail/NewMessageModal via @multica/views/channels so the standalone /channels/<id> route can render the dedicated chat component instead of IssueDetail.",
   "_comment_cerebro_mobile_list_reuse": "CEREBRO-PATCH(views-mobile-list-reuse): FIR-2669 — expose ./agents/presence, ./agents/components/agents-page (AgentListRow type), ./runtimes/utils, ./runtimes/components/{runtime-machines,provider-logo,shared} so @multica/cerebro-runtime's mobile card lists reuse the same cells/helpers instead of duplicating them. These are leaf view modules (no cerebro-runtime import), so no new package cycle; the AgentListRow import is type-only.",
-  "_comment_cerebro_agent_page_redesign_reuse": "CEREBRO-PATCH(views-agent-redesign-reuse): FIR-2670 — expose ./common/prop-row, ./agents/components/tabs/{activity-tab,skills-tab,env-tab,infisical-folders-tab,custom-args-tab,sandbox-tab,mcp-config-tab,integrations-tab} and ./agents/components/inspector/{runtime-picker,model-picker,thinking-prop-row,visibility-picker,concurrency-picker,skill-attach} so @multica/cerebro-agent-page-redesign reuses the shipped Activity feed, Skills add/remove, advanced setup tabs, and editable inspector pickers instead of re-implementing them. These are cycle-safe leaf modules (inspector pickers have no cerebro import; activity-tab already imports @multica/cerebro-runtime which @multica/views already depends on) so no new package cycle.",
+  "_comment_cerebro_agent_page_redesign_reuse": "CEREBRO-PATCH(views-agent-redesign-reuse): FIR-2670 / FIR-2927 — expose ./common/prop-row, ./agents/components/tabs/{activity-tab,skills-tab,env-tab,infisical-folders-tab,custom-args-tab,sandbox-tab,mcp-config-tab,integrations-tab} and ./agents/components/inspector/{runtime-picker,model-picker,thinking-picker,thinking-prop-row,visibility-picker,concurrency-picker,skill-attach} so @multica/cerebro-agent-page-redesign and @multica/cerebro-workflows reuse the shipped Activity feed, Skills add/remove, advanced setup tabs, and editable inspector pickers instead of re-implementing them. These are cycle-safe leaf modules (inspector pickers have no cerebro import; activity-tab already imports @multica/cerebro-runtime which @multica/views already depends on) so no new package cycle.",
   "exports": {
     "./channels": "./channels/index.ts",
     "./navigation": "./navigation/index.ts",
@@ -76,6 +76,7 @@
     "./agents/components/tabs/integrations-tab": "./agents/components/tabs/integrations-tab.tsx",
     "./agents/components/inspector/runtime-picker": "./agents/components/inspector/runtime-picker.tsx",
     "./agents/components/inspector/model-picker": "./agents/components/inspector/model-picker.tsx",
+    "./agents/components/inspector/thinking-picker": "./agents/components/inspector/thinking-picker.tsx",
     "./agents/components/inspector/thinking-prop-row": "./agents/components/inspector/thinking-prop-row.tsx",
     "./agents/components/inspector/visibility-picker": "./agents/components/inspector/visibility-picker.tsx",
     "./agents/components/inspector/concurrency-picker": "./agents/components/inspector/concurrency-picker.tsx",

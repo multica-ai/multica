@@ -55,6 +55,8 @@ type IssueActions interface {
 	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
+	SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error
 	// Issue-bound phase dispatch (Tine live-test fix): a plan/build phase run
 	// is enqueued ON the target issue with a trigger comment, not as a
 	// detached quick_create task.
@@ -450,13 +452,17 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	}
 	contextJSON := mustJSON(taskContext)
 
-	if _, err := s.issues.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	task, err := s.issues.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
 		RuntimeID: agent.RuntimeID,
 		Priority:  0,
 		Context:   contextJSON,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("run_skill: enqueue task: %w", err)
+	}
+	if err := s.applyTaskOverrides(ctx, task.ID, cfg.Model, cfg.ThinkingLevel); err != nil {
+		return err
 	}
 	// We deliberately do NOT publish a daemon wakeup here — that lives on
 	// TaskService, which the workflow engine doesn't depend on. The task
@@ -524,7 +530,7 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		"loop_phase":               phase,
 		"plan_mode":                cfg.PlanMode,
 	})
-	if _, err := s.issues.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	task, err := s.issues.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
 		RuntimeID:         agent.RuntimeID,
 		IssueID:           issue.ID,
@@ -535,11 +541,37 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		Title:             pgtype.Text{String: name + ": " + issue.Title, Valid: true},
 		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true},
 		OriginalUserID:    originalUserID,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("run_skill: enqueue phase task: %w", err)
+	}
+	if err := s.applyTaskOverrides(ctx, task.ID, cfg.Model, cfg.ThinkingLevel); err != nil {
+		return err
 	}
 	// Same as the quick_create path: no daemon wakeup from the engine — the
 	// claim poll picks the task up.
+	return nil
+}
+
+func (s *Service) applyTaskOverrides(ctx context.Context, taskID pgtype.UUID, model, thinking string) error {
+	model = strings.TrimSpace(model)
+	thinking = strings.TrimSpace(thinking)
+	if model != "" {
+		if err := s.issues.SetAgentTaskModelOverride(ctx, db.SetAgentTaskModelOverrideParams{
+			ID:            taskID,
+			ModelOverride: model,
+		}); err != nil {
+			return fmt.Errorf("run_skill: set model override: %w", err)
+		}
+	}
+	if thinking != "" {
+		if err := s.issues.SetAgentTaskThinkingOverride(ctx, db.SetAgentTaskThinkingOverrideParams{
+			ID:               taskID,
+			ThinkingOverride: thinking,
+		}); err != nil {
+			return fmt.Errorf("run_skill: set thinking override: %w", err)
+		}
+	}
 	return nil
 }
 

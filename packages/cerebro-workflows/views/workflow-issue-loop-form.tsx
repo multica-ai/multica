@@ -12,6 +12,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
@@ -22,6 +24,8 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
 import { AssigneePicker } from "@multica/views/issues/components";
+import { ModelPicker } from "@multica/views/agents/components/inspector/model-picker";
+import { ThinkingPicker } from "@multica/views/agents/components/inspector/thinking-picker";
 import { Plus, Trash2 } from "lucide-react";
 
 import { SkillNamePicker } from "./loop-pickers";
@@ -68,6 +72,8 @@ interface VerificationRow {
   skill: string;
   assigneeType: LoopAssigneeType;
   assigneeId: string;
+  model: string;
+  thinkingLevel: string;
 }
 
 function newRow(): VerificationRow {
@@ -80,6 +86,8 @@ function newRow(): VerificationRow {
     skill: "",
     assigneeType: "agent",
     assigneeId: "",
+    model: "",
+    thinkingLevel: "",
   };
 }
 
@@ -90,6 +98,8 @@ interface PhaseRow {
   name: string;
   buildSkill: string;
   buildAgentId: string;
+  model: string;
+  thinkingLevel: string;
   goal: string;
   verification: VerificationRow[];
 }
@@ -100,6 +110,8 @@ function newPhase(seed?: Partial<PhaseRow>): PhaseRow {
     name: "",
     buildSkill: "",
     buildAgentId: "",
+    model: "",
+    thinkingLevel: "",
     goal: "",
     verification: [newRow()],
     ...seed,
@@ -119,9 +131,14 @@ interface LoopFormState {
   // Definition of done. Stored on the wire as `goal`.
   goal: string;
   planning: boolean;
+  planAgentId: string;
   planSkill: string;
+  planModel: string;
+  planThinking: string;
   buildAgentId: string;
   buildSkill: string;
+  buildModel: string;
+  buildThinking: string;
   maxAttempts: string;
   noProgressStalls: string;
   verification: VerificationRow[];
@@ -140,9 +157,14 @@ const EMPTY_LOOP_FORM: LoopFormState = {
   enabled: true,
   goal: "",
   planning: false,
+  planAgentId: "",
   planSkill: "",
+  planModel: "",
+  planThinking: "",
   buildAgentId: "",
   buildSkill: "",
+  buildModel: "",
+  buildThinking: "",
   maxAttempts: String(DEFAULT_LOOP_CAPS.max_iterations),
   noProgressStalls: String(DEFAULT_LOOP_CAPS.no_progress_stalls),
   verification: [newRow()],
@@ -168,6 +190,8 @@ function rowsFromVerification(list: LoopVerification[]): VerificationRow[] {
     // an old human check to a person.
     assigneeType: v.assignee_type ?? (v.type === "human" ? "member" : "agent"),
     assigneeId: v.assignee_id ?? "",
+    model: v.model ?? "",
+    thinkingLevel: v.thinking_level ?? "",
   }));
 }
 
@@ -191,6 +215,8 @@ function verificationFromRows(rows: VerificationRow[]): LoopVerification[] {
       // judges from the free-text instruction.
       base.assignee_type = "agent";
       base.assignee_id = row.assigneeId;
+      base.model = row.model || undefined;
+      base.thinking_level = row.thinkingLevel || undefined;
       if (row.skill) base.skill = row.skill;
       base.rubric = row.prompt || row.label || row.skill;
     }
@@ -208,9 +234,14 @@ function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
     // recipes still show their full instruction after the point-4 collapse.
     goal: [spec.goal, spec.definition_of_done].filter(Boolean).join("\n\n"),
     planning: spec.planning === true,
+    planAgentId: spec.plan_agent_id ?? "",
     planSkill: spec.plan_skill ?? "",
+    planModel: spec.plan_model ?? "",
+    planThinking: spec.plan_thinking ?? "",
     buildAgentId: spec.build_agent_id ?? "",
     buildSkill: spec.build_skill ?? "",
+    buildModel: spec.build_model ?? "",
+    buildThinking: spec.build_thinking ?? "",
     maxAttempts: String(spec.caps?.max_iterations ?? DEFAULT_LOOP_CAPS.max_iterations),
     noProgressStalls: String(
       spec.caps?.no_progress_stalls ?? DEFAULT_LOOP_CAPS.no_progress_stalls,
@@ -225,6 +256,8 @@ function formStateFromWorkflow(wf: CerebroWorkflow): LoopFormState {
               name: p.name ?? "",
               buildSkill: p.build_skill ?? "",
               buildAgentId: p.build_agent_id ?? "",
+              model: p.model ?? "",
+              thinkingLevel: p.thinking_level ?? "",
               goal: p.goal ?? "",
               verification:
                 p.verification.length > 0 ? rowsFromVerification(p.verification) : [newRow()],
@@ -256,19 +289,26 @@ function buildLoopSpec(form: LoopFormState): LoopSpec {
       no_progress_stalls: stalls,
     },
     planning: form.planning,
+    plan_agent_id: form.planning ? form.planAgentId || undefined : undefined,
     plan_skill: form.planning ? form.planSkill || form.buildSkill : undefined,
+    plan_model: form.planning ? form.planModel || undefined : undefined,
+    plan_thinking: form.planning ? form.planThinking || undefined : undefined,
     plan_gate:
       form.planning && form.planGate.length > 0 ? verificationFromRows(form.planGate) : undefined,
     // In multi-phase mode phase 0 drives the loop; keep build_skill pointing at
     // it so a downgrade to single-phase still has a skill to fall back on.
     build_agent_id: multiPhase ? (form.phases[0]?.buildAgentId ?? "") : form.buildAgentId,
     build_skill: multiPhase ? (form.phases[0]?.buildSkill ?? "") : form.buildSkill,
+    build_model: multiPhase ? (form.phases[0]?.model || undefined) : form.buildModel || undefined,
+    build_thinking: multiPhase ? (form.phases[0]?.thinkingLevel || undefined) : form.buildThinking || undefined,
   };
   if (multiPhase) {
     spec.phases = form.phases.map((p) => ({
       name: p.name || undefined,
       build_skill: p.buildSkill,
       build_agent_id: p.buildAgentId || undefined,
+      model: p.model || undefined,
+      thinking_level: p.thinkingLevel || undefined,
       goal: p.goal || undefined,
       verification: verificationFromRows(p.verification),
     }));
@@ -283,6 +323,7 @@ interface Props {
 
 export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
   const featureEnabled = useFeatureFlag("cerebro_workflows");
+  const stepModelOverrideEnabled = useFeatureFlag("cerebro_workflow_step_model_override");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -362,6 +403,8 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                 name: "Phase 1",
                 buildSkill: f.buildSkill,
                 buildAgentId: f.buildAgentId,
+                model: f.buildModel,
+                thinkingLevel: f.buildThinking,
                 goal: f.goal,
                 verification: f.verification.length > 0 ? f.verification : [newRow()],
               }),
@@ -435,6 +478,27 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           </p>
           {form.planning && (
             <>
+              <Field label="Plan agent">
+                <AgentPicker
+                  agentId={form.planAgentId || null}
+                  onChange={(id) => setForm({ ...form, planAgentId: id })}
+                />
+              </Field>
+              {stepModelOverrideEnabled && (
+                <StepModelControls
+                  wsId={wsId}
+                  agentId={form.planAgentId || form.buildAgentId}
+                  model={form.planModel}
+                  thinkingLevel={form.planThinking}
+                  onChange={(patch) =>
+                    setForm({
+                      ...form,
+                      planModel: patch.model ?? form.planModel,
+                      planThinking: patch.thinkingLevel ?? form.planThinking,
+                    })
+                  }
+                />
+              )}
               <Field label="Plan skill (defaults to the build skill below)">
                 <SkillNamePicker
                   value={form.planSkill}
@@ -456,6 +520,8 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                         row={row}
                         index={i}
                         canRemove
+                        wsId={wsId}
+                        modelControlsEnabled={stepModelOverrideEnabled}
                         onChange={(patch) => planGateOps.set(row.key, patch)}
                         onRemove={() => planGateOps.remove(row.key)}
                       />
@@ -505,6 +571,21 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                   onChange={(id) => setForm({ ...form, buildAgentId: id })}
                 />
               </Field>
+              {stepModelOverrideEnabled && (
+                <StepModelControls
+                  wsId={wsId}
+                  agentId={form.buildAgentId}
+                  model={form.buildModel}
+                  thinkingLevel={form.buildThinking}
+                  onChange={(patch) =>
+                    setForm({
+                      ...form,
+                      buildModel: patch.model ?? form.buildModel,
+                      buildThinking: patch.thinkingLevel ?? form.buildThinking,
+                    })
+                  }
+                />
+              )}
               <Field label="Prompt">
                 <Textarea
                   value={form.goal}
@@ -580,6 +661,20 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                     onChange={(id) => phaseOps.set(phase.key, { buildAgentId: id })}
                   />
                 </Field>
+                {stepModelOverrideEnabled && (
+                  <StepModelControls
+                    wsId={wsId}
+                    agentId={phase.buildAgentId || form.buildAgentId}
+                    model={phase.model}
+                    thinkingLevel={phase.thinkingLevel}
+                    onChange={(patch) =>
+                      phaseOps.set(phase.key, {
+                        model: patch.model ?? phase.model,
+                        thinkingLevel: patch.thinkingLevel ?? phase.thinkingLevel,
+                      })
+                    }
+                  />
+                )}
                 <Field label="Prompt">
                   <Textarea
                     value={phase.goal}
@@ -597,6 +692,8 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                         row={row}
                         index={i}
                         canRemove={phase.verification.length > 1}
+                        wsId={wsId}
+                        modelControlsEnabled={stepModelOverrideEnabled}
                         onChange={(patch) =>
                           phaseOps.setVerification(phase.key, (rows) =>
                             rows.map((r) => (r.key === row.key ? { ...r, ...patch } : r)),
@@ -678,6 +775,8 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
                 row={row}
                 index={i}
                 canRemove={form.verification.length > 1}
+                wsId={wsId}
+                modelControlsEnabled={stepModelOverrideEnabled}
                 onChange={(patch) => setRow(row.key, patch)}
                 onRemove={() =>
                   setForm((f) => ({
@@ -789,12 +888,16 @@ function VerificationRowEditor({
   row,
   index,
   canRemove,
+  wsId,
+  modelControlsEnabled,
   onChange,
   onRemove,
 }: {
   row: VerificationRow;
   index: number;
   canRemove: boolean;
+  wsId: string;
+  modelControlsEnabled: boolean;
   onChange: (patch: Partial<VerificationRow>) => void;
   onRemove: () => void;
 }) {
@@ -880,6 +983,15 @@ function VerificationRowEditor({
       {row.kind === "review" && (
         <>
           <AssigneeFields row={row} onChange={onChange} />
+          {modelControlsEnabled && row.assigneeType === "agent" && (
+            <StepModelControls
+              wsId={wsId}
+              agentId={row.assigneeId}
+              model={row.model}
+              thinkingLevel={row.thinkingLevel}
+              onChange={onChange}
+            />
+          )}
           {row.assigneeType === "agent" && (
             <Field label="Run a skill (optional)">
               <SkillNamePicker
@@ -903,6 +1015,57 @@ function VerificationRowEditor({
           </Field>
         </>
       )}
+    </div>
+  );
+}
+
+function StepModelControls({
+  wsId,
+  agentId,
+  model,
+  thinkingLevel,
+  onChange,
+}: {
+  wsId: string;
+  agentId: string;
+  model: string;
+  thinkingLevel: string;
+  onChange: (patch: { model?: string; thinkingLevel?: string }) => void;
+}) {
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agent = agents.find((a) => a.id === agentId && !a.archived_at);
+  const runtimeId = agent?.runtime_id || null;
+  const modelsQuery = useQuery(runtimeModelsOptions(runtimeId));
+  const models = modelsQuery.data?.models ?? [];
+  const effectiveModel = model || agent?.model || models.find((m) => m.default)?.id || "";
+  const levels =
+    models.find((m) => m.id === effectiveModel)?.thinking?.supported_levels ?? [];
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="Model">
+        <ModelPicker
+          runtimeId={runtimeId}
+          runtimeOnline={Boolean(runtimeId)}
+          value={model}
+          canEdit={Boolean(runtimeId)}
+          onChange={(next) => onChange({ model: next, thinkingLevel: "" })}
+        />
+      </Field>
+      <Field label="Thinking">
+        {levels.length > 0 || thinkingLevel ? (
+          <ThinkingPicker
+            value={thinkingLevel}
+            levels={levels}
+            canEdit={Boolean(runtimeId) && levels.length > 0}
+            onChange={(next: string) => onChange({ thinkingLevel: next })}
+          />
+        ) : (
+          <span className="min-w-0 truncate px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+            Agent default
+          </span>
+        )}
+      </Field>
     </div>
   );
 }

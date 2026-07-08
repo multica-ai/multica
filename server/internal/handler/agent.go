@@ -276,7 +276,8 @@ type AgentTaskResponse struct {
 	Title                            *string `json:"title,omitempty"` // CEREBRO-PATCH(task-title-builder): short generated headline.
 	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
 	WaitReason            *string              `json:"wait_reason,omitempty"`
-	ModelOverride         string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ModelOverride         string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ThinkingOverride      string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(agent-task-thinking-override): per-task thinking override for issue workflow steps.
 	SandboxEnabled        *bool                `json:"sandbox_enabled,omitempty"`
 	RuntimeSandboxPolicy  json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox string               `json:"runtime_persona_sandbox,omitempty"`
@@ -423,7 +424,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
-		ModelOverride: t.ModelOverride.String,
+		ModelOverride:    t.ModelOverride.String,
+		ThinkingOverride: t.ThinkingOverride.String,
 	}
 }
 

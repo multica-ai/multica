@@ -102,7 +102,8 @@ type Task struct {
 	UserProfilePrompt                string               `json:"user_profile_prompt,omitempty"`
 	Kind                             string               `json:"kind,omitempty"`
 	Title                            string               `json:"title,omitempty"`
-	ModelOverride                    string               `json:"model_override,omitempty"` // CEREBRO-PATCH(daemon-task-model-override): per-task model override (JEH-1310).
+	ModelOverride                    string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(daemon-task-model-override): per-task model override (JEH-1310).
+	ThinkingOverride                 string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(daemon-task-thinking-override): per-task thinking override for issue workflow steps.
 	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
 	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`

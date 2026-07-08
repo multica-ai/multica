@@ -489,3 +489,9 @@ WHERE id = sqlc.arg('id')::uuid;
 UPDATE agent_task_queue
 SET model_override = NULLIF(sqlc.arg('model_override')::text, '')
 WHERE id = sqlc.arg('id')::uuid;
+
+-- name: SetAgentTaskThinkingOverride :exec
+-- CEREBRO-PATCH(sqlc-task-thinking-override): per-task thinking override for issue workflow roles.
+UPDATE agent_task_queue
+SET thinking_override = NULLIF(sqlc.arg('thinking_override')::text, '')
+WHERE id = sqlc.arg('id')::uuid;
