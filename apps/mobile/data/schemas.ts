@@ -561,7 +561,7 @@ export const EMPTY_MEMBER_LIST: MemberWithUser[] = [];
 
 const AgentInvocationTargetSchema: z.ZodType<AgentInvocationTarget> = z
   .object({
-    target_type: z.enum(["workspace", "member", "space"]).catch("space"),
+    target_type: z.enum(["workspace", "member", "team"]).catch("team"),
     target_id: z
       .string()
       .nullable()
