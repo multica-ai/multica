@@ -14,7 +14,6 @@
     "actions": "操作"
   },
   "state": {
-    "default": "默认",
     "active": "启用",
     "archived": "已归档"
   },
@@ -75,7 +74,7 @@
     "members_empty": "暂无成员",
     "archive_confirm_title": "归档空间？",
     "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
-    "default_cannot_archive": "默认空间不能归档",
+    "last_space_cannot_archive": "工作区必须至少保留一个空间",
     "archive_admin_only": "只有管理员可以归档空间",
     "goto": "前往"
   },

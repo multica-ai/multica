@@ -63,17 +63,17 @@ SELECT wt.* FROM workspace_space wt
 JOIN project_space pt ON pt.space_id = wt.id AND pt.workspace_id = wt.workspace_id
 WHERE pt.workspace_id = $1
   AND pt.project_id = $2
-ORDER BY wt.is_default DESC, wt.name ASC, wt.created_at ASC;
+ORDER BY wt.name ASC, wt.created_at ASC;
 
 -- name: ListProjectSpacesByProjects :many
 SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
-       wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by,
+       wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by,
        wt.created_by, wt.created_at, wt.updated_at
 FROM project_space pt
 JOIN workspace_space wt ON wt.id = pt.space_id AND wt.workspace_id = pt.workspace_id
 WHERE pt.workspace_id = $1
   AND pt.project_id = ANY(sqlc.arg('project_ids')::uuid[])
-ORDER BY pt.project_id, wt.is_default DESC, wt.name ASC, wt.created_at ASC;
+ORDER BY pt.project_id, wt.name ASC, wt.created_at ASC;
 
 -- name: AddProjectSpace :exec
 INSERT INTO project_space (workspace_id, project_id, space_id)

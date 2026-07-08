@@ -25,7 +25,6 @@ type SpaceResponse struct {
 	Description  string  `json:"description"`
 	Icon         *string `json:"icon"`
 	IssueCounter int32   `json:"issue_counter"`
-	IsDefault    bool    `json:"is_default"`
 	ArchivedAt   *string `json:"archived_at"`
 	CreatedBy    *string `json:"created_by"`
 	CreatedAt    string  `json:"created_at"`
@@ -46,7 +45,6 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 		Description:  t.Description,
 		Icon:         textToPtr(t.Icon),
 		IssueCounter: t.IssueCounter,
-		IsDefault:    t.IsDefault,
 		ArchivedAt:   timestampToPtr(t.ArchivedAt),
 		CreatedBy:    uuidToPtr(t.CreatedBy),
 		CreatedAt:    timestampToString(t.CreatedAt),
@@ -153,7 +151,6 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Key:         key,
-		IsDefault:   false,
 		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
 		CreatedBy:   creatorUUID,
@@ -559,11 +556,10 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only workspace admins can archive a space")
 		return
 	}
-	// Block archiving a Space that still drives live autopilots — the SQL only
-	// guards the default space, so without this an archived Space would leave
-	// active autopilots pointing at a Space that can no longer receive work.
-	// Existing issues are intentionally NOT a blocker: the default space always
-	// has issues, and archived-space issues stay readable.
+	// Block archiving a Space that still drives live autopilots — without this
+	// an archived Space would leave active autopilots pointing at a Space that
+	// can no longer receive work. Existing issues are intentionally NOT a
+	// blocker: archived-space issues stay readable.
 	activeAutopilots, err := h.Queries.CountActiveAutopilotsBySpace(r.Context(), db.CountActiveAutopilotsBySpaceParams{
 		WorkspaceID: wsUUID,
 		SpaceID:     spaceID,
@@ -576,13 +572,42 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "cannot archive a space used by active autopilots")
 		return
 	}
-	space, err := h.Queries.ArchiveWorkspaceSpace(r.Context(), db.ArchiveWorkspaceSpaceParams{
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive space")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// No space is permanently protected — instead every workspace must always
+	// keep at least one active Space. FOR UPDATE locks every active Space row
+	// for this workspace so a concurrent archive on a different Space in the
+	// same workspace serializes behind this one; without the lock, two
+	// concurrent archives of the last two Spaces could both read "2 active"
+	// and both proceed, leaving zero.
+	active, err := qtx.ListActiveWorkspaceSpacesForUpdate(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate space usage")
+		return
+	}
+	if len(active) <= 1 {
+		writeError(w, http.StatusConflict, "cannot archive the last active space in a workspace")
+		return
+	}
+
+	space, err := qtx.ArchiveWorkspaceSpace(r.Context(), db.ArchiveWorkspaceSpaceParams{
 		ID:          spaceID,
 		WorkspaceID: wsUUID,
 		ArchivedBy:  parseUUID(userID),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "space cannot be archived")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive space")
 		return
 	}
 	resp := h.withCallerMembership(r.Context(), spaceToResponse(space), space.ID, userID)

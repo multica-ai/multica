@@ -43,37 +43,68 @@
 -- workspace.issue_prefix / issue_counter are intentionally retained here; a
 -- later cleanup migration drops them once nothing reads them (per plan).
 
--- 1. Re-backfill stragglers written by old instances during the deploy window.
+-- 1. Re-backfill stragglers written by old instances during the deploy window,
+--    to the same workspace's earliest active Space — the same fallback
+--    GetDefaultWorkspaceSpace resolves to at runtime (no is_default flag; see
+--    131's comment on workspace_space).
 UPDATE issue i
 SET space_id = wt.id
 FROM workspace_space wt
 WHERE wt.workspace_id = i.workspace_id
-  AND wt.is_default
+  AND wt.archived_at IS NULL
+  AND wt.id = (
+      SELECT w2.id FROM workspace_space w2
+      WHERE w2.workspace_id = i.workspace_id AND w2.archived_at IS NULL
+      ORDER BY w2.created_at ASC, w2.id ASC
+      LIMIT 1
+  )
   AND i.space_id IS NULL;
 
 UPDATE autopilot a
 SET space_id = wt.id
 FROM workspace_space wt
 WHERE wt.workspace_id = a.workspace_id
-  AND wt.is_default
+  AND wt.archived_at IS NULL
+  AND wt.id = (
+      SELECT w2.id FROM workspace_space w2
+      WHERE w2.workspace_id = a.workspace_id AND w2.archived_at IS NULL
+      ORDER BY w2.created_at ASC, w2.id ASC
+      LIMIT 1
+  )
   AND a.space_id IS NULL;
 
 -- 2. Sync counters upward. GREATEST of the current counter, the max number
---    actually minted into the Space, and (default Spaces only) the legacy
---    workspace counter old writers incremented. The WHERE guard keeps this to
---    only the rows that would actually rise, so counters never regress.
+--    actually minted into the Space, and (for the workspace's earliest Space
+--    only — there is no is_default flag, but that Space is always the one
+--    migration 131 backfilled from the legacy workspace counter, since no
+--    other Space could have existed before that migration ran) the legacy
+--    workspace counter old writers incremented. Deliberately not filtered to
+--    archived_at IS NULL: this identifies which Space historically inherited
+--    the legacy counter, which doesn't change if that Space was later
+--    archived. The WHERE guard keeps this to only the rows that would
+--    actually rise, so counters never regress.
 UPDATE workspace_space wt
 SET issue_counter = GREATEST(
         wt.issue_counter,
         COALESCE((SELECT max(i.number) FROM issue i WHERE i.space_id = wt.id), 0),
-        CASE WHEN wt.is_default
+        CASE WHEN wt.id = (
+                 SELECT w2.id FROM workspace_space w2
+                 WHERE w2.workspace_id = wt.workspace_id
+                 ORDER BY w2.created_at ASC, w2.id ASC
+                 LIMIT 1
+             )
              THEN COALESCE((SELECT w.issue_counter FROM workspace w WHERE w.id = wt.workspace_id), 0)
              ELSE 0 END
     ),
     updated_at = now()
 WHERE wt.issue_counter < GREATEST(
         COALESCE((SELECT max(i.number) FROM issue i WHERE i.space_id = wt.id), 0),
-        CASE WHEN wt.is_default
+        CASE WHEN wt.id = (
+                 SELECT w2.id FROM workspace_space w2
+                 WHERE w2.workspace_id = wt.workspace_id
+                 ORDER BY w2.created_at ASC, w2.id ASC
+                 LIMIT 1
+             )
              THEN COALESCE((SELECT w.issue_counter FROM workspace w WHERE w.id = wt.workspace_id), 0)
              ELSE 0 END
     );

@@ -6,7 +6,6 @@ export interface Space {
   description: string;
   icon: string | null;
   issue_counter: number;
-  is_default: boolean;
   archived_at: string | null;
   created_by: string | null;
   created_at: string;

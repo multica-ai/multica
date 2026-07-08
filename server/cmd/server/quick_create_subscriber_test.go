@@ -60,7 +60,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 
 	var spaceID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1`,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&spaceID); err != nil {
 		t.Fatalf("load fixture default space: %v", err)

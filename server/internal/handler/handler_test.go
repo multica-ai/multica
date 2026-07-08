@@ -127,8 +127,8 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
-		VALUES ($1, 'Default', $2, $3, true, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Default', $2, $3, $4)
 	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
@@ -519,15 +519,15 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 
 	var oldSpaceID, targetSpaceID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
-		VALUES ($1, $2, $3, 1, false, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, $2, $3, 1, $4)
 		RETURNING id
 	`, testWorkspaceID, "Old Space", oldSpaceKey, testUserID).Scan(&oldSpaceID); err != nil {
 		t.Fatalf("insert old space: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
-		VALUES ($1, $2, $3, 10, false, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, $2, $3, 10, $4)
 		RETURNING id
 	`, testWorkspaceID, "Target Space", targetSpaceKey, testUserID).Scan(&targetSpaceID); err != nil {
 		t.Fatalf("insert target space: %v", err)
@@ -632,65 +632,6 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 	}
 }
 
-func TestResolveIssueByIdentifierFallsBackToDefaultSpaceForNullSpaceIssue(t *testing.T) {
-	// Migration 132 makes issue.space_id NOT NULL, so a null-space issue can no
-	// longer be inserted to exercise the identifier fallback. The production
-	// fallback itself is retained for the rolling-deploy window (issue.go
-	// "TODO(migration-b): remove null-space fallback after migration 132 has run
-	// in production"); this DB test cannot construct its precondition against a
-	// 132-migrated schema and stays skipped until that fallback is removed.
-	t.Skip("null-space issues are impossible after migration 132 (space_id NOT NULL); see issue.go TODO(migration-b)")
-
-	ctx := context.Background()
-	suffix := time.Now().UnixNano() % 1_000_000
-	defaultKey := fmt.Sprintf("D%06d", suffix)
-	otherKey := fmt.Sprintf("O%06d", suffix)
-
-	var workspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, '', $3)
-		RETURNING id
-	`, "Null Space Resolver", fmt.Sprintf("null-space-resolver-%d", suffix), defaultKey).Scan(&workspaceID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
-	})
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Default', $2, true), ($1, 'Other', $3, false)
-	`, workspaceID, defaultKey, otherKey); err != nil {
-		t.Fatalf("create spaces: %v", err)
-	}
-
-	var issueID string
-	var number int32 = 1
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, title, status, priority, creator_type, creator_id,
-			number, space_id
-		)
-		VALUES ($1, 'Null-space compatibility issue', 'todo', 'none', 'member', $2, $3, NULL)
-		RETURNING id
-	`, workspaceID, testUserID, number).Scan(&issueID); err != nil {
-		t.Fatalf("create null-space issue: %v", err)
-	}
-
-	issue, ok := testHandler.resolveIssueByIdentifier(ctx, fmt.Sprintf("%s-%d", defaultKey, number), workspaceID)
-	if !ok {
-		t.Fatalf("expected default Space key to resolve null-space issue")
-	}
-	if got := uuidToString(issue.ID); got != issueID {
-		t.Fatalf("resolved issue id = %s, want %s", got, issueID)
-	}
-
-	if _, ok := testHandler.resolveIssueByIdentifier(ctx, fmt.Sprintf("%s-%d", otherKey, number), workspaceID); ok {
-		t.Fatalf("non-default Space key must not resolve null-space issue")
-	}
-}
-
 // TestDeleteIssueRejectsInvalidUUID verifies that a path segment that is
 // neither a valid UUID nor a valid identifier returns 404 (not 204) — the
 // handler must never silently succeed on malformed input.
@@ -780,8 +721,8 @@ func TestCreateIssueRejectsCrossWorkspaceParent(t *testing.T) {
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Default', 'XWP', true)
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Default', 'XWP')
 	`, otherWorkspaceID); err != nil {
 		t.Fatalf("insert foreign default space: %v", err)
 	}
@@ -789,7 +730,7 @@ func TestCreateIssueRejectsCrossWorkspaceParent(t *testing.T) {
 	var foreignParentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, number)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'todo', 'none', 'member', $3, 1)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'todo', 'none', 'member', $3, 1)
 		RETURNING id
 	`, otherWorkspaceID, "Foreign parent", testUserID).Scan(&foreignParentID); err != nil {
 		t.Fatalf("insert foreign parent: %v", err)
@@ -1938,7 +1879,7 @@ func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, creator_type, creator_id, title, number)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 3310)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'member', $2, $3, 3310)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "preserve bare issue identifiers").Scan(&issueID); err != nil {
 		t.Fatalf("create issue fixture: %v", err)
@@ -3002,7 +2943,7 @@ func TestResolveActor(t *testing.T) {
 	var issueID string
 	err = testPool.QueryRow(ctx,
 		`INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, number, position)
-		 VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'resolveActor test', 'todo', 'none', 'member', $2, 9999, 0)
+		 VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'resolveActor test', 'todo', 'none', 'member', $2, 9999, 0)
 		 RETURNING id`, testWorkspaceID, testUserID,
 	).Scan(&issueID)
 	if err != nil {
@@ -3788,7 +3729,7 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		UPDATE workspace_space
 		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE space_id = workspace_space.id)) + 1
-		WHERE workspace_id = $1 AND is_default RETURNING issue_counter
+		WHERE workspace_id = $1 RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)
 	}
@@ -3796,7 +3737,7 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "nested mention inheritance regression", assigneeAgent, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -3883,7 +3824,7 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	if err := testPool.QueryRow(ctx, `
 		UPDATE workspace_space
 		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE space_id = workspace_space.id)) + 1
-		WHERE workspace_id = $1 AND is_default RETURNING issue_counter
+		WHERE workspace_id = $1 RETURNING issue_counter
 	`, testWorkspaceID).Scan(&number); err != nil {
 		t.Fatalf("next issue number: %v", err)
 	}
@@ -3891,7 +3832,7 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'member', $2, $3, 'agent', $4, $5)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "nested participation regression", assigneeAgent, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

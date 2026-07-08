@@ -85,14 +85,13 @@ INSERT INTO issue (
 ) RETURNING *;
 
 -- name: GetIssueBySpaceKeyAndNumber :one
--- TODO(migration-b): remove null-space fallback after migration 132 has run in production
+-- issue.space_id is NOT NULL as of migration 132, which ships in the same
+-- release as this query, so no null-space fallback is needed.
 SELECT i.* FROM issue i
-LEFT JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id
-LEFT JOIN workspace_space default_space ON default_space.workspace_id = i.workspace_id AND default_space.is_default
+JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND lower(COALESCE(issue_space.key, default_space.key)) = lower($2)
-  AND i.number = $3
-  AND (i.space_id IS NOT NULL OR default_space.id IS NOT NULL);
+  AND lower(issue_space.key) = lower($2)
+  AND i.number = $3;
 
 -- name: UpdateIssue :one
 UPDATE issue SET

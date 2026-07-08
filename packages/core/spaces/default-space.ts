@@ -3,15 +3,20 @@ import type { Space } from "../types";
 /**
  * The space a new issue defaults into when no other context (route, parent,
  * single-space project) applies: the first space in the user's personal order.
- * Falls back to the workspace default space for users whose membership rows
- * predate the membership rollout, then to any active space.
+ * Falls back to the workspace's earliest-created active space for users whose
+ * membership rows predate the membership rollout — no space is flagged
+ * "default"; the earliest one is the same one the server resolves to when a
+ * create request omits space_id (see GetDefaultWorkspaceSpace).
  */
 export function creationDefaultSpaceId(spaces: Space[]): string | undefined {
   const active = spaces.filter((space) => !space.archived_at);
   const mine = active
     .filter((space) => space.is_member)
     .sort((a, b) => a.sort_order - b.sort_order);
-  return (mine[0] ?? active.find((space) => space.is_default) ?? active[0])?.id;
+  const earliest = [...active].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  )[0];
+  return (mine[0] ?? earliest)?.id;
 }
 
 /**

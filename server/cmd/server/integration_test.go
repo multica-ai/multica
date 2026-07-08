@@ -135,8 +135,8 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
-		VALUES ($1, 'Default', $2, $3, true, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Default', $2, $3, $4)
 	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
@@ -183,7 +183,7 @@ func defaultSpaceUUID(t *testing.T, ctx context.Context, workspaceID string) pgt
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1`,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 LIMIT 1`,
 		workspaceID,
 	).Scan(&id); err != nil {
 		t.Fatalf("load default space: %v", err)
@@ -889,7 +889,7 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Dedup fixture', 'member', $2)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Dedup fixture', 'member', $2)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("failed to seed issue: %v", err)

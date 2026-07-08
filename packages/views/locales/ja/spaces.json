@@ -14,7 +14,6 @@
     "actions": "操作"
   },
   "state": {
-    "default": "デフォルト",
     "active": "アクティブ",
     "archived": "アーカイブ済み"
   },
@@ -75,7 +74,7 @@
     "members_empty": "メンバーはまだいません",
     "archive_confirm_title": "Space をアーカイブしますか？",
     "archive_confirm_body": "全メンバーを外すと {{name}} はアーカイブされます。既存の issue は閲覧できます。",
-    "default_cannot_archive": "デフォルト Space はアーカイブできません",
+    "last_space_cannot_archive": "ワークスペースには少なくとも 1 つの Space が必要です",
     "archive_admin_only": "Space をアーカイブできるのは管理者のみです",
     "goto": "移動"
   },

@@ -243,12 +243,14 @@ func TestMigration132CutoverInvariant(t *testing.T) {
 	}
 
 	// Counter sync: default space counter = GREATEST(seeded 3, max number 4,
-	// legacy ws counter 5) = 5. It must never regress.
+	// legacy ws counter 5) = 5. It must never regress. No is_default flag — the
+	// default space is identified the same way GetDefaultWorkspaceSpace and
+	// migration 132 itself do: the workspace's earliest-created Space.
 	var defaultSpaceID string
 	var defaultCounter int
 	var defaultKey string
 	if err := pool.QueryRow(ctx,
-		`SELECT id, key, issue_counter FROM workspace_space WHERE workspace_id = $1 AND is_default`, wsID,
+		`SELECT id, key, issue_counter FROM workspace_space WHERE workspace_id = $1 ORDER BY created_at ASC, id ASC LIMIT 1`, wsID,
 	).Scan(&defaultSpaceID, &defaultKey, &defaultCounter); err != nil {
 		t.Fatalf("read default space: %v", err)
 	}
@@ -278,7 +280,7 @@ func TestMigration132CutoverInvariant(t *testing.T) {
 	// same workspace (impossible under the dropped workspace-number unique).
 	var designSpaceID string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO workspace_space (workspace_id, name, key, is_default) VALUES ($1, 'Design', 'DES', false) RETURNING id`, wsID,
+		`INSERT INTO workspace_space (workspace_id, name, key) VALUES ($1, 'Design', 'DES') RETURNING id`, wsID,
 	).Scan(&designSpaceID); err != nil {
 		t.Fatalf("insert design space: %v", err)
 	}
@@ -311,7 +313,7 @@ func TestMigration132PreflightRejectsDuplicateSpaceNumber(t *testing.T) {
 	execCutover(t, pool, `ALTER TABLE issue DROP CONSTRAINT uq_issue_workspace_number`)
 	execCutover(t, pool, `
 		INSERT INTO issue (workspace_id, space_id, number, status)
-		SELECT $1, wt.id, 1, 'todo' FROM workspace_space wt WHERE wt.workspace_id = $1 AND wt.is_default`, wsID)
+		SELECT $1, wt.id, 1, 'todo' FROM workspace_space wt WHERE wt.workspace_id = $1`, wsID)
 
 	err := applyCutoverMigration(pool, schema, up132)
 	if err == nil {
@@ -336,10 +338,12 @@ func TestMigration132PreflightRejectsNullSpace(t *testing.T) {
 		t.Fatalf("apply 131: %v", err)
 	}
 
-	// Create an un-backfillable straggler: null out an issue's space and remove
-	// the default flag so 132's re-backfill cannot repair it.
+	// Create an un-backfillable straggler: null out an issue's space and archive
+	// the workspace's only Space, so it's no longer a valid re-backfill target
+	// (132's re-backfill only considers archived_at IS NULL Spaces — there is no
+	// is_default flag to strip instead).
 	execCutover(t, pool, `UPDATE issue SET space_id = NULL WHERE workspace_id = $1 AND number = 1`, wsID)
-	execCutover(t, pool, `UPDATE workspace_space SET is_default = false WHERE workspace_id = $1`, wsID)
+	execCutover(t, pool, `UPDATE workspace_space SET archived_at = now() WHERE workspace_id = $1`, wsID)
 
 	err := applyCutoverMigration(pool, schema, up132)
 	if err == nil {
