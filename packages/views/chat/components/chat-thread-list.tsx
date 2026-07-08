@@ -140,6 +140,20 @@ export function ChatThreadList({
     });
   };
 
+  // Archiving the chat currently in view would otherwise leave the conversation
+  // pane showing a now read-only, "dangling" session. Mirror the Inbox list's
+  // handleArchive: advance selection to the next chat in the (sorted, non-
+  // archived) history list, fall back to the previous one, and only clear when
+  // nothing is left. Archiving any other row leaves the selection untouched.
+  const handleArchive = (session: ChatSession) => {
+    if (activeSessionId === session.id) {
+      const idx = historySessions.findIndex((s) => s.id === session.id);
+      const next = historySessions[idx + 1] ?? historySessions[idx - 1] ?? null;
+      setActiveSession(next?.id ?? null);
+    }
+    setArchived.mutate({ sessionId: session.id, archived: true });
+  };
+
   const handleConfirmStop = (
     session: ChatSession,
     task: PendingChatTasksResponse["tasks"][number],
@@ -358,7 +372,7 @@ export function ChatThreadList({
                   <RowAction
                     icon={<Archive className="size-3.5" />}
                     label={t(($) => $.list.archive)}
-                    onClick={() => setArchived.mutate({ sessionId: session.id, archived: true })}
+                    onClick={() => handleArchive(session)}
                   />
                 )}
               </>
