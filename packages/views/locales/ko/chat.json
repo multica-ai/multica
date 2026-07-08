@@ -18,7 +18,15 @@
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",
-    "task_failed_fallback": "작업 실패",
+    "failure": {
+      "agent_error": "에이전트에 오류가 발생하여 답변을 완료하지 못했습니다. 다시 시도해 주세요.",
+      "timeout": "시간이 너무 오래 걸려 완료 전에 중단되었습니다. 다시 시도하거나 요청을 더 작게 나눠 보세요.",
+      "codex_semantic_inactivity": "에이전트가 응답하지 않아 완료 전에 중단되었습니다. 다시 시도해 주세요.",
+      "runtime_offline": "에이전트가 현재 오프라인 상태여서 답변할 수 없습니다. 다시 온라인이 되면 시도해 주세요.",
+      "runtime_recovery": "완료 전에 에이전트가 다시 시작되었습니다. 다시 시도해 주세요.",
+      "manual": "이 답변이 취소되었습니다.",
+      "fallback": "문제가 발생하여 에이전트가 답변을 완료하지 못했습니다. 다시 시도해 주세요."
+    },
     "tools_other": "도구 {{count}}개",
     "tool_result_named": "{{tool}} 결과: ",
     "tool_result_unnamed": "결과: ",

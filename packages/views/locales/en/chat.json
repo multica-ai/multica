@@ -19,7 +19,15 @@
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
-    "task_failed_fallback": "Task failed",
+    "failure": {
+      "agent_error": "The agent ran into an error and couldn't finish replying. Please try again.",
+      "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
+      "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
+      "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
+      "runtime_recovery": "The agent restarted before it could finish. Please try again.",
+      "manual": "This reply was cancelled.",
+      "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
+    },
     "tools_one": "{{count}} tool",
     "tools_other": "{{count}} tools",
     "tool_result_named": "{{tool}} result: ",

@@ -31,7 +31,6 @@ import type {
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
@@ -444,12 +443,23 @@ function FailureBubble({
 }) {
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
-  // Map the back-end enum to copy via the shared label table; an unknown
-  // reason (e.g. a future enum value the front-end doesn't ship yet)
-  // falls back to a generic translated label.
+  // Chat gets its own friendly, reassuring copy per failure reason — plain
+  // language + a "try again" nudge — instead of the terse developer labels
+  // (`failureReasonLabel`) used on the agent-detail / execution-log surfaces.
+  // An unknown reason (a future enum value this build doesn't ship yet) falls
+  // back to a generic friendly line. The raw error stays tucked under the
+  // collapsible below for anyone who wants the technical detail.
+  const chatFailureCopy: Record<TaskFailureReason, string> = {
+    agent_error: t(($) => $.message_list.failure.agent_error),
+    timeout: t(($) => $.message_list.failure.timeout),
+    codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
+    runtime_offline: t(($) => $.message_list.failure.runtime_offline),
+    runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
+    manual: t(($) => $.message_list.failure.manual),
+  };
   const label =
-    failureReasonLabel[reason as TaskFailureReason] ??
-    t(($) => $.message_list.task_failed_fallback);
+    chatFailureCopy[reason as TaskFailureReason] ??
+    t(($) => $.message_list.failure.fallback);
 
   return (
     <div className="w-full space-y-1.5">
