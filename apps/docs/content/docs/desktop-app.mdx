@@ -45,6 +45,10 @@ The whole process **doesn't interrupt what you're working on**.
 
 The macOS build is signed and notarized, so you won't see an "unidentified developer" warning on first launch. The Linux build is an `.AppImage` — auto-updates rely on electron-updater, which can be flaky on some distros. **If auto-update doesn't work, download the new version manually and replace the old file.**
 
+<Callout type="info">
+**macOS updater cleanup** — failed Squirrel.Mac installs can leave duplicate `Multica.app.backup-*` folders in `/Applications` and caches under `~/Library/Caches/@multicadesktop-updater`, `~/Library/Caches/ai.multica.desktop`, and `~/Library/Caches/ai.multica.desktop.ShipIt`. Those copies show up in Spotlight. Quit Multica, then run `bash scripts/cleanup-macos-desktop-updater.sh` from the repo (or delete those paths manually) before reinstalling from a fresh DMG.
+</Callout>
+
 ## Do I still need the standalone CLI and daemon?
 
 **No.** Desktop ships with the same `multica` CLI binary embedded inside it, and it launches its own daemon profile at startup (isolated from any daemon you may be running manually from the terminal).

@@ -86,16 +86,18 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
+            archs: --x64 --arm64
           - os: windows-latest
             target: win
-          # macOS Squirrel.Mac in-place updates require the ZIP to satisfy the
-          # installed app's code-signing designated requirement. Without
-          # CSC_LINK + CSC_KEY_PASSWORD the build is ad-hoc signed and cannot
-          # replace a Developer ID-installed copy. Set those secrets (plus
-          # APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID for
-          # notarization) to ship signed macOS auto-updates from CI.
+            archs: --x64 --arm64
+          # Apple Silicon only — a single arch avoids latest-mac.yml collisions
+          # from publishing x64 then arm64 in separate electron-builder runs.
+          # Squirrel.Mac in-place updates require a Developer ID-signed ZIP;
+          # wire CSC_LINK + CSC_KEY_PASSWORD (or a macOS runner keychain cert)
+          # plus APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID.
           - os: macos-latest
             target: mac
+            archs: --arm64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -125,6 +127,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Clean stale desktop artifacts (macOS)
+        if: matrix.target == 'mac'
+        working-directory: apps/desktop
+        run: rm -rf dist out
+
       - name: Package Desktop installers (${{ matrix.target }})
         working-directory: apps/desktop
         env:
@@ -140,6 +147,6 @@ jobs:
         shell: bash
         run: >-
           node scripts/package.mjs
-          --${{ matrix.target }} --x64 --arm64 --publish always
+          --${{ matrix.target }} ${{ matrix.archs }} --publish always
           --config.publish.owner=${{ github.repository_owner }}
           --config.publish.repo=multica
