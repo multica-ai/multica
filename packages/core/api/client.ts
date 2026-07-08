@@ -509,6 +509,29 @@ export class ApiClient {
     });
   }
 
+  async getGitHubUserConnectUrl(): Promise<{ url: string }> {
+    return this.fetch<{ url: string }>("/api/me/github/connect");
+  }
+
+  async connectGitHubUser(code: string, state: string): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/github/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/github/callback",
+    });
+  }
+
+  async disconnectGitHubUser(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/github", {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "DELETE /api/me/github",
+    });
+  }
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
