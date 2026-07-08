@@ -72,7 +72,6 @@
     }
   },
   "window": {
-    "open_full_tooltip": "Open full page",
     "new_chat_tooltip": "New chat",
     "restore_tooltip": "Restore",
     "expand_tooltip": "Expand",
@@ -97,7 +96,13 @@
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
     "returning_title_default": "Welcome to Multica",
+    "returning_subtitle": "Try asking",
     "chat_with_named": "Chat with {{name}}"
+  },
+  "starter_prompts": {
+    "list_open": "List my open tasks by priority",
+    "summarize_today": "Summarize what I did today",
+    "plan_next": "Plan what to work on next"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {
