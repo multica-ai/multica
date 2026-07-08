@@ -31,7 +31,7 @@ Shared packages export raw `.ts` / `.tsx` and are compiled by consuming apps. De
 Keep server state and client state separate.
 
 - TanStack Query owns server state: issues, users, workspaces, inbox, agents, members, and anything fetched from the API.
-- Zustand owns client state: selected workspace, filters, drafts, modals, tab layout, and navigation history.
+- Zustand owns client/view state: filters, drafts, modals, tab layout, and navigation history. Current workspace identity is route-driven; platform stores/singletons may mirror slug/id only for headers, persistence namespaces, and reconnects.
 - Shared Zustand stores live in `packages/core/`, never in `packages/views/` or app directories.
 - React Context is for platform plumbing only, such as `WorkspaceIdProvider` and `NavigationProvider`.
 - Only auth/workspace stores may call `api.*` directly. Other server interaction belongs in queries/mutations.
@@ -39,7 +39,7 @@ Keep server state and client state separate.
 - Optimistic updates only when ALL hold: outcome locally predictable, user stays on the same screen (no navigation), failure is rare, rollback is trivial. Canonical: status/assignee/toggle field patches — patch determinate caches, roll back on failure, invalidate uncertain projections on settle.
 - Flows that navigate or confirm (create, delete, leave) must await the server before navigating or cleaning up; never optimistically remove an entity from cache.
 - Chat/message send uses the pending-message pattern: render immediately with a visible pending state and retry on failure, not silent optimism.
-- WebSocket events invalidate or patch Query cache; they never write directly to Zustand stores.
+- WebSocket events invalidate or patch Query cache for server data. They must never mirror server payload data into Zustand; clearing client-owned pointers (active session, selection, current workspace) is allowed only with a single responder and a self-initiated guard when this client can cause the event.
 - Persist durable preferences/drafts/layout. Do not persist server data or ephemeral UI state.
 - Zustand selectors must return stable references. Do not return freshly allocated objects/arrays from selectors without shallow comparison.
 - Hooks that need workspace context should accept `wsId`; do not call `useWorkspaceId()` internally unless the hook is guaranteed to run under the provider.
@@ -155,9 +155,9 @@ Desktop routing has three categories:
 More desktop constraints:
 
 - New pre-workspace desktop flows register a `WindowOverlay` type in `stores/window-overlay-store.ts`; do not add them to `routes.tsx`.
-- `setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the active workspace source of truth.
+- `setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` mirrors the active route for headers, storage namespaces, and reconnects; workspace route layouts own setting it.
 - Code that leaves workspace context must call `setCurrentWorkspace(null, null)` explicitly.
-- Leave/delete workspace flow order: read cached destination, clear current workspace, navigate, then run the mutation.
+- Workspace delete must await the server before navigation/cleanup. Workspace leave currently clears/navigates before mutation only to avoid the `member:removed` realtime race; treat that as known debt, not a reusable pattern.
 - Cross-workspace navigation must go through the navigation adapter so it can call `switchWorkspace(slug, targetPath)`.
 - Full-window desktop views outside the dashboard shell must mount `<DragStrip />` from `@multica/views/platform` as the first flex child. Interactive controls in the top 48px need `WebkitAppRegion: "no-drag"`.
 
