@@ -563,5 +563,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.surfaceIssues.map((i) => i.id)).toContain(
       "cancelled-1",
     );
+    // cancelled is never offered as a hideable/persistent board column.
+    expect(result.current.hiddenStatuses).not.toContain("cancelled");
   });
 });

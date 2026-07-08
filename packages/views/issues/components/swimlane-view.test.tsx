@@ -372,6 +372,68 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
+  // MUL-4261: the swimlane re-imposed canonical order by intersecting with
+  // BOARD_STATUSES, which silently dropped a filter-selected `cancelled`
+  // column. Status columns must come from `visibleStatuses` (via ALL_STATUSES
+  // order), so cancelled survives when selected and stays out by default.
+  const cancelledOrphan: Issue = {
+    id: "cancelled-orphan",
+    workspace_id: "ws-1",
+    number: 9,
+    identifier: "PROJ-9",
+    title: "Cancelled Orphan",
+    description: "A cancelled orphan",
+    status: "cancelled",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 400,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("renders a Cancelled column and its cards when cancelled is visible", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        visibleStatuses={[
+          "backlog",
+          "todo",
+          "in_progress",
+          "in_review",
+          "done",
+          "blocked",
+          "cancelled",
+        ]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
+  });
+
+  it("omits the Cancelled column when cancelled is not in visibleStatuses", () => {
+    renderWithI18n(
+      // Default visibleStatuses = BOARD_STATUSES (no cancelled).
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancelled Orphan")).not.toBeInTheDocument();
+  });
+
   it("renders parent swimlanes and orphans section", () => {
     renderWithI18n(
       <SwimLaneView
