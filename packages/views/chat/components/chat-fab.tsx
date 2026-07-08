@@ -16,12 +16,6 @@ import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 
-/**
- * Minimised floating chat button. Toggles the {@link ChatWindow} overlay open.
- * Availability is gated one level up by {@link FloatingChat} (Settings
- * preference + route), so this component only concerns itself with the
- * open/closed transition and the unread / running affordances.
- */
 export function ChatFab() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();

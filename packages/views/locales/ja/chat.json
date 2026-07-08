@@ -67,7 +67,6 @@
     }
   },
   "window": {
-    "open_full_tooltip": "全画面で開く",
     "new_chat_tooltip": "新規チャット",
     "restore_tooltip": "復元",
     "expand_tooltip": "展開",
