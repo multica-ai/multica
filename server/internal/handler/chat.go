@@ -147,6 +147,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -175,6 +176,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -300,6 +302,54 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
+		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+}
+
+type SetChatSessionPinnedRequest struct {
+	Pinned bool `json:"pinned"`
+}
+
+// SetChatSessionPinned pins or unpins a chat so it sticks to the top of the
+// caller's conversation list. Pin state is per-session and, since sessions are
+// per-creator, inherently per-user. It never bumps updated_at (see the SQL) so
+// an unpinned chat does not jump the activity-sorted list.
+func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req SetChatSessionPinnedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.SetChatSessionPinned(r.Context(), db.SetChatSessionPinnedParams{
+		ID:     session.ID,
+		Pinned: req.Pinned,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	pinned := updated.PinnedAt.Valid
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: resolvedSessionID,
+		Title:         updated.Title,
+		Pinned:        &pinned,
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	})
 
@@ -1032,8 +1082,11 @@ type ChatSessionResponse struct {
 	HasUnread   bool             `json:"has_unread"`
 	UnreadCount int              `json:"unread_count"`
 	LastMessage *ChatLastMessage `json:"last_message"`
-	CreatedAt   string           `json:"created_at"`
-	UpdatedAt   string           `json:"updated_at"`
+	// Pinned marks a chat the user has stuck to the top of the list. Populated
+	// by list endpoints and by the pin/unpin + single-session responses.
+	Pinned    bool   `json:"pinned"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // ChatLastMessage is a preview of a session's most recent message, used to
@@ -1089,6 +1142,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		CreatorID:   uuidToString(s.CreatorID),
 		Title:       s.Title,
 		Status:      s.Status,
+		Pinned:      s.PinnedAt.Valid,
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}

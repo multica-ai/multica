@@ -30,6 +30,9 @@ export interface ChatSession {
   unread_count?: number;
   /** Latest message in the session, or null when empty. List-only. */
   last_message?: ChatLastMessage | null;
+  /** True when the user has pinned this chat to the top of the list.
+   *  Optional so older clients / non-list payloads stay valid. */
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -1,6 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
+import type { ChatSession } from "../types/chat";
 
 // NOTE on workspace scoping:
 // `wsId` is used only as part of queryKey for cache isolation per workspace.
@@ -47,6 +48,28 @@ export function chatSessionsOptions(wsId: string) {
     queryKey: chatKeys.sessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: Infinity,
+  });
+}
+
+/** Last-activity timestamp used to rank the IM list (newest first). */
+function sessionActivityTime(s: ChatSession): number {
+  return new Date(s.last_message?.created_at ?? s.updated_at).getTime();
+}
+
+/**
+ * Orders the chat list the same way the server does: pinned chats first, then
+ * everyone else by most-recent activity. Used both to render the list and to
+ * re-sort the cache after an optimistic pin/unpin or a WS patch, so a mutated
+ * flat cache never renders out of order. Returns a new array; stable for equal
+ * keys (Array.prototype.sort is stable), so pinned rows keep their server
+ * order when pin timestamps aren't carried in the list payload.
+ */
+export function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
+  return [...sessions].sort((a, b) => {
+    const ap = a.pinned ? 1 : 0;
+    const bp = b.pinned ? 1 : 0;
+    if (ap !== bp) return bp - ap;
+    return sessionActivityTime(b) - sessionActivityTime(a);
   });
 }
 

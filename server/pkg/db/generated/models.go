@@ -327,6 +327,7 @@ type ChatSession struct {
 	RuntimeID    pgtype.UUID        `json:"runtime_id"`
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`
+	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
 }
 
 type Comment struct {
