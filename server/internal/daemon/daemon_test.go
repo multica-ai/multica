@@ -1733,6 +1733,32 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 	}
 }
 
+// FIR-2786: a repo whose workspace-configured URL carries a trailing slash
+// must still be checkout-able by the canonical URL (no trailing slash), and
+// vice versa. Before the fix, workspaceRepoAllowed did an exact string-map
+// lookup, so any such mismatch made a legitimately-configured repo report
+// ErrRepoNotConfigured.
+// CEREBRO-PATCH(repo-url-trailing-slash): regression test for the
+// normalizeRepoURL fix in daemon.go.
+func TestWorkspaceRepoAllowedIgnoresTrailingSlash(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		workspaces: map[string]*workspaceState{
+			"ws-1": newWorkspaceState("ws-1", nil, "", []RepoData{
+				{URL: "https://github.com/firtal-group/warning-management-system/"},
+			}, nil),
+		},
+	}
+
+	if !d.workspaceRepoAllowed("ws-1", "https://github.com/firtal-group/warning-management-system") {
+		t.Fatal("expected repo configured with a trailing slash to be allowed without one")
+	}
+	if !d.workspaceRepoAllowed("ws-1", "https://github.com/firtal-group/warning-management-system/") {
+		t.Fatal("expected the exact configured URL (with trailing slash) to remain allowed")
+	}
+}
+
 func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	t.Parallel()
 
