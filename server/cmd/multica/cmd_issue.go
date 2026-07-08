@@ -419,11 +419,7 @@ func init() {
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
-	issueReorderCmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
-	issueReorderCmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
-	issueReorderCmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
-	issueReorderCmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
-	issueReorderCmd.Flags().String("output", "json", "Output format: table or json")
+	registerIssueReorderFlags(issueReorderCmd)
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -1332,6 +1328,24 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 // Reorder command
 // ---------------------------------------------------------------------------
 
+// registerIssueReorderFlags wires the reorder command's flags and declares its
+// target selector as a cobra flag group: mutually exclusive so at most one of
+// --before/--after/--top/--bottom is accepted, and one-required so at least one
+// must be given. Declaring the rule (instead of counting the flags by hand in
+// runIssueReorder) lets cobra reject zero-target and multi-target invocations
+// before RunE with a canonical message, and makes shell completion group-aware
+// — it hides the sibling target flags once one of them is set. It is shared with
+// the command's tests so they exercise the exact flag-group wiring that ships.
+func registerIssueReorderFlags(cmd *cobra.Command) {
+	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
+	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
+	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
+	cmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+	cmd.MarkFlagsMutuallyExclusive("before", "after", "top", "bottom")
+	cmd.MarkFlagsOneRequired("before", "after", "top", "bottom")
+}
+
 // runIssueReorder repositions an issue inside its current status column. The
 // new position is computed client-side by computeReorderPosition, which mirrors
 // the board/list drag-and-drop math (computePosition in
@@ -1345,14 +1359,26 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	top, _ := cmd.Flags().GetBool("top")
 	bottom, _ := cmd.Flags().GetBool("bottom")
 
-	modes := 0
-	for _, set := range []bool{before != "", after != "", top, bottom} {
-		if set {
-			modes++
-		}
+	// "Exactly one of --before/--after/--top/--bottom" is enforced declaratively
+	// by the command's mutually-exclusive, one-required flag group (see
+	// registerIssueReorderFlags), so cobra rejects zero-target and multi-target
+	// invocations before RunE runs. Cobra keys off flag *presence* (Changed),
+	// not value, so guard the cases it cannot see: a --before/--after passed
+	// empty (e.g. an unset shell variable), or a --top/--bottom explicitly set
+	// to false (e.g. `--top=false` from a generated command). Each counts as
+	// "set" for the group yet selects no real target, and would otherwise fall
+	// through to a confusing "not found in column" error.
+	if cmd.Flags().Changed("before") && before == "" {
+		return fmt.Errorf("--before requires an issue ID or key")
 	}
-	if modes != 1 {
-		return fmt.Errorf("exactly one of --before, --after, --top, or --bottom is required")
+	if cmd.Flags().Changed("after") && after == "" {
+		return fmt.Errorf("--after requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("top") && !top {
+		return fmt.Errorf("--top cannot be set to false; pass it on its own to move the issue to the top of its column")
+	}
+	if cmd.Flags().Changed("bottom") && !bottom {
+		return fmt.Errorf("--bottom cannot be set to false; pass it on its own to move the issue to the bottom of its column")
 	}
 
 	client, err := newAPIClient(cmd)
