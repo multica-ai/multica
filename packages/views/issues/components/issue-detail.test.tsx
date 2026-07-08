@@ -830,6 +830,54 @@ describe("IssueDetail (shared)", () => {
     ).toBeTruthy();
   });
 
+  it("reverses entries inside a coalesced activity block when newest first", async () => {
+    // Regression: newest_first previously reversed only the group order, so a
+    // run of consecutive activities that coalesces into one block stayed
+    // internally ascending — the newest activity sat at the bottom of the
+    // block instead of the top. The block below is the trailing group (no
+    // comment after it), so it renders expanded by default.
+    mockCommentOrderStore.order = "newest_first";
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-2",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "low", to: "high" },
+        created_at: "2026-01-18T00:01:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-3",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "due_date_changed",
+        details: { to: "2026-02-01T00:00:00Z" },
+        created_at: "2026-01-18T00:02:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    const newest = await screen.findByText(/set due date to/i);
+    const oldest = screen.getByText(/changed status/i);
+    // newest activity renders above the oldest one inside the block.
+    expect(
+      newest.compareDocumentPosition(oldest) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("reruns the source task from an agent failure comment", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       ...mockTimeline,

@@ -1024,9 +1024,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
+    // newest_first reverses the group order AND the entries inside each
+    // `activities` block. Reversing the group array alone leaves a coalesced
+    // run of consecutive activities internally ascending, so the newest one
+    // sits at the bottom of the block instead of the top. `comment` groups
+    // hold a single entry and need no internal reversal.
     return {
       threadReplies,
-      groups: commentOrder === "newest_first" ? [...groups].reverse() : groups,
+      groups:
+        commentOrder === "newest_first"
+          ? [...groups].reverse().map((g) =>
+              g.type === "activities"
+                ? { ...g, entries: [...g.entries].reverse() }
+                : g,
+            )
+          : groups,
     };
   }, [timeline, commentOrder]);
 
