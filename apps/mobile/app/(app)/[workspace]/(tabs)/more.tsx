@@ -6,11 +6,10 @@
  * SectionGroup/NavRow are the same shared components more/settings.tsx
  * uses — this is the pattern's second call site, not a new one.
  */
-import { Image, View } from "react-native";
+import { View } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/ui/text";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { NavRow, SectionGroup } from "@/components/ui/section-group";
