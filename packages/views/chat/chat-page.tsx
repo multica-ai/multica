@@ -100,6 +100,23 @@ export function ChatPage() {
     setComposingNew(false);
   };
 
+  // Single archive path for both entry points (thread-list row + conversation
+  // header). When the archived chat is the one in view, move the pane off it:
+  // on desktop advance to the next chat (Inbox-style); on mobile drop back to
+  // the list, which reads more naturally than being thrown into an unrelated
+  // conversation full-screen. Archiving any other chat leaves the view put.
+  const handleArchive = (session: ChatSession) => {
+    if (session.id === c.activeSessionId) {
+      if (isMobile) {
+        c.setActiveSession(null);
+        setComposingNew(false);
+      } else {
+        c.advanceSelectionAfterArchive(session);
+      }
+    }
+    c.archiveSession(session.id);
+  };
+
   const startNewChat = (agent: Agent | null) => {
     if (agent) c.handleStartNewChat(agent);
     else c.handleNewChat();
@@ -131,6 +148,7 @@ export function ChatPage() {
         agents={c.agents}
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}
+        onArchive={handleArchive}
       />
     </div>
   );
@@ -142,7 +160,11 @@ export function ChatPage() {
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0">
       {c.currentSession && (
-        <ChatSessionHeader session={c.currentSession} agent={c.activeAgent} />
+        <ChatSessionHeader
+          session={c.currentSession}
+          agent={c.activeAgent}
+          onArchive={handleArchive}
+        />
       )}
       {c.showSkeleton ? (
         <ChatMessageSkeleton />

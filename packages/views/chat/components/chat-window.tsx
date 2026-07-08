@@ -1127,9 +1127,15 @@ function SessionDropdown({
   // bypass the "archive first, delete only from Archived" semantics.
   const handleArchive = (session: ChatSession) => {
     if (activeSessionId === session.id) {
-      // Eager local clear when archiving the session in view, so the composer
-      // doesn't keep pointing at a now read-only session until WS catches up.
-      setActiveSession(null);
+      // Archiving the session in view: advance to the next chat (fall back to
+      // the previous, clear only when none remain) instead of stranding the
+      // composer on a now read-only session — mirrors the Chat tab and the
+      // Inbox list. Routing the non-null advance through onSelectSession keeps
+      // selectedAgentId in sync when the next chat belongs to another agent.
+      const idx = historySessions.findIndex((s) => s.id === session.id);
+      const next = historySessions[idx + 1] ?? historySessions[idx - 1] ?? null;
+      if (next) onSelectSession(next);
+      else setActiveSession(null);
     }
     setArchived.mutate({ sessionId: session.id, archived: true });
   };

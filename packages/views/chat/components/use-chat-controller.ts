@@ -21,10 +21,12 @@ import {
   pendingChatTaskOptions,
   chatKeys,
   isTaskMessageTaskId,
+  sortChatSessions,
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
   useMarkChatSessionRead,
+  useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
@@ -248,6 +250,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const setArchived = useSetChatSessionArchived();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -607,6 +610,33 @@ export function useChatController(opts?: { isActive?: boolean }) {
     [activeAgent, setSelectedAgentId, setActiveSession],
   );
 
+  // Archiving the chat currently in view would otherwise strand the
+  // conversation pane on a now read-only, "dangling" session. Mirror the Inbox
+  // list: advance selection to the next chat in the (sorted, non-archived)
+  // history, fall back to the previous one, and clear only when nothing is
+  // left. Routing the non-null advance through handleSelectSession keeps
+  // selectedAgentId in sync, so a follow-up "new chat" still defaults to the
+  // right agent even when the next chat belongs to a different agent. A no-op
+  // when the archived session isn't the open one — that selection stays put.
+  const advanceSelectionAfterArchive = useCallback(
+    (session: { id: string; agent_id: string }) => {
+      if (activeSessionId !== session.id) return;
+      const history = sortChatSessions(
+        sessions.filter((s) => s.status !== "archived"),
+      );
+      const idx = history.findIndex((s) => s.id === session.id);
+      const next = history[idx + 1] ?? history[idx - 1] ?? null;
+      if (next) handleSelectSession(next);
+      else setActiveSession(null);
+    },
+    [activeSessionId, sessions, handleSelectSession, setActiveSession],
+  );
+
+  const archiveSession = useCallback(
+    (sessionId: string) => setArchived.mutate({ sessionId, archived: true }),
+    [setArchived],
+  );
+
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
   return {
@@ -644,6 +674,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleNewChat,
     handleStartNewChat,
     handleSelectSession,
+    advanceSelectionAfterArchive,
+    archiveSession,
     // store setters (for surfaces that sync selection to the URL, etc.)
     setActiveSession,
     setSelectedAgentId,

@@ -41,9 +41,14 @@ import { useT } from "../../i18n";
 export function ChatSessionHeader({
   session,
   agent,
+  onArchive,
 }: {
   session: ChatSession;
   agent: Agent | null;
+  // Archiving the open conversation must move the pane off it (advance to the
+  // next chat on desktop, back to the list on mobile), so the parent owns it —
+  // see ChatPage.handleArchive. Falls back to a plain status flip if unwired.
+  onArchive?: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
   const wsPaths = useWorkspacePaths();
@@ -91,7 +96,10 @@ export function ChatSessionHeader({
     deleteSession.mutate(session.id);
   };
 
-  const doArchive = () => setArchived.mutate({ sessionId: session.id, archived: true });
+  const doArchive = () =>
+    onArchive
+      ? onArchive(session)
+      : setArchived.mutate({ sessionId: session.id, archived: true });
   const doUnarchive = () => setArchived.mutate({ sessionId: session.id, archived: false });
 
   return (

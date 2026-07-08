@@ -75,11 +75,16 @@ export function ChatThreadList({
   agents,
   activeSessionId,
   onSelectSession,
+  onArchive,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
+  // Archiving is owned by the parent so the selection advance stays layout-
+  // aware (desktop advances to the next chat; mobile drops back to the list)
+  // and routes through the shared controller — see ChatPage.handleArchive.
+  onArchive: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
@@ -138,20 +143,6 @@ export function ChatThreadList({
     deleteSession.mutate(sessionId, {
       onSettled: () => setConfirmingDeleteId(null),
     });
-  };
-
-  // Archiving the chat currently in view would otherwise leave the conversation
-  // pane showing a now read-only, "dangling" session. Mirror the Inbox list's
-  // handleArchive: advance selection to the next chat in the (sorted, non-
-  // archived) history list, fall back to the previous one, and only clear when
-  // nothing is left. Archiving any other row leaves the selection untouched.
-  const handleArchive = (session: ChatSession) => {
-    if (activeSessionId === session.id) {
-      const idx = historySessions.findIndex((s) => s.id === session.id);
-      const next = historySessions[idx + 1] ?? historySessions[idx - 1] ?? null;
-      setActiveSession(next?.id ?? null);
-    }
-    setArchived.mutate({ sessionId: session.id, archived: true });
   };
 
   const handleConfirmStop = (
@@ -372,7 +363,7 @@ export function ChatThreadList({
                   <RowAction
                     icon={<Archive className="size-3.5" />}
                     label={t(($) => $.list.archive)}
-                    onClick={() => handleArchive(session)}
+                    onClick={() => onArchive(session)}
                   />
                 )}
               </>

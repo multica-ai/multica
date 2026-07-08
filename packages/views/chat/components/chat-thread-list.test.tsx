@@ -6,9 +6,14 @@ import enChat from "../../locales/en/chat.json";
 import enIssues from "../../locales/en/issues.json";
 
 // --- Mocks ------------------------------------------------------------------
-// The archive-advance behavior is the unit under test: archiving the chat that
-// is currently open should move the selection to the next chat in the list.
-// setActiveSession is the observable side effect; setArchived just flips status.
+// The list no longer owns the archive-advance behavior — the parent (ChatPage)
+// does, so it stays layout-aware and routes through the shared controller. Here
+// we only assert the history-row Archive action delegates to the `onArchive`
+// prop and does NOT fire the archive mutation itself. The advance semantics
+// (next / previous / clear / cross-agent sync) are covered in the controller
+// test, and mobile-vs-desktop in the page. setActiveSession/archiveMutate are
+// kept as negative assertions: the list must not touch them for a history
+// archive anymore.
 
 const setActiveSession = vi.fn();
 const archiveMutate = vi.fn();
@@ -82,7 +87,7 @@ const sessions: ChatSession[] = [
   makeSession({ id: "s3", updated_at: "2026-07-08T01:00:00Z" }),
 ];
 
-function renderList(activeSessionId: string | null) {
+function renderList(activeSessionId: string | null, onArchive = vi.fn()) {
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatThreadList
@@ -90,63 +95,48 @@ function renderList(activeSessionId: string | null) {
         agents={[agent]}
         activeSessionId={activeSessionId}
         onSelectSession={vi.fn()}
+        onArchive={onArchive}
       />
     </I18nProvider>,
   );
+  return onArchive;
 }
 
 const ARCHIVE_LABEL = enChat.list.archive;
 
-describe("ChatThreadList archive advance", () => {
+describe("ChatThreadList archive delegation", () => {
   beforeEach(() => {
     setActiveSession.mockClear();
     archiveMutate.mockClear();
   });
 
-  it("advances selection to the next chat when archiving the open one", () => {
-    renderList("s2");
-    // Each row exposes an "Archive" hover action; archive the one in view (s2).
-    const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
+  it("delegates the history-row Archive action to onArchive with that session", () => {
+    const onArchive = renderList("s2");
     // Rows render in order s1, s2, s3 → the second archive button is s2's.
+    const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
     fireEvent.click(archiveButtons[1]!);
 
-    expect(setActiveSession).toHaveBeenCalledWith("s3");
-    expect(archiveMutate).toHaveBeenCalledWith({ sessionId: "s2", archived: true });
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
   });
 
-  it("falls back to the previous chat when archiving the last open one", () => {
-    renderList("s3");
+  it("passes the archived row's session even when it isn't the open one", () => {
+    const onArchive = renderList("s1");
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
+    // Archive s3 while s1 is the open one — the parent decides what to do.
     fireEvent.click(archiveButtons[2]!);
 
-    expect(setActiveSession).toHaveBeenCalledWith("s2");
-    expect(archiveMutate).toHaveBeenCalledWith({ sessionId: "s3", archived: true });
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s3" });
   });
 
-  it("clears the selection when archiving the only chat", () => {
-    render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatThreadList
-          sessions={[makeSession({ id: "only" })]}
-          agents={[agent]}
-          activeSessionId="only"
-          onSelectSession={vi.fn()}
-        />
-      </I18nProvider>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: ARCHIVE_LABEL }));
-
-    expect(setActiveSession).toHaveBeenCalledWith(null);
-    expect(archiveMutate).toHaveBeenCalledWith({ sessionId: "only", archived: true });
-  });
-
-  it("leaves the selection untouched when archiving a chat that is not open", () => {
-    renderList("s1");
+  it("does not flip archive status or move selection itself", () => {
+    renderList("s2");
     const archiveButtons = screen.getAllByRole("button", { name: ARCHIVE_LABEL });
-    // Archive s3 while s1 is the open one.
-    fireEvent.click(archiveButtons[2]!);
+    fireEvent.click(archiveButtons[1]!);
 
+    // Advance + mutation are the parent/controller's job now; the list stays out.
     expect(setActiveSession).not.toHaveBeenCalled();
-    expect(archiveMutate).toHaveBeenCalledWith({ sessionId: "s3", archived: true });
+    expect(archiveMutate).not.toHaveBeenCalled();
   });
 });
