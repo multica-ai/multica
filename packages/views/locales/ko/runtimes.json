@@ -58,6 +58,19 @@
       "cli": "CLI",
       "cloud_worker": "클라우드 워커",
       "local_daemon": "로컬 데몬"
+    },
+    "rename": "기기 이름 변경",
+    "rename_dialog": {
+      "title": "기기 이름 변경",
+      "description": "이 기기에 알아보기 쉬운 이름을 지정합니다. 이 기기의 모든 런타임에 적용되며 에이전트의 런타임을 선택할 때 표시됩니다.",
+      "placeholder": "예: 내 MacBook",
+      "hint": "비워 두면 기기의 기본 이름을 사용합니다.",
+      "cancel": "취소",
+      "save": "저장",
+      "saving": "저장 중...",
+      "toast_saved": "기기 이름을 변경했습니다",
+      "toast_cleared": "기기 이름을 지웠습니다",
+      "toast_failed": "기기 이름 변경에 실패했습니다"
     }
   },
   "health": {
@@ -82,7 +95,6 @@
     "all_runtimes": "모든 런타임",
     "read_only": "읽기 전용",
     "delete_button": "런타임 삭제",
-    "rename_button": "이름 변경",
     "last_seen": "마지막 확인 {{when}}",
     "fact_owner": "소유자",
     "fact_device": "기기",
@@ -106,18 +118,6 @@
     },
     "visibility_toast_updated": "공개 범위를 {{visibility}}(으)로 설정했습니다",
     "visibility_toast_failed": "공개 범위를 업데이트하지 못했습니다",
-    "rename_dialog": {
-      "title": "런타임 이름 변경",
-      "description": "에이전트를 만들 때 쉽게 찾을 수 있도록 이 런타임에 사용자 지정 이름을 지정합니다.",
-      "hint": "비워 두면 기본 이름을 사용합니다.",
-      "apply_to_machine": "이 컴퓨터의 모든 런타임에 적용",
-      "cancel": "취소",
-      "save": "저장",
-      "saving": "저장 중...",
-      "toast_saved": "런타임 이름을 변경했습니다",
-      "toast_cleared": "사용자 지정 이름을 지웠습니다",
-      "toast_failed": "런타임 이름 변경에 실패했습니다"
-    },
     "delete_dialog": {
       "self_heal_notice": "이 런타임은 실행 중인 로컬 데몬이 관리합니다. 삭제는 성공하지만, 데몬 프로세스를 멈추지 않으면 몇 초 안에 새 런타임이 다시 등록됩니다. 완전히 제거하려면 먼저 데몬을 중지하세요.",
       "profile_backed_notice": "이 런타임은 사용자 지정 런타임 프로필에서 등록되었습니다. 여기서 삭제하면 현재 런타임 인스턴스만 제거되며, 프로필이 남아 있는 동안 실행 중인 데몬이 다시 등록할 수 있습니다. 완전히 제거하려면 Custom runtimes에서 사용자 지정 런타임 프로필을 삭제하세요.",
