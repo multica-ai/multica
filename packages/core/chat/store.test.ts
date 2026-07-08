@@ -97,8 +97,15 @@ describe("chat store — draft attachments", () => {
 });
 
 describe("chat store — floating window preference", () => {
-  it("defaults OFF when no preference is stored (opt-in)", () => {
+  it("defaults ON when no preference is stored", () => {
     const store = createChatStore({ storage: memStorage() });
+    expect(store.getState().floatingChatEnabled).toBe(true);
+  });
+
+  it("honours an explicit stored 'false' preference (opt-out)", () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:floatingChatEnabled", "false");
+    const store = createChatStore({ storage });
     expect(store.getState().floatingChatEnabled).toBe(false);
   });
 

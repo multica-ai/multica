@@ -6,8 +6,8 @@ import { useT } from "../../i18n";
 
 /**
  * Chat settings — its own tab under "My Account". Currently just the
- * floating-window toggle: when off (the default), the FAB / overlay never
- * mount and Chat is reachable only from its dedicated tab. The preference is
+ * floating-window toggle: when off, the FAB / overlay never mount and Chat
+ * is reachable only from its dedicated tab. It is on by default. The preference is
  * a persisted client setting (`floatingChatEnabled`), so it applies
  * immediately without a round-trip.
  */

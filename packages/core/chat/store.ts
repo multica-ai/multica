@@ -40,8 +40,8 @@ const OPEN_KEY = "multica:chat:isOpen";
  * Whether the floating chat window (FAB + overlay) is available at all,
  * persisted globally like OPEN_KEY. This is the Settings → Chat preference:
  * when off, the FAB/overlay never mount and Chat lives only in its tab.
- * Missing key = default OFF — the floating window is opt-in, enabled from
- * the Settings → Chat tab.
+ * Missing key = default ON — the floating window is on by default and can
+ * be turned off from the Settings → Chat tab.
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
 
@@ -179,9 +179,10 @@ export function createChatStore(options: ChatStoreOptions) {
   const storedOpen = storage.getItem(OPEN_KEY);
   const initialIsOpen = storedOpen === "true";
 
-  // Default OFF: the floating window is opt-in — only an explicit "true"
-  // (set from the Settings → Chat tab) enables it.
-  const initialFloatingEnabled = storage.getItem(FLOATING_KEY) === "true";
+  // Default ON: the floating window is enabled unless the user explicitly
+  // turned it off ("false") from the Settings → Chat tab. A missing key
+  // (new user) resolves to enabled.
+  const initialFloatingEnabled = storage.getItem(FLOATING_KEY) !== "false";
 
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
