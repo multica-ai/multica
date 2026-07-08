@@ -13,6 +13,15 @@ import { api } from "@multica/core/api";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useT } from "../../i18n";
+import { useLocaleAdapter } from "@multica/core/i18n/react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type SupportedLocale } from "@multica/core/i18n";
 
 // Mirror server/internal/handler/auth.go:MaxProfileDescriptionLen. Counted in
 // JS String.length (UTF-16 code units) here while the server counts runes,
@@ -32,6 +41,14 @@ export function AccountTab() {
   const [profileSaving, setProfileSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const localeAdapter = useLocaleAdapter();
+  const { i18n } = useT("settings");
+
+  const currentLocale: SupportedLocale = SUPPORTED_LOCALES.includes(
+    i18n.language as SupportedLocale,
+  )
+    ? (i18n.language as SupportedLocale)
+    : DEFAULT_LOCALE;
 
   useEffect(() => {
     setProfileName(user?.name ?? "");
@@ -55,7 +72,7 @@ export function AccountTab() {
     try {
       const result = await upload(file);
       if (!result) return;
-      const updated = await api.updateMe({ avatar_url: result.link });
+      const updated = await api.updateMe({ avatar_url: result.markdownLink || result.link });
       setUser(updated);
       toast.success(t(($) => $.account.toast_avatar_updated));
     } catch (err) {
@@ -97,6 +114,27 @@ export function AccountTab() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.account.toast_profile_failed));
     }
+  };
+
+  const handleProfileTypeChange = async (next: SupportedLocale) => {
+    if (next === currentLocale) return;
+    localeAdapter.persist(next);
+
+    let syncFailed = false;
+    if (user) {
+      try {
+        await api.updateMe({ language: next });
+      } catch {
+        syncFailed = true;
+      }
+    }
+
+    if (syncFailed) {
+      toast.warning("Failed to sync profile type");
+      setTimeout(() => window.location.reload(), 2500);
+      return;
+    }
+    window.location.reload();
   };
 
   return (
@@ -184,6 +222,31 @@ export function AccountTab() {
                 </p>
               ) : null}
             </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                Profile Type (What kind of work do you do?)
+              </Label>
+              <div className="mt-1">
+                <Select
+                  value={currentLocale}
+                  onValueChange={(val) => handleProfileTypeChange(val as SupportedLocale)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a profile type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">Software Development</SelectItem>
+                    <SelectItem value="en-marketing">Marketing</SelectItem>
+                    <SelectItem value="en-creative">Creative</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                This adjusts terminology (e.g., Issues vs. Tasks vs. Creative Briefs) to match your workflow.
+              </p>
+            </div>
+
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"

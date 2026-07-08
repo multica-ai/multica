@@ -564,6 +564,31 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 			return
 		}
 
+		wsUUID := parseUUID(e.WorkspaceID)
+		workspace, err := queries.GetWorkspace(context.Background(), wsUUID)
+		if err != nil {
+			return
+		}
+
+		// Check preferences
+		pref, err := queries.GetNotificationPreference(context.Background(), db.GetNotificationPreferenceParams{
+			WorkspaceID: wsUUID,
+			UserID:      recipientID,
+		})
+		if err == nil && len(pref.Preferences) > 0 {
+			var prefs map[string]string
+			if err := json.Unmarshal(pref.Preferences, &prefs); err == nil {
+				if prefs["system_notifications"] == "muted" {
+					return
+				}
+				eventType, _ := item["type"].(string)
+				group := mapEventTypeToGroup(eventType)
+				if group != "" && prefs[group] == "muted" {
+					return
+				}
+			}
+		}
+
 		tokens, err := queries.GetUserDeviceTokens(context.Background(), recipientID)
 		if err != nil || len(tokens) == 0 {
 			return
@@ -578,7 +603,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		var data map[string]any
 		if issueID, ok := item["issue_id"].(*string); ok && issueID != nil {
 			data = map[string]any{
-				"url": "multica://issue/" + *issueID,
+				"url": "multica://" + workspace.Slug + "/issue/" + *issueID,
 			}
 		}
 
@@ -1067,3 +1092,19 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"details":        json.RawMessage(item.Details),
 	}
 }
+
+func mapEventTypeToGroup(eventType string) string {
+	switch eventType {
+	case "assigned":
+		return "assignments"
+	case "status_changed", "issue_completed", "issue_archived":
+		return "status_changes"
+	case "comment", "mention", "reaction_added":
+		return "comments"
+	case "task_failed", "agent_mentioned":
+		return "agent_activity"
+	default:
+		return "updates"
+	}
+}
+

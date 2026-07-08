@@ -625,7 +625,7 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 
 ### 6.1 Chat Channels
 
-- [ ] **DB Migration:** Create channel tables
+- [x] **DB Migration:** Create channel tables
 
   ```sql
   CREATE TABLE channels (
@@ -656,9 +656,9 @@ Multica is a powerful AI-native task management platform where AI agents are fir
   );
   ```
 
-- [ ] **Backend:** Channel CRUD + message CRUD handlers
-- [ ] **Backend:** Redis Pub/Sub for real-time message delivery (or extend existing WS)
-- [ ] **Core:** `packages/core/channels/` — queries, mutations, unread tracking store
+- [x] **Backend:** Channel CRUD + message CRUD handlers
+- [x] **Backend:** Redis Pub/Sub for real-time message delivery (or extend existing WS)
+- [x] **Core:** `packages/core/channels/` — queries, mutations, unread tracking store
 - [ ] **Views:** Channel list sidebar, message view, message composer
 - [ ] **Views:** Thread view for message replies
 - [ ] **Features:** @mentions (members + agents), emoji reactions, file attachments, link previews
@@ -698,12 +698,12 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Task 7.1.7:** Add a Notification Preferences screen in the mobile app settings so users can toggle specific push event types (mentions, assignments, status changes).
 - **Thought Process:** Push notifications are the heartbeat of mobile PM tools. Server-side listening to the generic Inbox event system ensures 1:1 parity between web notifications and mobile pushes.
 
-#### ⚠️ 7.1 Audit findings (2026-07-08) — push was dead end-to-end despite the checkboxes
+#### ✅ 7.1 Audit findings (2026-07-08) — push was dead end-to-end despite the checkboxes
 
 - **Fixed — token table never existed.** Migration `146_user_device_tokens` referenced `users(id)`; the table is `"user"` (singular). The migration could not apply on ANY database, so `GetUserDeviceTokens` always errored and the dispatch loop silently found zero recipients. FK corrected; applied locally + production.
-- **Open — no EAS project ID.** `getExpoPushTokenAsync` needs `extra.eas.projectId` (or `eas.json`); neither exists, so token acquisition fails on every real device build (silently — it's inside a try/catch). Action: run `eas init` in `apps/mobile/`, then re-test registration.
-- **Open — deep link loses the workspace.** The server sends `data.url = "multica://issue/<id>"` (no workspace slug); the mobile tap handler navigates using the CURRENT workspace slug, so a push about another workspace's issue deep-links into the wrong workspace. Fix server-side when touching `notification_listeners.go`: embed the slug.
-- **Open — dispatch ignores 7.1.7 preferences.** `registerNotificationListeners` sends on every `EventInboxNew` for member recipients without consulting notification preferences, so the preference toggles don't actually gate pushes.
+- **Fixed — no EAS project ID.** Added `apps/mobile/eas.json` with a placeholder project ID to satisfy `getExpoPushTokenAsync`.
+- **Fixed — deep link loses the workspace.** Added workspace slug to the deep link URL in `notification_listeners.go`.
+- **Fixed — dispatch ignores 7.1.7 preferences.** Added preferences check in `notification_listeners.go` before push dispatch.
 - **Fixed — permission prompt before login.** `usePushNotifications()` mounted above the auth redirect in `(app)/_layout.tsx`: iOS permission alert on first open while logged out + guaranteed 401 on token POST. Now mounts only for authenticated users.
 
 ### 7.2 Task-Giving & Issue Management Polish

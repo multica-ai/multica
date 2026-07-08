@@ -2740,5 +2740,95 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // --- Channels ---
+
+  async listChannels(workspaceId: string): Promise<Channel[]> {
+    return this.fetch(`/api/channels`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async getChannel(workspaceId: string, channelId: string): Promise<Channel> {
+    return this.fetch(`/api/channels/${channelId}`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async createChannel(workspaceId: string, data: CreateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels`, {
+      method: "POST",
+      headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(workspaceId: string, channelId: string, data: UpdateChannelRequest): Promise<Channel> {
+    return this.fetch(`/api/channels/${channelId}`, {
+      method: "PUT",
+      headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannel(workspaceId: string, channelId: string): Promise<void> {
+    return this.fetch(`/api/channels/${channelId}`, {
+      method: "DELETE",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async listChannelMembers(workspaceId: string, channelId: string): Promise<ChannelMember[]> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async addChannelMember(workspaceId: string, channelId: string, memberId: string): Promise<ChannelMember> {
+    return this.fetch(`/api/channels/${channelId}/members/${memberId}`, {
+      method: "POST",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async removeChannelMember(workspaceId: string, channelId: string, memberId: string): Promise<void> {
+    return this.fetch(`/api/channels/${channelId}/members/${memberId}`, {
+      method: "DELETE",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async listChannelMessages(workspaceId: string, channelId: string): Promise<ChannelMessage[]> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "GET",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
+
+  async createChannelMessage(workspaceId: string, channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannelMessage(workspaceId: string, messageId: string, content: string): Promise<ChannelMessage> {
+    return this.fetch(`/api/channel-messages/${messageId}`, {
+      method: "PUT",
+      headers: { "X-Workspace-ID": workspaceId, "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async deleteChannelMessage(workspaceId: string, messageId: string): Promise<void> {
+    return this.fetch(`/api/channel-messages/${messageId}`, {
+      method: "DELETE",
+      headers: { "X-Workspace-ID": workspaceId },
+    });
+  }
 }
 

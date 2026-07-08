@@ -979,6 +979,28 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Channels
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/{channelId}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Put("/", h.UpdateChannel)
+					r.Delete("/", h.DeleteChannel)
+					
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members/{memberId}", h.AddChannelMember)
+					r.Delete("/members/{memberId}", h.RemoveChannelMember)
+					
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.CreateChannelMessage)
+				})
+			})
+			r.Route("/api/channel-messages/{messageId}", func(r chi.Router) {
+				r.Put("/", h.UpdateChannelMessage)
+				r.Delete("/", h.DeleteChannelMessage)
+			})
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
