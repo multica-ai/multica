@@ -133,7 +133,10 @@
     "add": "添加",
     "add_agent": "添加常用 Agent",
     "unpin_agent": "移出常用",
-    "waiting": "等待回复"
+    "waiting": "等待回复",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "pinned": "已置顶"
   },
   "header": {
     "view_profile": "查看 Agent 资料",

@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Loader2, Square, Trash2 } from "lucide-react";
+import { Clock, Loader2, Pin, PinOff, Square, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
-import { pendingChatTasksOptions, chatKeys } from "@multica/core/chat/queries";
-import { useDeleteChatSession } from "@multica/core/chat/mutations";
+import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
+import { useDeleteChatSession, useSetChatSessionPinned } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -63,9 +63,11 @@ export function ChatThreadList({
   const wsId = useWorkspaceId();
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
-  // Legacy soft-archived rows are dead data — excluded from history.
+  // Legacy soft-archived rows are dead data — excluded from history. Sorted
+  // pinned-first (then by activity) so the list stays ordered even after an
+  // optimistic pin/unpin or a WS patch mutates the flat cache in place.
   const historySessions = useMemo(
-    () => sessions.filter((s) => s.status !== "archived"),
+    () => sortChatSessions(sessions.filter((s) => s.status !== "archived")),
     [sessions],
   );
 
@@ -73,6 +75,7 @@ export function ChatThreadList({
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const deleteSession = useDeleteChatSession();
+  const setPinned = useSetChatSessionPinned();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
 
@@ -222,7 +225,13 @@ export function ChatThreadList({
 
         <div className="min-w-0 flex-1">
           {/* Line 1: name + time (time stays put; hover actions overlay below) */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {session.pinned && (
+              <Pin
+                aria-label={t(($) => $.list.pinned)}
+                className="size-3 shrink-0 -rotate-45 fill-current text-muted-foreground"
+              />
+            )}
             <span className={cn("min-w-0 flex-1 truncate text-sm", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
               {titleText}
             </span>
@@ -279,6 +288,11 @@ export function ChatThreadList({
             changes the row height (which was making the list jump). */}
         {!isConfirmingAction && (
           <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 group-hover/row:flex">
+            <RowAction
+              icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
+              label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
+              onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
+            />
             {isRunning ? (
               <RowAction
                 icon={<Square className="size-3 fill-current" />}

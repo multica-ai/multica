@@ -136,7 +136,10 @@
     "add": "Add",
     "add_agent": "Add a frequent agent",
     "unpin_agent": "Remove from frequent",
-    "waiting": "Waiting for reply"
+    "waiting": "Waiting for reply",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinned": "Pinned"
   },
   "header": {
     "view_profile": "View agent profile",

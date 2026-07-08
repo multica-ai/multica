@@ -133,7 +133,10 @@
     "add": "追加",
     "add_agent": "よく使う Agent を追加",
     "unpin_agent": "よく使うから外す",
-    "waiting": "返信待ち"
+    "waiting": "返信待ち",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "pinned": "ピン留め済み"
   },
   "header": {
     "view_profile": "Agent のプロフィール",

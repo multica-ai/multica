@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -233,6 +234,76 @@ func TestUpdateChatSession_RenamesTitle(t *testing.T) {
 	}
 	if dbTitle != "Renamed Session" {
 		t.Fatalf("db title: want %q, got %q", "Renamed Session", dbTitle)
+	}
+}
+
+// TestSetChatSessionPinned_TogglesPin confirms PATCH /pin stamps pinned_at on
+// pin and clears it on unpin, returns the new state, and does not bump
+// updated_at (pinning is a list-ordering preference, not activity).
+func TestSetChatSessionPinned_TogglesPin(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatPinAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var updatedBefore time.Time
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT updated_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&updatedBefore); err != nil {
+		t.Fatalf("query updated_at: %v", err)
+	}
+
+	pin := func(pinned bool) ChatSessionResponse {
+		req := newRequest("PATCH", "/api/chat/sessions/"+sessionID+"/pin", map[string]any{
+			"pinned": pinned,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionPinned(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionPinned(%v): expected 200, got %d: %s", pinned, w.Code, w.Body.String())
+		}
+		var resp ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode pin: %v", err)
+		}
+		return resp
+	}
+
+	// Pin.
+	if resp := pin(true); !resp.Pinned {
+		t.Fatalf("pin=true response Pinned: want true, got false")
+	}
+	var pinnedAt *time.Time
+	var updatedAfter time.Time
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT pinned_at, updated_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&pinnedAt, &updatedAfter); err != nil {
+		t.Fatalf("query pinned_at: %v", err)
+	}
+	if pinnedAt == nil {
+		t.Fatalf("pinned_at: want non-null after pin, got null")
+	}
+	if !updatedAfter.Equal(updatedBefore) {
+		t.Fatalf("updated_at must not change on pin: before %v, after %v", updatedBefore, updatedAfter)
+	}
+
+	// Unpin.
+	if resp := pin(false); resp.Pinned {
+		t.Fatalf("pin=false response Pinned: want false, got true")
+	}
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT pinned_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&pinnedAt); err != nil {
+		t.Fatalf("query pinned_at after unpin: %v", err)
+	}
+	if pinnedAt != nil {
+		t.Fatalf("pinned_at: want null after unpin, got %v", *pinnedAt)
 	}
 }
 

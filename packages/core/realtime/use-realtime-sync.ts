@@ -44,7 +44,7 @@ import {
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
-import { chatKeys, mergeTaskMessagesBySeq } from "../chat/queries";
+import { chatKeys, mergeTaskMessagesBySeq, sortChatSessions } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -84,6 +84,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatMessagesPage,
+  ChatSession,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -1117,24 +1118,29 @@ export function useRealtimeSync(
       const payload = p as {
         chat_session_id: string;
         title?: string;
+        pinned?: boolean;
         updated_at?: string;
       };
       chatWsLogger.info("chat:session_updated (global)", payload);
       const id = getCurrentWsId();
       if (!id) return;
-      const patch = (
-        old?: { id: string; title: string; updated_at: string }[],
-      ) =>
-        old?.map((s) =>
+      // `pinned` is present only on pin/unpin events; a plain rename omits it,
+      // so leave the existing pin state untouched then. When it changes we
+      // re-sort so the row jumps to / from the top like the server order.
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(id), (old) => {
+        if (!old) return old;
+        const next = old.map((s) =>
           s.id === payload.chat_session_id
             ? {
                 ...s,
                 title: payload.title ?? s.title,
+                pinned: payload.pinned ?? s.pinned,
                 updated_at: payload.updated_at ?? s.updated_at,
               }
             : s,
         );
-      qc.setQueryData(chatKeys.sessions(id), patch);
+        return payload.pinned === undefined ? next : sortChatSessions(next);
+      });
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has

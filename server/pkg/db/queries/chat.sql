@@ -33,7 +33,7 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
-ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC;
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
 SELECT cs.*,
@@ -54,10 +54,21 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
-ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC;
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetChatSessionPinned :one
+-- Pin/unpin a chat. Deliberately does NOT touch updated_at: pinning is a
+-- list-ordering preference, not activity, so it must not bump the session's
+-- last-activity sort key (which would make an unpinned chat jump the list).
+-- pinned = true stamps pinned_at only when it was NULL, so re-pinning keeps
+-- the original pin order; pinned = false clears it.
+UPDATE chat_session
+SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
 WHERE id = $1
 RETURNING *;
 

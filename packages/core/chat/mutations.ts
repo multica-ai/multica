@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import { chatKeys } from "./queries";
+import { chatKeys, sortChatSessions } from "./queries";
 import { createLogger } from "../logger";
 import type { ChatSession, ChatPinnedAgent } from "../types";
 
@@ -147,6 +147,43 @@ export function useUpdateChatSession() {
     },
     onError: (err, vars, ctx) => {
       logger.error("updateChatSession.error.rollback", { sessionId: vars.sessionId, err });
+      if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
+ * Pins or unpins a chat. Optimistically flips `pinned` and re-sorts the cached
+ * list (pinned first, then by activity) so the row jumps to / from the top
+ * instantly; rolls back on error. The matching `chat:session_updated` WS event
+ * carries the new pin state to other tabs/devices — see use-realtime-sync.ts.
+ */
+export function useSetChatSessionPinned() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (data: { sessionId: string; pinned: boolean }) => {
+      logger.info("setChatSessionPinned.start", data);
+      return api.setChatSessionPinned(data.sessionId, data.pinned);
+    },
+    onMutate: async ({ sessionId, pinned }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+
+      const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+
+      const patch = (old?: ChatSession[]) =>
+        old &&
+        sortChatSessions(old.map((s) => (s.id === sessionId ? { ...s, pinned } : s)));
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
+
+      return { prevSessions };
+    },
+    onError: (err, vars, ctx) => {
+      logger.error("setChatSessionPinned.error.rollback", { sessionId: vars.sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
     },
     onSettled: () => {
