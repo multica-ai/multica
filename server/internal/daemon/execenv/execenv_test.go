@@ -11,6 +11,10 @@ import (
 	"testing"
 )
 
+func init() {
+	isUnderTest = true
+}
+
 func testLogger() *slog.Logger {
 	return slog.Default()
 }

@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+var isUnderTest = false
+
 // Background
 //
 // On macOS, Codex's Seatbelt sandbox in the `workspace-write` mode silently
@@ -52,6 +54,16 @@ type codexSandboxPolicy struct {
 //   workspace-write with network access (upstream bug fixed).
 // - darwin otherwise (including when the version is unknown): fall back to
 //   danger-full-access so the Multica CLI can reach the API.
+func getSandboxModeOverride() string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE")); v != "" {
+		return v
+	}
+	if isUnderTest {
+		return ""
+	}
+	return getWindowsRegistrySandboxMode()
+}
+
 func codexSandboxPolicyFor(goos, detectedVersion, codexPath string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
@@ -65,7 +77,7 @@ func codexSandboxPolicyFor(goos, detectedVersion, codexPath string) codexSandbox
 			}
 		}
 
-		if v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE")); v != "" {
+		if v := getSandboxModeOverride(); v != "" {
 			if v == "danger-full-access" || v == "workspace-write" {
 				return codexSandboxPolicy{
 					Mode:          v,
