@@ -2643,12 +2643,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
-	// Platform-driven parent notification: when this issue transitions into
-	// `done` and has a parent, post a top-level system comment on the parent
-	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
-	// loops in PR #2918). The helper guards on transition + parent state and
-	// fails best-effort.
+	// Platform-driven parent handoffs: child `in_review` wakes the parent for
+	// verification; child `done` wakes the parent when a stage barrier closes.
+	// Both helpers guard on transition + parent state and fail best-effort.
 	if statusChanged {
+		h.notifyParentOfChildReview(r.Context(), prevIssue, issue)
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 	}
 
@@ -3142,9 +3141,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		}
 
-		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538). Best-effort; failure does not abort the batch.
+		// Platform-driven parent handoffs, mirrored from UpdateIssue. Best-effort;
+		// failure does not abort the batch.
 		if statusChanged {
+			h.notifyParentOfChildReview(r.Context(), prevIssue, issue)
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 		}
 

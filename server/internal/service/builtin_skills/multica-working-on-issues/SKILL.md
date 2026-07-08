@@ -154,9 +154,12 @@ on it. These are the contracts, not advice:
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
-- **`in_review`** is an accepted issue status. Some workflows use it while a PR
-  is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent. If a PR
+- **`in_review`** is an accepted issue status. On a child issue, moving into
+  `in_review` posts a parent review-handoff system comment and wakes the parent
+  assignee so the orchestrator can verify the child output before marking it
+  done.
+- **`done`** on a child issue posts a system comment on its parent when the
+  relevant stage barrier closes. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
 - **`cancelled`** stops outstanding work; treat it as a user-driven decision.
@@ -185,12 +188,13 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
-i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
-(no comment, no wake). A sibling set with **no** stages is one implicit stage,
-so the parent is woken once when the *last* sub-issue finishes — not on every
-child.
+stages. The parent assignee is woken for **review** whenever a child enters
+`in_review`, because that is an orchestrator handoff. Separately, the parent is
+woken **once, when a whole stage finishes** — i.e. every sub-issue in the lowest
+unfinished stage has reached a terminal status (`done`/`cancelled`). A completion
+that does not close a stage is silent (no stage-complete comment, no stage wake).
+A sibling set with **no** stages is one implicit stage, so the parent gets the
+stage-complete wake once when the *last* sub-issue finishes — not on every child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's

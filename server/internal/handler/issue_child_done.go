@@ -193,6 +193,77 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
 }
 
+// notifyParentOfChildReview wakes the parent assignee when a child moves into
+// `in_review`. This is the pre-terminal review handoff for orchestrated
+// pipelines: the child has delivered, but the parent/orchestrator must verify
+// before marking it done and unblocking downstream stages. Unlike child-done,
+// this is deliberately NOT stage-barrier gated — every child entering review is
+// a unit of work for the parent assignee.
+//
+// Guards mirror notifyParentOfChildDone where applicable: only transition INTO
+// in_review, skip parked/closed parents, skip human parent assignees, and keep
+// failures best-effort so the status update itself is never rolled back.
+func (h *Handler) notifyParentOfChildReview(ctx context.Context, prev, issue db.Issue) {
+	if !issue.ParentIssueID.Valid {
+		return
+	}
+	if prev.Status == "in_review" || issue.Status != "in_review" {
+		return
+	}
+
+	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
+	if err != nil {
+		slog.Warn("child review: failed to load parent",
+			"error", err,
+			"child_id", uuidToString(issue.ID),
+			"parent_id", uuidToString(issue.ParentIssueID))
+		return
+	}
+	if parent.Status == "done" || parent.Status == "cancelled" || parent.Status == "backlog" {
+		return
+	}
+	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
+		return
+	}
+
+	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	identifier := prefix + "-" + strconv.Itoa(int(issue.Number))
+	childID := uuidToString(issue.ID)
+	title := sanitizeChildTitleForSystemComment(issue.Title)
+	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
+	content := fmt.Sprintf(
+		"%sSub-issue [%s](mention://issue/%s) — \"%s\" — is ready for parent review. Review its output against the brief; if it passes, mark the sub-issue `done` and continue the staged workflow. If it misses criteria, send it back with the specific fixes required.",
+		mentionPrefix, identifier, childID, title,
+	)
+
+	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     parent.ID,
+		WorkspaceID: parent.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    pgtype.UUID{Valid: false},
+	})
+	if err != nil {
+		slog.Warn("child review: create system comment failed",
+			"error", err,
+			"child_id", childID,
+			"parent_id", uuidToString(parent.ID))
+		return
+	}
+
+	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(comment, nil, nil),
+		"issue_title":         parent.Title,
+		"issue_assignee_type": textToPtr(parent.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
+		"issue_status":        parent.Status,
+	})
+
+	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+}
+
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
 // cancelled sibling will never complete, so it must not hold a stage open.
