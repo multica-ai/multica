@@ -387,7 +387,7 @@ describe("WSClient", () => {
       expect(lastTimerDelay()).toBe(1000);
     });
 
-    it("stops reconnecting after the maximum number of attempts", () => {
+    it("keeps retrying indefinitely with capped delay", () => {
       vi.stubGlobal(
         "Math",
         new Proxy(Math, {
@@ -407,19 +407,24 @@ describe("WSClient", () => {
       const ws = new WSClient("ws://example.test/ws", { logger });
       ws.connect();
 
-      // Drive 20 failures (the max).
-      for (let i = 0; i < 20; i++) {
+      // Drive past the old 20-attempt limit — all should schedule a reconnect.
+      for (let i = 0; i < 25; i++) {
         simulateDisconnect();
-        vi.advanceTimersByTime(lastTimerDelay());
+        const delay = lastTimerDelay();
+        // Once past attempt 5 (base > 30000), delay should be capped at 30s.
+        if (i >= 5) {
+          expect(delay).toBe(30000);
+        }
+        vi.advanceTimersByTime(delay);
       }
 
-      // The 21st disconnect should NOT schedule a reconnect.
+      // The 26th disconnect should STILL schedule a reconnect (no give-up).
       const timerCountBefore = setTimeoutSpy.mock.calls.length;
       simulateDisconnect();
-      expect(setTimeoutSpy.mock.calls.length).toBe(timerCountBefore);
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("giving up"),
-      );
+      expect(setTimeoutSpy.mock.calls.length).toBe(timerCountBefore + 1);
+      expect(lastTimerDelay()).toBe(30000);
+      // No "giving up" error should have been logged.
+      expect(logger.error).not.toHaveBeenCalled();
     });
 
     it("disconnect() cancels a pending reconnect and resets the counter", () => {

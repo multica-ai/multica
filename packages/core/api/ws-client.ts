@@ -10,10 +10,11 @@ const UNPARSEABLE_LOG_MAX_CHARS = 200;
 
 // Reconnect backoff parameters. A flat delay causes a thundering herd when many
 // clients reconnect after a server restart; exponential backoff with jitter
-// spreads the reconnection attempts over time.
+// spreads the reconnection attempts over time. The client retries indefinitely
+// (capped at RECONNECT_MAX_DELAY_MS) because the web/desktop UI does not yet
+// expose a visible disconnected state or manual retry action.
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
-const RECONNECT_MAX_ATTEMPTS = 20;
 
 function summarizeUnparseable(data: unknown): string {
   const text = typeof data === "string" ? data : String(data);
@@ -156,17 +157,10 @@ export class WSClient {
 
   /**
    * Schedule a reconnection attempt with exponential backoff and jitter.
-   * After `RECONNECT_MAX_ATTEMPTS` consecutive failures the client stops
-   * reconnecting and logs an error; call `connect()` to retry manually.
+   * Retries indefinitely with a capped delay because the web/desktop UI
+   * does not yet expose a visible disconnected state or manual retry action.
    */
   private scheduleReconnect() {
-    if (this.reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
-      this.logger.error(
-        `ws: giving up after ${RECONNECT_MAX_ATTEMPTS} reconnect attempts; call connect() to retry`,
-      );
-      return;
-    }
-
     const base = Math.min(
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_DELAY_MS,
@@ -180,7 +174,7 @@ export class WSClient {
 
     this.reconnectAttempt++;
     this.logger.warn(
-      `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS})`,
+      `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
