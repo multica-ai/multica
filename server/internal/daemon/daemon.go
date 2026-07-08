@@ -3634,6 +3634,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
+	defer func() {
+		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
+			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+		}
+	}()
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →
@@ -4649,7 +4654,14 @@ func ensureTaskTempDir(envRoot string, taskID string) (string, error) {
 	if envRoot == "" {
 		return "", errors.New("env root is empty")
 	}
-	dir := filepath.Join(envRoot, "tmp", safeTempPathComponent(taskID))
+	root := shortTaskTempRoot()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return "", err
+	}
+	dir := taskTempDirPath(envRoot, taskID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -4659,13 +4671,23 @@ func ensureTaskTempDir(envRoot string, taskID string) (string, error) {
 	return dir, nil
 }
 
-func safeTempPathComponent(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "task"
+func shortTaskTempRoot() string {
+	if os.PathSeparator == '/' {
+		return filepath.Join("/tmp", "multica-"+strconv.Itoa(os.Getuid()))
 	}
-	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_")
-	return replacer.Replace(value)
+	return filepath.Join(os.TempDir(), "multica")
+}
+
+func taskTempDirPath(envRoot string, taskID string) string {
+	return filepath.Join(shortTaskTempRoot(), taskTempDirName(envRoot, taskID))
+}
+
+func taskTempDirName(envRoot string, taskID string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.TrimSpace(envRoot)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(strings.TrimSpace(taskID)))
+	return fmt.Sprintf("task-%016x", h.Sum64())
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

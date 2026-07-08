@@ -1490,6 +1490,21 @@ func TestHermesProviderErrorSnifferTerminalNonRetryable(t *testing.T) {
 	}
 }
 
+func TestHermesProviderErrorSnifferUnixSocketPathTooLong(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("OSError: AF_UNIX path too long\n"))
+
+	msg := s.terminalMessage()
+	if msg == "" {
+		t.Fatal("expected AF_UNIX path error to be classified as terminal")
+	}
+	if !strings.Contains(msg, "Unix socket path too long") || !strings.Contains(msg, "TMPDIR") {
+		t.Fatalf("expected clear TMPDIR/socket message, got %q", msg)
+	}
+}
+
 // TestHermesBackendPromotesProviderErrorWithNonEmptyOutput pins the
 // fix for GitHub multica#1952: a hermes run that hits a 429 (or any
 // upstream provider error) must surface as Status=failed even though
