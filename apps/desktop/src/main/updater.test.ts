@@ -16,6 +16,9 @@ const ctx = vi.hoisted(() => ({
   autoUpdater: null as {
     allowPrerelease: boolean;
   } | null,
+  showMessageBox: vi.fn(async () => ({ response: 1 })),
+  openExternalSafely: vi.fn(),
+  releasesPageUrl: "https://github.com/multica-ai/multica/releases/latest",
 }));
 
 vi.mock("electron-updater", () => {
@@ -43,9 +46,20 @@ vi.mock("electron", () => ({
     getVersion: ctx.getVersion,
   },
   BrowserWindow: class BrowserWindow {},
+  dialog: {
+    showMessageBox: ctx.showMessageBox,
+  },
   ipcMain: {
     handle: ctx.ipcHandle,
   },
+}));
+
+vi.mock("./external-url", () => ({
+  openExternalSafely: ctx.openExternalSafely,
+}));
+
+vi.mock("./github-release-base", () => ({
+  githubReleasesLatestPageUrl: () => ctx.releasesPageUrl,
 }));
 
 import { setupAutoUpdater } from "./updater";
@@ -120,11 +134,15 @@ describe("setupAutoUpdater", () => {
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
     ctx.getVersion.mockClear();
+    ctx.showMessageBox.mockClear();
+    ctx.openExternalSafely.mockClear();
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
   });
 
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("forwards update progress to a live renderer", () => {
@@ -176,5 +194,24 @@ describe("setupAutoUpdater", () => {
   it("disables allowPrerelease so git-describe local builds can check stable releases", () => {
     setupAutoUpdater(() => makeWindow().win);
     expect(ctx.autoUpdater?.allowPrerelease).toBe(false);
+  });
+
+  it("notifies the renderer and shows a dialog on macOS code-signature install failures", async () => {
+    const { win, send } = makeWindow();
+    setupAutoUpdater(() => win);
+
+    emitUpdater(
+      "error",
+      new Error(
+        "Code signature at URL file:///tmp/Multica.app/ did not pass validation: code did not meet specified code requirements",
+      ),
+    );
+
+    expect(send).toHaveBeenCalledWith("updater:update-error", {
+      code: "signature_mismatch",
+      message:
+        "Code signature at URL file:///tmp/Multica.app/ did not pass validation: code did not meet specified code requirements",
+    });
+    expect(ctx.showMessageBox).toHaveBeenCalled();
   });
 });

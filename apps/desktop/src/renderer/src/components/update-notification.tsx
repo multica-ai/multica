@@ -1,27 +1,89 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { AlertCircle, RefreshCw, X } from "lucide-react";
 
 // Downloads run silently in the background (main process has
 // autoDownload=true). The renderer only renders UI once the package is fully
 // downloaded and waiting for a restart.
 type UpdateState =
   | { status: "idle" }
-  | { status: "ready"; version: string };
+  | { status: "ready"; version: string }
+  | { status: "failed"; version?: string };
 
 export function UpdateNotification() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    const cleanup = window.updater.onUpdateDownloaded((info) => {
+    const cleanupDownloaded = window.updater.onUpdateDownloaded((info) => {
       setState({ status: "ready", version: info.version });
       setDismissed(false);
     });
-    return cleanup;
+    const cleanupError = window.updater.onUpdateError(() => {
+      setState((current) =>
+        current.status === "ready"
+          ? { status: "failed", version: current.version }
+          : { status: "failed" },
+      );
+      setDismissed(false);
+    });
+    return () => {
+      cleanupDownloaded();
+      cleanupError();
+    };
   }, []);
 
   if (state.status === "idle") return null;
   if (dismissed) return null;
+
+  const openReleases = () => {
+    void window.updater.getReleasesPageUrl().then((url) => {
+      void window.desktopAPI.openExternal(url);
+    });
+  };
+
+  if (state.status === "failed") {
+    return (
+      <div className="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border bg-background p-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-300">
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="size-3.5" />
+        </button>
+
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-md bg-destructive/10 p-1.5">
+            <AlertCircle className="size-4 text-destructive" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Update could not be installed</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {state.version
+                ? `v${state.version} downloaded but could not replace the installed app automatically. Install the macOS DMG from GitHub Releases instead.`
+                : "The downloaded update could not replace the installed app automatically. Install the latest macOS DMG from GitHub Releases instead."}
+            </p>
+            <div className="mt-2 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setDismissed(true)}
+                className="inline-flex items-center rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={openReleases}
+                className="inline-flex items-center rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Open Releases
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border bg-background p-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-300">

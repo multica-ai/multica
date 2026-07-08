@@ -1,5 +1,7 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
-import { app, type BrowserWindow, ipcMain } from "electron";
+import { app, dialog, type BrowserWindow, ipcMain } from "electron";
+import { openExternalSafely } from "./external-url";
+import { githubReleasesLatestPageUrl } from "./github-release-base";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -39,7 +41,57 @@ export type ManualUpdateCheckResult =
 type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
-  | "updater:update-downloaded";
+  | "updater:update-downloaded"
+  | "updater:update-error";
+
+function isMacCodeSignatureError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message;
+  return (
+    message.includes("Code signature") ||
+    message.includes("code requirements") ||
+    message.includes("SQRLCodeSignature")
+  );
+}
+
+let signatureErrorDialogOpen = false;
+
+function notifyMacSignatureInstallFailure(
+  getMainWindow: () => BrowserWindow | null,
+  message: string,
+): void {
+  sendToLiveRenderer(getMainWindow(), "updater:update-error", {
+    code: "signature_mismatch",
+    message,
+  });
+
+  if (signatureErrorDialogOpen) return;
+  const win = getMainWindow();
+  if (!win || win.isDestroyed()) return;
+
+  signatureErrorDialogOpen = true;
+  const releasesUrl = githubReleasesLatestPageUrl();
+  void dialog
+    .showMessageBox(win, {
+      type: "error",
+      title: "Update could not be installed",
+      message: "The downloaded update could not be applied automatically.",
+      detail:
+        "This usually happens when the update was signed differently from your installed copy. " +
+        "Download and install the latest macOS DMG from GitHub Releases instead.",
+      buttons: ["Open Releases", "OK"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    .then(({ response }) => {
+      if (response === 0) {
+        void openExternalSafely(releasesUrl);
+      }
+    })
+    .finally(() => {
+      signatureErrorDialogOpen = false;
+    });
+}
 
 function isDestroyedObjectError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("Object has been destroyed");
@@ -116,6 +168,9 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
 
   autoUpdater.on("error", (err) => {
     console.error("Auto-updater error:", err);
+    if (process.platform === "darwin" && isMacCodeSignatureError(err)) {
+      notifyMacSignatureInstallFailure(getMainWindow, err.message);
+    }
   });
 
   // Retained for IPC back-compat with older renderer bundles. With
@@ -125,8 +180,19 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   });
 
   ipcMain.handle("updater:install", () => {
+    // With autoInstallOnAppQuit=true, electron-updater's quitAndInstall is a
+    // no-op when Squirrel.Mac rejected the bundle (e.g. code-signature
+    // mismatch). Re-trigger validation so the native error surfaces instead
+    // of leaving Restart now as a silent failure.
+    if (process.platform === "darwin") {
+      void autoUpdater.checkForUpdates().catch((err) => {
+        console.error("Failed to re-check update before install:", err);
+      });
+    }
     autoUpdater.quitAndInstall(false, true);
   });
+
+  ipcMain.handle("updater:releases-page-url", () => githubReleasesLatestPageUrl());
 
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
     try {

@@ -88,6 +88,14 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          # macOS Squirrel.Mac in-place updates require the ZIP to satisfy the
+          # installed app's code-signing designated requirement. Without
+          # CSC_LINK + CSC_KEY_PASSWORD the build is ad-hoc signed and cannot
+          # replace a Developer ID-installed copy. Set those secrets (plus
+          # APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID for
+          # notarization) to ship signed macOS auto-updates from CI.
+          - os: macos-latest
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -122,9 +130,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Ad-hoc-sign only when no Developer ID cert is wired into CI.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+        shell: bash
         run: >-
           node scripts/package.mjs
           --${{ matrix.target }} --x64 --arm64 --publish always
-          -c.publish.owner=${{ github.repository_owner }}
-          -c.publish.repo=multica
+          --config.publish.owner=${{ github.repository_owner }}
+          --config.publish.repo=multica
