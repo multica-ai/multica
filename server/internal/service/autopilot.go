@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -39,6 +40,8 @@ type AutopilotService struct {
 // when computing next run times.
 const DefaultAutopilotTriggerTimezone = "UTC"
 
+const autopilotRecentDuplicateWindow = 60 * time.Second
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -47,15 +50,20 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
 //
-// Before any work is queued we run an admission check against the assignee
+// Before run_only work is queued we run an admission check against the assignee
 // agent's runtime: if it is not online, we record a `skipped` run with a
 // failure_reason and return without enqueueing. This is the "触发时准入" gate
 // from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
 // autopilots to pile thousands of doomed tasks onto agent_task_queue.
 //
+// create_issue mode is different: its primary contract is a durable audit
+// trail. If the assignee has a runtime but that runtime is merely offline,
+// dispatch still creates the issue and issue task so the work is visible and
+// can be claimed when the runtime returns.
+//
 // When assignee_type='squad' the gate runs against the squad leader (Path A
-// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), so an offline or
-// archived leader produces the same skip behaviour as an offline solo agent.
+// from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), with the same
+// create_issue audit-trail exception for a merely offline leader runtime.
 func (s *AutopilotService) DispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -161,11 +169,11 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 //   - It is in-flight in a state whose downstream side effect is
 //     observable:
 //
-//     * issue_created with a valid issue_id — the issue exists and
-//       the issue-event listener owns task creation from here.
+//   - issue_created with a valid issue_id — the issue exists and
+//     the issue-event listener owns task creation from here.
 //
-//     * running with a valid task_id — the task is queued, the
-//       listener will close the run when the task terminates.
+//   - running with a valid task_id — the task is queued, the
+//     listener will close the run when the task terminates.
 //
 // Anything else — most importantly issue_created/running with NULL
 // issue_id/task_id, or the brief 'pending' state — is a partial run:
@@ -294,6 +302,14 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
+	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
+		ctx, qtx, ap.WorkspaceID, ap.ID, ap.ProjectID, title, autopilotRecentDuplicateWindow,
+	); err != nil {
+		return fmt.Errorf("recent duplicate guard: %w", err)
+	} else if found {
+		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID)}
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
@@ -351,12 +367,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-
-	// Update run with the linked issue.
-	updatedRun, err := s.Queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+	// Link the run inside the same tx as the issue insert. This makes the
+	// recent-duplicate guard count only fully observable autopilot issues and
+	// avoids a crash window where recovery would see an orphan issue but no
+	// linked run.
+	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
 		ID:      run.ID,
 		IssueID: issue.ID,
 	})
@@ -364,6 +379,10 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("link run to issue: %w", err)
 	}
 	*run = updatedRun
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
 
 	// Publish issue:created so the existing event chain fires
 	// (subscriber listeners, activity listeners, notification listeners). For
@@ -397,10 +416,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
 	if ap.AssigneeType == "squad" {
-		// Fail-closed private-leader gate: if the leader is private, verify
-		// the autopilot creator still has access. This catches illegitimate
-		// configs that were saved before the save-time gate was added.
-		if leader.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, leader) {
+		// Fail-closed invocation gate: verify the autopilot creator may still
+		// invoke the leader under the permission model. Catches configs that
+		// predate the save-time gate, and admin-created configs that no longer
+		// pass (MUL-3963).
+		if !s.canCreatorInvokeAgent(ctx, ap, leader) {
 			return fmt.Errorf("autopilot creator cannot access private squad leader")
 		}
 		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
@@ -544,8 +564,8 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
 	}
 
-	// Fail-closed private-leader gate for squad autopilots.
-	if ap.AssigneeType == "squad" && agent.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, agent) {
+	// Fail-closed invocation gate for squad autopilots.
+	if ap.AssigneeType == "squad" && !s.canCreatorInvokeAgent(ctx, ap, agent) {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
@@ -868,33 +888,24 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		return "", false
 	}
 	if !ready {
-		return formatAdmissionReason(ap, reason), true
-	}
-	// Private-agent gate at the autopilot layer. Caller identity = the
-	// autopilot's creator: if the creator no longer has access to the
-	// (now-private) target agent, the dispatch is recorded as `skipped`.
-	// Agent-created autopilots bypass the gate to preserve A2A
-	// collaboration. Errors loading the workspace member fail closed —
-	// without an authoritative role the gate cannot grant access.
-	//
-	// For squad autopilots the gate runs against the resolved leader.
-	// Leader visibility is the right thing to check — if the human creator
-	// can no longer reach the leader, the autopilot would silently fail
-	// even though the squad itself looks intact.
-	if agent.Visibility == "private" && ap.CreatedByType == "member" {
-		creatorID := util.UUIDToString(ap.CreatedByID)
-		if util.UUIDToString(agent.OwnerID) != creatorID {
-			member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-				UserID:      ap.CreatedByID,
-				WorkspaceID: ap.WorkspaceID,
-			})
-			if err != nil {
-				return "autopilot creator no longer in workspace", true
-			}
-			if member.Role != "owner" && member.Role != "admin" {
-				return "autopilot creator lacks access to private assignee agent", true
-			}
+		if ap.ExecutionMode == "create_issue" && strings.HasPrefix(reason, "agent runtime is ") {
+			slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"runtime_id", util.UUIDToString(agent.RuntimeID),
+				"reason", reason,
+			)
+		} else {
+			return formatAdmissionReason(ap, reason), true
 		}
+	}
+	// Invocation gate at the autopilot layer (MUL-3963). Effective user = the
+	// autopilot's creator: if the creator may not invoke the target agent
+	// under the permission model, the dispatch is recorded as `skipped`.
+	// Admins do NOT bypass a private agent they do not own; agent-created
+	// autopilots are judged as workspace principals. For squad autopilots the
+	// gate runs against the resolved leader.
+	if !s.canCreatorInvokeAgent(ctx, ap, agent) {
+		return "autopilot creator lacks access to private assignee agent", true
 	}
 	return "", false
 }
@@ -1376,24 +1387,53 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 	return ws.IssuePrefix
 }
 
-// canCreatorAccessPrivateLeader checks whether the autopilot's creator still
-// has access to a private leader agent. Mirrors handler.canAccessPrivateAgent
-// logic: agent creators always pass; member creators must be the agent owner
-// or a workspace owner/admin. Returns false (fail-closed) on any lookup error.
-func (s *AutopilotService) canCreatorAccessPrivateLeader(ctx context.Context, ap db.Autopilot, leader db.Agent) bool {
-	if ap.CreatedByType == "agent" {
-		return true
-	}
+// canCreatorInvokeAgent checks whether the autopilot's creator may invoke the
+// target agent under the invocation-permission model (MUL-3963). It mirrors
+// handler.canInvokeAgent with the autopilot creator as the effective user:
+//   - member creator who owns the agent -> always
+//   - private agent -> only the owner (NO admin bypass, NO agent-created bypass)
+//   - public_to agent -> workspace target admits any workspace-member creator
+//     (and agent-created autopilots as workspace principals); member target
+//     admits the matching creator; team targets are inert.
+//
+// Fail-closed on any lookup error.
+func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Autopilot, agent db.Agent) bool {
 	creatorID := util.UUIDToString(ap.CreatedByID)
-	if util.UUIDToString(leader.OwnerID) == creatorID {
+	if ap.CreatedByType == "member" && util.UUIDToString(agent.OwnerID) == creatorID {
 		return true
 	}
-	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      ap.CreatedByID,
-		WorkspaceID: ap.WorkspaceID,
-	})
+	if agent.PermissionMode != "public_to" {
+		// private (or unknown mode): deny-by-default; only the owner branch
+		// above passes. Admins and agent-created autopilots do not bypass.
+		return false
+	}
+	targets, err := s.Queries.ListAgentInvocationTargets(ctx, agent.ID)
 	if err != nil {
 		return false
 	}
-	return member.Role == "owner" || member.Role == "admin"
+	// Agent-created autopilots are workspace-internal principals: a workspace
+	// target admits them. Member creators must be workspace members.
+	workspaceBroad := ap.CreatedByType == "agent"
+	isWorkspaceMember := false
+	if ap.CreatedByType == "member" {
+		if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      ap.CreatedByID,
+			WorkspaceID: ap.WorkspaceID,
+		}); err == nil {
+			isWorkspaceMember = true
+		}
+	}
+	for _, t := range targets {
+		switch t.TargetType {
+		case "workspace":
+			if isWorkspaceMember || workspaceBroad {
+				return true
+			}
+		case "member":
+			if ap.CreatedByType == "member" && util.UUIDToString(t.TargetID) == creatorID {
+				return true
+			}
+		}
+	}
+	return false
 }

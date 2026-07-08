@@ -218,6 +218,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
+    "composio_mcp": "MCP Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
     "discard_dialog_title": "Discard unsaved changes?",
@@ -235,6 +236,17 @@
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
     "visibility_label": "Visibility",
+    "access": {
+      "label": "Access",
+      "private_title": "Private",
+      "private_desc": "Only you can run this agent",
+      "public_title": "Public",
+      "public_desc": "Choose who can run this agent",
+      "public_workspace_option": "Everyone in this workspace",
+      "public_members_group": "Specific people",
+      "public_members_empty": "No workspace members to choose from",
+      "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
+    },
     "runtime_label": "Runtime",
     "runtime_filter_mine": "Mine",
     "runtime_filter_all": "All",
@@ -330,6 +342,22 @@
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
       "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+    },
+    "composio_mcp": {
+      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
+      "loading": "Loading your connections…",
+      "load_failed": "Couldn't load your connected apps. Try again shortly.",
+      "empty_title": "No connected apps yet",
+      "empty_hint": "You haven't connected any third-party services. Authorize one first, then come back here to allow it.",
+      "empty_link_to_settings": "Connect one in Settings → Integrations",
+      "connected": "Connected",
+      "toggle_aria": "Allow {{toolkit}} for this agent",
+      "saving": "Saving…",
+      "save_failed_toast": "Couldn't save — please try again",
+      "redacted_title": "Configured — hidden from your view",
+      "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
+      "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
+      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
     },
     "runtime_config": {
       "intro": "Choose how the OpenClaw runtime executes this agent's turns. Local mode runs the agent inside the daemon process. Gateway mode forwards each turn to an OpenClaw Gateway — useful when the daemon host is a lightweight coordinator and the agent should run on a more powerful machine.",
@@ -432,6 +460,28 @@
       "tooltip": "Workspace · everyone in this workspace can use this agent"
     }
   },
+  "access": {
+    "tooltip": "Access · who may run this agent",
+    "trigger_private": "Only me",
+    "trigger_workspace": "Workspace",
+    "trigger_members_count": "{{count}} people",
+    "trigger_members_empty": "Specific people",
+    "trigger_team": "Team",
+    "private_title": "Private",
+    "private_desc": "Only you can run this agent",
+    "workspace_title": "Public to workspace",
+    "workspace_desc": "Anyone in this workspace can run this agent",
+    "members_title": "Public to specific people",
+    "members_desc": "Only the people you pick can run this agent",
+    "team_title": "Public to team",
+    "team_desc": "Grant access to a whole team",
+    "team_coming_soon": "Coming soon",
+    "members_group": "People",
+    "public_group": "Public access",
+    "owner_only_readonly": "Only the agent owner can change who can run this agent.",
+    "members_empty": "No workspace members to choose from",
+    "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
+  },
   "profile_card": {
     "unavailable": "Agent unavailable",
     "detail_link": "Detail →",
@@ -466,7 +516,11 @@
     "no_data": "No execution data recorded.",
     "sort_label": "Sort",
     "sort_chronological": "Oldest first",
-    "sort_newest_first": "Newest first"
+    "sort_newest_first": "Newest first",
+    "expand_visible": "Expand visible",
+    "collapse_visible": "Collapse visible",
+    "preserve_filters": "Preserve filters",
+    "default_expanded": "Open details by default"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

@@ -166,8 +166,9 @@ func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[s
 }
 
 // claudeEffortSuperset returns the parsed `--effort` value list. When
-// parsing fails it returns the static fallback rather than nothing so
-// callers can still render a usable picker.
+// the help output can't be captured at all it returns the static
+// fallback rather than nothing so callers can still render a usable
+// picker.
 func claudeEffortSuperset(ctx context.Context, executablePath string) []string {
 	cmd := exec.CommandContext(ctx, executablePath, "--help")
 	hideAgentWindow(cmd)
@@ -175,14 +176,30 @@ func claudeEffortSuperset(ctx context.Context, executablePath string) []string {
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
 	}
-	parsed := parseClaudeEffortHelp(string(out))
-	if len(parsed) == 0 {
-		// Help format drifted — fall back to the last known good
-		// superset rather than the conservative subset, so newer
-		// levels are still offered until we hand-edit the fallback.
+	return claudeEffortLevelsFromHelp(string(out))
+}
+
+// claudeEffortLevelsFromHelp decides the effort superset from a
+// successfully captured `claude --help`. Three cases:
+//   - the value list parsed → use it verbatim;
+//   - `--effort` is advertised but the value list didn't parse → help
+//     format drifted; fall back to the last known good superset so
+//     newer levels are still offered until we hand-edit the fallback;
+//   - `--effort` is absent entirely → the installed CLI predates the
+//     flag. Return no levels: offering any would let the daemon pass
+//     ValidateThinkingLevel and inject --effort, which such a binary
+//     rejects with `error: unknown option '--effort'` — hard-failing
+//     every task for an agent with a persisted thinking_level instead
+//     of degrading to a plain run.
+func claudeEffortLevelsFromHelp(helpText string) []string {
+	parsed := parseClaudeEffortHelp(helpText)
+	if len(parsed) > 0 {
+		return parsed
+	}
+	if strings.Contains(helpText, "--effort") {
 		return append([]string(nil), claudeStaticEffortFullSuperset...)
 	}
-	return parsed
+	return nil
 }
 
 // parseClaudeEffortHelp extracts the comma-separated value list from a

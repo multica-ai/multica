@@ -34,6 +34,7 @@ const RESET_STATE = {
     assigneeId: undefined,
     startDate: null,
     dueDate: null,
+    labelIds: [],
     attachments: [],
   },
   lastAssigneeType: undefined,

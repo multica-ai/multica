@@ -93,6 +93,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "multica_runtime_id", want: true},
 		{key: "HOME", want: true},
 		{key: "PATH", want: true},
+		{key: "TMPDIR", want: true},
+		{key: "tmp", want: true},
+		{key: "TEMP", want: true},
 		{key: "CODEX_HOME", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
@@ -272,6 +275,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "hermes", want: false},
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
+		{provider: "traecli", want: true},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}

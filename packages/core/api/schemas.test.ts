@@ -4,7 +4,9 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_USER,
   InboxUnreadSummarySchema,
@@ -183,6 +185,38 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+});
+
+describe("CreateFeedbackResponseSchema", () => {
+  const ENDPOINT = { endpoint: "POST /api/feedback" };
+
+  it("parses a well-formed response and preserves extra fields", () => {
+    const parsed = parseWithFallback(
+      { id: "feedback-1", created_at: "2026-06-26T00:00:00Z", future_field: true },
+      CreateFeedbackResponseSchema,
+      EMPTY_CREATE_FEEDBACK_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed).toMatchObject({
+      id: "feedback-1",
+      created_at: "2026-06-26T00:00:00Z",
+      future_field: true,
+    });
+  });
+
+  it("returns the empty fallback for malformed feedback responses", () => {
+    expect(
+      parseWithFallback(
+        { id: 123, created_at: "2026-06-26T00:00:00Z" },
+        CreateFeedbackResponseSchema,
+        EMPTY_CREATE_FEEDBACK_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_CREATE_FEEDBACK_RESPONSE);
+    expect(
+      parseWithFallback(null, CreateFeedbackResponseSchema, EMPTY_CREATE_FEEDBACK_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_CREATE_FEEDBACK_RESPONSE);
   });
 });
 
@@ -415,6 +449,24 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("keeps cdn_signed=true from a signing-enabled server", () => {
     const parsed = AppConfigSchema.parse({ cdn_signed: true });
     expect(parsed.cdn_signed).toBe(true);
+  });
+
+  it("parses frontend feature flag decisions", () => {
+    const parsed = AppConfigSchema.parse({
+      feature_flags: {
+        composio_mcp_apps: true,
+        malformed_future_flag: "yes",
+      },
+    });
+    expect(parsed.feature_flags).toEqual({
+      composio_mcp_apps: true,
+      malformed_future_flag: false,
+    });
+  });
+
+  it("defaults malformed feature_flags to an empty object", () => {
+    const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
+    expect(parsed.feature_flags).toEqual({});
   });
 });
 

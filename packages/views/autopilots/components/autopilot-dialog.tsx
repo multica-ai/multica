@@ -15,6 +15,7 @@ import {
   Minimize2,
   Play,
   Rocket,
+  Users,
   Webhook,
   X as XIcon,
   Zap,
@@ -27,6 +28,14 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+} from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
@@ -51,6 +60,7 @@ import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
+  AutopilotCollaborator,
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
@@ -60,6 +70,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
+import { AutopilotAccessManager } from "./autopilot-access-manager";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -102,6 +113,8 @@ export type AutopilotDialogProps =
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
+      collaborators: AutopilotCollaborator[];
+      canManageAccess: boolean;
     };
 
 // ---------------------------------------------------------------------------
@@ -555,6 +568,29 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            {!isCreate && props.canManageAccess && (
+              <>
+                <Popover>
+                  <PopoverTrigger className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs text-muted-foreground opacity-90 transition-all hover:bg-accent/60 hover:text-foreground hover:opacity-100 cursor-pointer">
+                    <Users className="size-3.5" />
+                    <span>{t(($) => $.access.title)}</span>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" sideOffset={6} keepMounted className="w-80">
+                    <PopoverHeader>
+                      <PopoverTitle>{t(($) => $.access.title)}</PopoverTitle>
+                      <PopoverDescription className="text-xs">
+                        {t(($) => $.access.description)}
+                      </PopoverDescription>
+                    </PopoverHeader>
+                    <AutopilotAccessManager
+                      autopilotId={props.autopilotId}
+                      collaborators={props.collaborators}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <span className="mx-0.5 h-4 w-px bg-border" />
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={

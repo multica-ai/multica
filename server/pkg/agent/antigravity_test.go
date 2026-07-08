@@ -214,9 +214,13 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 		"/tmp/agy.log",
 		time.Minute,
 		ExecOptions{
+			ExtraArgs: []string{
+				"--settings", "/tmp/biz-gate.json", // Claude Code-only daemon/profile arg; agy rejects it
+			},
 			// Each blocked flag below must be stripped silently — the daemon
 			// owns these because they're required for non-interactive,
-			// resume-aware operation.
+			// resume-aware operation, or because the flag is unsupported by
+			// Antigravity.
 			CustomArgs: []string{
 				"-p", "hijacked-prompt",
 				"-i",
@@ -228,6 +232,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"--dangerously-skip-permissions",
 				"--print-timeout", "1h",
 				"--log-file", "/elsewhere.log",
+				"--settings=/tmp/agent-settings.json",
 				"--add-dir", "/extra", // user-added workspace dir should survive
 			},
 		},
@@ -260,6 +265,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "/elsewhere.log") {
 		t.Errorf("custom --log-file value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "--settings") || strings.Contains(joined, "biz-gate.json") || strings.Contains(joined, "agent-settings.json") {
+		t.Errorf("Antigravity-incompatible --settings flag leaked through filter: %v", args)
 	}
 	if !strings.Contains(joined, "--add-dir /extra") {
 		t.Errorf("non-blocked --add-dir flag should pass through: %v", args)
@@ -665,10 +673,6 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
 
 	select {
 	case result, ok := <-session.Result:
@@ -690,5 +694,20 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+
+	var messages []Message
+	for msg := range session.Messages {
+		messages = append(messages, msg)
+	}
+	var recoveredMessage bool
+	for _, msg := range messages {
+		if msg.Type == MessageText && strings.Contains(msg.Content, "created result.txt with VERIFIED=yes") {
+			recoveredMessage = true
+			break
+		}
+	}
+	if !recoveredMessage {
+		t.Fatalf("expected recovered transcript reply to be emitted as MessageText, got %#v", messages)
 	}
 }

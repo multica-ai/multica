@@ -108,7 +108,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
 	var sawCompletedGoalComplete atomic.Bool
+	var sawCompletedIssueComment atomic.Bool
 	var goalCompleteCallIDs sync.Map
+	var issueCommentCallIDs sync.Map
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -129,10 +131,16 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if msg.Tool == "goal_complete" && msg.CallID != "" {
 					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
 				}
+				if msg.CallID != "" && isKiroIssueCommentAddTool(msg) {
+					issueCommentCallIDs.Store(msg.CallID, struct{}{})
+				}
 			}
 			if msg.Type == MessageToolResult {
 				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
 					sawCompletedGoalComplete.Store(msg.Status == "completed")
+				}
+				if _, ok := issueCommentCallIDs.LoadAndDelete(msg.CallID); ok {
+					sawCompletedIssueComment.Store(msg.Status == "completed")
 				}
 			}
 			if msg.Type == MessageText {
@@ -181,6 +189,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		effectiveModel := strings.TrimSpace(opts.Model)
 
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
@@ -237,6 +246,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					"actual", sessionID,
 				)
 			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
@@ -254,6 +266,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				finalError = "kiro session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
+			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
 			}
 		}
 
@@ -318,8 +333,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if sawCompletedGoalComplete.Load() && isKiroGoalCompleteCloseError(err) {
-					b.cfg.Logger.Warn("kiro session/prompt failed after goal_complete; preserving completed task status", "error", err)
+				if (sawCompletedGoalComplete.Load() || sawCompletedIssueComment.Load()) && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after completed task result; preserving completed task status", "error", err)
 					finalStatus = "completed"
 					finalError = ""
 				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
@@ -346,6 +361,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
+				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
 				c.usageMu.Unlock()
 			default:
 			}
@@ -379,8 +396,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+			model := effectiveModel
 			if model == "" {
 				model = "unknown"
 			}
@@ -412,6 +429,73 @@ func isKiroGoalCompleteCloseError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
+}
+
+func isKiroIssueCommentAddTool(msg Message) bool {
+	if msg.Tool != "terminal" {
+		return false
+	}
+	command, _ := msg.Input["command"].(string)
+	return isKiroIssueCommentAddCommand(command)
+}
+
+func isKiroIssueCommentAddCommand(command string) bool {
+	parts := trimLeadingEnvAssignments(strings.Fields(command))
+	// Some runtimes route terminal calls through a shell wrapper such as
+	// `sh -c "multica issue comment add ..."`; unwrap a single such layer so
+	// the real invocation is still recognized.
+	if len(parts) >= 3 && isPOSIXShellName(parts[0]) && parts[1] == "-c" {
+		inner := strings.Trim(strings.Join(parts[2:], " "), "\"'")
+		parts = trimLeadingEnvAssignments(strings.Fields(inner))
+	}
+	if len(parts) < 4 {
+		return false
+	}
+	executable := strings.TrimPrefix(parts[0], "./")
+	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
+		return false
+	}
+	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
+}
+
+// trimLeadingEnvAssignments drops leading `KEY=VALUE` tokens so an invocation
+// like `MULTICA_TOKEN=x multica issue comment add ...` is still recognized.
+func trimLeadingEnvAssignments(parts []string) []string {
+	for len(parts) > 0 && isEnvAssignment(parts[0]) {
+		parts = parts[1:]
+	}
+	return parts
+}
+
+// isEnvAssignment reports whether tok is a `NAME=value` shell env assignment.
+func isEnvAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		c := tok[i]
+		switch {
+		case c == '_', c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isPOSIXShellName reports whether tok names a shell that takes `-c <command>`.
+func isPOSIXShellName(tok string) bool {
+	if i := strings.LastIndexByte(tok, '/'); i >= 0 {
+		tok = tok[i+1:]
+	}
+	switch tok {
+	case "sh", "bash", "zsh", "dash":
+		return true
+	default:
+		return false
+	}
 }
 
 func kiroToolNameFromTitle(title string) string {

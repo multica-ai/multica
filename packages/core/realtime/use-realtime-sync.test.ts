@@ -20,6 +20,7 @@ import {
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
   invalidateChatMessageQueries,
+  refetchPendingChatAggregate,
   resolveInboxSourceSlug,
 } from "./use-realtime-sync";
 
@@ -144,6 +145,48 @@ describe("invalidateChatMessageQueries", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
+  });
+});
+
+describe("refetchPendingChatAggregate (cross-session pending leak guard)", () => {
+  const wsId = "ws-1";
+
+  it("invalidates the aggregate instead of optimistically writing it, so another member's workspace-broadcast task:* event can't flip this user's has_pending", () => {
+    // Regression for the PR #5018 security review: task:* events are a
+    // workspace fanout with no creator/visibility, so member B's task must not
+    // be able to set member A's FAB to has_pending=true client-side. A's
+    // aggregate currently (correctly) says "nothing pending".
+    const qc = createQueryClient();
+    qc.setQueryData(chatKeys.pendingTasksHasAny(wsId), { has_pending: false });
+    qc.setQueryData(chatKeys.pendingTasks(wsId), { tasks: [] });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const setData = vi.spyOn(qc, "setQueryData");
+
+    refetchPendingChatAggregate(qc, wsId);
+
+    // MUST NOT optimistically flip the boolean or inject a task from the
+    // untrusted event — the cached values are left untouched.
+    expect(qc.getQueryData(chatKeys.pendingTasksHasAny(wsId))).toEqual({
+      has_pending: false,
+    });
+    expect(qc.getQueryData(chatKeys.pendingTasks(wsId))).toEqual({ tasks: [] });
+    expect(setData).not.toHaveBeenCalled();
+
+    // Instead it marks the aggregate stale for an authoritative, server-side
+    // permission-filtered refetch. The has-any key is nested under
+    // pendingTasks, so this one invalidation refreshes both caches.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.pendingTasks(wsId),
+    });
+  });
+
+  it("no-ops without a workspace id (no accidental cross-workspace invalidation)", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    refetchPendingChatAggregate(qc, undefined);
+
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 

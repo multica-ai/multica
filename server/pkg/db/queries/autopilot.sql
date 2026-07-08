@@ -30,7 +30,10 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+  AND (
+    (sqlc.narg('status')::text IS NULL AND a.status <> 'archived')
+    OR a.status = sqlc.narg('status')
+  )
 ORDER BY a.created_at DESC;
 
 -- name: GetAutopilot :one
@@ -66,8 +69,10 @@ UPDATE autopilot SET
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1;
+-- name: ArchiveAutopilot :exec
+UPDATE autopilot
+SET status = 'archived', updated_at = now()
+WHERE id = $1;
 
 -- name: UpdateAutopilotLastRunAt :exec
 UPDATE autopilot SET last_run_at = now(), updated_at = now()
@@ -451,4 +456,3 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
-

@@ -3,6 +3,8 @@ package execenv
 import (
 	"fmt"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // This file holds the slim runtime brief — the post-MUL-3560 path that
@@ -42,16 +44,18 @@ func writeHeader(b *strings.Builder) {
 
 // writeBackgroundTaskSafetySlim is the slim analogue of
 // writeBackgroundTaskSafetyInstructions (legacy). Drops the verbose
-// preamble and keeps the three behaviour pins (the same ones tests
-// assert): "Do NOT end your turn while background tasks",
-// "wait for a future notification/reminder", "run the work synchronously
-// instead".
+// preamble but keeps the same hard behaviour pins the tests assert:
+// "Do NOT end your turn while background tasks", "wait for a future
+// notification/reminder", "run the work synchronously instead", the
+// no-background-and-yield rule, and the no-"standing by" sign-off rule.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal when your top-level turn exits — any background work still running may be orphaned and its result lost.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
-	b.WriteString("- If a tool response says to wait for a future notification/reminder, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
-	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n\n")
+	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any background work still running is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification or wakeup to resume — it will not arrive.\n")
+	b.WriteString("- Do every wait synchronously inside one foreground tool call that blocks to completion (e.g. `gh run watch`, a blocking test command); never split \"start the wait\" and \"collect the result\" across turns.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder, or that it is running in the background so you can keep working, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
+	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n")
+	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
@@ -134,6 +138,48 @@ func writeWorkspaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Workspace Context\n\n")
 	b.WriteString(ctxText)
 	b.WriteString("\n\n")
+}
+
+func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.ConnectedApps) == 0 {
+		return
+	}
+	var lines strings.Builder
+	for _, app := range ctx.ConnectedApps {
+		serverName := sanitizeBriefCodeToken(app.ServerName)
+		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
+		if serverName == "" || toolkitSlug == "" {
+			continue
+		}
+		name := sanitizeNameForBriefMarkdown(app.ToolkitName)
+		if name == "" {
+			name = sanitizeNameForBriefMarkdown(runtimeapps.DisplayNameForToolkitSlug(toolkitSlug))
+		}
+		if name == "" {
+			name = toolkitSlug
+		}
+		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
+	}
+	if lines.Len() == 0 {
+		return
+	}
+	b.WriteString("## Connected Apps\n\n")
+	b.WriteString(lines.String())
+	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+}
+
+func sanitizeBriefCodeToken(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return ""
+	}
+	return s
 }
 
 // writeAvailableCommands emits the slim Available Commands section
@@ -465,9 +511,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
 // Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Task Initiator, Workspace Context, Workflow, Always
-// Use CLI, Output — are shared by every kind and emitted unconditionally
-// (or gated by their own data preconditions).
+// Requesting User, Task Initiator, Workspace Context, Connected Apps,
+// Workflow, Always Use CLI, Output — are shared by every kind and emitted
+// unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -478,6 +524,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeConnectedApps(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

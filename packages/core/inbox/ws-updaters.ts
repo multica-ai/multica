@@ -12,7 +12,7 @@ export function onInboxNew(
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
 }
 
-export function onInboxIssueStatusChanged(
+export function patchInboxIssueStatus(
   qc: QueryClient,
   wsId: string,
   issueId: string,
@@ -23,6 +23,15 @@ export function onInboxIssueStatusChanged(
       i.issue_id === issueId ? { ...i, issue_status: status } : i,
     ),
   );
+}
+
+export function onInboxIssueStatusChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  status: IssueStatus,
+) {
+  patchInboxIssueStatus(qc, wsId, issueId, status);
 }
 
 // Mirrors the DB-level ON DELETE CASCADE on inbox_item.issue_id: when an issue

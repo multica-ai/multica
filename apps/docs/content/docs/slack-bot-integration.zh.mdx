@@ -34,6 +34,10 @@ features:
   bot_user:
     display_name: Multica
     always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[title]"
 oauth_config:
   scopes:
     bot:
@@ -45,6 +49,7 @@ oauth_config:
       - chat:write
       - reactions:write
       - users:read
+      - commands
 settings:
   event_subscriptions:
     bot_events:
@@ -72,8 +77,10 @@ settings:
 | `im:history` + `message.im` | 接收发给 Bot 的**私聊**（每一条私聊消息都会被读取）。 |
 | `channels:history` / `groups:history` / `mpim:history` + 对应的 `message.*` 事件 | 接收公开频道、私有频道和群组私聊里的消息。在这些场景里，Bot 只对 **@ 了**它的消息做出响应。 |
 | `users:read` | 必需，这样 Multica 才能（通过 `bots.info`）核实你的两个 token 属于同一个 app。 |
+| `commands` | 启用 `/issue` 斜杠命令所需的 bot 权限（和 `features.slash_commands` 搭配）。少了它，即使更新 manifest 并重装，也拿不到这个命令。 |
 | `socket_mode_enabled: true` | Bot 通过 Socket Mode 向外连接——**无需任何公网 URL / request URL**。 |
 | `interactivity.is_enabled: false` | Multica 的提示是纯链接，不是按钮，所以不需要交互性。 |
+| `slash_commands`（`/issue`） | 注册 `/issue` 斜杠命令，让任何人都能从消息框直接创建一个 Multica issue。通过 Socket Mode 下发——无需 request URL。 |
 
 这里**没有 OAuth 重定向 URL**，因为 BYO 不使用 OAuth。
 
@@ -118,7 +125,7 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 | **智能体 → Integrations** | 所有者和管理员能看到 **Connect Slack**；连接后它会变成一个 **Connected to Slack** 徽标，并带一个 **Disconnect** 操作。 |
 | **私聊 Bot** | 工作区成员直接给 Bot 发消息。这段对话会成为该智能体的一个 Multica [chat](/chat) 会话；每一条私聊消息都会被读取。 |
 | **频道里 @ 它** | 把 Bot 邀请进来（`/invite @your-bot`）再 @ 它。只有 @ 它的那条消息会被读取——Bot 不会监听整个频道。每个 @bot 的 **thread** 都是它自己的会话。 |
-| **`/issue` 命令** | 以 `/issue <标题>` 开头的消息（可在后面几行附上正文）会在工作区创建一个新的 Multica issue，记在你名下。 |
+| **`/issue` 斜杠命令** | 输入 `/issue <描述>`（在频道或私聊里），智能体会把你的自然语言描述整理成一个规整的 Multica issue，记在你名下。它会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。不需要 @ Bot。 |
 | **回复** | 智能体的答复会被发回同一段私聊或 thread 里。 |
 
 ## 使用 Bot（成员）
@@ -126,6 +133,8 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 ### 第一条消息：绑定你的账号
 
 第一次 @ 或私聊 Bot 时，它会回一条 **绑定你的账号** 提示。点开链接、登录 Multica，你的 Slack 身份就会绑定到你的 Multica 成员身份——正是这一步让智能体能以你的身份行事（比如 `/issue` 会把 issue 记在你名下）。这个链接是一次性的，大约 15 分钟后过期；再给 Bot 发条消息就能拿到一个新的。
+
+**每个 Slack workspace 只需绑定一次。** 如果同一个 Multica 工作区在同一个 Slack workspace 里跑了多个 Bot（每个智能体一个 App），你在第一个 Bot 上完成绑定后，其余的会自动复用这次绑定，不会再次弹出提示。（只有在*另一个* Slack workspace 里的 Bot、或连到*另一个* Multica 工作区的 Bot，才需要重新绑定。）
 
 <Callout type="warning">
 只有**工作区成员**才能使用 Bot。如果你不是成员，或者跳过了身份绑定，Bot 不会运行——你的消息会被丢弃（仅出于审计目的记录，不保存消息内容）。
@@ -135,7 +144,7 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 
 - **在频道里** —— Bot 不会自动加入。先运行一次 `/invite @your-bot`，然后 `@your-bot <你的消息>`。每次追问都要重新 @ 它一下（Bot 只读取 @ 了它的消息）。
 - **在私聊里** —— 从 Slack 侧栏的 **Apps** 区块打开 Bot 并直接给它发消息；不用 @。
-- **创建 issue** —— 发送 `/issue Fix the login redirect`；在标题后面再加几行就是描述。
+- **创建 issue** —— 使用 `/issue` 斜杠命令，比如 `/issue 登录跳转在 Safari 上坏了`。用自然语言描述就行，智能体会替你写好标题和结构化描述再建 issue。在频道或私聊里都能用（不用 @ Bot），会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。第一次使用的人会先收到一个一次性的账号绑定链接。
 
 ## 管理与断开
 

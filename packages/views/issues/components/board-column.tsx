@@ -5,7 +5,12 @@ import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Issue, IssueAssigneeType, IssueStatus } from "@multica/core/types";
+import type {
+  Issue,
+  IssueAssigneeType,
+  IssueStatus,
+  Project,
+} from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -14,13 +19,13 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+import type { IssueCreateDefaults } from "../surface/types";
 
 // Insertion-position prediction intentionally omitted. The server's
 // ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
@@ -37,7 +42,7 @@ export interface BoardColumnGroup {
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   totalCount?: number;
-  createData?: Record<string, unknown>;
+  createData?: IssueCreateDefaults;
 }
 
 export const BoardColumn = memo(function BoardColumn({
@@ -45,19 +50,23 @@ export const BoardColumn = memo(function BoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
+  projectMap,
   totalCount,
   footer,
   projectId,
+  onCreateIssue,
   sortLabel,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   totalCount?: number;
   footer?: ReactNode;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
 }) {
   const status = group.status;
@@ -100,27 +109,29 @@ export const BoardColumn = memo(function BoardColumn({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => {
-                    const data = {
-                      ...(group.createData ?? {}),
-                      ...(projectId ? { project_id: projectId } : {}),
-                    };
-                    useModalStore.getState().open("create-issue", data);
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              }
-            />
-            <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-          </Tooltip>
+          {onCreateIssue && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={() => {
+                      const data = {
+                        ...(group.createData ?? {}),
+                        ...(projectId ? { project_id: projectId } : {}),
+                      };
+                      onCreateIssue(data);
+                    }}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                }
+              />
+              <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
       <div className="relative min-h-[200px] flex-1 rounded-lg">
@@ -143,7 +154,15 @@ export const BoardColumn = memo(function BoardColumn({
         >
           <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
             {resolvedIssues.map((issue) => (
-              <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} disableSorting={!!sortLabel} />
+              <DraggableBoardCard
+                key={issue.id}
+                issue={issue}
+                childProgress={childProgressMap?.get(issue.id)}
+                project={
+                  issue.project_id ? projectMap?.get(issue.project_id) : undefined
+                }
+                disableSorting={!!sortLabel}
+              />
             ))}
           </SortableContext>
           {issueIds.length === 0 && (

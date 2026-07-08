@@ -34,6 +34,10 @@ features:
   bot_user:
     display_name: Multica
     always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[title]"
 oauth_config:
   scopes:
     bot:
@@ -45,6 +49,7 @@ oauth_config:
       - chat:write
       - reactions:write
       - users:read
+      - commands
 settings:
   event_subscriptions:
     bot_events:
@@ -72,8 +77,10 @@ settings:
 | `im:history` + `message.im` | 봇에게 보내는 **DM**을 받습니다(모든 DM 메시지를 읽습니다). |
 | `channels:history` / `groups:history` / `mpim:history` + 대응하는 `message.*` 이벤트 | 공개 채널, 비공개 채널, 그룹 DM의 메시지를 받습니다. 이런 곳에서 봇은 자신을 **@로 멘션한** 메시지에만 반응합니다. |
 | `users:read` | Multica가 두 토큰이 같은 앱에 속하는지 (`bots.info`를 통해) 확인하는 데 필요합니다. |
+| `commands` | `/issue` 슬래시 명령을 활성화하는 bot 스코프입니다(`features.slash_commands`와 짝을 이룹니다). 이것이 없으면 매니페스트를 업데이트하고 재설치해도 명령이 부여되지 않습니다. |
 | `socket_mode_enabled: true` | 봇이 Socket Mode로 밖으로 연결합니다 — **공개 URL / request URL이 필요 없습니다**. |
 | `interactivity.is_enabled: false` | Multica의 안내는 버튼이 아니라 일반 링크라서, interactivity가 필요 없습니다. |
+| `slash_commands`(`/issue`) | `/issue` 슬래시 명령을 등록해, 누구나 메시지 입력창에서 Multica 이슈를 생성할 수 있게 합니다. Socket Mode로 전달되며 요청 URL이 필요 없습니다. |
 
 **OAuth redirect URL은 없습니다.** BYO는 OAuth를 사용하지 않기 때문입니다.
 
@@ -118,7 +125,7 @@ app-level token은 Socket Mode 연결을 인가합니다. 콘솔에서만 생성
 | **Agent → Integrations** | owner와 admin에게는 **Connect Slack**이 보이며, 연결되면 **Connected to Slack** 배지와 **Disconnect** 컨트롤로 바뀝니다. |
 | **봇에게 DM** | 워크스페이스 멤버가 봇에게 직접 메시지를 보냅니다. 그 대화는 에이전트와의 Multica [chat](/chat) 세션이 되며, 모든 DM 메시지를 읽습니다. |
 | **채널에서 `@`-멘션** | 봇을 초대(`/invite @your-bot`)하고 `@`로 멘션하세요. 멘션한 메시지만 읽으며, 봇이 채널 전체를 듣지는 않습니다. 각 @bot **스레드**가 자체 세션입니다. |
-| **`/issue` 명령** | `/issue <제목>`(다음 줄에 본문 추가 가능)으로 메시지를 시작하면 워크스페이스에 새 Multica 이슈가 생성되고, 당신 이름으로 귀속됩니다. |
+| **`/issue` 슬래시 명령** | `/issue <설명>`을(채널이나 DM에서) 입력하면 에이전트가 당신의 자연어 설명을 잘 정리된 Multica 이슈로 만들어 당신 이름으로 등록합니다. 먼저 본인에게만 접수 확인을 비공개로 답하고, 이슈가 준비되면 Multica 알림을 받습니다 — @ 멘션이 필요 없습니다. |
 | **답변** | 에이전트의 답변은 같은 DM 또는 스레드로 다시 게시됩니다. |
 
 ## 봇 사용하기 (멤버)
@@ -126,6 +133,8 @@ app-level token은 Socket Mode 연결을 인가합니다. 콘솔에서만 생성
 ### 첫 메시지: 계정 연결하기
 
 봇을 처음 `@`로 멘션하거나 DM하면, **계정을 연결하라**는 안내로 답합니다. 링크를 탭하고 Multica에 로그인하면, 당신의 Slack 신원이 Multica 멤버십에 바인딩됩니다 — 바로 이 단계가 에이전트로 하여금 당신을 대신해 행동하게 합니다(예: `/issue`는 당신 이름으로 이슈를 생성합니다). 이 링크는 일회용이며 약 15분 후에 만료됩니다. 새 링크가 필요하면 봇에게 다시 메시지를 보내세요.
+
+**연결은 Slack 워크스페이스당 한 번만 하면 됩니다.** 같은 Multica 워크스페이스가 하나의 Slack 워크스페이스에서 여러 봇을 운영하는 경우(에이전트마다 앱 하나), 첫 봇에서 연결을 마치면 나머지는 그 연결을 자동으로 재사용하므로 다시 안내가 뜨지 않습니다. (다시 연결해야 하는 경우는 *다른* Slack 워크스페이스에 있는 봇이거나, *다른* Multica 워크스페이스에 연결된 봇일 때뿐입니다.)
 
 <Callout type="warning">
 **워크스페이스 멤버**만 봇을 사용할 수 있습니다. 멤버가 아니거나 신원 연결을 건너뛰면 봇은 실행되지 않으며, 메시지는 폐기됩니다(감사 목적으로 기록되며, 내용은 저장하지 않습니다).
@@ -135,7 +144,7 @@ app-level token은 Socket Mode 연결을 인가합니다. 콘솔에서만 생성
 
 - **채널에서** — 봇은 자동으로 참여하지 않습니다. `/invite @your-bot`을 한 번 실행한 다음 `@your-bot <당신의 메시지>`로 보내세요. 후속 메시지마다 다시 멘션하세요(봇은 자신을 멘션한 메시지만 읽습니다).
 - **DM에서** — Slack 사이드바의 **Apps** 섹션에서 봇을 열고 직접 메시지를 보내세요. 멘션이 필요 없습니다.
-- **이슈 생성** — `/issue Fix the login redirect`를 보내세요. 제목 뒤에 줄을 더 추가하면 설명이 됩니다.
+- **이슈 생성** — `/issue` 슬래시 명령을 사용하세요(예: `/issue 로그인 리디렉트가 Safari에서 깨져요`). 자연어로 설명하면 에이전트가 제목과 구조화된 설명을 작성해 이슈를 등록해 줍니다. 채널이나 DM에서 모두 쓸 수 있고(@ 멘션 불필요), 먼저 본인에게만 접수 확인을 비공개로 답하고, 이슈가 생성되면 Multica 알림을 받습니다. 처음 사용하는 사람은 먼저 일회용 계정 연결 링크를 받습니다.
 
 ## 관리 및 연결 해제
 

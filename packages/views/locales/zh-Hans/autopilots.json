@@ -70,7 +70,6 @@
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
     "edit": "编辑",
-    "manage_access": "管理访问",
     "run_now": "立即运行",
     "running": "运行中...",
     "toast_triggered": "已触发自动化",

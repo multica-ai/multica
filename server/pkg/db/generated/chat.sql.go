@@ -90,22 +90,29 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 const createChatTask = `-- name: CreateChatTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
-    initiator_user_id, force_fresh_session
+    initiator_user_id, originator_user_id, force_fresh_session, runtime_mcp_overlay,
+    runtime_connected_apps
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
-    COALESCE($6::boolean, FALSE)
+    $6,
+    COALESCE($7::boolean, FALSE),
+    $8,
+    $9
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, escalation_for_task_id, fire_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps
 `
 
 type CreateChatTaskParams struct {
-	AgentID           pgtype.UUID `json:"agent_id"`
-	RuntimeID         pgtype.UUID `json:"runtime_id"`
-	Priority          int32       `json:"priority"`
-	ChatSessionID     pgtype.UUID `json:"chat_session_id"`
-	InitiatorUserID   pgtype.UUID `json:"initiator_user_id"`
-	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
+	AgentID              pgtype.UUID `json:"agent_id"`
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
+	Priority             int32       `json:"priority"`
+	ChatSessionID        pgtype.UUID `json:"chat_session_id"`
+	InitiatorUserID      pgtype.UUID `json:"initiator_user_id"`
+	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
+	ForceFreshSession    pgtype.Bool `json:"force_fresh_session"`
+	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
 }
 
 func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) (AgentTaskQueue, error) {
@@ -115,7 +122,10 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.Priority,
 		arg.ChatSessionID,
 		arg.InitiatorUserID,
+		arg.OriginatorUserID,
 		arg.ForceFreshSession,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -149,8 +159,11 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.HandoffNote,
 		&i.PrepareLeaseExpiresAt,
 		&i.SquadID,
+		&i.RuntimeMcpOverlay,
 		&i.EscalationForTaskID,
 		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
 	)
 	return i, err
 }
@@ -362,6 +375,41 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 	var i GetPendingChatTaskRow
 	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
 	return i, err
+}
+
+const hasPendingChatTasksByCreator = `-- name: HasPendingChatTasksByCreator :one
+SELECT EXISTS (
+  SELECT 1
+  FROM agent_task_queue atq
+  JOIN chat_session cs ON cs.id = atq.chat_session_id
+  WHERE atq.chat_session_id IS NOT NULL
+    AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    AND cs.workspace_id = $1
+    AND cs.creator_id = $2
+    AND cs.agent_id = ANY($3::uuid[])
+) AS has_pending
+`
+
+type HasPendingChatTasksByCreatorParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	CreatorID   pgtype.UUID   `json:"creator_id"`
+	AgentIds    []pgtype.UUID `json:"agent_ids"`
+}
+
+// Boolean fast-path for the FAB's "running" indicator. Returns a single
+// EXISTS row instead of the full task list, so the planner can stop at the
+// first matching in-flight task (LIMIT 1 semantics via EXISTS).
+//
+// Permission filtering is baked into the query: agent_id = ANY($3) restricts
+// the result to the agents the caller may currently see, so a member who lost
+// access to a private agent never gets a true from a task they can no longer
+// reach. The handler must pass its resolved accessible-agent id set as $3;
+// an empty array yields false.
+func (q *Queries) HasPendingChatTasksByCreator(ctx context.Context, arg HasPendingChatTasksByCreatorParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingChatTasksByCreator, arg.WorkspaceID, arg.CreatorID, arg.AgentIds)
+	var has_pending bool
+	err := row.Scan(&has_pending)
+	return has_pending, err
 }
 
 const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
@@ -597,12 +645,13 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 }
 
 const listPendingChatTasksByCreator = `-- name: ListPendingChatTasksByCreator :many
-SELECT atq.id AS task_id, atq.status, atq.chat_session_id
+SELECT atq.id AS task_id, atq.status, atq.chat_session_id, cs.agent_id
 FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
-WHERE cs.workspace_id = $1
-  AND cs.creator_id = $2
+WHERE atq.chat_session_id IS NOT NULL
   AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND cs.workspace_id = $1
+  AND cs.creator_id = $2
 ORDER BY atq.created_at DESC
 `
 
@@ -615,11 +664,20 @@ type ListPendingChatTasksByCreatorRow struct {
 	TaskID        pgtype.UUID `json:"task_id"`
 	Status        string      `json:"status"`
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
 }
 
 // Aggregate view of all in-flight chat tasks owned by a given creator in a
 // workspace. Drives the FAB's "running" indicator when the chat window is
 // closed and no single session's query is active.
+//
+// Returns cs.agent_id so the handler can filter tasks belonging to private
+// agents the caller has lost access to using the already-loaded `allowed`
+// set — no second ListAllChatSessionsByCreator scan on the hot path.
+//
+// atq.chat_session_id IS NOT NULL is redundant given the JOIN, but stated
+// explicitly so the planner can prove the query predicate is a subset of the
+// idx_agent_task_queue_chat_pending_v2 partial-index predicate and use it.
 func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPendingChatTasksByCreatorParams) ([]ListPendingChatTasksByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listPendingChatTasksByCreator, arg.WorkspaceID, arg.CreatorID)
 	if err != nil {
@@ -629,7 +687,12 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 	items := []ListPendingChatTasksByCreatorRow{}
 	for rows.Next() {
 		var i ListPendingChatTasksByCreatorRow
-		if err := rows.Scan(&i.TaskID, &i.Status, &i.ChatSessionID); err != nil {
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Status,
+			&i.ChatSessionID,
+			&i.AgentID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

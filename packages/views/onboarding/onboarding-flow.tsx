@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { captureEvent } from "@multica/core/analytics";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -145,15 +144,6 @@ export function OnboardingFlow({
   });
   const existingWorkspace = workspace ?? workspaces[0] ?? null;
   const canSkipWelcome = workspacesFetched && workspaces.length > 0;
-  const startedEmittedRef = useRef(false);
-  useEffect(() => {
-    if (startedEmittedRef.current || !workspacesFetched) return;
-    startedEmittedRef.current = true;
-    captureEvent("onboarding_started", {
-      source: "onboarding",
-      ...(existingWorkspace ? { workspace_id: existingWorkspace.id } : {}),
-    });
-  }, [existingWorkspace, workspacesFetched]);
 
   // The `runtimeInstructions` slot is only plumbed by the web shell
   // (desktop bundles a daemon, so a CLI install card would be noise

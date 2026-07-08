@@ -168,6 +168,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Kiro:        writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Qoder:       writes {workDir}/AGENTS.md  (skills discovered from .qoder/skills/, user-level ~/.qoder/skills is unaffected)
 // For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
+// For Traecli:     writes {workDir}/AGENTS.md  (traecli reads .trae/rules/ not AGENTS.md, so the brief is delivered inline via providerNeedsInlineSystemPrompt; the file is written for parity/visibility only)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
 	path := runtimeConfigPath(workDir, provider)
@@ -187,7 +188,7 @@ func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
 	case "claude", "codebuddy":
 		return filepath.Join(workDir, "CLAUDE.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""
@@ -493,6 +494,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(ctxText)
 		b.WriteString("\n\n")
 	}
+	writeConnectedApps(&b, ctx)
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
@@ -750,7 +752,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude", "codebuddy":
 			// Claude/CodeBuddy discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity":
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "traecli":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, Qoder,
 			// and Antigravity discover skills natively from their respective paths.
 			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
@@ -838,10 +840,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 func writeBackgroundTaskSafetyInstructions(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks this task terminal when your top-level agent process/turn exits. Any background work you started but did not collect before exiting can be orphaned: its result may be lost, and the user may see a completed/failed task even though the delegated work was never synthesized.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
-	b.WriteString("- If a tool or runtime offers a background mode, use it only when you can explicitly wait for completion and collect the result before your final response.\n")
-	b.WriteString("- If a tool response says to wait for a future notification/reminder instead of collecting now, do not rely on that in Multica-managed runs. Block on the appropriate wait/output/collect operation before exiting.\n")
+	b.WriteString("Multica marks this task terminal the moment your top-level agent process/turn exits. A Multica-managed run has NO \"background work finishes later and wakes you up\" step: whatever you leave running in the background is orphaned, its result is lost, and the final comment you meant to post once it finished never sends. The user sees a task that ended with no conclusion and has to re-trigger you.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification, reminder, or wakeup to let you resume — that wakeup does not exist here.\n")
+	b.WriteString("- Do every wait synchronously inside a single foreground tool call that blocks until the work is done — e.g. `gh run watch <run-id>` for CI, or a blocking test/build command. Never split \"start the wait\" into this turn and \"collect the result\" into a later turn.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder, or tells you it is now running in the background so you can keep working, do NOT rely on that in Multica-managed runs — that hint comes from the standalone harness and does not apply here. Block on the appropriate wait/output/collect operation before exiting.\n")
 	b.WriteString("- If you cannot observe or collect a background task's result, do not spawn it in the background; run the work synchronously instead.\n")
+	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back once X finishes\" / \"waiting for CI\" message. That message becomes your final output and the task ends immediately — either finish the wait synchronously now and report the real outcome, or post the result you already have.\n")
 	b.WriteString("- Before posting your final result or exiting silently, account for every background task you started and incorporate its output or failure into your response.\n\n")
 }

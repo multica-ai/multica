@@ -106,7 +106,7 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -159,6 +159,47 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed result, got status=%q error=%q", result.Status, result.Error)
+	}
+	if _, ok := result.Usage["unknown"]; ok {
+		t.Fatalf("usage should use Kiro current model, got unknown entry: %+v", result.Usage)
+	}
+	usage, ok := result.Usage["auto"]
+	if !ok {
+		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
+	}
+	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
 	}
 }
 
@@ -269,6 +310,105 @@ func TestKiroBackendDoesNotCompleteAfterFailedGoalComplete(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func fakeKiroACPIssueCommentCloseErrorScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_comment_done"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_comment_done","update":{"type":"ToolCall","toolCallId":"tc-comment","name":"Shell","status":"pending","parameters":{"command":"multica issue comment add issue-1 --content-file ./reply.md"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_comment_done","update":{"type":"ToolCallUpdate","toolCallId":"tc-comment","status":"completed","name":"Shell","output":"created comment"}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestKiroBackendTreatsCommentAddCloseErrorAsCompleted(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPIssueCommentCloseErrorScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var messages []Message
+	messagesDone := make(chan struct{})
+	go func() {
+		defer close(messagesDone)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		<-messagesDone
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed after issue comment close error, got %q (error=%q, messages=%+v)", result.Status, result.Error, messages)
+		}
+		if result.Error != "" {
+			t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+		}
+		if result.SessionID != "ses_comment_done" {
+			t.Fatalf("session id = %q, want ses_comment_done", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKiroIssueCommentAddCommand(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{"multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"./multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"/usr/local/bin/multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"MULTICA_TOKEN=x multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"FOO=1 BAR=2 ./multica issue comment add issue-1", true},
+		{`sh -c "multica issue comment add issue-1 --content-file ./reply.md"`, true},
+		{`bash -c 'multica issue comment add issue-1'`, true},
+		{`/bin/sh -c "multica issue comment add issue-1"`, true},
+		{"multica issue get issue-1", false},
+		{"echo multica issue comment add issue-1", false},
+		{`sh -c "echo multica issue comment add issue-1"`, false},
+		{"FOO=bar", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isKiroIssueCommentAddCommand(tt.command); got != tt.want {
+			t.Errorf("isKiroIssueCommentAddCommand(%q) = %v, want %v", tt.command, got, tt.want)
+		}
 	}
 }
 
@@ -452,8 +592,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0", usage)
+	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)

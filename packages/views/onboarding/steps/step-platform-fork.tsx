@@ -2,11 +2,6 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Download } from "lucide-react";
-import {
-  captureDownloadIntent,
-  captureEvent,
-  setPersonProperties,
-} from "@multica/core/analytics";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -74,47 +69,15 @@ export function StepPlatformFork({
   const [dialog, setDialog] = useState<DialogState>(null);
   const [downloaded, setDownloaded] = useState(false);
 
-  // Platform signal retained purely for PostHog dimensions — the UI
-  // no longer branches on it (Windows / Linux desktop installers now
-  // ship, so all three platforms get the same card). Computed
-  // lazily; SSR-safe because handlers only run client-side.
-  const isMac =
-    typeof navigator !== "undefined" &&
-    (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || "") ||
-      /Mac OS X/i.test(navigator.userAgent || ""));
-
   const picker = useRuntimePicker(wsId);
 
   const pickDesktop = () => {
     window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
     setDownloaded(true);
-    // Step-3-scoped path selection event (kept for existing funnels);
-    // `source: "step3"` future-proofs if the event is reused from
-    // another surface later.
-    captureEvent("onboarding_runtime_path_selected", {
-      workspace_id: wsId,
-      path: "download_desktop",
-      source: "onboarding",
-      surface: "step3",
-      is_mac: isMac,
-    });
-    // Cross-surface Desktop intent event — also fires from landing
-    // hero / footer / login / Welcome. Enables the top-of-funnel
-    // split without retrofitting `onboarding_runtime_path_selected`
-    // to non-onboarding contexts.
-    captureDownloadIntent("step3");
   };
 
   const handleOpenCli = () => {
     setDialog("cli");
-    captureEvent("onboarding_runtime_path_selected", {
-      workspace_id: wsId,
-      path: "cli",
-      source: "onboarding",
-      surface: "step3",
-      is_mac: isMac,
-    });
-    setPersonProperties({ platform_preference: "web" });
   };
 
   const handleCliConnect = () => {

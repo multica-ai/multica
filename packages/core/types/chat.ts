@@ -23,6 +23,15 @@ export interface PendingChatTasksResponse {
   tasks: PendingChatTaskItem[];
 }
 
+/**
+ * Boolean fast-path payload for the FAB "running" indicator — returned by
+ * GET /api/chat/pending-tasks/has-any. The FAB only needs to know whether any
+ * in-flight chat task exists, so it avoids fetching the full task list.
+ */
+export interface HasPendingChatTasksResponse {
+  has_pending: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   chat_session_id: string;
