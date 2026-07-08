@@ -2760,7 +2760,8 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
+// GetIssueUsage returns aggregated token usage for all tasks belonging to an
+// issue, plus per-task per-model rows for the sidebar's per-run breakdown.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -2774,12 +2775,49 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	taskRows, err := h.Queries.ListIssueTaskUsage(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue task usage")
+		return
+	}
+
+	type taskUsageResponse struct {
+		TaskID           string `json:"task_id"`
+		CreatedAt        string `json:"created_at"`
+		CommentTriggered bool   `json:"comment_triggered"`
+		Provider         string `json:"provider"`
+		Model            string `json:"model"`
+		InputTokens      int64  `json:"input_tokens"`
+		OutputTokens     int64  `json:"output_tokens"`
+		CacheReadTokens  int64  `json:"cache_read_tokens"`
+		CacheWriteTokens int64  `json:"cache_write_tokens"`
+	}
+	tasks := make([]taskUsageResponse, 0, len(taskRows))
+	for _, tr := range taskRows {
+		createdAt := ""
+		if tr.CreatedAt.Valid {
+			createdAt = tr.CreatedAt.Time.UTC().Format(time.RFC3339)
+		}
+		tasks = append(tasks, taskUsageResponse{
+			TaskID:           uuidToString(tr.TaskID),
+			CreatedAt:        createdAt,
+			CommentTriggered: tr.CommentTriggered,
+			Provider:         tr.Provider,
+			Model:            tr.Model,
+			InputTokens:      tr.InputTokens,
+			OutputTokens:     tr.OutputTokens,
+			CacheReadTokens:  tr.CacheReadTokens,
+			CacheWriteTokens: tr.CacheWriteTokens,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_input_tokens":       row.TotalInputTokens,
 		"total_output_tokens":      row.TotalOutputTokens,
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
 		"task_count":               row.TaskCount,
+		"tasks":                    tasks,
 	})
 }
 
