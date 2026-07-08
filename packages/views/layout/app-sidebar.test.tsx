@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { chatSessions, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+  chatSessions: { current: [] as { unread_count?: number }[] },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   navigation: { current: { pathname: "/acme/issues" } },
@@ -102,6 +103,7 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
+    chat: () => "/acme/chat",
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
@@ -161,6 +163,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
+    if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
@@ -277,5 +280,34 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
     summary.current = [{ workspace_id: "ws-1", count: 5 }];
     const { container } = render(<AppSidebar />);
     expect(rowDots(container)).toHaveLength(0);
+  });
+});
+
+describe("personal nav — Chat", () => {
+  beforeEach(() => {
+    chatSessions.current = [];
+    navigation.current = { pathname: "/acme/issues" };
+  });
+
+  // The mocked SidebarMenuButton exposes the AppLink target as `data-href`
+  // and renders the label + badge as its children.
+  const chatNav = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('button[data-href="/acme/chat"]');
+
+  it("renders a Chat nav link to the workspace chat route", () => {
+    const { container } = render(<AppSidebar />);
+    expect(chatNav(container)).not.toBeNull();
+  });
+
+  it("badges the Chat nav with the summed unread_count of chat sessions", () => {
+    chatSessions.current = [{ unread_count: 3 }, { unread_count: 2 }, { unread_count: 0 }];
+    const { container } = render(<AppSidebar />);
+    expect(chatNav(container)?.textContent).toContain("5");
+  });
+
+  it("shows no Chat unread badge when every session is read", () => {
+    chatSessions.current = [{ unread_count: 0 }, {}];
+    const { container } = render(<AppSidebar />);
+    expect(chatNav(container)?.textContent ?? "").not.toMatch(/\d/);
   });
 });
