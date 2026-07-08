@@ -1630,6 +1630,122 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+// TestGetIssueUsage_PerTaskBreakdown verifies the usage endpoint returns
+// per-task rows alongside the aggregate totals, with comment_triggered
+// distinguishing comment-cycle runs from assignment runs.
+func TestGetIssueUsage_PerTaskBreakdown(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'usage breakdown test', $2, 'member',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, author_id, author_type, content, workspace_id)
+		VALUES ($1, $2, 'member', 'trigger', $3)
+		RETURNING id
+	`, issueID, testUserID, testWorkspaceID).Scan(&commentID); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID) })
+
+	mkTask := func(triggerCommentID any, createdOffset time.Duration, inputTokens int64) string {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, trigger_comment_id, created_at)
+			VALUES ($1, $2, $3, 'completed', $4, now() + $5::interval)
+			RETURNING id
+		`, agentID, issueID, runtimeID, triggerCommentID,
+			fmt.Sprintf("%d seconds", int(createdOffset.Seconds()))).Scan(&taskID); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
+			VALUES ($1, 'anthropic', 'claude-sonnet-4.6', $2, 100, 50, 25, now())
+		`, taskID, inputTokens); err != nil {
+			t.Fatalf("insert task_usage: %v", err)
+		}
+		return taskID
+	}
+
+	assignmentTaskID := mkTask(nil, 0, 1000)
+	commentTaskID := mkTask(commentID, time.Minute, 2000) // newer → first in response
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		TotalInputTokens int64 `json:"total_input_tokens"`
+		TaskCount        int   `json:"task_count"`
+		Tasks            []struct {
+			TaskID           string `json:"task_id"`
+			CreatedAt        string `json:"created_at"`
+			CommentTriggered bool   `json:"comment_triggered"`
+			Provider         string `json:"provider"`
+			Model            string `json:"model"`
+			InputTokens      int64  `json:"input_tokens"`
+			OutputTokens     int64  `json:"output_tokens"`
+			CacheReadTokens  int64  `json:"cache_read_tokens"`
+			CacheWriteTokens int64  `json:"cache_write_tokens"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.TotalInputTokens != 3000 {
+		t.Fatalf("expected total_input_tokens 3000, got %d", resp.TotalInputTokens)
+	}
+	if resp.TaskCount != 2 {
+		t.Fatalf("expected task_count 2, got %d", resp.TaskCount)
+	}
+	if len(resp.Tasks) != 2 {
+		t.Fatalf("expected 2 task rows, got %d", len(resp.Tasks))
+	}
+	// Newest first.
+	if resp.Tasks[0].TaskID != commentTaskID || !resp.Tasks[0].CommentTriggered {
+		t.Fatalf("expected first row = comment task %s with comment_triggered=true, got %+v", commentTaskID, resp.Tasks[0])
+	}
+	if resp.Tasks[1].TaskID != assignmentTaskID || resp.Tasks[1].CommentTriggered {
+		t.Fatalf("expected second row = assignment task %s with comment_triggered=false, got %+v", assignmentTaskID, resp.Tasks[1])
+	}
+	if resp.Tasks[0].InputTokens != 2000 || resp.Tasks[0].Model != "claude-sonnet-4.6" {
+		t.Fatalf("unexpected first row fields: %+v", resp.Tasks[0])
+	}
+	if resp.Tasks[0].CreatedAt == "" {
+		t.Fatal("expected created_at to be set")
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
