@@ -12,6 +12,7 @@ import {
   EMPTY_USER,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  IssueUsageSummarySchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -576,5 +577,30 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("IssueUsageSummarySchema", () => {
+  it("fills defaults for a malformed response", () => {
+    const parsed = IssueUsageSummarySchema.parse({});
+    expect(parsed.total_input_tokens).toBe(0);
+    expect(parsed.task_count).toBe(0);
+    expect(parsed.tasks).toEqual([]);
+  });
+
+  it("defaults missing fields inside task rows", () => {
+    const parsed = IssueUsageSummarySchema.parse({
+      total_input_tokens: 10,
+      tasks: [{ model: "claude-sonnet-4.6" }],
+    });
+    const task = parsed.tasks[0]!;
+    expect(task.model).toBe("claude-sonnet-4.6");
+    expect(task.input_tokens).toBe(0);
+    expect(task.comment_triggered).toBe(false);
+  });
+
+  it("drops a non-array tasks field to the default", () => {
+    const parsed = IssueUsageSummarySchema.safeParse({ tasks: "nope" });
+    expect(parsed.success).toBe(false);
   });
 });

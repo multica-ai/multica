@@ -572,6 +572,7 @@ describe("onIssueDeleted", () => {
       total_cache_read_tokens: 0,
       total_cache_write_tokens: 0,
       task_count: 1,
+      tasks: [],
     });
     qc.setQueryData<Attachment[]>(issueKeys.attachments(ISSUE_ID), [
       {
