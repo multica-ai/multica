@@ -4,8 +4,16 @@ import type { ReactElement } from "react";
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { getAttachmentTextContentMock } = vi.hoisted(() => ({
-  getAttachmentTextContentMock: vi.fn(),
+const { getAttachmentTextContentMock, resolveIssueIdentifierMock } = vi.hoisted(
+  () => ({
+    getAttachmentTextContentMock: vi.fn(),
+    resolveIssueIdentifierMock: vi.fn(),
+  }),
+);
+
+vi.mock("../issues/hooks", () => ({
+  useResolveIssueIdentifier: (identifier: string) =>
+    resolveIssueIdentifierMock(identifier),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -219,6 +227,41 @@ describe("ReadonlyContent issue mention Markdown", () => {
 
     expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
     expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
+  });
+
+  it("autolinks a resolved bare identifier as an issue mention card", () => {
+    resolveIssueIdentifierMock.mockImplementation((id: string) =>
+      id === "MUL-7" ? { id: "issue-7", identifier: "MUL-7" } : null,
+    );
+
+    const { getByTestId } = render(
+      <ReadonlyContent content="See MUL-7 for context" />,
+    );
+
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-7");
+    expect(resolveIssueIdentifierMock).toHaveBeenCalledWith("MUL-7");
+  });
+
+  it("leaves an unresolved bare identifier as plain text", () => {
+    resolveIssueIdentifierMock.mockReturnValue(null);
+
+    const { container, queryByTestId } = render(
+      <ReadonlyContent content="See MUL-999 for context" />,
+    );
+
+    expect(queryByTestId("issue-mention-card")).toBeNull();
+    expect(container.textContent).toContain("MUL-999");
+  });
+
+  it("does not autolink a bare identifier inside inline code", () => {
+    resolveIssueIdentifierMock.mockReturnValue(null);
+
+    const { queryByTestId } = render(
+      <ReadonlyContent content={"use `MUL-7` here"} />,
+    );
+
+    expect(resolveIssueIdentifierMock).not.toHaveBeenCalled();
+    expect(queryByTestId("issue-mention-card")).toBeNull();
   });
 
   it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
