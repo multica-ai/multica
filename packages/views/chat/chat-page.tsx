@@ -25,6 +25,7 @@ import { NewChatButton } from "./components/new-chat-button";
 import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
+import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -162,6 +163,8 @@ export function ChatPage() {
 
       {c.noAgent ? (
         <NoAgentBanner />
+      ) : c.isAgentArchived ? (
+        <ArchivedAgentBanner agentName={c.activeAgent?.name} />
       ) : (
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
@@ -173,8 +176,9 @@ export function ChatPage() {
         onUploadFile={c.handleUploadFile}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
-        disabled={c.isSessionArchived}
+        disabled={c.isSessionArchived || c.isAgentArchived}
         noAgent={c.noAgent}
+        agentArchived={c.isAgentArchived}
         agentName={c.activeAgent?.name}
       />
     </div>

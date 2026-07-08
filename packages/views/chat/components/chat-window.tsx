@@ -30,6 +30,7 @@ import {
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
+import { ArchivedAgentBanner } from "./archived-agent-banner";
 import {
   chatSessionsOptions,
   chatMessagesPageOptions,
@@ -236,8 +237,21 @@ export function ChatWindow() {
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
 
-  // Resolve selected agent: stored preference → first available
+  // The agent bound to the OPEN session, resolved from the full agent list
+  // (archived included). An archived agent is filtered out of availableAgents,
+  // so resolving only from that list would make an archived-agent session
+  // render some *other* available agent — wrong avatar/name and a send that
+  // targets the wrong agent. Binding to the session's real agent keeps it
+  // honest; the archived state then makes the conversation read-only.
+  const sessionAgent = currentSession
+    ? agents.find((a) => a.id === currentSession.agent_id) ?? null
+    : null;
+  const isAgentArchived = !!sessionAgent?.archived_at;
+
+  // Resolve selected agent: open session's agent → stored preference → first
+  // available. New chats have no session, so they fall through to the picker.
   const activeAgent =
+    sessionAgent ??
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
@@ -423,6 +437,16 @@ export function ChatWindow() {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
       }
+      // Read-only conversation: the agent is retired and can no longer pick up
+      // work, so refuse to enqueue a task that would sit orphaned forever. The
+      // input is disabled in this state; this is the belt-and-braces guard.
+      if (isAgentArchived) {
+        apiLogger.warn("sendChatMessage skipped: agent is archived", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
 
       const finalContent = content;
 
@@ -569,6 +593,7 @@ export function ChatWindow() {
       activeSessionId,
       selectedAgentId,
       activeAgent,
+      isAgentArchived,
       ensureSession,
       cancelChatTask,
       qc,
@@ -783,12 +808,15 @@ export function ChatWindow() {
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
+      ) : isAgentArchived ? (
+        <ArchivedAgentBanner agentName={activeAgent?.name} />
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
-      {/* Input — disabled for legacy archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
+      {/* Input — disabled for legacy archived sessions and for sessions whose
+       *  agent has been archived (read-only); locked out entirely when there's
+       *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
@@ -796,8 +824,9 @@ export function ChatWindow() {
         onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
-        disabled={isSessionArchived}
+        disabled={isSessionArchived || isAgentArchived}
         noAgent={noAgent}
+        agentArchived={isAgentArchived}
         agentName={activeAgent?.name}
         leftAdornment={
           <AgentDropdown
