@@ -1629,6 +1629,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// An is_agent_intro session carries no user message: the agent opens
+			// the conversation by introducing itself. Flag it so the daemon builds
+			// a self-introduction prompt rather than a "reply to their message"
+			// prompt (MUL-4230).
+			resp.ChatIntro = cs.IsAgentIntro
 			// Flag a channel-backed session so the daemon makes the agent aware
 			// it is operating inside Slack — read this conversation's history
 			// from the channel via `multica chat history` / `multica chat thread`,

@@ -187,6 +187,17 @@ func buildCommentPrompt(task Task, provider string) string {
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
 func buildChatPrompt(task Task) string {
+	// Proactive self-introduction: the agent was just created and is opening the
+	// conversation. There is no user message to reply to — the agent sends the
+	// first message so the thread reads as the agent messaging its creator, not
+	// the creator prompting the agent (MUL-4230).
+	if task.ChatIntro {
+		var b strings.Builder
+		b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
+		b.WriteString("You were just created, and this is the very first message in a direct chat with the person who created you. They have not written anything yet — you are opening the conversation. Send a short, warm, first-person introduction: who you are, what you're good at, and how they can work with you. Do NOT phrase it as an answer to a question or repeat any prompt back; just introduce yourself as if you reached out first.\n")
+		return b.String()
+	}
+
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
