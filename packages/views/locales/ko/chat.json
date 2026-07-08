@@ -140,8 +140,7 @@
     "waiting": "답장 대기 중",
     "pin": "고정",
     "unpin": "고정 해제",
-    "pinned": "고정됨",
-    "archived": "보관됨"
+    "pinned": "고정됨"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",

@@ -140,8 +140,7 @@
     "waiting": "等待回复",
     "pin": "置顶",
     "unpin": "取消置顶",
-    "pinned": "已置顶",
-    "archived": "已归档"
+    "pinned": "已置顶"
   },
   "header": {
     "view_profile": "查看 Agent 资料",

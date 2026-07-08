@@ -140,8 +140,7 @@
     "waiting": "返信待ち",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
-    "pinned": "ピン留め済み",
-    "archived": "アーカイブ済み"
+    "pinned": "ピン留め済み"
   },
   "header": {
     "view_profile": "Agent のプロフィール",
