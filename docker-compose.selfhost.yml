@@ -140,3 +140,7 @@ services:
 volumes:
   pgdata:
   backend_uploads:
+
+networks:
+  shared-network:
+    external: true
