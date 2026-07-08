@@ -133,7 +133,7 @@ export function ChatPage() {
   );
 
   const listHeader = (
-    <PageHeader className="justify-between border-b-0">
+    <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
       </div>
@@ -142,7 +142,7 @@ export function ChatPage() {
   );
 
   const listBody = (
-    <div className="p-1">
+    <div className="px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
         agents={c.agents}
