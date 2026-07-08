@@ -36,14 +36,14 @@
       "hours": "{{count}}時間前",
       "days": "{{count}}日前"
     },
-    "row_delete_aria": "チャットセッションを削除",
+    "row_delete_aria": "現在のチャットを削除してやり直す",
     "row_rename_aria": "チャットセッションの名前を変更",
     "delete_dialog": {
-      "title": "チャットセッションを削除",
-      "description_with_title": "\"{{title}}\" とそのメッセージが完全に削除されます。この操作は取り消せません。",
-      "description_default": "このチャットセッションとそのメッセージが完全に削除されます。この操作は取り消せません。",
+      "title": "現在のチャットを削除してやり直す",
+      "description_with_title": "\"{{title}}\" とそのメッセージが完全に削除されます。次のメッセージは新しいチャット文脈で始まります。この操作は取り消せません。",
+      "description_default": "このチャットセッションとそのメッセージが完全に削除されます。次のメッセージは新しいチャット文脈で始まります。この操作は取り消せません。",
       "cancel": "キャンセル",
-      "confirm": "削除",
+      "confirm": "削除してやり直す",
       "confirming": "削除中..."
     },
     "row_stop_aria": "現在の実行を停止",

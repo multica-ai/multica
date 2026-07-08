@@ -1074,6 +1074,10 @@ function SessionDropdown({
     // arrives over WS (~50–200ms gap).
     if (isDeletingCurrent) {
       setActiveSession(null);
+      // Deleting the current session is the supported "start fresh" path:
+      // clear any session-bound draft so the next send goes through the
+      // empty-state/new-session flow instead of reviving deleted context.
+      useChatStore.getState().clearInputDraft(sessionId);
     }
     deleteSession.mutate(sessionId, {
       onSettled: () => setConfirmingDeleteId(null),

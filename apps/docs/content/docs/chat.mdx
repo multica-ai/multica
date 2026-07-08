@@ -20,6 +20,20 @@ Two rules of thumb:
 
 Open **Chat** from the sidebar, pick an agent, and start a new conversation. The interface feels like any messaging app: you send a message, the agent replies. Each message triggers a run in the background (an enqueued `task`), so replies may take a few seconds.
 
+## Start fresh by deleting the current chat
+
+If the current conversation is polluted, off-track, or stuck on stale assumptions, use **Chat history → Delete this chat and start fresh**.
+
+- The current chat session and every message in it are permanently deleted.
+- Multica immediately returns you to the empty composer state.
+- Your **next** message creates a brand-new chat session, so the agent starts from a clean context instead of resuming the deleted one.
+
+Use this when you want a real reset, not just a new turn in the same thread.
+
+<Callout type="warning">
+Deleting a chat is permanent. If the old thread contains anything you may need later, keep it and start a separate chat instead.
+</Callout>
+
 ## What an agent can and cannot do in chat
 
 Agents run in a **fully sandboxed** mode inside a conversation.
