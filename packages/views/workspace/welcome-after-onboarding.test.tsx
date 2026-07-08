@@ -294,7 +294,7 @@ describe("WelcomeAfterOnboarding", () => {
       // Navigates to the first issue (intro, since it's earlier in
       // STARTER_CARD_IDS).
       await waitFor(() =>
-        expect(mockPush).toHaveBeenCalledWith("/test-ws/issues/issue-intro"),
+        expect(mockPush).toHaveBeenCalledWith("/test-ws/issue/issue-intro"),
       );
     });
 
