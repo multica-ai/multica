@@ -638,12 +638,25 @@ export interface SetAgentSkillsRequest {
   skill_ids: string[];
 }
 
+export interface IssueTaskUsage {
+  task_id: string;
+  created_at: string;
+  comment_triggered: boolean;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
 export interface IssueUsageSummary {
   total_input_tokens: number;
   total_output_tokens: number;
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
   task_count: number;
+  tasks: IssueTaskUsage[];
 }
 
 export interface RuntimeUsage {
