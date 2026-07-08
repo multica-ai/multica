@@ -96,6 +96,17 @@ type APIClient interface {
 	// adapter: flattening and block assembly are the enricher's job.
 	ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error)
 
+	// ListContainerMessages lists one page of messages in a chat
+	// (container_id_type=chat, the whole conversation) or a topic
+	// (container_id_type=thread, one 话题) via GET /open-apis/im/v1/messages,
+	// newest-first (sort_type=ByCreateTimeDesc). Where ListChatMessages fetches
+	// a single time-anchored page for the inbound enricher, this exposes
+	// page_token cursoring so the on-demand `multica chat` history reader can
+	// page to OLDER messages (MUL-4166). body.content is forwarded verbatim for
+	// the reader's flattener; the result carries Lark's next page_token (empty
+	// when no older page remains).
+	ListContainerMessages(ctx context.Context, creds InstallationCredentials, p ListContainerParams) (ListContainerResult, error)
+
 	// BatchGetUsers resolves a set of user open_ids to their display names
 	// via GET /open-apis/contact/v3/users/batch. The enricher uses it to
 	// label recent-context / quoted / forwarded speakers (and the sender
@@ -136,6 +147,40 @@ type ListMessagesParams struct {
 	EndTime int64
 }
 
+// ListContainerParams selects one page of messages in a Lark chat or topic
+// for the on-demand history reader. ContainerType is "chat" (the whole
+// conversation) or "thread" (one 话题).
+type ListContainerParams struct {
+	// ContainerType is the container_id_type: "chat" or "thread".
+	ContainerType string
+	// ContainerID is the chat_id (ContainerType "chat") or thread_id
+	// (ContainerType "thread") to read.
+	ContainerID string
+	// PageSize is how many messages to return; clamped to Lark's 1..50 range.
+	PageSize int
+	// PageToken is an opaque cursor from a prior ListContainerResult; empty
+	// reads the newest page. Lark pages backward in time from here under
+	// sort_type=ByCreateTimeDesc.
+	PageToken string
+}
+
+// larkContainerTypeChat / larkContainerTypeThread are the container_id_type
+// values the history reader passes.
+const (
+	larkContainerTypeChat   = "chat"
+	larkContainerTypeThread = "thread"
+)
+
+// ListContainerResult is one page of messages plus the cursor to the next
+// (older) page. Messages are in Lark's returned order (newest-first under
+// ByCreateTimeDesc); the reader sorts them oldest-first.
+type ListContainerResult struct {
+	Messages []LarkMessage
+	// PageToken is the cursor for the next (older) page, or empty when Lark
+	// reports no more messages (has_more=false).
+	PageToken string
+}
+
 // LarkMessage is the normalized slice of an IM v1 message item the
 // enricher needs. Body.content is passed through raw (still the
 // JSON-encoded, msg_type-specific string Lark double-encodes) so the
@@ -150,8 +195,12 @@ type LarkMessage struct {
 	ParentID       string
 	RootID         string
 	UpperMessageID string // the merge_forward parent a child hangs under
-	Deleted        bool
-	Mentions       []LarkMessageMention
+	// ThreadID is the Lark topic (话题) this message belongs to. Empty when the
+	// message is not part of a topic. The history reader surfaces it so the
+	// agent can drill into a topic with `multica chat thread <thread_id>`.
+	ThreadID string
+	Deleted  bool
+	Mentions []LarkMessageMention
 }
 
 // LarkMessageMention mirrors a mentions[] entry on the IM REST item
@@ -381,6 +430,11 @@ func (s *stubAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (s *stubAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	s.log.Warn("lark stub client: ListChatMessages called", "chat_id", string(p.ChatID))
 	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) ListContainerMessages(ctx context.Context, creds InstallationCredentials, p ListContainerParams) (ListContainerResult, error) {
+	s.log.Warn("lark stub client: ListContainerMessages called", "container_type", p.ContainerType, "container_id", p.ContainerID)
+	return ListContainerResult{}, ErrAPIClientNotConfigured
 }
 
 func (s *stubAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {

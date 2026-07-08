@@ -1109,8 +1109,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})
@@ -1231,6 +1231,31 @@ func TestHTTPClient_BadHTTPStatus(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "http 500") {
 		t.Errorf("want http 500 surfaced, got %v", err)
+	}
+}
+
+// A Lark envelope on a non-2xx response (e.g. 400 + code 230027 for a missing
+// scope) must surface as a structured *APIError so callers can classify it —
+// here IsMissingPermission — instead of an opaque "http 400" string.
+func TestHTTPClient_MissingScopeIsStructured(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		_, _ = io.WriteString(w, `{"code":230027,"msg":"Lack of necessary permissions, ext=need scope: im:message.group_msg"}`)
+	})
+	c := newTestClient(fake, time.Now)
+	_, err := c.ListContainerMessages(context.Background(), testCreds(), ListContainerParams{
+		ContainerType: larkContainerTypeChat,
+		ContainerID:   "oc",
+		PageSize:      10,
+	})
+	if !IsMissingPermission(err) {
+		t.Fatalf("want IsMissingPermission true, got %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != 230027 {
+		t.Fatalf("want *APIError code 230027, got %v", err)
 	}
 }
 

@@ -338,6 +338,14 @@ SELECT * FROM channel_chat_session_binding
 WHERE chat_session_id = sqlc.arg('chat_session_id')
   AND channel_type = sqlc.arg('channel_type');
 
+-- name: GetChannelChatSessionBindingBySessionAny :one
+-- Reverse lookup by session alone. chat_session_id is UNIQUE, so this returns
+-- the one binding regardless of channel type — used where the caller must
+-- DISCOVER which channel a session is bound to (unified `multica chat` history
+-- dispatch, prompt channel awareness) rather than assert a specific platform.
+SELECT * FROM channel_chat_session_binding
+WHERE chat_session_id = $1;
+
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
 -- Records the most recent inbound trigger message + thread so the decoupled
 -- outbound patcher can thread its reply back into the originating topic.

@@ -72,11 +72,11 @@ func taskActorReq(target, taskID string) *http.Request {
 	return req
 }
 
-func withSlackHistory(t *testing.T, r ChatChannelHistoryReader) {
+func withChatHistory(t *testing.T, r ChatChannelHistoryReader) {
 	t.Helper()
-	orig := testHandler.SlackHistory
-	testHandler.SlackHistory = r
-	t.Cleanup(func() { testHandler.SlackHistory = orig })
+	orig := testHandler.ChatHistory
+	testHandler.ChatHistory = r
+	t.Cleanup(func() { testHandler.ChatHistory = orig })
 }
 
 func TestGetChatChannelHistory_Success(t *testing.T) {
@@ -92,7 +92,7 @@ func TestGetChatChannelHistory_Success(t *testing.T) {
 		},
 		NextCursor: "100",
 	}}
-	withSlackHistory(t, fake)
+	withChatHistory(t, fake)
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history?limit=10", taskID))
@@ -121,7 +121,7 @@ func TestGetChatThread_CurrentThread(t *testing.T) {
 	}
 	taskID := newChatHistoryTask(t, true)
 	fake := &fakeChatHistoryReader{page: channel.HistoryPage{ChannelType: "slack", ThreadID: "50.0", Messages: []channel.HistoryMessage{{ID: "50.0", TS: "50.0", Text: "root"}}}}
-	withSlackHistory(t, fake)
+	withChatHistory(t, fake)
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatThread(w, taskActorReq("/api/chat/thread", taskID))
@@ -143,7 +143,7 @@ func TestGetChatThread_ByID(t *testing.T) {
 	}
 	taskID := newChatHistoryTask(t, true)
 	fake := &fakeChatHistoryReader{page: channel.HistoryPage{ChannelType: "slack", ThreadID: "70.0"}}
-	withSlackHistory(t, fake)
+	withChatHistory(t, fake)
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatThread(w, taskActorReq("/api/chat/thread?id=70.0", taskID))
@@ -161,7 +161,7 @@ func TestGetChatHistory_NoBindingReturnsNote(t *testing.T) {
 		t.Skip("requires test database")
 	}
 	taskID := newChatHistoryTask(t, true)
-	withSlackHistory(t, &fakeChatHistoryReader{err: slack.ErrNoSlackSession})
+	withChatHistory(t, &fakeChatHistoryReader{err: slack.ErrNoSlackSession})
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
@@ -176,12 +176,37 @@ func TestGetChatHistory_NoBindingReturnsNote(t *testing.T) {
 	}
 }
 
+// A HistoryUnavailableError (bound channel, but history unreadable for a known
+// reason like a missing scope) becomes a 200 + the actionable reason as a note,
+// NOT a 502 — so the agent proceeds and reports the fixable cause instead of
+// retrying a "transient" failure forever.
+func TestGetChatHistory_UnavailableReturnsActionableNote(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	taskID := newChatHistoryTask(t, true)
+	reason := "Lark channel history is unavailable: the connected Feishu app is missing a required permission (need scope: im:message.group_msg)."
+	withChatHistory(t, &fakeChatHistoryReader{err: &channel.HistoryUnavailableError{Reason: reason}})
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (not a retryable 5xx): %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Note != reason || len(resp.Messages) != 0 {
+		t.Fatalf("expected the actionable reason as the note, got %+v", resp)
+	}
+}
+
 func TestGetChatHistory_NilReaderReturnsNote(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
 	taskID := newChatHistoryTask(t, true)
-	withSlackHistory(t, nil)
+	withChatHistory(t, nil)
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
@@ -206,7 +231,7 @@ func TestGetChatHistory_RejectsForgedTaskID(t *testing.T) {
 	}
 	taskID := newChatHistoryTask(t, true)
 	fake := &fakeChatHistoryReader{page: channel.HistoryPage{ChannelType: "slack"}}
-	withSlackHistory(t, fake)
+	withChatHistory(t, fake)
 
 	req := newRequest("GET", "/api/chat/history", nil)
 	req.Header.Set("X-Task-ID", taskID) // forged: no X-Actor-Source=task_token
@@ -240,7 +265,7 @@ func TestGetChatHistory_NonChatTask(t *testing.T) {
 		t.Skip("requires test database")
 	}
 	taskID := newChatHistoryTask(t, false) // task with no chat_session_id
-	withSlackHistory(t, &fakeChatHistoryReader{})
+	withChatHistory(t, &fakeChatHistoryReader{})
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))

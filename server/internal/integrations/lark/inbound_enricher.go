@@ -22,14 +22,15 @@ const larkMsgTypeMergeForward = "merge_forward"
 // visible "... (N more truncated)" marker.
 const defaultMaxForwardChildren = 100
 
-// DefaultRecentContextSize is the window the production wiring uses for
-// the group-context prefetch: the page_size of the single list call made
-// when a user @-mentions the Bot in a group. It is a FETCH budget, not a
-// guaranteed rendered count — the trigger message itself and any quoted
-// parent are filtered out of the result, so the <recent_context> block
-// usually renders one or two fewer lines. 10 keeps the agent's prompt
-// meaningfully contextual without bloating it or straining the inbound
-// ACK budget (one list call, page_size 10).
+// DefaultRecentContextSize is the historical window for the group-context
+// prefetch: the page_size of the single list call made when a user @-mentions
+// the Bot in a group. As of MUL-4166 the production wiring sets
+// RecentContextSize to 0 (prefetch disabled) — surrounding context is now
+// PULLED on demand via `multica chat history`, matching Slack. This constant is
+// retained for tests and for any deployment that opts the force-assembled
+// <recent_context> block back in. It is a FETCH budget, not a guaranteed
+// rendered count — the trigger message itself and any quoted parent are
+// filtered out of the result.
 const DefaultRecentContextSize = 10
 
 // Enricher expands an inbound message's body with context the user
@@ -55,9 +56,10 @@ type InboundEnricherConfig struct {
 	// RecentContextSize caps how many surrounding group messages the
 	// enricher prefetches and inlines as a <recent_context> block when a
 	// user @-mentions the Bot in a group. <=0 DISABLES the prefetch
-	// entirely (only explicitly-attached quote/forward context is used);
-	// the production wiring sets DefaultRecentContextSize. Values above
-	// Lark's 50-per-page cap are clamped by the client.
+	// entirely (only explicitly-attached quote/forward context is used).
+	// The production wiring sets 0 as of MUL-4166 — recent context is pulled
+	// on demand via `multica chat history` instead. Values above Lark's
+	// 50-per-page cap are clamped by the client.
 	RecentContextSize int
 	// Logger receives best-effort warnings about fetch failures. Nil
 	// uses slog.Default().
@@ -439,6 +441,16 @@ func (e *inboundEnricher) renderForwardedItems(items []LarkMessage, forwardID st
 // context, not a fresh trigger, so passing empty bot identifiers leaves
 // every @-mention rendered as a readable @name.
 func (e *inboundEnricher) flattenMessage(m LarkMessage) string {
+	return flattenLarkMessage(m)
+}
+
+// flattenLarkMessage turns one fetched IM message into plain text: a deleted
+// marker, else structural flatten by msg_type followed by @_user_N placeholder
+// resolution against the message's own mentions. Empty bot identifiers leave
+// every @-mention rendered as a readable @name — a quoted / forwarded /
+// historical message is context, not a fresh trigger, so nothing is stripped.
+// Shared by the inbound enricher and the on-demand history reader.
+func flattenLarkMessage(m LarkMessage) string {
 	if m.Deleted {
 		return "[deleted message]"
 	}

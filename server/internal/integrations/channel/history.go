@@ -1,5 +1,28 @@
 package channel
 
+import "errors"
+
+// ErrNoChannelSession reports that a chat session has no channel binding a
+// history reader can serve — a web-only session, or one bound to a platform
+// with no reader wired. Readers and the channel-type dispatcher return it so
+// the unified `multica chat history` / `multica chat thread` commands answer
+// gracefully (an empty read with an explanatory note) rather than failing.
+var ErrNoChannelSession = errors.New("channel: session has no channel binding")
+
+// HistoryUnavailableError marks a bound channel whose history cannot be read
+// for a known, NON-transient reason — most importantly a missing platform
+// permission (e.g. the connected Feishu app lacks the scope to read group
+// messages). The unified commands surface Reason as an actionable note with a
+// 200, NOT a retryable 5xx: retrying a permission failure just fails again, and
+// a generic 5xx makes the agent misreport it as a transient platform outage.
+type HistoryUnavailableError struct {
+	// Reason is the agent-facing, actionable explanation (what is missing and
+	// how to fix it). It is returned verbatim as the response note.
+	Reason string
+}
+
+func (e *HistoryUnavailableError) Error() string { return e.Reason }
+
 // This file defines the channel-agnostic vocabulary for ON-DEMAND history
 // reads. History is PULLED by the agent through two unified CLI commands —
 // `multica chat history` (the channel OVERVIEW: top-level messages + thread
