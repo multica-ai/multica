@@ -1,4 +1,21 @@
 {
+  "avatar_upload": {
+    "change": "アバターを変更",
+    "remove": "削除",
+    "select_image": "画像ファイルを選択してください。",
+    "updated": "アバターを更新しました",
+    "failed": "アバターのアップロードに失敗しました"
+  },
+  "avatar_crop": {
+    "title": "アバターを調整",
+    "hint": "ドラッグで位置を調整し、スライダーで拡大・縮小します。",
+    "zoom": "ズーム",
+    "cancel": "キャンセル",
+    "apply": "保存",
+    "uploading": "アップロード中…",
+    "loading": "読み込み中…",
+    "load_failed": "画像を読み込めませんでした"
+  },
   "save": "保存",
   "cancel": "キャンセル",
   "delete": "削除",

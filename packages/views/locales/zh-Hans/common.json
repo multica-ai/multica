@@ -1,4 +1,21 @@
 {
+  "avatar_upload": {
+    "change": "更换头像",
+    "remove": "移除",
+    "select_image": "请选择一张图片文件。",
+    "updated": "头像已更新",
+    "failed": "头像上传失败"
+  },
+  "avatar_crop": {
+    "title": "调整头像",
+    "hint": "拖动可调整位置，滑块用于缩放。",
+    "zoom": "缩放",
+    "cancel": "取消",
+    "apply": "保存",
+    "uploading": "上传中…",
+    "loading": "加载中…",
+    "load_failed": "图片加载失败"
+  },
   "save": "保存",
   "cancel": "取消",
   "delete": "删除",
