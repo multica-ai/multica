@@ -142,7 +142,7 @@ export function ChatWindow() {
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
         />
       ) : (
-        <EmptyState agent={c.activeAgent} onPickPrompt={(text) => c.handleSend(text)} />
+        <EmptyState agent={c.activeAgent} />
       )}
 
       {c.noAgent ? (

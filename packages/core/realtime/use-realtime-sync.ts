@@ -1103,6 +1103,11 @@ export function useRealtimeSync(
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
+      // FailTask persisted a failure chat_message, so the thread list's
+      // last_message / unread_count / sort order changed too. Mirror the
+      // chat:done (success) path and refresh the sessions list — otherwise the
+      // left rail keeps a stale preview until the next full refetch.
+      invalidateSessionLists();
     });
 
     const unsubChatSessionRead = ws.on("chat:session_read", (p) => {

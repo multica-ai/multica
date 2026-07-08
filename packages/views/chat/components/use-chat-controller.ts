@@ -179,7 +179,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
+    chatSessionsOptions(wsId),
+  );
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
@@ -537,6 +539,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     agents,
     availableAgents,
     sessions,
+    sessionsLoaded,
     activeSessionId,
     selectedAgentId,
     currentSession,
