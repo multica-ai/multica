@@ -17,21 +17,50 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var spaceKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
+var nonSpaceKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
 
-// generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
-// Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
-func generateIssuePrefix(name string) string {
-	letters := nonAlpha.ReplaceAllString(name, "")
-	if len(letters) == 0 {
-		return "WS"
+// reservedSpaceKeys blocks keys that would collide with static routes under
+// /space/{key} (e.g. the create-space page at /space/new). Mirrors why
+// "workspaces" is a reserved workspace slug for /workspaces/new.
+var reservedSpaceKeys = map[string]struct{}{
+	"NEW": {},
+}
+
+// defaultSpaceKeyFromSlug derives the default space key by normalizing the
+// slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
+func defaultSpaceKeyFromSlug(slug string) string {
+	key := normalizeSpaceKey(slug)
+	if key == "" {
+		return "T"
 	}
-	letters = strings.ToUpper(letters)
-	if len(letters) > 3 {
-		letters = letters[:3]
+	return key
+}
+
+// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 131 (minus
+// the 'SPACE' fallback, which callers decide): uppercase, strip characters
+// outside [A-Z0-9], truncate to 7, and prefix digit-leading keys with 'T'.
+func normalizeSpaceKey(raw string) string {
+	key := nonSpaceKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(raw)), "")
+	if len(key) > 7 {
+		key = key[:7]
 	}
-	return letters
+	if key != "" && key[0] >= '0' && key[0] <= '9' {
+		key = "T" + key
+		if len(key) > 7 {
+			key = key[:7]
+		}
+	}
+	return key
+}
+
+func validSpaceKey(key string) bool {
+	if !spaceKeyPattern.MatchString(key) {
+		return false
+	}
+	_, reserved := reservedSpaceKeys[key]
+	return !reserved
 }
 
 type WorkspaceResponse struct {
@@ -132,11 +161,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateWorkspaceRequest struct {
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	IssuePrefix *string `json:"issue_prefix"`
+	Name            string  `json:"name"`
+	Slug            string  `json:"slug"`
+	Description     *string `json:"description"`
+	Context         *string `json:"context"`
+	DefaultSpaceKey *string `json:"default_space_key"`
+	IssuePrefix     *string `json:"issue_prefix"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -183,9 +213,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	issuePrefix := generateIssuePrefix(req.Name)
+	defaultSpaceKey := defaultSpaceKeyFromSlug(req.Slug)
 	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
-		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		defaultSpaceKey = normalizeSpaceKey(*req.IssuePrefix)
+	}
+	if req.DefaultSpaceKey != nil && strings.TrimSpace(*req.DefaultSpaceKey) != "" {
+		defaultSpaceKey = normalizeSpaceKey(*req.DefaultSpaceKey)
+	}
+	if !validSpaceKey(defaultSpaceKey) {
+		writeError(w, http.StatusBadRequest, "default_space_key must match ^[A-Z][A-Z0-9]{0,6}$")
+		return
 	}
 
 	qtx := h.Queries.WithTx(tx)
@@ -194,7 +231,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Slug:        req.Slug,
 		Description: ptrToText(req.Description),
 		Context:     ptrToText(req.Context),
-		IssuePrefix: issuePrefix,
+		IssuePrefix: defaultSpaceKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -212,6 +249,32 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add owner: "+err.Error())
+		return
+	}
+
+	space, err := qtx.CreateWorkspaceSpace(r.Context(), db.CreateWorkspaceSpaceParams{
+		WorkspaceID: ws.ID,
+		Name:        ws.Name,
+		Key:         defaultSpaceKey,
+		Description: pgtype.Text{},
+		// No icon on purpose: the default space renders SpaceIcon's colored
+		// fallback block, which is the designated landing spot for the
+		// planned per-space colors (see SpaceIcon).
+		Icon:      pgtype.Text{},
+		CreatedBy: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create default space: "+err.Error())
+		return
+	}
+	if err := qtx.AddWorkspaceSpaceMember(r.Context(), db.AddWorkspaceSpaceMemberParams{
+		WorkspaceID: ws.ID,
+		SpaceID:     space.ID,
+		UserID:      parseUUID(userID),
+		Role:        "lead",
+		SortOrder:   1,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add default space member: "+err.Error())
 		return
 	}
 
@@ -333,17 +396,61 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		params.Repos = reposJSON
 	}
+	var updateDefaultSpaceKey bool
 	if req.IssuePrefix != nil {
-		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		prefix := normalizeSpaceKey(*req.IssuePrefix)
 		if prefix != "" {
+			if !validSpaceKey(prefix) {
+				writeError(w, http.StatusBadRequest, "issue_prefix must match ^[A-Z][A-Z0-9]{0,6}$")
+				return
+			}
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
+			updateDefaultSpaceKey = true
 		}
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
-	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
+	var ws db.Workspace
+	var err error
+	if updateDefaultSpaceKey {
+		tx, txErr := h.TxStarter.Begin(r.Context())
+		if txErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+
+		defaultSpace, spaceErr := qtx.GetDefaultWorkspaceSpace(r.Context(), idUUID)
+		if spaceErr != nil {
+			writeError(w, http.StatusBadRequest, "default space not found")
+			return
+		}
+		if _, spaceErr := updateWorkspaceSpaceLocked(r.Context(), qtx, db.UpdateWorkspaceSpaceParams{
+			ID:          defaultSpace.ID,
+			WorkspaceID: idUUID,
+			Key:         params.IssuePrefix,
+		}); spaceErr != nil {
+			if spaceErr == errSpaceKeyFrozen {
+				writeError(w, http.StatusConflict, "space identifier cannot be changed after issues have been created")
+				return
+			}
+			if isUniqueViolation(spaceErr) || isCheckViolation(spaceErr) {
+				writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to update default space key")
+			return
+		}
+		ws, err = qtx.UpdateWorkspace(r.Context(), params)
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+	} else {
+		ws, err = h.Queries.UpdateWorkspace(r.Context(), params)
+	}
 	if err != nil {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
@@ -498,7 +605,18 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
+	// Member creation + default-space join are atomic: the sidebar shows
+	// joined spaces only, so a member outside every space would see an empty
+	// Spaces section and issue creation would lose its per-user default.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create member")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	member, err := qtx.CreateMember(r.Context(), db.CreateMemberParams{
 		WorkspaceID: requester.WorkspaceID,
 		UserID:      user.ID,
 		Role:        role,
@@ -509,6 +627,25 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Warn("create member failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
+		writeError(w, http.StatusInternalServerError, "failed to create member")
+		return
+	}
+	// Hard failure (rolls the member insert back) — a missing default space is
+	// data corruption, and silently skipping would mint a space-less member.
+	defSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), requester.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
+		return
+	}
+	spaceRole := "member"
+	if role == "owner" || role == "admin" {
+		spaceRole = "lead"
+	}
+	if _, err := addSpaceMember(r.Context(), qtx, requester.WorkspaceID, defSpace.ID, user.ID, spaceRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default space")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}

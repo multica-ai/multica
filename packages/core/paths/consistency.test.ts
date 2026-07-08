@@ -19,6 +19,7 @@ describe("paths.workspace() shape", () => {
         "root",
         "usage",
         "issues",
+        "spaceNew",
         "projects",
         "autopilots",
         "agents",

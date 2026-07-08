@@ -64,9 +64,10 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	// Same-workspace parent — must be accepted and threaded through.
 	var localParentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number, space_id)
 		VALUES ($1, 'quick-create parent (local)', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&localParentID); err != nil {
 		t.Fatalf("create local parent issue: %v", err)
@@ -94,10 +95,19 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
 	})
+	// The foreign parent issue below resolves space_id from this workspace's
+	// default Space; a freshly-created workspace has none, so seed it here.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Default', 'QCF', 0, $2)
+	`, foreignWorkspaceID, foreignUserID); err != nil {
+		t.Fatalf("create foreign workspace_space: %v", err)
+	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number, space_id)
 		VALUES ($1, 'quick-create parent (foreign)', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, foreignWorkspaceID, foreignUserID).Scan(&foreignParentID); err != nil {
 		t.Fatalf("create foreign parent issue: %v", err)

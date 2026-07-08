@@ -364,6 +364,7 @@ func init() {
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("space", "", "Filter by Space UUID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
@@ -391,6 +392,7 @@ func init() {
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
+	issueCreateCmd.Flags().String("space", "", "Space UUID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
@@ -411,6 +413,7 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().String("space", "", "Move the issue to this Space (UUID or key); it is renumbered and the old identifier keeps resolving")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -537,6 +540,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		params.Set("project_id", project.ID)
+	}
+	if v, _ := cmd.Flags().GetString("space"); v != "" {
+		params.Set("space_id", v)
 	}
 	if mdFlags, _ := cmd.Flags().GetStringSlice("metadata"); len(mdFlags) > 0 {
 		filter, err := buildMetadataFilterQueryParam(mdFlags)
@@ -973,6 +979,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["project_id"] = project.ID
 	}
+	if v, _ := cmd.Flags().GetString("space"); v != "" {
+		body["space_id"] = v
+	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
 		if stage < 1 {
@@ -1151,6 +1160,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
+	}
+	if cmd.Flags().Changed("space") {
+		v, _ := cmd.Flags().GetString("space")
+		if v == "" {
+			return fmt.Errorf("--space requires a Space UUID or key")
+		}
+		spaceID, err := resolveSpaceRef(ctx, client, v)
+		if err != nil {
+			return err
+		}
+		body["space_id"] = spaceID
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")

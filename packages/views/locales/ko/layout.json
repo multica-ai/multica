@@ -3,6 +3,7 @@
     "inbox": "인박스",
     "my_issues": "내 이슈",
     "issues": "이슈",
+    "spaces": "Space",
     "projects": "프로젝트",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
@@ -10,7 +11,8 @@
     "usage": "사용량",
     "runtimes": "런타임",
     "skills": "스킬",
-    "settings": "설정"
+    "settings": "설정",
+    "more": "더 보기"
   },
   "help": {
     "trigger": "도움말",
@@ -42,6 +44,8 @@
       "title": "Discord 참여하기",
       "description": "팀과 다른 사용자들과 교류해 보세요.",
       "dismiss": "닫기"
-    }
+    },
+    "new_space": "새 Space",
+    "spaces_empty": "첫 Space 만들기"
   }
 }

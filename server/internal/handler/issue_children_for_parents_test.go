@@ -188,17 +188,26 @@ func TestListChildrenByParents_IgnoresForeignWorkspaceParents(t *testing.T) {
 			`DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
 	})
 
+	// The foreign workspace needs its own default Space to satisfy the NOT NULL
+	// space_id constraint on the issues seeded below.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default', 'FCW', $2)
+	`, foreignWorkspaceID, testUserID); err != nil {
+		t.Fatalf("setup: seed foreign default space: %v", err)
+	}
+
 	var foreignParentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, number, title, status, position, creator_type, creator_id)
-		VALUES ($1, 1, 'foreign parent', 'todo', 1, 'member', $2)
+		INSERT INTO issue (workspace_id, number, title, status, position, creator_type, creator_id, space_id)
+		VALUES ($1, 1, 'foreign parent', 'todo', 1, 'member', $2, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, foreignWorkspaceID, testUserID).Scan(&foreignParentID); err != nil {
 		t.Fatalf("setup: insert foreign parent: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO issue (workspace_id, number, title, status, position, parent_issue_id, creator_type, creator_id)
-		VALUES ($1, 2, 'foreign child', 'todo', 2, $2, 'member', $3)
+		INSERT INTO issue (workspace_id, number, title, status, position, parent_issue_id, creator_type, creator_id, space_id)
+		VALUES ($1, 2, 'foreign child', 'todo', 2, $2, 'member', $3, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 	`, foreignWorkspaceID, foreignParentID, testUserID); err != nil {
 		t.Fatalf("setup: insert foreign child: %v", err)
 	}
@@ -246,8 +255,8 @@ func createChildIssue(t *testing.T, title, status, parentID string) IssueRespons
 // newScrambledChildren creates a parent plus four children whose issue numbers
 // ascend in creation order while their position values are set in the opposite
 // order and their statuses are mixed. This reproduces the real-world layout:
-// NextTopPosition assigns MIN(position)-1 per (workspace, status), so newer
-// children get ever-smaller positions and different statuses draw from
+// NextTopPositionForSpace assigns MIN(position)-1 per (workspace, space, status),
+// so newer children get ever-smaller positions and different statuses draw from
 // different pools. A position-ordered query would interleave them; only a
 // number-ordered query returns them in creation order. Returns the parent and
 // the children in creation order (ascending number).

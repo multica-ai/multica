@@ -12,6 +12,11 @@ import {
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  ListSpacesResponseSchema,
+  SpaceSchema,
+  EMPTY_LIST_SPACES_RESPONSE,
+  SearchProjectsResponseSchema,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -507,5 +512,125 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/spaces" };
+  const baseSpace = {
+    id: "space-1",
+    workspace_id: "ws-1",
+    name: "Frontend",
+    key: "FE",
+    description: "",
+    icon: null,
+    issue_counter: 3,
+    archived_at: null,
+    created_by: "user-1",
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+  };
+
+  it("parses a well-formed space and tolerates extra fields", () => {
+    const parsed = SpaceSchema.parse({ ...baseSpace, future_field: "ignored" });
+    expect(parsed.id).toBe("space-1");
+    expect(parsed.key).toBe("FE");
+  });
+
+  it("defaults scalar fields when an older backend omits them", () => {
+    const parsed = SpaceSchema.parse({ id: "space-2", workspace_id: "ws-1" });
+    expect(parsed.name).toBe("");
+    expect(parsed.key).toBe("");
+    expect(parsed.description).toBe("");
+    expect(parsed.icon).toBeNull();
+    expect(parsed.issue_counter).toBe(0);
+    expect(parsed.archived_at).toBeNull();
+  });
+
+  it("parses a list response and coerces total", () => {
+    const parsed = parseWithFallback(
+      { spaces: [baseSpace], total: 1 },
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.spaces).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+  });
+
+  it("defaults spaces and total when the body omits them", () => {
+    const parsed = parseWithFallback(
+      {},
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.spaces).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("falls back to empty when a space row has a wrong-typed id", () => {
+    expect(
+      parseWithFallback(
+        { spaces: [{ ...baseSpace, id: 42 }], total: 1 },
+        ListSpacesResponseSchema,
+        EMPTY_LIST_SPACES_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
+  });
+
+  it("falls back to empty for a non-object body", () => {
+    expect(
+      parseWithFallback(null, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
+  });
+});
+
+describe("ProjectSchema space_ids drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/projects/search" };
+  const baseProject = {
+    id: "proj-1",
+    workspace_id: "ws-1",
+    title: "Website",
+    description: null,
+    icon: null,
+    status: "active",
+    priority: "medium",
+    lead_type: null,
+    lead_id: null,
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+    match_source: "title",
+  };
+
+  it("preserves a populated space_ids array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, space_ids: ["space-1", "space-2"] }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual(["space-1", "space-2"]);
+  });
+
+  it("defaults space_ids to an empty array when the field is missing", () => {
+    const parsed = parseWithFallback(
+      { projects: [baseProject], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
+  });
+
+  it("coerces a null space_ids to an empty array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, space_ids: null }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
   });
 });

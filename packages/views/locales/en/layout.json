@@ -3,6 +3,7 @@
     "inbox": "Inbox",
     "my_issues": "My Issues",
     "issues": "Issues",
+    "spaces": "Spaces",
     "projects": "Projects",
     "autopilots": "Autopilot",
     "agents": "Agents",
@@ -10,7 +11,8 @@
     "usage": "Usage",
     "runtimes": "Runtimes",
     "skills": "Skills",
-    "settings": "Settings"
+    "settings": "Settings",
+    "more": "More"
   },
   "help": {
     "trigger": "Help",
@@ -40,8 +42,10 @@
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Join our Discord",
-      "description": "Chat with the team and other builders.",
+      "description": "Chat with the space and other builders.",
       "dismiss": "Dismiss"
-    }
+    },
+    "new_space": "New space",
+    "spaces_empty": "Create your first space"
   }
 }

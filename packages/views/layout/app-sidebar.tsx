@@ -12,6 +12,7 @@ import {
   useSensor,
   useSensors,
   closestCenter,
+  MeasuringStrategy,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
@@ -48,6 +49,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -77,6 +79,11 @@ import { useConfigStore } from "@multica/core/config";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
+import { mySpaceListOptions } from "@multica/core/spaces/queries";
+import { useUpdateSpaceMembership } from "@multica/core/spaces/mutations";
+import { useSidebarStore } from "@multica/core/layout/sidebar-store";
+import { SpaceIcon } from "../spaces/components/space-icon";
+import type { Space } from "@multica/core/types";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
@@ -109,7 +116,6 @@ const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>>
 type NavKey =
   | "inbox"
   | "myIssues"
-  | "issues"
   | "projects"
   | "autopilots"
   | "agents"
@@ -123,7 +129,7 @@ type NavKey =
 type NavLabelKey =
   | "inbox"
   | "my_issues"
-  | "issues"
+  | "spaces"
   | "projects"
   | "autopilots"
   | "agents"
@@ -133,30 +139,171 @@ type NavLabelKey =
   | "skills"
   | "settings";
 
+// Re-measure droppable rects during a space drag: groups collapse on drag
+// start, so the rects cached at gesture start are immediately stale.
+const spaceDragMeasuring = { droppable: { strategy: MeasuringStrategy.Always } };
+
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "inbox", labelKey: "inbox", icon: Inbox },
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
+// The workspace-wide issues list left the nav with the space rollout: issues
+// live under their space (Spaces section below) or under My Issues. Space
+// management lives on each space's detail page (the /spaces overview was cut
+// from v1). Autopilots are space-scoped like issues (space_id NOT NULL,
+// their output lands in their space), so they live under each space below —
+// no global entry, same rationale as the removed workspace-wide Issues.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "issues", labelKey: "issues", icon: ListTodo },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
-  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
-const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+// Rendered as plain rows alongside workspaceNav (see the Workspace group
+// below) — used to sit behind a "More" dropdown, now always visible.
+const moreNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "skills", labelKey: "skills", icon: BookOpenText },
-  { key: "settings", labelKey: "settings", icon: Settings },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
+  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
 ];
+
+// Per-space children under the Spaces group. Hrefs are built per space key.
+const spaceChildNav = [
+  { pathKey: "spaceIssues", labelKey: "issues", icon: ListTodo },
+  { pathKey: "spaceProjects", labelKey: "projects", icon: FolderKanban },
+  { pathKey: "spaceAutopilots", labelKey: "autopilots", icon: Zap },
+] as const;
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;
   return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+}
+
+// Controlled collapse state persisted per workspace (sidebar-store). Absent
+// key = expanded, so new groups (and fresh workspaces) start open.
+function useGroupCollapse(key: string) {
+  const collapsed = useSidebarStore((s) => s.collapsed[key] === true);
+  const setGroupCollapsed = useSidebarStore((s) => s.setGroupCollapsed);
+  const onOpenChange = useCallback(
+    (open: boolean) => setGroupCollapsed(key, !open),
+    [key, setGroupCollapsed],
+  );
+  return { open: !collapsed, onOpenChange };
+}
+
+// One space's collapsible nav group inside the Spaces section: draggable via
+// the same dnd-kit setup the Pinned section uses (PointerSensor distance 5,
+// so plain clicks still toggle the collapse), children are the space's
+// surfaces addressed by space key.
+function SortableSpaceGroup({
+  space,
+  pathname,
+  buildHref,
+  detailHref,
+  forceCollapsed,
+}: {
+  space: Space;
+  pathname: string;
+  buildHref: (pathKey: (typeof spaceChildNav)[number]["pathKey"], spaceKey: string) => string;
+  detailHref: string;
+  /** True while any space drag is in flight: every group renders collapsed so
+      all sortable items are the same height — variable-height blocks make
+      dnd-kit's rect math (and thus the whole gesture) feel broken. */
+  forceCollapsed: boolean;
+}) {
+  const { t } = useT("layout");
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: space.id });
+  const collapse = useGroupCollapse(`space:${space.id}`);
+  // Same trap the pinned rows hit: the click that ends a drag would follow
+  // the row's link and reload the page. Mirror SortablePinItem's guard —
+  // remember the drag and swallow exactly that one click.
+  const wasDragged = useRef(false);
+  useEffect(() => {
+    if (isDragging) wasDragged.current = true;
+  }, [isDragging]);
+  // The row itself is the space's home (detail page). It stays highlighted
+  // anywhere inside the space (issues/projects/autopilots too) so the sidebar
+  // always shows which space you're in.
+  const isSpaceActive = isNavActive(pathname, detailHref);
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "opacity-30")}
+    >
+      <Collapsible open={collapse.open && !forceCollapsed} onOpenChange={collapse.onOpenChange}>
+        {/* The whole row navigates to the space page (and expands the group —
+            navigation is context). The chevron sits right after the name like
+            every other group label — always visible, secondary color, primary
+            only when hovered (the one independently-clickable element: it
+            toggles the collapse without navigating). Drag listeners live on
+            the row; the 5px activation distance keeps clicks working. */}
+        <div {...attributes} {...listeners}>
+          <SidebarGroupLabel
+            render={<AppLink href={detailHref} draggable={false} />}
+            onClick={(event) => {
+              if (wasDragged.current) {
+                wasDragged.current = false;
+                event.preventDefault();
+                return;
+              }
+              collapse.onOpenChange(true);
+            }}
+            className={cn(
+              "w-full cursor-pointer gap-1.5 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+              isSpaceActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+              isDragging && "pointer-events-none",
+            )}
+          >
+            <SpaceIcon space={space} className="size-3.5" />
+            <span className="truncate">{space.name}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                // Toggle only — never follow the surrounding link.
+                e.preventDefault();
+                e.stopPropagation();
+                collapse.onOpenChange(!collapse.open);
+              }}
+              className="-ml-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn(
+                  "!size-3 stroke-[2.5] transition-transform duration-200",
+                  collapse.open && "rotate-90",
+                )}
+              />
+            </button>
+          </SidebarGroupLabel>
+        </div>
+        <CollapsibleContent>
+          {/* pt-0.5 breathes the children away from their space row; the
+              group container's gap-0.5 covers the space below. pl-5 lands
+              child icons exactly under the space name's text start. */}
+          <SidebarMenu className="gap-0.5 pt-0.5 pl-5">
+            {spaceChildNav.map((child) => {
+              const href = buildHref(child.pathKey, space.key);
+              const isActive = isNavActive(pathname, href);
+              return (
+                <SidebarMenuItem key={child.pathKey}>
+                  <SidebarMenuButton
+                    isActive={isActive}
+                    render={<AppLink href={href} />}
+                    className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                  >
+                    <child.icon />
+                    <span>{t(($) => $.nav[child.labelKey])}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
 }
 
 /**
@@ -387,6 +534,73 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  // Persisted collapse state per group; per-space groups manage their own
+  // inside SortableSpaceGroup.
+  const pinnedCollapse = useGroupCollapse("pinned");
+  const workspaceCollapse = useGroupCollapse("workspace");
+  const spacesCollapse = useGroupCollapse("spaces");
+
+  // Spaces section: only spaces the user joined, in their personal order.
+  const { data: mySpaces = [] } = useQuery({
+    ...mySpaceListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const updateSpaceMembership = useUpdateSpaceMembership();
+  // Local presentational copy for drop-animation stability — same trick as
+  // the pinned rows below: follow TQ at rest, freeze during a drag so the
+  // optimistic cache re-sort can't reorder the DOM while dnd-kit's drop
+  // animation is still interpolating (that's what made drops snap back).
+  const [localSpaces, setLocalSpaces] = useState(mySpaces);
+  const [localSpacesWsId, setLocalSpacesWsId] = useState<string | null>(wsId ?? null);
+  const isSpaceDraggingRef = useRef(false);
+  const [spaceDragActive, setSpaceDragActive] = useState(false);
+  useEffect(() => {
+    if (!isSpaceDraggingRef.current) {
+      setLocalSpaces(mySpaces);
+    }
+  }, [mySpaces]);
+  useEffect(() => {
+    setLocalSpacesWsId(wsId ?? null);
+  }, [wsId]);
+  const visibleSpaces = localSpacesWsId === (wsId ?? null) ? localSpaces : [];
+  const handleSpaceDragStart = useCallback(() => {
+    isSpaceDraggingRef.current = true;
+    setSpaceDragActive(true);
+  }, []);
+  const handleSpaceDragCancel = useCallback(() => {
+    isSpaceDraggingRef.current = false;
+    setSpaceDragActive(false);
+  }, []);
+  // Fractional reorder (Linear-style): the dragged space takes the midpoint
+  // of its new neighbors, so a drag is a single-row membership update. The
+  // local array is rearranged first so the dropped row lands exactly where
+  // the animation ends.
+  const handleSpaceDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      isSpaceDraggingRef.current = false;
+      setSpaceDragActive(false);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = localSpaces.findIndex((t) => t.id === active.id);
+      const newIndex = localSpaces.findIndex((t) => t.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const reordered = arrayMove(localSpaces, oldIndex, newIndex);
+      setLocalSpaces(reordered);
+      const prev = reordered[newIndex - 1];
+      const next = reordered[newIndex + 1];
+      const sortOrder =
+        prev && next
+          ? (prev.sort_order + next.sort_order) / 2
+          : prev
+            ? prev.sort_order + 1
+            : next
+              ? next.sort_order - 1
+              : 1;
+      updateSpaceMembership.mutate({ id: String(active.id), sort_order: sortOrder });
+    },
+    [localSpaces, updateSpaceMembership],
+  );
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
   const getPinHref = useCallback(
@@ -460,6 +674,24 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
+  // Route-derived seed for the create-issue flow: whichever route the user is
+  // standing on should default the modal, not just a page's own local "+"
+  // button. Shared by the global "C" shortcut and the sidebar's "New Issue"
+  // button below — neither goes through a page's `scope`-aware create
+  // handler, so without this they always fell through to the personal
+  // default space regardless of which space's pages the user was browsing.
+  const projectRouteMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  const spaceRouteMatch = pathname.match(/^\/[^/]+\/space\/([^/]+)/);
+  const routeSpaceKey = spaceRouteMatch?.[1];
+  const routeSpace = routeSpaceKey
+    ? mySpaces.find((s) => s.key.toLowerCase() === routeSpaceKey.toLowerCase())
+    : undefined;
+  const routeCreateDefaults = projectRouteMatch
+    ? { project_id: projectRouteMatch[1] }
+    : routeSpace
+      ? { space_id: routeSpace.id }
+      : undefined;
+
   // Global "C" shortcut: opens whichever create mode the user landed on last
   // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
   // inside both modal footers so users can flip without remembering which
@@ -477,16 +709,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isEditable) return;
       if (useModalStore.getState().modal) return;
       e.preventDefault();
-      // Auto-fill project when on a project detail page. The manual form
-      // consumes `project_id`; quick-create also honours it as a seed for
-      // its project picker, so passing it through is safe for both modes.
-      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-      openCreateIssueWithPreference(data);
+      openCreateIssueWithPreference(routeCreateDefaults);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [pathname]);
+  }, [routeCreateDefaults]);
 
   return (
       <Sidebar variant="inset">
@@ -616,6 +843,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
+                    <DropdownMenuItem render={<AppLink href={p.settings()} />}>
+                      <Settings className="h-3.5 w-3.5" />
+                      {t(($) => $.nav.settings)}
+                    </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
                       {t(($) => $.sidebar.log_out)}
@@ -634,7 +865,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => openCreateIssueWithPreference()}
+                onClick={() => openCreateIssueWithPreference(routeCreateDefaults)}
               >
                 <span className="relative">
                   <SquarePen />
@@ -649,7 +880,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
         {/* Navigation */}
         <SidebarContent ref={sidebarScrollRef} style={sidebarFadeStyle}>
-          <SidebarGroup>
+          <SidebarGroup className="py-1">
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {personalNav.map((item) => {
@@ -678,8 +909,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           {visiblePinned.length > 0 && (
-            <Collapsible defaultOpen>
-              <SidebarGroup className="group/pinned">
+            <Collapsible open={pinnedCollapse.open} onOpenChange={pinnedCollapse.onOpenChange}>
+              <SidebarGroup className="group/pinned py-1">
                 <SidebarGroupLabel
                   render={<CollapsibleTrigger />}
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
@@ -712,61 +943,137 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </Collapsible>
           )}
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {/* Workspace — shared resources. */}
+          <Collapsible open={workspaceCollapse.open} onOpenChange={workspaceCollapse.onOpenChange}>
+            <SidebarGroup className="group/ws py-1">
+              <SidebarGroupLabel
+                render={<CollapsibleTrigger />}
+                className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+              >
+                <span>{t(($) => $.sidebar.workspace_group)}</span>
+                <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+              </SidebarGroupLabel>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu className="gap-0.5">
+                    {[...workspaceNav, ...moreNav].map((item) => {
+                      const href = p[item.key]();
+                      const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
+                      return (
+                        <SidebarMenuItem key={item.key}>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            render={<AppLink href={href} />}
+                            className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                          >
+                            <item.icon />
+                            <span>{t(($) => $.nav[item.labelKey])}</span>
+                            {item.key === "runtimes" && hasRuntimeUpdates && (
+                              <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                            )}
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {configureNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+          {/* Spaces — joined spaces only, in the user's personal order.
+              Drag a space header to reorder; the first space doubles as the
+              issue-creation default. Always rendered: a user with no joined
+              spaces gets an empty-state row (join/create) instead of losing
+              the section — and with it every create/browse entry point. */}
+          <Collapsible open={spacesCollapse.open} onOpenChange={spacesCollapse.onOpenChange}>
+              <SidebarGroup className="group/spaces relative py-1">
+                {/* Rendered before the label so the label can react to it via
+                    peer-hover (CSS peer only looks at *earlier* siblings).
+                    Absolute positioning means this render-order swap doesn't
+                    move it visually — it still paints above the label. */}
+                {/* Hover-revealed, secondary until hovered itself — mirrors
+                    the pinned-count affordance. Navigates to the create-space
+                    page directly; sized like the space-row chevron buttons. */}
+                {/* right-4 = group px-2 + label px-2, so the icon's right
+                    edge sits on the same inset line as row content; top-3
+                    centers the 16px button in the 32px label row (group
+                    py-1). */}
+                <SidebarGroupAction
+                  title={t(($) => $.sidebar.new_space)}
+                  className="peer/spaces-action top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/spaces:opacity-100 [&>svg]:size-3"
+                  onClick={() => push(p.spaceNew())}
+                >
+                  <Plus />
+                </SidebarGroupAction>
+                {/* The action overlaps this row's top-right corner, so its own
+                    hover steals the pointer from the label underneath and the
+                    label's plain hover: would drop out. peer-hover keeps the
+                    row background lit while the pointer is over the action;
+                    the action's own hover: still makes it visibly brighter on
+                    top of that. */}
+                <SidebarGroupLabel
+                  render={<CollapsibleTrigger />}
+                  className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground peer-hover/spaces-action:bg-sidebar-accent/70 peer-hover/spaces-action:text-sidebar-accent-foreground"
+                >
+                  <span>{t(($) => $.nav.spaces)}</span>
+                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+                </SidebarGroupLabel>
+                <CollapsibleContent>
+                  {/* pt-0.5 mirrors the space rows' own children breathing
+                      (py-0.5): space rows are row-styled, not plain content,
+                      so they need the same gap above as below. */}
+                  {/* gap-0.5 keeps a constant 2px rhythm between space
+                      blocks whether they're collapsed (row→row) or expanded
+                      (children→next row) — same spacing as SidebarMenu rows
+                      everywhere else. */}
+                  <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
+                    {mySpaces.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => push(p.spaceNew())}
+                        className="flex h-8 cursor-pointer items-center rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                       >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                        {t(($) => $.sidebar.spaces_empty)}
+                      </button>
+                    )}
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={spaceDragMeasuring} onDragStart={handleSpaceDragStart} onDragEnd={handleSpaceDragEnd} onDragCancel={handleSpaceDragCancel}>
+                      <SortableContext items={visibleSpaces.map((space) => space.id)} strategy={verticalListSortingStrategy}>
+                        {visibleSpaces.map((space) => (
+                          <SortableSpaceGroup
+                            key={space.id}
+                            forceCollapsed={spaceDragActive}
+                            space={space}
+                            pathname={pathname}
+                            buildHref={(pathKey, spaceKey) => p[pathKey](spaceKey)}
+                            detailHref={p.spaceDetail(space.key)}
+                          />
+                        ))}
+                      </SortableContext>
+                    </DndContext>
+                  </SidebarGroupContent>
+                </CollapsibleContent>
+              </SidebarGroup>
+            </Collapsible>
+
         </SidebarContent>
 
         <SidebarFooter className="p-2">
           <JoinDiscordCard />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-1">
+            {/* Settings lives as a footer icon next to Help — it's a
+                low-frequency destination that doesn't earn a nav row. */}
+            <AppLink
+              href={p.settings()}
+              aria-label={t(($) => $.nav.settings)}
+              title={t(($) => $.nav.settings)}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                isNavActive(pathname, p.settings()) && "bg-accent text-foreground",
+              )}
+            >
+              <Settings className="size-4" />
+            </AppLink>
             <HelpLauncher />
           </div>
         </SidebarFooter>

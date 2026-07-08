@@ -290,6 +290,9 @@ type AgentTaskResponse struct {
 	Agent              *TaskAgentData        `json:"agent,omitempty"`
 	ConnectedApps      []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
 	Repos              []RepoData            `json:"repos,omitempty"`
+	SpaceID            string                `json:"space_id,omitempty"`            // issue/autopilot/quick-create Space, when known
+	SpaceKey           string                `json:"space_key,omitempty"`           // Space issue namespace key, e.g. MUL
+	SpaceName          string                `json:"space_name,omitempty"`          // human-readable Space name
 	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief

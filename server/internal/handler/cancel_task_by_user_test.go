@@ -45,8 +45,9 @@ func createAutopilotRunOnlyTask(t *testing.T, agentID string) string {
 
 	var autopilotID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'cancel-runonly-ap', $2, 'run_only', 'member', $3)
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id, space_id)
+		VALUES ($1, 'cancel-runonly-ap', $2, 'run_only', 'member', $3,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, workspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("create autopilot: %v", err)
@@ -89,6 +90,15 @@ func createForeignWorkspaceAgent(t *testing.T) string {
 		t.Fatalf("create foreign workspace: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID) })
+
+	// The autopilot fixture resolves space_id from this workspace's default
+	// Space; a freshly-created workspace has none, so seed it here.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Default', 'FCW', 0, $2)
+	`, workspaceID, testUserID); err != nil {
+		t.Fatalf("create foreign workspace_space: %v", err)
+	}
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
@@ -256,8 +266,9 @@ func TestCancelTaskByUser_IssueTask_Succeeds(t *testing.T) {
 
 	var issueID, taskID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'cancel-byid-issue', 'todo', 'medium', $2, 'member', 92001, 0)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, space_id)
+		VALUES ($1, 'cancel-byid-issue', 'todo', 'medium', $2, 'member', 92001, 0,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

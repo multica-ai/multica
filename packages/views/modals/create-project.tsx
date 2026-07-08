@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { ChevronRight, FolderOpen, Maximize2, Minimize2, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
@@ -30,6 +30,9 @@ import {
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -50,6 +53,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
+import { SpaceMultiPicker } from "../spaces/components/space-picker";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -110,15 +114,23 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+export function CreateProjectModal({
+  onClose,
+  data,
+}: {
+  onClose: () => void;
+  /** `space_id`: the space the modal was opened from (e.g. a space's Projects
+   *  page) — pre-selects that space instead of the personal default. */
+  data?: Record<string, unknown> | null;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
-  const workspaceName = workspace?.name;
   const wsPaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const { getActorName } = useActorName();
   const projectStatusLabels = useProjectStatusLabels();
   const projectPriorityLabels = useProjectPriorityLabels();
@@ -133,6 +145,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
+  const [spaceIds, setSpaceIds] = useState<string[]>([]);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -222,13 +235,45 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
+  // Seed the default space exactly once, when spaces first load. Guarding only
+  // on `spaceIds.length` re-seeded the moment the user cleared the selection,
+  // fighting the deselection; the ref makes seeding a one-shot so clearing
+  // sticks.
+  const contextSpaceId = (data?.space_id as string) || undefined;
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
+  const seededDefaultSpaceRef = useRef(false);
+  useEffect(() => {
+    if (seededDefaultSpaceRef.current || spaces.length === 0) return;
+    seededDefaultSpaceRef.current = true;
+    if (spaceIds.length > 0) return;
+    // The space the modal was opened from wins (e.g. a space's Projects
+    // page); otherwise the same shared fallback as the issue/quick-create/
+    // autopilot forms: last space used, then my first space.
+    const defaultSpaceId = contextSpaceId ?? resolveCreationSpaceId(spaces, { lastSpaceId });
+    if (defaultSpaceId) setSpaceIds([defaultSpaceId]);
+  }, [spaceIds.length, spaces, contextSpaceId, lastSpaceId]);
+
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
+
+  // A project always keeps at least one space (server rule) — otherwise it
+  // would vanish from every space's Projects page. Single source for the
+  // inline hint, the disabled submit button, and the submit guard; moot
+  // while the workspace has no spaces loaded yet.
+  const spaceSelectionMissing = useMemo(
+    () => spaces.length > 0 && spaceIds.length === 0,
+    [spaces.length, spaceIds.length],
+  );
 
   const createProject = useCreateProject();
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (spaceSelectionMissing) {
+      toast.error(t(($) => $.create_project.space_required));
+      return;
+    }
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -266,9 +311,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
+        space_ids: spaceIds.length > 0 ? spaceIds : undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
+      // A project can span multiple spaces; the first selected one stands in
+      // as "primary" for the shared last-used memory.
+      if (spaceIds[0]) setLastSpaceId(spaceIds[0]);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
@@ -314,7 +363,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
+            {/* Owning spaces lead the breadcrumb — same slot as the issue
+                modal's space picker, multi-select since projects can span
+                spaces. */}
+            <SpaceMultiPicker
+              spaceIds={spaceIds}
+              onChange={setSpaceIds}
+              triggerRender={<PillButton />}
+              align="start"
+            />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
@@ -353,6 +410,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             </Tooltip>
           </div>
         </div>
+
+        {/* At-least-one-space nudge on its own line, aligned under the space
+            picker; the submit button disables on the same condition. */}
+        {spaceSelectionMissing && (
+          <div className="px-5 -mt-1 pb-1 text-[11px] text-destructive/80 shrink-0">
+            {t(($) => $.create_project.space_min_hint)}
+          </div>
+        )}
 
         <div className="px-5 pb-2 shrink-0">
           <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
@@ -794,7 +859,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!title.trim() || submitting}
+            disabled={!title.trim() || submitting || spaceSelectionMissing}
             className="shrink-0"
           >
             {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}

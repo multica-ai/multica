@@ -446,9 +446,10 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	// agent and enqueued a task.
 	var issueID, commentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, space_id)
 		VALUES ($1, 'cross-ws mention test', 'todo', 'medium', 'member', $2,
-		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create test issue: %v", err)
@@ -531,10 +532,11 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
-		                   assignee_type, assignee_id, number)
+		                   assignee_type, assignee_id, number, space_id)
 		VALUES ($1, 'on_comment private-agent gate test', 'todo', 'medium', 'member', $2,
 		        'agent', $3,
-		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue assigned to private agent: %v", err)

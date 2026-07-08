@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -51,6 +52,7 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
 	WorkspaceID    pgtype.UUID
+	SpaceID        pgtype.UUID
 	Title          string
 	Description    pgtype.Text
 	Status         string
@@ -82,8 +84,9 @@ type IssueCreateOpts struct {
 	// package to depend on handler-layer types. If nil, the service
 	// emits a minimal `{"issue_id": <uuid>}` payload — enough for cache
 	// invalidation, but front-ends that expect the full response shape
-	// must provide BroadcastPayload.
-	BroadcastPayload func(issue db.Issue, attachments []db.Attachment) map[string]any
+	// must provide BroadcastPayload. spaceKey is the resolved Space key so
+	// the callback can build the identifier without re-querying the Space.
+	BroadcastPayload func(issue db.Issue, attachments []db.Attachment, spaceKey string) map[string]any
 
 	// ActorID overrides the actor ID used for broadcast + analytics
 	// when it differs from the creator on the row. Agent-created issues
@@ -102,6 +105,18 @@ type IssueCreateOpts struct {
 	// daemon / lark / autopilot). Derived from middleware's client
 	// metadata at the handler layer.
 	Platform string
+
+	// BeforeCommit runs after the issue row has been inserted and before the
+	// create transaction commits. It is for same-transaction side effects that
+	// must be visible when EventIssueCreated fires.
+	BeforeCommit func(ctx context.Context, qtx *db.Queries, issue db.Issue) error
+
+	// PreCreate runs inside the create transaction before validation,
+	// numbering, and insert. It is for caller-specific guards whose locks
+	// must be held until the transaction commits (e.g. the autopilot
+	// recent-duplicate guard). Its error aborts the create and is
+	// propagated to the caller unwrapped.
+	PreCreate func(ctx context.Context, qtx *db.Queries) error
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -124,6 +139,36 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrSpaceNotFound signals that the requested or fallback Space does not exist
+// in the workspace. Callers translate this into 400.
+var ErrSpaceNotFound = errors.New("space not found in this workspace")
+
+// ErrSpaceArchived signals that the resolved Space exists but is archived and
+// cannot receive new work. Kept distinct from ErrSpaceNotFound so callers can
+// return a clear "space is archived" message instead of a misleading "not found".
+var ErrSpaceArchived = errors.New("space is archived")
+
+// ErrProjectSpaceAmbiguous signals that a Space was not specified for an issue
+// whose Project belongs to more than one Space, so no single Space can be
+// inferred. Callers translate this into a 400 that names the candidate Space
+// keys; matched via errors.Is against a *ProjectSpaceAmbiguousError.
+var ErrProjectSpaceAmbiguous = errors.New("project has multiple spaces; specify space_id")
+
+// ProjectSpaceAmbiguousError carries the candidate Space keys so the transport
+// layer can produce a guided message. It matches ErrProjectSpaceAmbiguous under
+// errors.Is.
+type ProjectSpaceAmbiguousError struct {
+	SpaceKeys []string
+}
+
+func (e *ProjectSpaceAmbiguousError) Error() string {
+	return fmt.Sprintf("project has multiple spaces (%s); specify space_id", strings.Join(e.SpaceKeys, ", "))
+}
+
+func (e *ProjectSpaceAmbiguousError) Is(target error) bool {
+	return target == ErrProjectSpaceAmbiguous
+}
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -131,9 +176,19 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 //   - On ErrActiveDuplicate: DuplicateIssue is the row that blocked the
 //     create; Issue and Attachments are zero.
 type IssueCreateResult struct {
-	Issue          db.Issue
-	Attachments    []db.Attachment
+	Issue       db.Issue
+	Attachments []db.Attachment
+	// SpaceKey is the identifier prefix of the resolved Space, captured during
+	// creation so callers building the broadcast payload and HTTP response do
+	// not each re-query the Space that Create already resolved.
+	SpaceKey       string
 	DuplicateIssue *db.Issue
+	// EnqueueErr carries a non-fatal agent/squad task enqueue failure that
+	// happened AFTER the issue was committed. The issue itself is valid; the
+	// manual HTTP path ignores this (warn-only, historical behavior), but the
+	// autopilot path uses it to fail the run instead of recording a success
+	// for work whose agent task was never created.
+	EnqueueErr error
 }
 
 // Create runs the full issue-creation pipeline atomically end-to-end:
@@ -164,12 +219,19 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
 
+	if opts.PreCreate != nil {
+		if err := opts.PreCreate(ctx, qtx); err != nil {
+			return IssueCreateResult{}, err
+		}
+	}
+
 	// Resolve and validate parent / project before reading from the
 	// duplicate guard so a forged parent or project ID is rejected
 	// before we touch the issue counter. Both checks scope by
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	spaceID := p.SpaceID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -184,6 +246,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
+		// Space is a creation-time default, not a constraint: a sub-issue
+		// seeds its space from the parent only when the caller didn't pick
+		// one. Parent and child may diverge afterwards.
+		if !spaceID.Valid && parent.SpaceID.Valid {
+			spaceID = parent.SpaceID
+		}
 	}
 	if projectID.Valid {
 		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
@@ -193,8 +261,23 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
 	}
+	space, err := ResolveSpace(ctx, qtx, p.WorkspaceID, spaceID, projectID)
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	spaceID = space.ID
 
-	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
+	// Invariant: an issue's space is always part of its project's space set.
+	// The UI resolves a mismatch with an explicit dialog whose default is
+	// "add the space to the project"; headless callers (agents, CLI, API)
+	// get that same default applied here, so the invariant holds on every
+	// path and a space's Projects page never misses a project that holds
+	// its issues.
+	if err := EnsureProjectHasSpace(ctx, qtx, p.WorkspaceID, projectID, spaceID); err != nil {
+		return IssueCreateResult{}, err
+	}
+
+	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, spaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("duplicate guard: %w", err)
 	}
@@ -203,21 +286,24 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
+	issueNumber, err := qtx.IncrementSpaceIssueCounter(ctx, db.IncrementSpaceIssueCounterParams{
+		ID:          spaceID,
+		WorkspaceID: p.WorkspaceID,
+	})
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("increment counter: %w", err)
 	}
 
-	// New issues sort to the top of their (workspace, status) column for
-	// manual ordering. Computed inside the tx, after IncrementIssueCounter
-	// has already taken the workspace row lock, so two concurrent creates
-	// in the same workspace see each other's positions and don't both
+	// New issues sort to the top of their (workspace, space, status) column for
+	// manual ordering. Computed inside the tx, after IncrementSpaceIssueCounter
+	// has already taken the space row lock, so two concurrent creates
+	// in the same space see each other's positions and don't both
 	// land on the same min-1 slot. Concurrent manual reorder via
 	// UpdateIssue(position) does NOT take this lock, so a create racing
 	// a reorder is still allowed to collide on position — manual ordering
 	// is best-effort and the UI tolerates equal positions by falling back
 	// to the secondary ORDER BY key.
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, p.Status)
+	newPosition, err := issueposition.NextTopPositionForSpace(ctx, tx, p.WorkspaceID, spaceID, p.Status)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
 	}
@@ -226,6 +312,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 			WorkspaceID:   p.WorkspaceID,
+			SpaceID:       spaceID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -247,6 +334,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
 			WorkspaceID:   p.WorkspaceID,
+			SpaceID:       spaceID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -268,6 +356,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
 
+	if opts.BeforeCommit != nil {
+		if err := opts.BeforeCommit(ctx, qtx, issue); err != nil {
+			return IssueCreateResult{}, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -279,11 +373,103 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	s.publishIssueCreated(issue, attachments, p.CreatorType, actorID, opts)
+	s.publishIssueCreated(issue, attachments, space.Key, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
+	enqueueErr := s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
-	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+	return IssueCreateResult{Issue: issue, Attachments: attachments, SpaceKey: space.Key, EnqueueErr: enqueueErr}, nil
+}
+
+// ResolveSpace is the single authority for choosing an issue's Space. It is used
+// by IssueService.Create and by the HTTP quick-create / autopilot handlers so
+// every issue-producing path shares one inference and validation policy:
+//
+//   - an explicit requestedSpaceID is validated and used;
+//   - otherwise, when a Project is given: a single-space Project infers that
+//     Space, a multi-space Project is ambiguous (ErrProjectSpaceAmbiguous), and a
+//     Project with no Space links falls through;
+//   - otherwise the workspace default Space is used.
+//
+// The chosen Space must be active (ErrSpaceNotFound / ErrSpaceArchived). The
+// project association is a creation-time default only — an explicit space is
+// never validated against the project's space set.
+func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpaceID, projectID pgtype.UUID) (db.WorkspaceSpace, error) {
+	spaceID := requestedSpaceID
+	if !spaceID.Valid && projectID.Valid {
+		spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+		})
+		if err != nil {
+			return db.WorkspaceSpace{}, fmt.Errorf("list project spaces: %w", err)
+		}
+		switch {
+		case len(spaces) == 1:
+			spaceID = spaces[0].ID
+		case len(spaces) > 1:
+			keys := make([]string, len(spaces))
+			for i, t := range spaces {
+				keys[i] = t.Key
+			}
+			return db.WorkspaceSpace{}, &ProjectSpaceAmbiguousError{SpaceKeys: keys}
+		}
+	}
+	if !spaceID.Valid {
+		space, err := q.GetDefaultWorkspaceSpace(ctx, workspaceID)
+		if err != nil {
+			return db.WorkspaceSpace{}, ErrSpaceNotFound
+		}
+		spaceID = space.ID
+	}
+	return ValidateActiveSpace(ctx, q, workspaceID, spaceID)
+}
+
+// EnsureProjectHasSpace upholds the invariant that an issue's space is part of
+// its project's space set, by adding the association when it is missing (the
+// same default the UI's conflict dialog offers). No-op without a project.
+// Exported via the issue create/update paths only — project↔space stays a
+// creation-time default for everything else.
+func EnsureProjectHasSpace(ctx context.Context, q *db.Queries, workspaceID, projectID, spaceID pgtype.UUID) error {
+	if !projectID.Valid || !spaceID.Valid {
+		return nil
+	}
+	spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		return fmt.Errorf("list project spaces: %w", err)
+	}
+	for _, t := range spaces {
+		if t.ID == spaceID {
+			return nil
+		}
+	}
+	if err := q.AddProjectSpace(ctx, db.AddProjectSpaceParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+		SpaceID:     spaceID,
+	}); err != nil {
+		return fmt.Errorf("add project space: %w", err)
+	}
+	return nil
+}
+
+// ValidateActiveSpace loads a Space by ID and returns it only if it exists in the
+// workspace and is not archived. Shared active-space validation for ResolveSpace
+// and for handlers validating a Space-id list.
+func ValidateActiveSpace(ctx context.Context, q *db.Queries, workspaceID, spaceID pgtype.UUID) (db.WorkspaceSpace, error) {
+	space, err := q.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || !space.ID.Valid {
+		return db.WorkspaceSpace{}, ErrSpaceNotFound
+	}
+	if space.ArchivedAt.Valid {
+		return db.WorkspaceSpace{}, ErrSpaceArchived
+	}
+	return space, nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created
@@ -318,13 +504,13 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	return list
 }
 
-func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, creatorType, actorID string, opts IssueCreateOpts) {
+func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, spaceKey, creatorType, actorID string, opts IssueCreateOpts) {
 	if s.Bus == nil {
 		return
 	}
 	var payload map[string]any
 	if opts.BroadcastPayload != nil {
-		payload = opts.BroadcastPayload(issue, attachments)
+		payload = opts.BroadcastPayload(issue, attachments, spaceKey)
 	} else {
 		// Minimal fallback so cache invalidations still fire even if the
 		// caller forgot to supply a builder. Front-ends that expect the
@@ -385,20 +571,29 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 }
 
-func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string) {
+// maybeEnqueueOnAssign enqueues the assignee agent (or squad leader) task for a
+// freshly created, non-backlog, assigned issue. It still logs a warning on
+// failure so the manual create path is unchanged, but it also RETURNS the
+// failure so callers that need a durable outcome (autopilot) can act on it
+// instead of silently recording a success.
+func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string) error {
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
-		return
+		return nil
 	}
 	if s.shouldEnqueueAgentTask(ctx, issue) {
 		if _, err := s.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
 			slog.Warn("enqueue agent task on create failed",
 				"issue_id", util.UUIDToString(issue.ID),
 				"error", err)
+			return fmt.Errorf("enqueue agent task: %w", err)
 		}
 	}
 	if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
-		s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID)
+		if err := s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID); err != nil {
+			return fmt.Errorf("enqueue squad leader task: %w", err)
+		}
 	}
+	return nil
 }
 
 // shouldEnqueueAgentTask returns true when an issue create or assignment
@@ -453,13 +648,13 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	return ready
 }
 
-func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
+func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) error {
 	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return
+		return nil
 	}
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
@@ -468,7 +663,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil || hasPending {
-		return
+		return nil
 	}
 	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task on create failed",
@@ -476,5 +671,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"squad_id", util.UUIDToString(squad.ID),
 			"leader_id", util.UUIDToString(squad.LeaderID),
 			"error", err)
+		return err
 	}
+	return nil
 }

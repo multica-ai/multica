@@ -60,6 +60,14 @@ vi.mock("@multica/core/paths", () => ({
       issues: () => `/${slug}/issues`,
     }),
   },
+  useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme" }),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({ data: [] }),
+}));
+vi.mock("@multica/core/spaces/queries", () => ({
+  spaceListOptions: () => ({ queryKey: ["spaces"], queryFn: () => [] }),
 }));
 
 import { TabBar } from "./tab-bar";

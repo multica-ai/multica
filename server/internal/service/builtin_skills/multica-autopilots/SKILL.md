@@ -38,14 +38,22 @@ Execution modes:
 ```bash
 multica autopilot list --output json
 multica autopilot get <autopilot-id> --output json
-multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
+multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --space <space-id-or-key> --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
+multica autopilot update <autopilot-id> --space <space-id-or-key> --output json
 multica autopilot runs <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
 ```
+
+`--space <space-id-or-key>` (UUID or key) sets the autopilot's space on `create` and
+reassigns it on `update`. Omitting `--space` on create uses the workspace's default
+space, whose key is the legacy workspace prefix; omitting it on update keeps the
+current space. Every autopilot always belongs to a space — there is no clear
+operation, and `--space ""` is ignored (the server keeps the existing space).
+`multica autopilot list --space <space-id-or-key>` filters by space.
 
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 

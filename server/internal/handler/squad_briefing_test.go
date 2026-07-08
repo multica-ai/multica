@@ -320,9 +320,9 @@ func queueSquadIssueTaskFor(t *testing.T, squadID, agentID, runtimeID string, is
 	if err := testPool.QueryRow(ctx, `
 INSERT INTO issue (
 workspace_id, title, status, priority, creator_id, creator_type,
-assignee_type, assignee_id, number, position
+assignee_type, assignee_id, number, position, space_id
 ) VALUES ($1, 'Squad briefing claim test', 'todo', 'medium', $2, 'member',
-'squad', $3, $4, 0)
+'squad', $3, $4, 0, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 RETURNING id
 `, testWorkspaceID, testUserID, squadID, issueNumber).Scan(&issueID); err != nil {
 		t.Fatalf("create squad-assigned issue: %v", err)

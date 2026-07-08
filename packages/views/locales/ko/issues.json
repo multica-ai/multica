@@ -41,10 +41,12 @@
     "no_labels": "아직 라벨이 없습니다",
     "no_assignee": "담당자 없음",
     "no_project": "프로젝트 없음",
+    "all_spaces": "모든 Space",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_assignee": "담당자",
     "section_creator": "생성자",
+    "section_space": "Space",
     "section_project": "프로젝트",
     "section_label": "라벨",
     "section_date": "날짜",
@@ -196,6 +198,7 @@
     "pull_request_card_files_count_other": "파일 {{count}}개",
     "pull_request_card_show_more": "{{count}}개 더 보기",
     "pull_request_card_show_less": "간단히 보기",
+    "prop_space": "Space",
     "prop_status": "상태",
     "prop_priority": "우선순위",
     "prop_stage": "단계",
@@ -400,6 +403,7 @@
     "updated_ago": "{{time}} 수정됨"
   },
   "actions": {
+    "space": "Space",
     "status": "상태",
     "priority": "우선순위",
     "assignee": "담당자",
