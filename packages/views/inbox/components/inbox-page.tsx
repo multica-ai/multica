@@ -273,7 +273,7 @@ export function InboxPage() {
       <p className="text-sm">{t(($) => $.list.empty)}</p>
     </div>
   ) : (
-    <div>
+    <div className="p-1">
       {items.map((item) => (
         <InboxListItem
           key={item.id}
