@@ -5,6 +5,7 @@ import enInbox from "./en/inbox.json";
 import enIssues from "./en/issues.json";
 import enProjects from "./en/projects.json";
 import enSettings from "./en/settings.json";
+import enSkills from "./en/skills.json";
 import enWorkspace from "./en/workspace.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansChat from "./zh-Hans/chat.json";
@@ -13,6 +14,7 @@ import zhHansInbox from "./zh-Hans/inbox.json";
 import zhHansIssues from "./zh-Hans/issues.json";
 import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansSettings from "./zh-Hans/settings.json";
+import zhHansSkills from "./zh-Hans/skills.json";
 import zhHansWorkspace from "./zh-Hans/workspace.json";
 
 export type SupportedLocale = "en" | "zh-Hans";
@@ -26,6 +28,7 @@ export const RESOURCES = {
     issues: enIssues,
     projects: enProjects,
     settings: enSettings,
+    skills: enSkills,
     workspace: enWorkspace,
   },
   "zh-Hans": {
@@ -36,6 +39,7 @@ export const RESOURCES = {
     issues: zhHansIssues,
     projects: zhHansProjects,
     settings: zhHansSettings,
+    skills: zhHansSkills,
     workspace: zhHansWorkspace,
   },
 } satisfies Record<SupportedLocale, Record<string, Record<string, unknown>>>;

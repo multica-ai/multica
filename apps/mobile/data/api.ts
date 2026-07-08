@@ -46,6 +46,8 @@ import type {
   SearchIssuesResponse,
   SearchProjectsResponse,
   SendChatMessageResponse,
+  Skill,
+  SkillSummary,
   Squad,
   NotificationPreferenceResponse,
   NotificationPreferences,
@@ -95,6 +97,8 @@ import {
   EMPTY_RUNTIME_LIST,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
+  EMPTY_SKILL,
+  EMPTY_SKILL_SUMMARY_LIST,
   EMPTY_SQUAD_LIST,
   EMPTY_USER,
   EMPTY_WORKSPACE_LIST,
@@ -111,6 +115,8 @@ import {
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SendChatMessageResponseSchema,
+  SkillSchema,
+  SkillSummaryListSchema,
   SquadListSchema,
   TaskMessageListSchema,
   EMPTY_TASK_MESSAGE_LIST,
@@ -909,6 +915,25 @@ class ApiClient {
     // half-populated detail page.
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
       endpoint: "GET /api/projects/:id",
+    });
+  }
+
+  async listSkills(opts?: { signal?: AbortSignal }): Promise<SkillSummary[]> {
+    return this.fetchValidated(
+      "/api/skills",
+      SkillSummaryListSchema,
+      EMPTY_SKILL_SUMMARY_LIST,
+      { ...opts, endpoint: "listSkills" },
+    );
+  }
+
+  async getSkill(
+    id: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<Skill> {
+    return this.fetchValidated(`/api/skills/${id}`, SkillSchema, EMPTY_SKILL, {
+      ...opts,
+      endpoint: "GET /api/skills/:id",
     });
   }
 

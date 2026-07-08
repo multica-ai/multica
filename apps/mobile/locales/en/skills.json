@@ -1,0 +1,41 @@
+{
+  "list": {
+    "header_title": "Skills",
+    "error": {
+      "load_prefix": "Failed to load skills:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "empty": {
+      "title": "No skills yet",
+      "message": "Skills created on desktop will show up here."
+    },
+    "used_by_one": "Used by {{count}} agent",
+    "used_by_other": "Used by {{count}} agents"
+  },
+  "origin": {
+    "manual": "Manual",
+    "runtime_local": "Imported from runtime",
+    "clawhub": "ClawHub",
+    "skills_sh": "Skills.sh",
+    "github": "GitHub"
+  },
+  "detail": {
+    "header_default_title": "Skill",
+    "error": {
+      "load_prefix": "Failed to load skill:",
+      "unknown": "unknown error",
+      "retry": "Retry"
+    },
+    "creator_label": "Created by",
+    "created_label": "Created",
+    "updated_label": "Updated",
+    "used_by_title": "Used by",
+    "used_by_empty": "Not used by any agent yet",
+    "files_title": "Files",
+    "file_root_label": "SKILL.md"
+  },
+  "file": {
+    "header_default_title": "File"
+  }
+}

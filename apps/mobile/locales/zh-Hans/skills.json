@@ -1,0 +1,41 @@
+{
+  "list": {
+    "header_title": "skill",
+    "error": {
+      "load_prefix": "加载 skill 失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "empty": {
+      "title": "还没有 skill",
+      "message": "在桌面端创建的 skill 会显示在这里。"
+    },
+    "used_by_one": "{{count}} 个智能体在使用",
+    "used_by_other": "{{count}} 个智能体在使用"
+  },
+  "origin": {
+    "manual": "手动创建",
+    "runtime_local": "从运行时导入",
+    "clawhub": "ClawHub",
+    "skills_sh": "Skills.sh",
+    "github": "GitHub"
+  },
+  "detail": {
+    "header_default_title": "skill",
+    "error": {
+      "load_prefix": "加载 skill 失败：",
+      "unknown": "未知错误",
+      "retry": "重试"
+    },
+    "creator_label": "创建者",
+    "created_label": "创建时间",
+    "updated_label": "更新时间",
+    "used_by_title": "使用者",
+    "used_by_empty": "还没有智能体使用",
+    "files_title": "文件",
+    "file_root_label": "SKILL.md"
+  },
+  "file": {
+    "header_default_title": "文件"
+  }
+}

@@ -33,6 +33,8 @@ import type {
   SearchIssuesResponse,
   SearchProjectsResponse,
   SendChatMessageResponse,
+  Skill,
+  SkillSummary,
   Squad,
   TaskMessagePayload,
   User,
@@ -201,6 +203,61 @@ export const EMPTY_PROJECT: Project = {
   issue_count: 0,
   done_count: 0,
   resource_count: 0,
+};
+
+// Skill.content routinely runs 50-200KB (see the doc comment on
+// SkillSummary in @multica/core/types) — `.loose()` so any future field
+// the backend adds passes through unchanged rather than getting stripped.
+const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const SkillSummarySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  config: z.record(z.string(), z.unknown()).default({}),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const SkillSummaryListSchema = z.array(SkillSummarySchema).default([]);
+export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  config: z.record(z.string(), z.unknown()).default({}),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  content: z.string(),
+  files: z.array(SkillFileSchema).default([]),
+}).loose();
+
+// Fallback for `GET /api/skills/{id}` when the response shape drifts.
+// `id` defaults to empty — caller checks `data.id === ""` to render the
+// "not found / shape drifted" error state, same pattern as EMPTY_PROJECT.
+export const EMPTY_SKILL: Skill = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  content: "",
+  files: [],
 };
 
 // Project resources are typed pointers to external resources (today: GitHub
