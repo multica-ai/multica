@@ -2405,7 +2405,7 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2438,7 +2438,7 @@ func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
+	policy := codexSandboxPolicyFor("darwin", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2457,7 +2457,7 @@ func TestEnsureCodexSandboxConfigIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux", "0.121.0", "")
 	for i := 0; i < 3; i++ {
 		if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 			t.Fatalf("pass %d: %v", i, err)
@@ -2480,7 +2480,7 @@ approval_policy = "on-failure"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2515,7 +2515,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
+	policy := codexSandboxPolicyFor("darwin", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2554,7 +2554,7 @@ trust = "always"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2619,7 +2619,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(legacy), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux", "0.121.0", "")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -2657,7 +2657,7 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyFor(tc.goos, tc.version)
+			p := codexSandboxPolicyFor(tc.goos, tc.version, "")
 			if p.Mode != tc.wantMode {
 				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
 			}
@@ -2673,20 +2673,30 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 
 func TestCodexSandboxPolicyForWindowsOverrides(t *testing.T) {
 	// Cannot use t.Parallel() because we use t.Setenv.
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "codex-windows-sandbox-setup.exe")
+	os.WriteFile(helperPath, []byte("fake"), 0o755)
+	codexPath := filepath.Join(dir, "codex.exe")
 
-	// Test default Windows behavior (no env var)
+	// Test default Windows behavior (no env var, helper exists)
 	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "")
-	p1 := codexSandboxPolicyFor("windows", "0.121.0")
+	p1 := codexSandboxPolicyFor("windows", "0.121.0", codexPath)
 	if p1.Mode != "workspace-write" {
-		t.Errorf("default windows: mode = %q, want workspace-write", p1.Mode)
+		t.Errorf("default windows (helper exists): mode = %q, want workspace-write", p1.Mode)
 	}
 	if !p1.NetworkAccess {
 		t.Error("default windows: network access should be true")
 	}
 
+	// Test fallback when helper does not exist
+	pFallback := codexSandboxPolicyFor("windows", "0.121.0", "nonexistent-codex-path")
+	if pFallback.Mode != "danger-full-access" {
+		t.Errorf("default windows (no helper): mode = %q, want danger-full-access", pFallback.Mode)
+	}
+
 	// Test danger-full-access override
 	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "danger-full-access")
-	p2 := codexSandboxPolicyFor("windows", "0.121.0")
+	p2 := codexSandboxPolicyFor("windows", "0.121.0", codexPath)
 	if p2.Mode != "danger-full-access" {
 		t.Errorf("danger-full-access: mode = %q, want danger-full-access", p2.Mode)
 	}
@@ -2694,19 +2704,19 @@ func TestCodexSandboxPolicyForWindowsOverrides(t *testing.T) {
 		t.Error("danger-full-access: network access should be false")
 	}
 
-	// Test workspace-write override
+	// Test workspace-write override (forces workspace-write even if helper is missing)
 	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "workspace-write")
-	p3 := codexSandboxPolicyFor("windows", "0.121.0")
+	p3 := codexSandboxPolicyFor("windows", "0.121.0", "nonexistent-codex-path")
 	if p3.Mode != "workspace-write" {
-		t.Errorf("workspace-write: mode = %q, want workspace-write", p3.Mode)
+		t.Errorf("workspace-write override: mode = %q, want workspace-write", p3.Mode)
 	}
 	if !p3.NetworkAccess {
 		t.Error("workspace-write: network access should be true")
 	}
 
-	// Test invalid override value (should fall back to default workspace-write)
+	// Test invalid override value (should fall back to default workspace-write if helper exists)
 	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "invalid-mode-typo")
-	p4 := codexSandboxPolicyFor("windows", "0.121.0")
+	p4 := codexSandboxPolicyFor("windows", "0.121.0", codexPath)
 	if p4.Mode != "workspace-write" {
 		t.Errorf("invalid mode: mode = %q, want workspace-write", p4.Mode)
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -51,11 +52,19 @@ type codexSandboxPolicy struct {
 //   workspace-write with network access (upstream bug fixed).
 // - darwin otherwise (including when the version is unknown): fall back to
 //   danger-full-access so the Multica CLI can reach the API.
-func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
+func codexSandboxPolicyFor(goos, detectedVersion, codexPath string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
 	if goos == "windows" {
+		hasHelper := false
+		if codexPath != "" {
+			helperPath := filepath.Join(filepath.Dir(codexPath), "codex-windows-sandbox-setup.exe")
+			if _, err := os.Stat(helperPath); err == nil {
+				hasHelper = true
+			}
+		}
+
 		if v := strings.TrimSpace(os.Getenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE")); v != "" {
 			if v == "danger-full-access" || v == "workspace-write" {
 				return codexSandboxPolicy{
@@ -70,6 +79,15 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 				Reason:        fmt.Sprintf("invalid MULTICA_CODEX_WINDOWS_SANDBOX_MODE %q, falling back to default", v),
 			}
 		}
+
+		if !hasHelper {
+			return codexSandboxPolicy{
+				Mode:          "danger-full-access",
+				NetworkAccess: false,
+				Reason:        "sandbox helper binary not found next to codex.exe (falling back to danger-full-access)",
+			}
+		}
+
 		return codexSandboxPolicy{
 			Mode:          "workspace-write",
 			NetworkAccess: true,
