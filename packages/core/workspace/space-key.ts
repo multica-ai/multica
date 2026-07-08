@@ -1,5 +1,10 @@
 export const SPACE_KEY_REGEX = /^[A-Z][A-Z0-9]{0,6}$/;
 
+// Mirrors reservedSpaceKeys in server/internal/handler/workspace.go: keys
+// that would collide with a static route under /space/{key} (e.g. the
+// create-space page at /space/new).
+export const RESERVED_SPACE_KEYS = new Set(["NEW"]);
+
 // Mirrors the server-side normalizeSpaceKey (handler/workspace.go) and the
 // migration backfill: uppercase, strip characters outside [A-Z0-9], truncate
 // to 7, and prefix digit-leading keys with "T".
@@ -13,4 +18,8 @@ export function normalizeSpaceKey(value: string): string {
     key = `T${key}`.slice(0, 7);
   }
   return key;
+}
+
+export function isValidSpaceKey(key: string): boolean {
+  return SPACE_KEY_REGEX.test(key) && !RESERVED_SPACE_KEYS.has(key);
 }

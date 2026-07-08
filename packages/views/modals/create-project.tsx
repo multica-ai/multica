@@ -31,7 +31,8 @@ import {
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
-import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -113,7 +114,15 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+export function CreateProjectModal({
+  onClose,
+  data,
+}: {
+  onClose: () => void;
+  /** `space_id`: the space the modal was opened from (e.g. a space's Projects
+   *  page) — pre-selects that space instead of the personal default. */
+  data?: Record<string, unknown> | null;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
@@ -230,16 +239,20 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // on `spaceIds.length` re-seeded the moment the user cleared the selection,
   // fighting the deselection; the ref makes seeding a one-shot so clearing
   // sticks.
+  const contextSpaceId = (data?.space_id as string) || undefined;
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const seededDefaultSpaceRef = useRef(false);
   useEffect(() => {
     if (seededDefaultSpaceRef.current || spaces.length === 0) return;
     seededDefaultSpaceRef.current = true;
     if (spaceIds.length > 0) return;
-    // Same personal default as the issue/quick-create/autopilot forms: my
-    // first space, falling back to the workspace default space.
-    const defaultSpaceId = creationDefaultSpaceId(spaces);
+    // The space the modal was opened from wins (e.g. a space's Projects
+    // page); otherwise the same shared fallback as the issue/quick-create/
+    // autopilot forms: last space used, then my first space.
+    const defaultSpaceId = contextSpaceId ?? resolveCreationSpaceId(spaces, { lastSpaceId });
     if (defaultSpaceId) setSpaceIds([defaultSpaceId]);
-  }, [spaceIds.length, spaces]);
+  }, [spaceIds.length, spaces, contextSpaceId, lastSpaceId]);
 
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
@@ -302,6 +315,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         // Server attaches these in the same transaction as the project.
         resources,
       });
+      // A project can span multiple spaces; the first selected one stands in
+      // as "primary" for the shared last-used memory.
+      if (spaceIds[0]) setLastSpaceId(spaceIds[0]);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));

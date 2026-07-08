@@ -28,23 +28,19 @@
   "dialog": {
     "create_title": "Create space",
     "edit_title": "Edit space",
-    "description": "Spaces own issue identifiers and stable work areas. Membership is informational in v1.",
-    "tab_main": "Main",
-    "tab_members": "Members ({{count}})",
     "member_search": "Search members…",
     "member_search_empty": "No matching members",
     "creator_row": "Creator · Lead",
     "name_required": "Name is required",
     "members_entry": "Members",
-    "member_count": "{{count}} selected",
-    "members_pick_title": "Pick members",
-    "back": "Back"
+    "member_count": "{{count}} selected"
   },
   "form": {
     "name": "Name",
     "name_placeholder": "Engineering",
     "key": "Identifier",
     "key_hint": "Numbers this space’s issues — e.g. ENG-123. 1-7 uppercase letters or numbers, starting with a letter.",
+    "key_reserved": "NEW is a reserved identifier — pick another one.",
     "key_locked": "The identifier is locked because issues have already been created.",
     "icon": "Icon",
     "description": "Description",

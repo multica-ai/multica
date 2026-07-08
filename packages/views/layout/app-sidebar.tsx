@@ -33,7 +33,6 @@ import {
   CircleUser,
   FolderKanban,
   BarChart3,
-  MoreHorizontal,
   X,
   Zap,
   Users,
@@ -135,7 +134,6 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "squads"
-  | "more"
   | "usage"
   | "runtimes"
   | "skills"
@@ -153,16 +151,17 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 // The workspace-wide issues list left the nav with the space rollout: issues
 // live under their space (Spaces section below) or under My Issues. Space
 // management lives on each space's detail page (the /spaces overview was cut
-// from v1), and Usage/Runtimes are demoted into the More subgroup.
-// Autopilots are space-scoped like issues (space_id NOT NULL, their output
-// lands in their space), so they live under each space below — no global
-// entry, same rationale as the removed workspace-wide Issues.
+// from v1). Autopilots are space-scoped like issues (space_id NOT NULL,
+// their output lands in their space), so they live under each space below —
+// no global entry, same rationale as the removed workspace-wide Issues.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
 ];
 
+// Rendered as plain rows alongside workspaceNav (see the Workspace group
+// below) — used to sit behind a "More" dropdown, now always visible.
 const moreNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "skills", labelKey: "skills", icon: BookOpenText },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
@@ -675,6 +674,24 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
+  // Route-derived seed for the create-issue flow: whichever route the user is
+  // standing on should default the modal, not just a page's own local "+"
+  // button. Shared by the global "C" shortcut and the sidebar's "New Issue"
+  // button below — neither goes through a page's `scope`-aware create
+  // handler, so without this they always fell through to the personal
+  // default space regardless of which space's pages the user was browsing.
+  const projectRouteMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  const spaceRouteMatch = pathname.match(/^\/[^/]+\/space\/([^/]+)/);
+  const routeSpaceKey = spaceRouteMatch?.[1];
+  const routeSpace = routeSpaceKey
+    ? mySpaces.find((s) => s.key.toLowerCase() === routeSpaceKey.toLowerCase())
+    : undefined;
+  const routeCreateDefaults = projectRouteMatch
+    ? { project_id: projectRouteMatch[1] }
+    : routeSpace
+      ? { space_id: routeSpace.id }
+      : undefined;
+
   // Global "C" shortcut: opens whichever create mode the user landed on last
   // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
   // inside both modal footers so users can flip without remembering which
@@ -692,16 +709,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isEditable) return;
       if (useModalStore.getState().modal) return;
       e.preventDefault();
-      // Auto-fill project when on a project detail page. The manual form
-      // consumes `project_id`; quick-create also honours it as a seed for
-      // its project picker, so passing it through is safe for both modes.
-      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-      openCreateIssueWithPreference(data);
+      openCreateIssueWithPreference(routeCreateDefaults);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [pathname]);
+  }, [routeCreateDefaults]);
 
   return (
       <Sidebar variant="inset">
@@ -853,7 +865,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => openCreateIssueWithPreference()}
+                onClick={() => openCreateIssueWithPreference(routeCreateDefaults)}
               >
                 <span className="relative">
                   <SquarePen />
@@ -931,8 +943,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </Collapsible>
           )}
 
-          {/* Workspace — shared resources, with low-frequency entries tucked
-              into the More subgroup. */}
+          {/* Workspace — shared resources. */}
           <Collapsible open={workspaceCollapse.open} onOpenChange={workspaceCollapse.onOpenChange}>
             <SidebarGroup className="group/ws py-1">
               <SidebarGroupLabel
@@ -945,7 +956,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <CollapsibleContent>
                 <SidebarGroupContent>
                   <SidebarMenu className="gap-0.5">
-                    {workspaceNav.map((item) => {
+                    {[...workspaceNav, ...moreNav].map((item) => {
                       const href = p[item.key]();
                       const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
                       return (
@@ -957,44 +968,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           >
                             <item.icon />
                             <span>{t(($) => $.nav[item.labelKey])}</span>
+                            {item.key === "runtimes" && hasRuntimeUpdates && (
+                              <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                            )}
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       );
                     })}
-                    {/* More is a button opening a menu (not an inline
-                        collapse) — low-frequency destinations stay one click
-                        away without adding permanent rows. */}
-                    <SidebarMenuItem>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <SidebarMenuButton className="text-muted-foreground hover:bg-sidebar-accent/70" />
-                          }
-                        >
-                          <MoreHorizontal />
-                          <span>{t(($) => $.nav.more)}</span>
-                          {/* Update dot surfaces on the More row so runtime
-                              updates stay visible while tucked away. */}
-                          {hasRuntimeUpdates && (
-                            <span className="size-1.5 rounded-full bg-destructive" />
-                          )}
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent side="right" align="start" className="w-44">
-                          {moreNav.map((item) => (
-                            <DropdownMenuItem
-                              key={item.key}
-                              render={<AppLink href={p[item.key]()} />}
-                            >
-                              <item.icon className="h-3.5 w-3.5" />
-                              <span>{t(($) => $.nav[item.labelKey])}</span>
-                              {item.key === "runtimes" && hasRuntimeUpdates && (
-                                <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                              )}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </SidebarMenuItem>
                   </SidebarMenu>
                 </SidebarGroupContent>
               </CollapsibleContent>
@@ -1008,27 +988,37 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               the section — and with it every create/browse entry point. */}
           <Collapsible open={spacesCollapse.open} onOpenChange={spacesCollapse.onOpenChange}>
               <SidebarGroup className="group/spaces relative py-1">
-                <SidebarGroupLabel
-                  render={<CollapsibleTrigger />}
-                  className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
-                >
-                  <span>{t(($) => $.nav.spaces)}</span>
-                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
-                </SidebarGroupLabel>
+                {/* Rendered before the label so the label can react to it via
+                    peer-hover (CSS peer only looks at *earlier* siblings).
+                    Absolute positioning means this render-order swap doesn't
+                    move it visually — it still paints above the label. */}
                 {/* Hover-revealed, secondary until hovered itself — mirrors
-                    the pinned-count affordance. Opens the create-space modal
-                    directly; sized like the space-row chevron buttons. */}
+                    the pinned-count affordance. Navigates to the create-space
+                    page directly; sized like the space-row chevron buttons. */}
                 {/* right-4 = group px-2 + label px-2, so the icon's right
                     edge sits on the same inset line as row content; top-3
                     centers the 16px button in the 32px label row (group
                     py-1). */}
                 <SidebarGroupAction
                   title={t(($) => $.sidebar.new_space)}
-                  className="top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/spaces:opacity-100 [&>svg]:size-3"
-                  onClick={() => useModalStore.getState().open("create-space")}
+                  className="peer/spaces-action top-3 right-4 h-4 w-4 rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover/spaces:opacity-100 [&>svg]:size-3"
+                  onClick={() => push(p.spaceNew())}
                 >
                   <Plus />
                 </SidebarGroupAction>
+                {/* The action overlaps this row's top-right corner, so its own
+                    hover steals the pointer from the label underneath and the
+                    label's plain hover: would drop out. peer-hover keeps the
+                    row background lit while the pointer is over the action;
+                    the action's own hover: still makes it visibly brighter on
+                    top of that. */}
+                <SidebarGroupLabel
+                  render={<CollapsibleTrigger />}
+                  className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground peer-hover/spaces-action:bg-sidebar-accent/70 peer-hover/spaces-action:text-sidebar-accent-foreground"
+                >
+                  <span>{t(($) => $.nav.spaces)}</span>
+                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+                </SidebarGroupLabel>
                 <CollapsibleContent>
                   {/* pt-0.5 mirrors the space rows' own children breathing
                       (py-0.5): space rows are row-styled, not plain content,
@@ -1041,7 +1031,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     {mySpaces.length === 0 && (
                       <button
                         type="button"
-                        onClick={() => useModalStore.getState().open("create-space")}
+                        onClick={() => push(p.spaceNew())}
                         className="flex h-8 cursor-pointer items-center rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                       >
                         {t(($) => $.sidebar.spaces_empty)}

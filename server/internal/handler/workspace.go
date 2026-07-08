@@ -21,6 +21,13 @@ var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var spaceKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
 var nonSpaceKeyChars = regexp.MustCompile(`[^A-Z0-9]`)
 
+// reservedSpaceKeys blocks keys that would collide with static routes under
+// /space/{key} (e.g. the create-space page at /space/new). Mirrors why
+// "workspaces" is a reserved workspace slug for /workspaces/new.
+var reservedSpaceKeys = map[string]struct{}{
+	"NEW": {},
+}
+
 // defaultSpaceKeyFromSlug derives the default space key by normalizing the
 // slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
 func defaultSpaceKeyFromSlug(slug string) string {
@@ -49,7 +56,11 @@ func normalizeSpaceKey(raw string) string {
 }
 
 func validSpaceKey(key string) bool {
-	return spaceKeyPattern.MatchString(key)
+	if !spaceKeyPattern.MatchString(key) {
+		return false
+	}
+	_, reserved := reservedSpaceKeys[key]
+	return !reserved
 }
 
 type WorkspaceResponse struct {

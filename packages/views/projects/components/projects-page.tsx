@@ -804,7 +804,8 @@ export function ProjectsPage({ spaceId }: { spaceId?: string } = {}) {
     ...pinListOptions(wsId, currentUser?.id ?? ""),
     enabled: !!wsId && !!currentUser?.id,
   });
-  const openCreateProject = () => useModalStore.getState().open("create-project");
+  const openCreateProject = () =>
+    useModalStore.getState().open("create-project", spaceId ? { space_id: spaceId } : undefined);
 
   const isWorkspaceAdmin = useMemo(() => {
     if (!currentUser) return false;

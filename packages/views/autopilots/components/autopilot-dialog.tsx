@@ -51,7 +51,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
-import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -372,12 +373,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   );
   // Space is required and always resolves to a value — same model as the
   // issue modal. Associations are creation-time defaults, never constraints:
-  // explicit pick → single-space project → the user's first space. The picker
-  // is never restricted to the project's space set.
-  const defaultSpaceId = useMemo(() => creationDefaultSpaceId(spaces), [spaces]);
+  // explicit pick → single-space project → last used → the user's first space.
+  // The picker is never restricted to the project's space set.
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const projectSpaceId =
     selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
-  const effectiveSpaceId = spaceId ?? projectSpaceId ?? defaultSpaceId ?? null;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId, lastSpaceId }) ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -417,6 +420,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             user_id,
           })),
         });
+        setLastSpaceId(effectiveSpaceId);
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
         let webhookTrigger: AutopilotTrigger | null = null;
