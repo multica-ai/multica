@@ -36,7 +36,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker, IssueTypePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker, IssueTypePicker, GitHubRepoPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -251,6 +251,9 @@ export function ManualCreatePanel({
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
+  
+  const [createAsGithubIssue, setCreateAsGithubIssue] = useState(false);
+  const [githubRepo, setGithubRepo] = useState<any | null>(null);
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
@@ -428,6 +431,20 @@ export function ManualCreatePanel({
         }
         if (labelsFailed > 0) {
           toast.error(t(($) => $.create_issue.toast_link_labels_failed));
+        }
+      }
+
+      if (createAsGithubIssue && githubRepo) {
+        try {
+          await api.createGitHubIssue({
+            repo_owner: githubRepo.owner.login,
+            repo_name: githubRepo.name,
+            title: title.trim(),
+            description: description || "",
+          });
+        } catch (err) {
+          console.error("[create-issue] github issue creation failed", err);
+          toast.error("Failed to create GitHub issue, but Multica issue was created.");
         }
       }
 
@@ -910,6 +927,27 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
+                <div className="flex items-center gap-2">
+                  <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                    <Switch
+                      size="sm"
+                      checked={createAsGithubIssue}
+                      onCheckedChange={setCreateAsGithubIssue}
+                    />
+                    Create as GitHub Issue
+                  </label>
+                  {createAsGithubIssue && (
+                    <GitHubRepoPicker
+                      selectedRepoFullName={githubRepo?.full_name}
+                      onSelect={setGithubRepo}
+                      triggerRender={
+                        <Button variant="outline" size="sm" className="h-7 text-xs">
+                          {githubRepo ? githubRepo.full_name : "Select Repository..."}
+                        </Button>
+                      }
+                    />
+                  )}
+                </div>
                 {!title.trim() ? (
                   <TooltipProvider delay={200}>
                     <Tooltip>

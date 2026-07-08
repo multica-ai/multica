@@ -2727,5 +2727,18 @@ export class ApiClient {
       method: "DELETE",
     });
   }
+
+  // --- GitHub ---
+
+  async listGitHubUserRepos(): Promise<any[]> {
+    return this.fetch(`/api/me/github/repos`);
+  }
+
+  async createGitHubIssue(data: { repo_owner: string; repo_name: string; title: string; description?: string }): Promise<void> {
+    await this.fetch(`/api/me/github/issues`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
 }
 

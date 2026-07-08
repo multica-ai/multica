@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const githubKeys = {
@@ -20,3 +20,12 @@ export const issuePullRequestsOptions = (issueId: string) =>
     queryFn: () => api.listIssuePullRequests(issueId),
     enabled: !!issueId,
   });
+
+export const githubReposOptions = () => ({
+  queryKey: ["github", "repos"],
+  queryFn: () => api.listGitHubUserRepos(),
+});
+
+export function useGitHubRepos() {
+  return useQuery(githubReposOptions());
+}
