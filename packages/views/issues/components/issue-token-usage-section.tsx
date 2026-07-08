@@ -77,16 +77,17 @@ export function IssueTokenUsageSection({ usage }: { usage: IssueUsageSummary }) 
             <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
           </PropRow>
           {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-            <div className="contents" title={t(($) => $.detail.prop_cache_tooltip)}>
-              <PropRow label={t(($) => $.detail.prop_cache)}>
-                <span className="text-muted-foreground">
-                  {t(($) => $.detail.prop_cache_value, {
-                    read: formatTokenCount(usage.total_cache_read_tokens),
-                    write: formatTokenCount(usage.total_cache_write_tokens),
-                  })}
-                </span>
-              </PropRow>
-            </div>
+            <PropRow
+              label={t(($) => $.detail.prop_cache)}
+              title={t(($) => $.detail.prop_cache_tooltip)}
+            >
+              <span className="text-muted-foreground">
+                {t(($) => $.detail.prop_cache_value, {
+                  read: formatTokenCount(usage.total_cache_read_tokens),
+                  write: formatTokenCount(usage.total_cache_write_tokens),
+                })}
+              </span>
+            </PropRow>
           )}
           {runs.length > 0 ? (
             <>
