@@ -442,6 +442,14 @@ type GithubPendingInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubPrReview struct {
+	PrID          pgtype.UUID        `json:"pr_id"`
+	ReviewID      int64              `json:"review_id"`
+	ReviewerLogin string             `json:"reviewer_login"`
+	State         string             `json:"state"`
+	SubmittedAt   pgtype.Timestamptz `json:"submitted_at"`
+}
+
 type GithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -982,7 +990,10 @@ type User struct {
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone pgtype.Text `json:"timezone"`
+	Timezone          pgtype.Text `json:"timezone"`
+	GithubID          pgtype.Int8 `json:"github_id"`
+	GithubLogin       pgtype.Text `json:"github_login"`
+	GithubAccessToken pgtype.Text `json:"github_access_token"`
 }
 
 type UserComposioConnection struct {

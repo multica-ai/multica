@@ -767,6 +767,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		r.Get("/api/me/github/connect", h.GitHubUserConnect)
+		r.Post("/api/me/github/callback", h.GitHubUserCallback)
+		r.Delete("/api/me/github", h.GitHubUserDisconnect)
+		r.Get("/api/me/github/repos", h.GetGitHubUserRepos)
+		r.Post("/api/me/github/issues", h.CreateGitHubIssue)
+		r.Post("/api/me/github/device-code", h.GitHubDeviceCodeStart)
+		r.Post("/api/me/github/device-code/poll", h.GitHubDeviceCodePoll)
 		r.Post("/api/users/me/device-tokens", h.RegisterDeviceToken)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)

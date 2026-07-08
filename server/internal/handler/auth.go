@@ -63,6 +63,7 @@ type UserResponse struct {
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
 	ProfileDescription      string          `json:"profile_description"`
+	GithubLogin             *string         `json:"github_login"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
 }
@@ -92,6 +93,7 @@ func userToResponse(u db.User) UserResponse {
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
 		ProfileDescription:      u.ProfileDescription,
+		GithubLogin:             textToPtr(u.GithubLogin),
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -721,6 +723,304 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update user")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
+}
+
+func (h *Handler) GitHubUserConnect(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
+	if clientID == "" {
+		writeError(w, http.StatusServiceUnavailable, "GitHub OAuth is not configured")
+		return
+	}
+
+	// We can pass the user ID or a random nonce in the state for CSRF.
+	// For simplicity, just a static or simple state.
+	state := userID
+	redirectURI := fmt.Sprintf("https://github.com/login/oauth/authorize?client_id=%s&state=%s", clientID, state)
+
+	writeJSON(w, http.StatusOK, map[string]string{"url": redirectURI})
+}
+
+type GitHubUserCallbackRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"` // typically holds the user ID
+}
+
+type githubUserTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+}
+
+type githubUserResponse struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+
+func (h *Handler) GitHubUserCallback(w http.ResponseWriter, r *http.Request) {
+	// Must be logged in
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req GitHubUserCallbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
+	clientSecret := os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		writeError(w, http.StatusServiceUnavailable, "GitHub OAuth is not configured")
+		return
+	}
+
+	// Exchange code for token
+	tokenReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://github.com/login/oauth/access_token", nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	q := tokenReq.URL.Query()
+	q.Add("client_id", clientID)
+	q.Add("client_secret", clientSecret)
+	q.Add("code", req.Code)
+	tokenReq.URL.RawQuery = q.Encode()
+	tokenReq.Header.Set("Accept", "application/json")
+
+	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	if err != nil {
+		slog.Error("github user oauth token exchange failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to exchange code with GitHub")
+		return
+	}
+	defer tokenResp.Body.Close()
+
+	if tokenResp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "failed to exchange code with GitHub")
+		return
+	}
+
+	var gToken githubUserTokenResponse
+	if err := json.NewDecoder(tokenResp.Body).Decode(&gToken); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse GitHub token response")
+		return
+	}
+	if gToken.AccessToken == "" {
+		writeError(w, http.StatusBadGateway, "GitHub did not return an access token")
+		return
+	}
+
+	// Fetch user info
+	userReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://api.github.com/user", nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	userReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
+	userReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	userResp, err := http.DefaultClient.Do(userReq)
+	if err != nil {
+		slog.Error("github user fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from GitHub")
+		return
+	}
+	defer userResp.Body.Close()
+
+	if userResp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from GitHub")
+		return
+	}
+
+	var gUser githubUserResponse
+	if err := json.NewDecoder(userResp.Body).Decode(&gUser); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse GitHub user info")
+		return
+	}
+
+	// Link account
+	updatedUser, err := h.Queries.LinkGitHubAccount(r.Context(), db.LinkGitHubAccountParams{
+		ID:                parseUUID(userID),
+		GithubID:          pgtype.Int8{Int64: gUser.ID, Valid: true},
+		GithubLogin:       pgtype.Text{String: gUser.Login, Valid: true},
+		GithubAccessToken: pgtype.Text{String: gToken.AccessToken, Valid: true},
+	})
+	if err != nil {
+		slog.Error("failed to link github account", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to link GitHub account")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
+}
+
+func (h *Handler) GitHubUserDisconnect(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	updatedUser, err := h.Queries.UnlinkGitHubAccount(r.Context(), parseUUID(userID))
+	if err != nil {
+		slog.Error("failed to unlink github account", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to disconnect GitHub account")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
+}
+
+type githubDeviceCodeResponse struct {
+	DeviceCode      string `json:"device_code"`
+	UserCode        string `json:"user_code"`
+	VerificationUri string `json:"verification_uri"`
+	ExpiresIn       int    `json:"expires_in"`
+	Interval        int    `json:"interval"`
+}
+
+func (h *Handler) GitHubDeviceCodeStart(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
+	if clientID == "" {
+		writeError(w, http.StatusServiceUnavailable, "GitHub OAuth is not configured")
+		return
+	}
+
+	reqBody := url.Values{}
+	reqBody.Set("client_id", clientID)
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://github.com/login/device/code", strings.NewReader(reqBody.Encode()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create request")
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to call GitHub")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "github returned error")
+		return
+	}
+
+	var dResp githubDeviceCodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&dResp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse github response")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, dResp)
+}
+
+func (h *Handler) GitHubDeviceCodePoll(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
+	if clientID == "" {
+		writeError(w, http.StatusServiceUnavailable, "GitHub OAuth is not configured")
+		return
+	}
+
+	var reqBody struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	payload := url.Values{}
+	payload.Set("client_id", clientID)
+	payload.Set("device_code", reqBody.DeviceCode)
+	payload.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(payload.Encode()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create request")
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to call GitHub")
+		return
+	}
+	defer resp.Body.Close()
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		Error       string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse github response")
+		return
+	}
+
+	if tokenResp.Error != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": tokenResp.Error})
+		return
+	}
+
+	// Token acquired, now fetch user
+	userReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://api.github.com/user", nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create user request")
+		return
+	}
+	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+	userReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	uResp, err := http.DefaultClient.Do(userReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch user info")
+		return
+	}
+	defer uResp.Body.Close()
+
+	var gUser githubUserResponse
+	if err := json.NewDecoder(uResp.Body).Decode(&gUser); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse GitHub user info")
+		return
+	}
+
+	updatedUser, err := h.Queries.LinkGitHubAccount(r.Context(), db.LinkGitHubAccountParams{
+		ID:                parseUUID(userID),
+		GithubID:          pgtype.Int8{Int64: gUser.ID, Valid: true},
+		GithubLogin:       pgtype.Text{String: gUser.Login, Valid: true},
+		GithubAccessToken: pgtype.Text{String: tokenResp.AccessToken, Valid: true},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to link GitHub account")
 		return
 	}
 

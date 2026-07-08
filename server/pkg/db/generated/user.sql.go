@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 type CreateUserParams struct {
@@ -41,12 +41,15 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token FROM "user"
 WHERE id = $1
 `
 
@@ -68,12 +71,15 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token FROM "user"
 WHERE email = $1
 `
 
@@ -95,6 +101,39 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
+	)
+	return i, err
+}
+
+const getUserByGitHubID = `-- name: GetUserByGitHubID :one
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token FROM "user"
+WHERE github_id = $1
+`
+
+func (q *Queries) GetUserByGitHubID(ctx context.Context, githubID pgtype.Int8) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByGitHubID, githubID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
@@ -105,7 +144,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 type JoinCloudWaitlistParams struct {
@@ -135,6 +174,56 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
+	)
+	return i, err
+}
+
+const linkGitHubAccount = `-- name: LinkGitHubAccount :one
+UPDATE "user" SET
+    github_id = $2,
+    github_login = $3,
+    github_access_token = COALESCE($4, github_access_token),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
+`
+
+type LinkGitHubAccountParams struct {
+	ID                pgtype.UUID `json:"id"`
+	GithubID          pgtype.Int8 `json:"github_id"`
+	GithubLogin       pgtype.Text `json:"github_login"`
+	GithubAccessToken pgtype.Text `json:"github_access_token"`
+}
+
+func (q *Queries) LinkGitHubAccount(ctx context.Context, arg LinkGitHubAccountParams) (User, error) {
+	row := q.db.QueryRow(ctx, linkGitHubAccount,
+		arg.ID,
+		arg.GithubID,
+		arg.GithubLogin,
+		arg.GithubAccessToken,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
@@ -144,7 +233,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -165,6 +254,9 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
@@ -174,7 +266,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 type PatchUserOnboardingParams struct {
@@ -204,6 +296,9 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
@@ -213,7 +308,7 @@ UPDATE "user" SET
     starter_content_state = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 type SetStarterContentStateParams struct {
@@ -244,6 +339,44 @@ func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterCont
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
+	)
+	return i, err
+}
+
+const unlinkGitHubAccount = `-- name: UnlinkGitHubAccount :one
+UPDATE "user" SET
+    github_id = NULL,
+    github_login = NULL,
+    github_access_token = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
+`
+
+func (q *Queries) UnlinkGitHubAccount(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, unlinkGitHubAccount, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }
@@ -261,7 +394,7 @@ UPDATE "user" SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, github_id, github_login, github_access_token
 `
 
 type UpdateUserParams struct {
@@ -310,6 +443,9 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.GithubID,
+		&i.GithubLogin,
+		&i.GithubAccessToken,
 	)
 	return i, err
 }

@@ -78,3 +78,25 @@ UPDATE "user" SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetUserByGitHubID :one
+SELECT * FROM "user"
+WHERE github_id = $1;
+
+-- name: LinkGitHubAccount :one
+UPDATE "user" SET
+    github_id = $2,
+    github_login = $3,
+    github_access_token = COALESCE(sqlc.narg('github_access_token'), github_access_token),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UnlinkGitHubAccount :one
+UPDATE "user" SET
+    github_id = NULL,
+    github_login = NULL,
+    github_access_token = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
