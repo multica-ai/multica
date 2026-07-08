@@ -1149,18 +1149,30 @@ importers:
 
   packages/cerebro-agent-page-redesign:
     dependencies:
+      '@multica/cerebro-access':
+        specifier: workspace:*
+        version: link:../cerebro-access
       '@multica/cerebro-agent-capabilities':
         specifier: workspace:*
         version: link:../cerebro-agent-capabilities
       '@multica/cerebro-agent-context':
         specifier: workspace:*
         version: link:../cerebro-agent-context
+      '@multica/cerebro-agent-memory':
+        specifier: workspace:*
+        version: link:../cerebro-agent-memory
       '@multica/cerebro-agent-tools':
         specifier: workspace:*
         version: link:../cerebro-agent-tools
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-runtime':
+        specifier: workspace:*
+        version: link:../cerebro-runtime
+      '@multica/cerebro-types':
+        specifier: workspace:*
+        version: link:../cerebro-types
       '@multica/core':
         specifier: workspace:*
         version: link:../core
