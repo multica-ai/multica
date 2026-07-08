@@ -297,6 +297,19 @@ var validIssueSortColumns = []string{
 	"position", "title", "created_at", "start_date", "due_date", "priority",
 }
 
+// directionalIssueSortColumns are the sort keys for which --direction is
+// meaningful: every valid column except "position". Derived from
+// validIssueSortColumns so the two stay in sync.
+var directionalIssueSortColumns = func() []string {
+	cols := make([]string, 0, len(validIssueSortColumns)-1)
+	for _, c := range validIssueSortColumns {
+		if c != "position" {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}()
+
 func validateIssueStatus(status string) error {
 	return validateIssueEnum("status", status, validIssueStatuses)
 }
@@ -355,7 +368,7 @@ func init() {
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
-	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc) for non-position sorts; ignored for position")
+	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column (position is always ascending)")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -532,23 +545,31 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("metadata", filter)
 	}
-	if v, _ := cmd.Flags().GetString("sort"); v != "" {
+	sortVal, _ := cmd.Flags().GetString("sort")
+	if sortVal != "" {
 		valid := false
 		for _, c := range validIssueSortColumns {
-			if c == v {
+			if c == sortVal {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			return fmt.Errorf("invalid --sort %q; valid values: %s", v, strings.Join(validIssueSortColumns, ", "))
+			return fmt.Errorf("invalid --sort %q; valid values: %s", sortVal, strings.Join(validIssueSortColumns, ", "))
 		}
-		params.Set("sort", v)
+		params.Set("sort", sortVal)
 	}
 	if v, _ := cmd.Flags().GetString("direction"); v != "" {
 		d := strings.ToLower(v)
 		if d != "asc" && d != "desc" {
 			return fmt.Errorf("invalid --direction %q; valid values: asc, desc", v)
+		}
+		// position (the manual board order) is always ascending, so the server
+		// ignores --direction for it. Reject the combination up front rather
+		// than silently dropping the flag — a passed-but-ignored flag is a
+		// footgun, especially in scripts.
+		if sortVal == "" || sortVal == "position" {
+			return fmt.Errorf("--direction requires --sort to be one of %s; position (the default manual board order) is always ascending", strings.Join(directionalIssueSortColumns, ", "))
 		}
 		params.Set("direction", d)
 	}

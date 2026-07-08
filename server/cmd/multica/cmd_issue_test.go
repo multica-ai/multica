@@ -2614,6 +2614,44 @@ func TestRunIssueListRejectsInvalidSortAndDirection(t *testing.T) {
 	}
 }
 
+// TestRunIssueListRejectsDirectionWithoutDirectionalSort guards that passing a
+// valid --direction while the sort is the default/position (which the server
+// always sorts ascending) is rejected up front, rather than silently dropping
+// the flag — a passed-but-ignored flag is a footgun, especially in scripts.
+func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name string
+		sort string
+	}{
+		{"direction without sort", ""},
+		{"direction with explicit position sort", "position"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			if tc.sort != "" {
+				_ = cmd.Flags().Set("sort", tc.sort)
+			}
+			_ = cmd.Flags().Set("direction", "desc")
+			err := runIssueList(cmd, nil)
+			if err == nil {
+				t.Fatal("runIssueList: expected error for --direction on position/default sort")
+			}
+			if !strings.Contains(err.Error(), "--direction requires --sort") {
+				t.Fatalf("error = %q, want it to explain --direction requires a directional --sort", err)
+			}
+			// The message should name a concrete directional column to guide the fix.
+			if !strings.Contains(err.Error(), "created_at") {
+				t.Fatalf("error = %q, want it to list the valid directional sort columns", err)
+			}
+		})
+	}
+}
+
 func TestComputeReorderPosition(t *testing.T) {
 	positions := map[string]float64{"a": 10, "b": 20, "x": 99}
 	tests := []struct {
