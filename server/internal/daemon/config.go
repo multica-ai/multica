@@ -311,8 +311,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_TRAECLI_PATH", "traecli", "MULTICA_TRAECLI_MODEL"); ok {
 		agents["traecli"] = e
 	}
+	// OMP (oh-my-pi, https://pi.dev) — a Pi-derived coding agent driven over
+	// ACP via `omp acp --yolo`. Not wire-compatible with the upstream `pi`
+	// CLI's JSON stream mode, so it gets its own backend. MULTICA_OMP_MODEL
+	// seeds the daemon-wide default model (a model id from the user's
+	// authenticated omp catalog).
+	if e, ok := probe("MULTICA_OMP_PATH", "omp", "MULTICA_OMP_MODEL"); ok {
+		agents["omp"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, or traecli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, traecli, or omp and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -753,7 +761,7 @@ func isExecutableFile(path string) bool {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli",
+	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli", "omp",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

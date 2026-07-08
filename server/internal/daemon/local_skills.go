@@ -142,6 +142,10 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		// Official TRAE CLI global skills live in ~/.traecli/skills.
 		// See https://docs.trae.cn/cli_skills
 		providerRoot = filepath.Join(home, ".traecli", "skills")
+	case "omp":
+		// OMP (oh-my-pi) discovers user-level skills from ~/.omp/agent/skills via
+		// its native skill provider (project-level skills live in .omp/skills).
+		providerRoot = filepath.Join(home, ".omp", "agent", "skills")
 	case "antigravity":
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").

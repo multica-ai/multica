@@ -115,6 +115,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverTraecliModels(ctx, executablePath)
 		})
+	case "omp":
+		// OMP (oh-my-pi) is ACP-native: it returns its model catalog from
+		// session/new. Enumerate it on demand like the other ACP backends
+		// (requires an authenticated omp; falls back to manual entry on error).
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOmpModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -322,6 +329,31 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
 	})
+}
+
+// discoverOmpModels spins up a throwaway `omp acp --yolo` process and parses
+// the model catalog OMP advertises in its session/new `configOptions`. Unlike
+// the other ACP backends, OMP does NOT emit a `models.availableModels` block —
+// it exposes the model selector as a `category:"model"` config option, and
+// model changes go through `session/set_config_option`, not session/set_model
+// (which omp rejects as an unknown method). OMP must be authenticated for the
+// catalog to be non-empty; on any failure the caller falls back to the
+// manual-entry field.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	result, ok := acpSessionNewResult(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "omp",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-omp-discovery-",
+		acpArgs:      []string{"acp", "--yolo"},
+	})
+	if !ok {
+		return []Model{}, nil
+	}
+	models := parseACPModelConfigOptions(result)
+	if models == nil {
+		return []Model{}, nil
+	}
+	return models, nil
 }
 
 // cursorStaticModels is a minimal fallback used when
@@ -857,11 +889,30 @@ type acpDiscoveryProvider struct {
 // `models.availableModels` / `models.currentModelId`. Provider-specific
 // `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
+	result, ok := acpSessionNewResult(ctx, executablePath, p)
+	if !ok {
+		return []Model{}, nil
+	}
+	models := parseACPSessionNewModels(result)
+	if models == nil {
+		return []Model{}, nil
+	}
+	return models, nil
+}
+
+// acpSessionNewResult runs the minimal ACP handshake (initialize →
+// session/new) against an agent CLI and returns the raw session/new `result`
+// payload. It returns ok=false on any failure — missing binary, pipe error,
+// write error, timeout, or no matching response — so callers uniformly fall
+// back to an empty model list / manual entry. Sharing the handshake lets both
+// the `models.availableModels` parsers (Hermes/Kimi/Kiro/Qoder/Trae/Copilot)
+// and the `configOptions` parser (OMP) reuse one code path.
+func acpSessionNewResult(ctx context.Context, executablePath string, p acpDiscoveryProvider) (json.RawMessage, bool) {
 	if executablePath == "" {
 		executablePath = p.defaultBin
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -877,18 +928,18 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
-		return []Model{}, nil
+		return nil, false
 	}
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 	// Ensure the child process is always reaped.
 	defer func() {
@@ -919,7 +970,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		"clientInfo":         map[string]any{"name": p.clientName, "version": "0.1.0"},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 
 	// session/new requires a valid cwd — use a temp directory we
@@ -927,7 +978,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	// be in the middle of another task's worktree).
 	tmp, err := os.MkdirTemp("", p.tmpdirPrefix)
 	if err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 	defer os.RemoveAll(tmp)
 
@@ -935,14 +986,14 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		"cwd":        tmp,
 		"mcpServers": []any{},
 	}); err != nil {
-		return []Model{}, nil
+		return nil, false
 	}
 
 	// Read responses until we see the one for id=2 (session/new).
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
 	deadline := time.After(12 * time.Second)
-	done := make(chan []Model, 1)
+	done := make(chan json.RawMessage, 1)
 	go func() {
 		defer close(done)
 		for scanner.Scan() {
@@ -960,21 +1011,21 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 			if env.ID.String() != "2" || len(env.Result) == 0 {
 				continue
 			}
-			done <- parseACPSessionNewModels(env.Result)
+			done <- env.Result
 			return
 		}
 	}()
 
 	select {
-	case models := <-done:
-		if models == nil {
-			return []Model{}, nil
+	case result := <-done:
+		if len(result) == 0 {
+			return nil, false
 		}
-		return models, nil
+		return result, true
 	case <-deadline:
-		return []Model{}, nil
+		return nil, false
 	case <-runCtx.Done():
-		return []Model{}, nil
+		return nil, false
 	}
 }
 
@@ -1053,6 +1104,75 @@ func acpModelLabel(name, modelID string) string {
 		return modelID
 	}
 	return label
+}
+
+// parseACPModelConfigOptions extracts the model catalog from an ACP
+// session/new response that advertises models as a `configOptions` entry
+// (category/id "model") instead of a `models` block. OMP (oh-my-pi) is the
+// canonical case: its session/new returns
+//
+//	"configOptions": [
+//	  {
+//	    "id": "model", "category": "model", "currentValue": "zai/glm-5.2",
+//	    "options": [{"value":"zai/glm-5.2","name":"GLM-5.2"}, ...]
+//	  }
+//	]
+//
+// and model changes go through session/set_config_option, not session/set_model.
+// The option `value` is the model id; `name` is the display label; the entry
+// matching `currentValue` is flagged Default. Returns nil when no model config
+// option is present so the caller falls back to manual entry.
+func parseACPModelConfigOptions(raw json.RawMessage) []Model {
+	type cfgOptionValue struct {
+		Value string `json:"value"`
+		Name  string `json:"name"`
+	}
+	type cfgOption struct {
+		ID           string           `json:"id"`
+		Category     string           `json:"category"`
+		CurrentValue string           `json:"currentValue"`
+		Options      []cfgOptionValue `json:"options"`
+	}
+	var resp struct {
+		ConfigOptions []cfgOption `json:"configOptions"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil
+	}
+	models := make([]Model, 0)
+	seen := map[string]bool{}
+	for i := range resp.ConfigOptions {
+		opt := &resp.ConfigOptions[i]
+		if opt.Category != "model" && opt.ID != "model" {
+			continue
+		}
+		current := strings.TrimSpace(opt.CurrentValue)
+		for _, o := range opt.Options {
+			id := strings.TrimSpace(o.Value)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			provider := ""
+			// OMP model ids use "provider/model" (e.g. "zai/glm-5.2"); other
+			// ACP agents use "provider:model". Split on either so the UI
+			// groups the dropdown correctly.
+			if idx := strings.IndexAny(id, ":/"); idx > 0 {
+				provider = id[:idx]
+			}
+			models = append(models, Model{
+				ID:       id,
+				Label:    acpModelLabel(o.Name, id),
+				Provider: provider,
+				Default:  id == current,
+			})
+		}
+		break
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
 }
 
 // discoverAntigravityModels runs `agy models` and returns the catalog the

@@ -285,6 +285,11 @@ func skillsDirPath(workDir, provider string) string {
 		// in the workdir (global skills live in ~/.traecli/skills). See
 		// https://docs.trae.cn/cli_skills
 		return filepath.Join(workDir, ".traecli", "skills")
+	case "omp":
+		// OMP (oh-my-pi) auto-discovers project-level skills from .omp/skills/
+		// in the workdir via its native skill provider (user-level skills live
+		// in ~/.omp/skills).
+		return filepath.Join(workDir, ".omp", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's

@@ -17,6 +17,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "openclaw",
   "qoder",
   "traecli",
+  "omp",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {
