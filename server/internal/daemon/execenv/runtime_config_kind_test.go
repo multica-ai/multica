@@ -201,6 +201,47 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	}
 }
 
+// TestCommentFormattingForbidsSharedTmp pins the shared-/tmp guardrail
+// (GitHub #4913): the always-injected `## Comment Formatting` section must
+// constrain the body file to the run's working directory, forbid `/tmp` on
+// Linux/macOS (shared across daemon unix users — a Permission-denied write
+// followed by a separately-run post published another workspace's stale
+// file), and demand fail-fast write→post chaining.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestCommentFormattingForbidsSharedTmp(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+
+	ctx := TaskContextForEnv{IssueID: "i-1", TriggerCommentID: "tc-1",
+		AgentName: "Eve", AgentID: "eve-1"}
+
+	runtimeGOOS = "linux"
+	out := buildMetaSkillContent("claude", ctx)
+	for _, want := range []string{
+		"MUST live inside your current working directory",
+		"NEVER under `/tmp`",
+		"chain the write and the post with `&&`",
+		"#4913",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("linux Comment Formatting missing %q", want)
+		}
+	}
+
+	runtimeGOOS = "windows"
+	out = buildMetaSkillContent("claude", ctx)
+	for _, want := range []string{
+		"MUST live inside your current working directory",
+		"never a shared system temp directory",
+		"#4913",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("windows Comment Formatting missing %q", want)
+		}
+	}
+}
+
 // TestSlimQuickCreateAvailableCommands locks the minimal-variant content
 // for quick-create's Available Commands: `issue create` present, every
 // other Core command absent (the hard guardrails forbid the call).

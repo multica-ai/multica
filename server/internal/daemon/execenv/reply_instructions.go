@@ -167,9 +167,10 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
 				"On Windows, write the reply body to a UTF-8 file with your file-write tool, then post it with `--content-file`. "+
 				"Do NOT pipe via `--content-stdin` — Windows PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to native commands and silently drops non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) as `?` before the bytes reach `multica.exe`. "+
-				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
+				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line. "+
+				"The file must live inside your current working directory — never a shared system temp directory; posting a path you did not just successfully write publishes stale content (GitHub #4913). If the file write fails, do NOT run the post command.\n\n"+
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
-				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
+				"    # 1. Write the reply body to a UTF-8 file in your working directory (e.g. reply.md) with your file-write tool.\n"+
 				"    # 2. Post the comment:\n"+
 				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
 				"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
@@ -193,9 +194,10 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			"Write the reply body to a UTF-8 file with your file-write tool first, then post it with `--content-file`. "+
 			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them. "+
 			"Do NOT use `--content-stdin` with a HEREDOC either — when extra flags (e.g. `--assignee`, `--project` on `multica issue create`) accompany the command, the bash heredoc/flag boundary is fragile and flags can be silently swallowed into the stdin stream while the command still exits 0 (see GitHub #4182, OXY-78 / OXY-76). "+
-			"It is also easy to lose formatting or compress a structured reply into one line with inline forms.\n\n"+
+			"It is also easy to lose formatting or compress a structured reply into one line with inline forms. "+
+			"The file must live inside your current working directory — NEVER under `/tmp`: on multi-daemon hosts `/tmp` is shared across unix users, a fixed name like `/tmp/reply.md` can collide with another user's leftover file, your write fails with `Permission denied`, and a separately-run post then publishes that user's stale content (GitHub #4913). If you write via shell redirection, chain the write and the post with `&&` so a failed write aborts the post.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
+			"    # 1. Write the reply body to a UTF-8 file in your working directory (e.g. reply.md — never /tmp) with your file-write tool.\n"+
 			"    # 2. Post the comment:\n"+
 			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
 			"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+

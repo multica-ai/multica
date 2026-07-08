@@ -33,6 +33,8 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 		"Write the reply body to a UTF-8 file",
 		"`--content-file`",
 		"#4182",
+		"NEVER under `/tmp`",
+		"#4913",
 		"rm ./reply.md",
 		"Do NOT write literal `\\n` escapes to simulate line breaks",
 		"do NOT reuse --parent values from previous turns",
@@ -89,6 +91,8 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					"Write the reply body to a UTF-8 file",
 					"`--content-file`",
 					"#4182",
+					"NEVER under `/tmp`",
+					"#4913",
 					"rm ./reply.md",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
@@ -142,6 +146,8 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				"Do NOT pipe via `--content-stdin`",
 				"silently drops non-ASCII",
 				"$OutputEncoding",
+				"never a shared system temp directory",
+				"#4913",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, got)

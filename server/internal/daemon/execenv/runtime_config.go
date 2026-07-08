@@ -556,16 +556,28 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// line, the body never reaches the shell, no heredoc boundary exists for
 	// flags to leak across. This is identical to the long-standing Windows
 	// path, so the cross-platform guidance is now one shape.
+	//
+	// The body file itself must live inside the run's working directory —
+	// never a shared system temp dir. On multi-daemon hosts, /tmp is shared
+	// across the daemons' unix users: a fixed name like /tmp/reply.md can
+	// collide with another user's leftover file, the agent's write fails with
+	// `Permission denied` (sticky /tmp), and a follow-up post that runs as a
+	// separate statement publishes the OTHER workspace's stale content
+	// (GitHub #4913 — observed cross-workspace disclosure in production).
+	// Same reason the write and the post must be one fail-fast unit: a failed
+	// write must abort the post, never ship whatever the path already held.
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
 		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+		b.WriteString("The body file MUST live inside your current working directory (e.g. `./reply.md`) — never a shared system temp directory: leftover files there can belong to other users or earlier runs, and posting a path you did not just successfully write publishes stale content (GitHub #4913). If the file write fails for any reason, do NOT run the post command — fix the write first. ")
 		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
-		b.WriteString("After posting, remove the temp file with `Remove-Item ./reply.md` (or your chosen path) so a later run does not pick up stale content. ")
+		b.WriteString("After posting, remove the temp file with `Remove-Item ./reply.md` (or your chosen workdir-relative path) so a later run does not pick up stale content. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	} else {
 		b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them (MUL-2904). Do NOT use `--content-stdin` with a HEREDOC either: when extra flags accompany the command (e.g. `--assignee`, `--project` on `multica issue create`), the bash heredoc/flag boundary is fragile and flags can be silently swallowed into the stdin stream while the command still exits 0 (GitHub #4182). ")
+		b.WriteString("The body file MUST live inside your current working directory (e.g. `./reply.md`) — NEVER under `/tmp`: on multi-daemon hosts `/tmp` is shared across unix users, a fixed name like `/tmp/reply.md` can collide with another user's leftover file, your write fails with `Permission denied`, and a separately-run post then publishes that user's stale content (GitHub #4913). If you write the file via shell redirection, chain the write and the post with `&&` in one invocation so a failed write aborts the post; if the write fails for any reason, do NOT run the post command. ")
 		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
-		b.WriteString("After posting, remove the temp file with `rm ./reply.md` (or your chosen path) so a later run does not pick up stale content. ")
+		b.WriteString("After posting, remove the temp file with `rm ./reply.md` (or your chosen workdir-relative path) so a later run does not pick up stale content. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 
