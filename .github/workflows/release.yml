@@ -19,6 +19,7 @@ jobs:
       tag_name: ${{ steps.release_meta.outputs.tag_name }}
       is_stable: ${{ steps.release_meta.outputs.is_stable }}
       ghcr_owner: ${{ steps.ghcr.outputs.owner }}
+      is_upstream: ${{ steps.meta.outputs.is_upstream }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,9 +47,20 @@ jobs:
             echo "is_stable=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${GITHUB_REPOSITORY_OWNER}" = "multica-ai" ]; then
+            echo "is_upstream=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_upstream=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: GHCR image namespace
         id: ghcr
         shell: bash
+        # GHCR requires lowercase image namespaces; GitHub org names may be mixed-case.
         run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
@@ -60,14 +72,11 @@ jobs:
       - name: Run tests
         run: cd server && go test -race ./...
 
-  release:
+  # Publishes CLI archives to the GitHub Release for this repository.
+  # Upstream uses .goreleaser.yml (includes Homebrew tap). Forks use
+  # .goreleaser.fork.yml so they never touch multica-ai/homebrew-tap.
+  cli-release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -81,7 +90,8 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: Run GoReleaser
+      - name: Run GoReleaser (upstream)
+        if: needs.verify.outputs.is_upstream == 'true'
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -89,6 +99,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Run GoReleaser (fork)
+        if: needs.verify.outputs.is_upstream != 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean -f .goreleaser.fork.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
@@ -330,7 +349,8 @@ jobs:
 
   helm-chart:
     needs: [verify, docker-backend-merge, docker-web-merge]
-    if: github.repository_owner == 'multica-ai'
+    # Only the canonical upstream publishes the OCI Helm chart.
+    if: needs.verify.outputs.is_upstream == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: release-helm-chart-${{ github.ref }}
@@ -369,13 +389,11 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # Desktop installers upload to the GitHub Release created by cli-release.
+  # Publish owner/repo always come from github.repository so forks do not
+  # need a committed electron-builder.yml owner override.
   desktop:
-    needs: release
+    needs: [verify, cli-release]
     strategy:
       fail-fast: false
       matrix:
@@ -417,11 +435,62 @@ jobs:
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # electron-builder's GitHub publisher reads this:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable code signing on Linux/Windows for now — the public
-          # release is unsigned for these platforms, the CLI carries the
-          # trust boundary. Set CSC_LINK in repo secrets to enable
-          # Windows signing later.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+        shell: bash
+        run: >-
+          node scripts/package.mjs
+          --${{ matrix.target }} --x64 --arm64 --publish always
+          --config.publish.owner=${{ github.repository_owner }}
+          --config.publish.repo=${{ github.event.repository.name }}
+
+  # macOS desktop for forks only. Upstream still ships macOS via the manual
+  # release-desktop skill (Developer ID + notarization outside this workflow).
+  desktop-mac:
+    needs: [verify, cli-release]
+    if: needs.verify.outputs.is_upstream != 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Desktop installers (mac)
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Enable signing when CSC_LINK is present; otherwise ad-hoc.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
+        shell: bash
+        run: >-
+          node scripts/package.mjs
+          --mac --x64 --arm64 --publish always
+          --config.publish.owner=${{ github.repository_owner }}
+          --config.publish.repo=${{ github.event.repository.name }}

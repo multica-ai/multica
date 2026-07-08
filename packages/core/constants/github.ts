@@ -1,5 +1,7 @@
 export const DEFAULT_GITHUB_REPO = "multica-ai/multica";
 export const DEFAULT_GITHUB_BRANCH = "main";
+export const DEFAULT_DOCS_BASE_URL = "https://multica.ai/docs";
+export const DEFAULT_CHANGELOG_URL = "https://multica.ai/changelog";
 
 const INSTALL_SCRIPT = "install.sh";
 const FORK_INSTALL_SCRIPT = "install-fork.sh";

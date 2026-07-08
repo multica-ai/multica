@@ -12,8 +12,8 @@ install, release, desktop signing, or self-host env every cycle.
 |---------|-----------------|
 | Install CLI (humans / UI copy) | `scripts/install-fork.sh` → `install.sh` |
 | UI install command | Server env `MULTICA_GITHUB_REPO` → `/api/config` → `buildCliInstallCommand()` |
-| CLI binaries on tag | `.goreleaser.fork.yml` + `.github/workflows/release-fork.yml` |
-| Docker images on tag | Upstream `release.yml` docker jobs (owner lowercased for GHCR) |
+| CLI binaries on tag | `.goreleaser.fork.yml` via unified `.github/workflows/release.yml` |
+| Docker images on tag | Same `release.yml` docker jobs (`ghcr.io/<lowercase-owner>/…`) |
 | macOS desktop | Manual or CI arm64; **must** be Developer ID + notarized — see [`apps/desktop/MACOS_RELEASE.md`](apps/desktop/MACOS_RELEASE.md) |
 | Self-host (non-Docker) | Build from git tag; set fork env vars below |
 
@@ -27,7 +27,7 @@ These should never be expected upstream. Prefer putting fork defaults here:
 | `scripts/install-fork.sh` | curl entrypoint; sets `MULTICA_GITHUB_REPO`, skips Homebrew |
 | `scripts/install-fork.ps1` | Windows parity |
 | `.goreleaser.fork.yml` | GoReleaser without Homebrew tap publish |
-| `.github/workflows/release-fork.yml` | Fork tag → CLI + desktop (Linux/Win/mac arm64) |
+| `.github/workflows/release.yml` | Single tag pipeline: CLI + Docker + desktop (macOS fork-only job) |
 | `apps/desktop/MACOS_RELEASE.md` | Signing / notarization / Gatekeeper |
 | `scripts/cleanup-macos-desktop-updater.sh` | Clear ShipIt backups + updater cache |
 
@@ -89,13 +89,13 @@ GHCR owner must be **lowercase** (`git-on-my-level`).
 ## Release checklist
 
 1. Merge upstream `main` into fork `main`. Resolve conflicts only in fork-only
-   files and intentional overlays (`electron-builder.yml` publish owner/repo).
+   files. Desktop publish owner/repo is injected by CI (`--config.publish.*`); do not bake the fork org into `electron-builder.yml`.
 2. Local check: `pnpm typecheck` / `make test` as needed.
 3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. Wait for CI:
-   - **`release-fork.yml`**: CLI archives + `checksums.txt`; desktop Linux/Win;
-     mac arm64 if secrets allow signing
-   - **`release.yml`**: GHCR backend/web (even if you do not consume them)
+4. Wait for CI (`release.yml` only — `release-fork.yml` was merged into it):
+   - CLI archives + `checksums.txt` via `.goreleaser.fork.yml`
+   - GHCR backend/web (`ghcr.io/git-on-my-level/…`)
+   - Desktop Linux/Win; macOS when Apple secrets allow signing
 5. **macOS desktop** (until CI secrets are complete): build/sign/notarize locally
    per [`apps/desktop/MACOS_RELEASE.md`](apps/desktop/MACOS_RELEASE.md) and publish
    to the same tag (`latest-mac.yml` + DMG/ZIP).
@@ -117,10 +117,11 @@ GHCR owner must be **lowercase** (`git-on-my-level`).
 
 ## Desktop auto-update
 
-Installed apps look at `Git-on-my-level/multica` releases (`electron-builder.yml`
-publish owner/repo). The feed file is `latest-mac.yml` on the **latest** release
-tag. Publishing Mac assets only to an older tag (e.g. 0.3.44) while CLI is on
-0.3.45 causes 404s.
+Installed apps look at `Git-on-my-level/multica` releases (baked `app-update.yml`
+from CI `--config.publish.owner`). The committed `electron-builder.yml` default
+stays `multica-ai`; CI always overrides. The feed file is `latest-mac.yml` on
+the **latest** release tag. Publishing Mac assets only to an older tag (e.g.
+0.3.44) while CLI is on 0.3.45 causes 404s.
 
 Signing rules of thumb:
 
@@ -132,22 +133,31 @@ Wire fork repo secrets before relying on CI Mac builds: `CSC_LINK`,
 `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
 Details: [`apps/desktop/MACOS_RELEASE.md`](apps/desktop/MACOS_RELEASE.md).
 
-## Merging upstream
+## Syncing from upstream
 
 ```bash
-git fetch upstream   # or origin if you track multica-ai as upstream
+git remote add upstream https://github.com/multica-ai/multica.git   # once
+./scripts/sync-upstream.sh   # fetch + report ahead/behind (no auto-merge)
+git fetch upstream
 git checkout main
 git merge upstream/main
 ```
 
 Expect to re-apply or keep:
 
-- `apps/desktop/electron-builder.yml` → `publish.owner: Git-on-my-level`
+- `scripts/install-fork.*` → `FORK_DEFAULT_GITHUB_REPO` / `$ForkDefaultGithubRepo` (thin overlay for bare curl|bash)
 - All **fork-only files** above (should not conflict if upstream never adds them)
 - Env-guarded install/CLI changes usually merge cleanly
 
 After merge, run a quick install-fork smoke test and confirm `/api/config` still
 returns the fork repo on the hosted backend.
+
+## Help menu / docs URLs
+
+Help → Docs defaults to `https://multica.ai/docs` even on this fork (product
+concepts). Help → Changelog uses this fork's GitHub Releases when
+`MULTICA_GITHUB_REPO` is set. Override with `MULTICA_DOCS_BASE_URL` /
+`MULTICA_CHANGELOG_URL` if needed.
 
 ## Related PRs (history)
 
@@ -157,3 +167,4 @@ returns the fork repo on the hosted backend.
 | [#6](https://github.com/Git-on-my-level/multica/pull/6) | Fork desktop CI matrix + updater signature UX |
 | [#7](https://github.com/Git-on-my-level/multica/pull/7) | arm64-only Mac CI + updater cleanup script |
 | [#8](https://github.com/Git-on-my-level/multica/pull/8) | Install bin dir (`/opt/homebrew/bin`) + fail on error |
+| [#9](https://github.com/Git-on-my-level/multica/pull/9) | Fork runbook + macOS release notes |

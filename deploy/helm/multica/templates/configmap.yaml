@@ -24,6 +24,18 @@ data:
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
+  {{- if .Values.backend.config.githubRepo }}
+  MULTICA_GITHUB_REPO: {{ .Values.backend.config.githubRepo | quote }}
+  {{- end }}
+  {{- if .Values.backend.config.githubBranch }}
+  MULTICA_GITHUB_BRANCH: {{ .Values.backend.config.githubBranch | quote }}
+  {{- end }}
+  {{- if .Values.backend.config.docsBaseUrl }}
+  MULTICA_DOCS_BASE_URL: {{ .Values.backend.config.docsBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.backend.config.changelogUrl }}
+  MULTICA_CHANGELOG_URL: {{ .Values.backend.config.changelogUrl | quote }}
+  {{- end }}
 
   {{- if not .Values.postgres.external.enabled }}
   # --- PostgreSQL (consumed by the backend to build DATABASE_URL) ---

@@ -12,6 +12,9 @@ It covers:
 - full-stack isolated testing (backend + frontend + daemon from source)
 - troubleshooting and destructive reset options
 
+Maintaining a long-lived fork (releases, self-host images, syncing from
+`multica-ai/multica`) is covered in [FORK.md](FORK.md).
+
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.

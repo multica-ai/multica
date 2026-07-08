@@ -318,8 +318,10 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 }
 
 func TestGetConfigGithubRepoFromEnv(t *testing.T) {
-	t.Setenv("MULTICA_GITHUB_REPO", "Git-on-my-level/multica")
+	t.Setenv("MULTICA_GITHUB_REPO", "acme/multica")
 	t.Setenv("MULTICA_GITHUB_BRANCH", "develop")
+	t.Setenv("MULTICA_DOCS_BASE_URL", "https://docs.example.com")
+	t.Setenv("MULTICA_CHANGELOG_URL", "https://docs.example.com/changelog")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -333,11 +335,17 @@ func TestGetConfigGithubRepoFromEnv(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if cfg.GithubRepo != "Git-on-my-level/multica" {
-		t.Fatalf("github_repo: want Git-on-my-level/multica, got %q", cfg.GithubRepo)
+	if cfg.GithubRepo != "acme/multica" {
+		t.Fatalf("github_repo: want acme/multica, got %q", cfg.GithubRepo)
 	}
 	if cfg.GithubBranch != "develop" {
 		t.Fatalf("github_branch: want develop, got %q", cfg.GithubBranch)
+	}
+	if cfg.DocsBaseURL != "https://docs.example.com" {
+		t.Fatalf("docs_base_url: want https://docs.example.com, got %q", cfg.DocsBaseURL)
+	}
+	if cfg.ChangelogURL != "https://docs.example.com/changelog" {
+		t.Fatalf("changelog_url: want https://docs.example.com/changelog, got %q", cfg.ChangelogURL)
 	}
 }
 

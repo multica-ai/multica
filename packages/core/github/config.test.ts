@@ -16,20 +16,38 @@ describe("resolveGithubConfig", () => {
     expect(cfg.webUrl).toBe(githubWebUrl());
     expect(cfg.issuesUrl).toBe(githubIssuesUrl());
     expect(cfg.cliInstallCommand).toBe(buildCliInstallCommand());
+    expect(cfg.isUpstream).toBe(true);
+    expect(cfg.docsUrl).toBe("https://multica.ai/docs");
+    expect(cfg.changelogUrl).toBe("https://multica.ai/changelog");
   });
 
   it("builds fork install commands from overrides", () => {
     const cfg = resolveGithubConfig({
-      repo: "Git-on-my-level/multica",
+      repo: "acme/multica",
       branch: "main",
     });
     expect(cfg.cliInstallCommand).toBe(
-      "MULTICA_GITHUB_REPO=Git-on-my-level/multica MULTICA_GITHUB_BRANCH=main curl -fsSL https://raw.githubusercontent.com/Git-on-my-level/multica/main/scripts/install-fork.sh | bash",
+      "MULTICA_GITHUB_REPO=acme/multica MULTICA_GITHUB_BRANCH=main curl -fsSL https://raw.githubusercontent.com/acme/multica/main/scripts/install-fork.sh | bash",
     );
-    expect(cfg.webUrl).toBe("https://github.com/Git-on-my-level/multica");
-    expect(cfg.issuesUrl).toBe(
-      "https://github.com/Git-on-my-level/multica/issues",
+    expect(cfg.webUrl).toBe("https://github.com/acme/multica");
+    expect(cfg.issuesUrl).toBe("https://github.com/acme/multica/issues");
+    expect(cfg.isUpstream).toBe(false);
+    // Docs stay on the public Multica site unless MULTICA_DOCS_BASE_URL is set;
+    // changelog points at the fork's GitHub Releases.
+    expect(cfg.docsUrl).toBe("https://multica.ai/docs");
+    expect(cfg.changelogUrl).toBe(
+      "https://github.com/acme/multica/releases",
     );
+  });
+
+  it("honors explicit docs and changelog overrides", () => {
+    const cfg = resolveGithubConfig({
+      repo: "acme/multica",
+      docsBaseUrl: "https://docs.example.com",
+      changelogUrl: "https://docs.example.com/changelog",
+    });
+    expect(cfg.docsUrl).toBe("https://docs.example.com");
+    expect(cfg.changelogUrl).toBe("https://docs.example.com/changelog");
   });
 
   it("passes repo override through fork install command", () => {

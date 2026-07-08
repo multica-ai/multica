@@ -2,6 +2,10 @@
 
 Deploy Multica on your own infrastructure in minutes.
 
+> **Running a GitHub fork?** Set `MULTICA_GITHUB_REPO=owner/repo` and follow
+> [FORK.md](FORK.md) so install links, GHCR images, and releases target
+> your fork instead of `multica-ai/multica`.
+
 ## Architecture
 
 | Component | Description | Technology |

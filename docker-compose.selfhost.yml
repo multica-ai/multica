@@ -97,6 +97,8 @@ services:
       MULTICA_PUBLIC_URL: ${MULTICA_PUBLIC_URL:-}
       MULTICA_GITHUB_REPO: ${MULTICA_GITHUB_REPO:-}
       MULTICA_GITHUB_BRANCH: ${MULTICA_GITHUB_BRANCH:-}
+      MULTICA_DOCS_BASE_URL: ${MULTICA_DOCS_BASE_URL:-}
+      MULTICA_CHANGELOG_URL: ${MULTICA_CHANGELOG_URL:-}
       # Comma-separated CIDRs whose source IP is allowed to set
       # X-Forwarded-For / X-Real-IP for the webhook per-IP rate limiter.
       # Empty default = headers ignored, RemoteAddr used. Set e.g.

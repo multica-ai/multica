@@ -71,6 +71,10 @@ export function AuthInitializer({
           githubRepo: cfg.github_repo,
           githubBranch: cfg.github_branch,
         });
+        configStore.getState().setDocsConfig({
+          docsBaseUrl: cfg.docs_base_url,
+          changelogUrl: cfg.changelog_url,
+        });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         if (cfg.posthog_key) {
           initAnalytics({

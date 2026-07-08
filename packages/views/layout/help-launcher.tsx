@@ -8,14 +8,13 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useModalStore } from "@multica/core/modals";
+import { useGithubConfig } from "@multica/core/github/config";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { useT } from "../i18n";
 
-const DOCS_URL = "https://multica.ai/docs";
-const CHANGELOG_URL = "https://multica.ai/changelog";
-
 export function HelpLauncher() {
   const { t } = useT("layout");
+  const { docsUrl, changelogUrl } = useGithubConfig();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -33,7 +32,7 @@ export function HelpLauncher() {
       >
         <DropdownMenuItem
           render={
-            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" />
+            <a href={docsUrl} target="_blank" rel="noopener noreferrer" />
           }
         >
           <BookOpen className="h-3.5 w-3.5" />
@@ -43,7 +42,7 @@ export function HelpLauncher() {
         <DropdownMenuItem
           render={
             <a
-              href={CHANGELOG_URL}
+              href={changelogUrl}
               target="_blank"
               rel="noopener noreferrer"
             />

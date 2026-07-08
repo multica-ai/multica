@@ -1,6 +1,9 @@
 # -----------------------------------------------------------------------------
 # Container images
 # -----------------------------------------------------------------------------
+# Upstream defaults to ghcr.io/multica-ai/*. Forks should override both
+# repositories to ghcr.io/<lowercase-owner>/multica-{backend,web} and set
+# backend.config.githubRepo (see FORKING.md).
 images:
   backend:
     repository: ghcr.io/multica-ai/multica-backend
@@ -128,6 +131,12 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    # Fork self-host: set githubRepo to owner/repo so /api/config drives
+    # install commands, Help links, and feedback URLs at your fork.
+    githubRepo: ""
+    githubBranch: ""
+    docsBaseUrl: ""
+    changelogUrl: ""
   resources:
     requests:
       cpu: 100m

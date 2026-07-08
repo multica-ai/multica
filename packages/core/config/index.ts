@@ -17,6 +17,8 @@ interface ConfigState {
   workspaceCreationDisabled: boolean;
   githubRepo: string;
   githubBranch: string;
+  docsBaseUrl: string;
+  changelogUrl: string;
   featureFlags: Record<string, boolean>;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
@@ -32,6 +34,10 @@ interface ConfigState {
     githubRepo?: string;
     githubBranch?: string;
   }) => void;
+  setDocsConfig: (config: {
+    docsBaseUrl?: string;
+    changelogUrl?: string;
+  }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
 }
 
@@ -45,6 +51,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   workspaceCreationDisabled: false,
   githubRepo: "",
   githubBranch: "",
+  docsBaseUrl: "",
+  changelogUrl: "",
   featureFlags: {},
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
@@ -53,6 +61,8 @@ export const configStore = createStore<ConfigState>((set) => ({
     set({ daemonServerUrl, daemonAppUrl }),
   setGithubConfig: ({ githubRepo = "", githubBranch = "" }) =>
     set({ githubRepo, githubBranch }),
+  setDocsConfig: ({ docsBaseUrl = "", changelogUrl = "" }) =>
+    set({ docsBaseUrl, changelogUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
 }));
 

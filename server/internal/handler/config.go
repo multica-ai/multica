@@ -40,6 +40,11 @@ type AppConfig struct {
 	// user-facing GitHub link (install commands, releases, feedback).
 	GithubRepo   string `json:"github_repo,omitempty"`
 	GithubBranch string `json:"github_branch,omitempty"`
+	// DocsBaseURL / ChangelogURL override Help-menu and helper-agent doc
+	// links. When empty, the frontend falls back to multica.ai (upstream)
+	// or the configured GitHub repo / releases (forks).
+	DocsBaseURL  string `json:"docs_base_url,omitempty"`
+	ChangelogURL string `json:"changelog_url,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -71,6 +76,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.GithubRepo, config.GithubBranch = githubConfigFromEnv()
+	config.DocsBaseURL = normalizePublicURL(os.Getenv("MULTICA_DOCS_BASE_URL"))
+	config.ChangelogURL = normalizePublicURL(os.Getenv("MULTICA_CHANGELOG_URL"))
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 
 	// Re-read from env on every request so operators can rotate keys via

@@ -44,6 +44,8 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   github_repo?: string;
   github_branch?: string;
+  docs_base_url?: string;
+  changelog_url?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
 }
@@ -195,6 +197,8 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   github_repo: OptionalStringSchema,
   github_branch: OptionalStringSchema,
+  docs_base_url: OptionalStringSchema,
+  changelog_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
 }).loose();
@@ -208,6 +212,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   github_repo: "",
   github_branch: "",
+  docs_base_url: "",
+  changelog_url: "",
   workspace_creation_disabled: false,
   feature_flags: {},
 };
