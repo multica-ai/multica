@@ -530,7 +530,7 @@ describe("IssueUsageSummarySchema", () => {
     expect(task.comment_triggered).toBe(false);
   });
 
-  it("drops a non-array tasks field to the default", () => {
+  it("rejects a non-array tasks field", () => {
     const parsed = IssueUsageSummarySchema.safeParse({ tasks: "nope" });
     expect(parsed.success).toBe(false);
   });
