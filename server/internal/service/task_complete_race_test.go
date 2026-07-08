@@ -23,16 +23,40 @@ func (r *mockRow) Scan(dest ...any) error {
 		return r.err
 	}
 	t := r.task
-	ptrs := []any{
-		&t.ID, &t.AgentID, &t.IssueID, &t.Status, &t.Priority,
-		&t.DispatchedAt, &t.StartedAt, &t.CompletedAt, &t.Result,
-		&t.Error, &t.CreatedAt, &t.Context, &t.RuntimeID,
-		&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
-		&t.ChatSessionID, &t.AutopilotRunID,
-		&t.Attempt, &t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
-		&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
-		&t.WaitReason, &t.InitiatorUserID, &t.HandoffNote, &t.PrepareLeaseExpiresAt,
-		&t.SquadID, &t.EscalationForTaskID, &t.FireAt,
+	// Different queries return different column subsets.
+	// GetAgentTask returns all 35 columns; CompleteOrReclaimAgentTask and
+	// FailOrReclaimAgentTask return 32 (omitting runtime_mcp_overlay,
+	// originator_user_id, runtime_connected_apps). Build the matching
+	// source-pointer list based on how many destinations the caller passed.
+	var ptrs []any
+	switch len(dest) {
+	case 32:
+		// CompleteOrReclaimAgentTask / FailOrReclaimAgentTask column order
+		ptrs = []any{
+			&t.ID, &t.AgentID, &t.IssueID, &t.Status, &t.Priority,
+			&t.DispatchedAt, &t.StartedAt, &t.CompletedAt, &t.Result,
+			&t.Error, &t.CreatedAt, &t.Context, &t.RuntimeID,
+			&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
+			&t.ChatSessionID, &t.AutopilotRunID,
+			&t.Attempt, &t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
+			&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
+			&t.WaitReason, &t.InitiatorUserID, &t.HandoffNote, &t.PrepareLeaseExpiresAt,
+			&t.SquadID, &t.EscalationForTaskID, &t.FireAt,
+		}
+	default:
+		// GetAgentTask / full column order (35 columns)
+		ptrs = []any{
+			&t.ID, &t.AgentID, &t.IssueID, &t.Status, &t.Priority,
+			&t.DispatchedAt, &t.StartedAt, &t.CompletedAt, &t.Result,
+			&t.Error, &t.CreatedAt, &t.Context, &t.RuntimeID,
+			&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
+			&t.ChatSessionID, &t.AutopilotRunID,
+			&t.Attempt, &t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
+			&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
+			&t.WaitReason, &t.InitiatorUserID, &t.HandoffNote, &t.PrepareLeaseExpiresAt,
+			&t.SquadID, &t.RuntimeMcpOverlay, &t.EscalationForTaskID, &t.FireAt,
+			&t.OriginatorUserID, &t.RuntimeConnectedApps,
+		}
 	}
 	for i, p := range ptrs {
 		if i >= len(dest) {
