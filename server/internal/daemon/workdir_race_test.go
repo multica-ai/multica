@@ -166,12 +166,14 @@ func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-private-temp"
 	taskID := "task-private-temp"
-	expectedTempDir := filepath.Join(execenv.PredictRootDir(workspacesRoot, workspaceID, taskID), "tmp", taskID)
+	envRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	expectedTempDir := taskTempDirPath(envRoot, taskID)
 
 	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
 	fakeBin := filepath.Join(t.TempDir(), "claude")
 	script := `#!/bin/sh
-printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+if [ -d "$TMPDIR" ]; then tmpdir_exists=1; else tmpdir_exists=0; fi
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" > "$CAPTURE_FILE"
 IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
@@ -231,14 +233,6 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
 	}
 
-	info, err := os.Stat(expectedTempDir)
-	if err != nil {
-		t.Fatalf("expected task temp dir %q to exist: %v", expectedTempDir, err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("expected task temp path %q to be a directory", expectedTempDir)
-	}
-
 	raw, err := os.ReadFile(captureFile)
 	if err != nil {
 		t.Fatalf("read captured agent env: %v", err)
@@ -255,6 +249,15 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		if got[key] != expectedTempDir {
 			t.Fatalf("%s = %q, want private task temp dir %q", key, got[key], expectedTempDir)
 		}
+	}
+	if got["TMPDIR_EXISTS"] != "1" {
+		t.Fatalf("agent did not see task temp dir on disk: captured env %v", got)
+	}
+	if strings.Contains(expectedTempDir, envRoot) {
+		t.Fatalf("task temp dir must not live under long env root %q: got %q", envRoot, expectedTempDir)
+	}
+	if os.PathSeparator == '/' && len(expectedTempDir) >= 64 {
+		t.Fatalf("task temp dir must stay short for Unix-domain sockets: len(%q) = %d", expectedTempDir, len(expectedTempDir))
 	}
 }
 

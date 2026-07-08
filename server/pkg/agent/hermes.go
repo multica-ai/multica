@@ -1674,6 +1674,11 @@ var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadReque
 // "Details:" tag actually spells out what happened).
 var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
 
+// acpUnixSocketPathErrorRe catches Hermes/Python AF_UNIX socket failures,
+// which otherwise look like a generic provider failure even though the
+// actionable cause is an overlong TMPDIR-derived socket path.
+var acpUnixSocketPathErrorRe = regexp.MustCompile(`(?i)(AF_UNIX|Unix(?:-domain)? socket|sun_path).*(path too long)|path too long.*(AF_UNIX|Unix(?:-domain)? socket|sun_path)`)
+
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
 // exhausting retries ("after N retries"), or because the error is
@@ -1722,10 +1727,10 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
+		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line) || acpUnixSocketPathErrorRe.MatchString(line)) {
 			continue
 		}
-		if acpTerminalErrorRe.MatchString(line) {
+		if acpTerminalErrorRe.MatchString(line) || acpUnixSocketPathErrorRe.MatchString(line) {
 			s.terminal = true
 		}
 		if s.seen[line] {
@@ -1776,6 +1781,11 @@ func (s *acpProviderErrorSniffer) terminalMessage() string {
 // and terminalMessage(). Caller must hold s.mu.
 func (s *acpProviderErrorSniffer) messageLocked() string {
 	prefix := s.provider + " provider error: "
+	for _, line := range s.lines {
+		if acpUnixSocketPathErrorRe.MatchString(line) {
+			return prefix + "Unix socket path too long; TMPDIR-derived socket path exceeded the platform limit"
+		}
+	}
 	for _, line := range s.lines {
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
