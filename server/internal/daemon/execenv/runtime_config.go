@@ -170,7 +170,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
 // For Traecli:     writes {workDir}/AGENTS.md  (traecli reads .trae/rules/ not AGENTS.md, so the brief is delivered inline via providerNeedsInlineSystemPrompt; the file is written for parity/visibility only)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
-	content := buildMetaSkillContent(provider, ctx)
+	content := buildMetaSkillContentWithWorkDir(provider, workDir, ctx)
 	path := runtimeConfigPath(workDir, provider)
 	if path == "" {
 		// Unknown provider — skip config injection, prompt-only mode.
@@ -386,14 +386,27 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 // the slim brief does not regress agent behaviour. See MUL-3560 + the
 // `runtime_brief_slim` flag documentation in runtime_config_flag.go.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
+	return buildMetaSkillContentWithWorkDir(provider, "", ctx)
+}
+
+func buildMetaSkillContentWithWorkDir(provider string, workDir string, ctx TaskContextForEnv) string {
 	if useSlimBrief() {
-		return buildMetaSkillContentSlim(provider, ctx)
+		return buildMetaSkillContentSlimWithWorkDir(provider, workDir, ctx)
 	}
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 	writeBackgroundTaskSafetyInstructions(&b)
+	if workDir != "" {
+		b.WriteString("## Workspace Isolation\n\n")
+		fmt.Fprintf(&b, "Your current working directory is this task's isolated workdir: `%s`.\n\n", workDir)
+		b.WriteString("- Before editing code, run `pwd` and confirm you are inside this workdir.\n")
+		b.WriteString("- Never edit files outside the isolated workdir unless the user explicitly asks for a non-repo local file.\n")
+		b.WriteString("- If you need repository code, you must use `multica repo checkout <url>` from this workdir. It creates a dedicated git worktree and keeps parallel tasks isolated.\n")
+		b.WriteString("- Do not run `git clone` for workspace repositories, and do not reuse a shared checkout from another task.\n")
+		b.WriteString("- If no listed repository matches the task, stop and ask for the correct repo instead of guessing or cloning arbitrary URLs.\n\n")
+	}
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
