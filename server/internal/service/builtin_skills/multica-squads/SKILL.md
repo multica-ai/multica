@@ -15,7 +15,7 @@ If debugging why a squad did or did not run, inspect first:
 multica issue get <issue-id> --output json
 multica squad get <squad-id> --output json
 multica squad member list <squad-id> --output json
-multica issue comment list <issue-id> --recent 20 --output json
+multica issue comment list <issue-id> --recent 10 --output json
 ```
 
 If the command shape is unclear, check help instead of guessing:
@@ -80,7 +80,7 @@ Issue/comment commands often needed with squads:
 ```bash
 multica issue get <issue-id> --output json
 multica issue update <issue-id> --help
-multica issue comment list <issue-id> --output json
+multica issue comment list <issue-id> --recent 10 --output json
 multica issue comment add <issue-id> --help
 ```
 

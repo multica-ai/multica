@@ -52,6 +52,26 @@ multica squad member set-role <squad-id>
 
 Use `--help` for exact flags before writes.
 
+## Comment Catch-up Guidance
+
+Source:
+
+```text
+server/internal/daemon/prompt.go                  # assignment prompt starts with --recent 10
+server/internal/daemon/execenv/runtime_config.go  # runtime workflow starts with --recent 10
+server/internal/daemon/execenv/reply_instructions.go
+```
+
+Contracts:
+
+- assignment-triggered agents must catch up on comments, but the required
+  first read is bounded: `multica issue comment list <issue-id> --recent 10
+  --output json`;
+- older threads remain reachable through the `Next thread cursor` emitted on
+  stderr and the matching `--before` / `--before-id` flags;
+- comment-triggered cold starts read the triggering thread first and use
+  `--recent 10` only for cross-thread background.
+
 ## Create / Update
 
 Source:

@@ -59,6 +59,8 @@ func Classify(rawError string) Reason {
 		"context length",
 		"context_length_exceeded",
 		"maximum context",
+		"maximum input length",
+		"prompt length",
 		"prompt is too long",
 		"context size has been exceeded",
 	),

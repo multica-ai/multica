@@ -38,6 +38,7 @@ func TestClassifyRules(t *testing.T) {
 		{"context_length_exceeded code", `{"error":{"code":"context_length_exceeded"}}`, ReasonAgentContextOverflow},
 		{"maximum context", "Maximum context window of 200000 tokens has been exceeded", ReasonAgentContextOverflow},
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
+		{"tokenizer prompt length", "Tokenizer encode failed: the prompt length 199212 must less than the maximum input length 196608", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
 		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
 
