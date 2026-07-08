@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -252,6 +253,28 @@ func wrapTransport(req *http.Request, err error) error {
 		op = req.Method + " " + req.URL.Path
 	}
 	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
+}
+
+func isTransientGETTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) {
+		return true
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "http2: client connection lost") ||
+		strings.Contains(msg, "http2: server sent goaway") ||
+		strings.Contains(msg, "stream error")
 }
 
 // Language is the language FormatError renders messages in.
