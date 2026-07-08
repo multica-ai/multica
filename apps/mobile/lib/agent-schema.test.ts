@@ -35,7 +35,7 @@ describe("AgentSchema invocation permissions", () => {
 
     expect(parsed.permission_mode).toBe("private");
     expect(parsed.invocation_targets).toEqual([
-      { target_type: "space", target_id: null },
+      { target_type: "team", target_id: null },
     ]);
   });
 });
