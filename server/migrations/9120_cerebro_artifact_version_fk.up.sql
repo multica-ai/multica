@@ -12,6 +12,15 @@
 -- server/internal/cerebro/note/versions.go: snapshotVersion) — it never reads a
 -- cerebro_note field — so no data changes, only the FK target widens. Mirrors
 -- the same move made for note comments/references in 9089.
+--
+-- Real deployments hold cerebro_note rows that outlived their artifact row
+-- (hard-deleted artifacts never cascaded into cerebro_note, which has no FK to
+-- artifact), so version rows can reference a note_id with no artifact behind
+-- it. Those versions belong to deleted files and are unreachable from any
+-- surface — drop them first or the new FK cannot be added.
+DELETE FROM cerebro_note_version v
+    WHERE NOT EXISTS (SELECT 1 FROM artifact a WHERE a.id = v.note_id);
+
 ALTER TABLE cerebro_note_version
     DROP CONSTRAINT IF EXISTS cerebro_note_version_note_id_fkey;
 
