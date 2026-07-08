@@ -294,6 +294,28 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.41",
+        date: "2026-07-08",
+        title: "Machine names, member-owned squads, and CLI issue ordering",
+        changes: [],
+        features: [
+          "You can now give your machines their own names, and the runtime picker for creating an agent is searchable and grouped by machine.",
+          "Any member can now create and manage their own squads, not just workspace admins.",
+          "An agent's owner can now connect and manage its Lark bot directly, without needing to be an admin.",
+          "You can now reorder issues from the command line and set an exact position.",
+        ],
+        improvements: [
+          "When an agent task fails in chat, you now get a friendly, plain-language message with a nudge to try again.",
+        ],
+        fixes: [
+          "In Feishu topic groups, each topic now keeps its own separate conversation instead of everyone sharing one.",
+          "The desktop app now always shows a correct version number.",
+          "After a task moves between statuses, the board's count and the rows it shows stay in sync.",
+          "Files brought in through a skill import are now kept instead of being lost.",
+          "Deleting an autopilot now archives it cleanly, with nothing left behind.",
+        ],
+      },
+      {
         version: "0.3.40",
         date: "2026-07-07",
         title: "In-page find, resumable downloads, and fixes",
