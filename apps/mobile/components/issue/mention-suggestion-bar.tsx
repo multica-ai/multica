@@ -331,7 +331,8 @@ export function MentionSuggestionBar({
           // issue
           const closed =
             item.issue.status === "done" ||
-            item.issue.status === "cancelled";
+            item.issue.status === "cancelled" ||
+            item.issue.status === "archived";
           return (
             <Pressable
               onPress={() =>

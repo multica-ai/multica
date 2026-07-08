@@ -72,7 +72,7 @@ type IssueResponse struct {
 // the issue table. Write handlers pre-validate these so callers get a clean
 // 400 with the allowed values instead of a database CHECK violation bubbling
 // up as a 500.
-var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled", "archived"}
 var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 
 func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
@@ -465,7 +465,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
 
 	if !includeClosed {
-		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+		whereClause += " AND i.status NOT IN ('done', 'cancelled', 'archived')"
 	}
 
 	// --- ORDER BY clause ---
@@ -531,7 +531,8 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		WHEN 'backlog' THEN 4
 		WHEN 'done' THEN 5
 		WHEN 'cancelled' THEN 6
-		ELSE 7
+		WHEN 'archived' THEN 7
+		ELSE 8
 	END`
 
 	// --- match_source expression ---

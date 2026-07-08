@@ -269,7 +269,7 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 		return gcActionSkip
 	}
 
-	if (status.Status == "done" || status.Status == "cancelled") &&
+	if (status.Status == "done" || status.Status == "cancelled" || status.Status == "archived") &&
 		time.Since(status.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
