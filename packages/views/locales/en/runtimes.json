@@ -86,6 +86,7 @@
     "all_runtimes": "All runtimes",
     "read_only": "Read-only",
     "delete_button": "Delete runtime",
+    "rename_button": "Rename",
     "last_seen": "last seen {{when}}",
     "fact_owner": "Owner",
     "fact_device": "Device",
@@ -110,6 +111,18 @@
     },
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
+    "rename_dialog": {
+      "title": "Rename runtime",
+      "description": "Give this runtime a custom name so it's easier to find when creating agents.",
+      "hint": "Leave empty to use the default name.",
+      "apply_to_machine": "Apply to every runtime on this machine",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving...",
+      "toast_saved": "Runtime renamed",
+      "toast_cleared": "Custom name cleared",
+      "toast_failed": "Failed to rename runtime"
+    },
     "delete_dialog": {
       "self_heal_notice": "This runtime is managed by a running local daemon. Deleting it will succeed, but the daemon will re-register a fresh runtime within seconds — stop the daemon process first to remove it permanently.",
       "profile_backed_notice": "This runtime was registered from a custom runtime profile. Deleting it removes only the current runtime instance; a running daemon can register it again while the profile remains. Delete the custom runtime profile from Custom runtimes to remove it permanently.",
