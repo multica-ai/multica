@@ -46,7 +46,32 @@ WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
-WITH deleted_pending_check_suites AS (
+-- The channel_* tables carry NO FK to workspace (MUL-3515 §4), so — unlike the
+-- CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
+-- implicitly. Remove this workspace's channel installations, and every dependent
+-- row of each, here so a deleted workspace never leaves an orphaned installation
+-- occupying its bot's (channel_type, config->>'app_id') routing slot, which would
+-- make that bot un-rebindable anywhere until an operator hand-deletes the row
+-- (#4810). All in one statement so it commits atomically with the workspace row.
+WITH ws_installations AS (
+    SELECT id FROM channel_installation WHERE workspace_id = $1
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+detached_audit AS (
+    UPDATE channel_inbound_audit SET installation_id = NULL WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE workspace_id = $1
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+cleared_installations AS (
+    DELETE FROM channel_installation WHERE workspace_id = $1
+),
+deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
-DELETE FROM workspace WHERE id = $1;
+DELETE FROM workspace WHERE workspace.id = $1;
