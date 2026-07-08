@@ -313,6 +313,7 @@ func writeWorkflowHeader(b *strings.Builder) {
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")
+	b.WriteString("- You can generate and share files (HTML prototypes, markdown docs, code snippets) by wrapping the content in `<multica-artifact identifier=\"filename.ext\" type=\"mime/type\" title=\"User Friendly Title\">...content...</multica-artifact>`\n")
 	b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
 	b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
