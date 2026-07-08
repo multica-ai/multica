@@ -216,6 +216,12 @@ When the same logic needs to exist on both sides, copy the design — not the im
 
 ### Event-always-wins (optimistic conflict policy)
 
+Mutation success handlers and realtime handlers for the same server change
+must share the same updater shape: patch the same cache keys, invalidate the
+same uncertain projections, and never mirror server-data payloads into
+Zustand. Clearing mobile-owned pointers is allowed only when the hook is the
+single designated responder for that transition.
+
 Mutations like `useUpdateIssue` apply an optimistic patch to the detail cache, then the server processes the request and broadcasts `issue:updated`. If a separate WS event (from another client / another user / an agent) arrives between the optimistic patch and the mutation response, the WS handler overwrites the optimistic state with the server's authoritative state. Brief UI flicker is acceptable; correctness wins.
 
 **Do not** add timestamp-comparison logic to "protect" the optimistic state — the server is the truth and the user benefits from seeing real changes immediately. If a specific event proves problematic in practice, add the gate at that point, not by default.
@@ -373,17 +379,19 @@ Adding a new event type? Extend `packages/core/types/events.ts`:
 Forgetting step 3 means callers get `unknown` (loud — they have to
 narrow), not `any` (silent unsafe access). That's the safety net.
 
-### Synchronous setQueryData before `await cancelQueries`
+### Narrow exception: synchronous mark-read patch before navigation snapshots
 
-Optimistic mutations that flip state read by a UI element that's about
-to be in a navigation snapshot (the classic case: marking an inbox row
-read, then `router.push` to the issue) MUST call `setQueryData` in
-`onMutate` **before** `await qc.cancelQueries(...)`. The await yields
-one microtask; iOS captures the source-view snapshot during that gap and
-freezes the row in its unread style inside the slide-in transition.
+`useMarkInboxRead` is a documented exception to the usual "no optimistic
+patch when the URL changes" rule. It flips one deterministic `read=true`
+bit before `router.push` only so iOS does not freeze the source inbox row
+in its unread style during the native slide transition. The mutation still
+owns the patch, snapshots for rollback, and invalidates on settle.
 
-Lives inside the mutation, not the caller. See `useMarkInboxRead.onMutate`
-in `apps/mobile/data/mutations/inbox.ts` for the canonical example.
+Do not generalize this to create/delete/submit/navigation flows; those
+await the server with loading/error UI and only then navigate or close.
+If a similar snapshot exception is proposed, document why the optimistic
+state is deterministic, failure is rare, rollback is trivial, and the sync
+patch must happen before `await qc.cancelQueries(...)`.
 
 ### Checklist for a new feature
 
@@ -394,8 +402,12 @@ Before opening a PR for a new screen / mutation / realtime hook:
 2. API methods → `fetchValidated` / `fetchValidatedWith` (or raw
    `this.fetch` only for writes with no consumed response).
 3. Query key → factory in `data/queries/<feature>.ts`, 3-segment shape.
-4. Mutations → optimistic three-step (snapshot → patch → rollback) +
-   settle invalidate, all keys via factory.
+4. Mutations → choose by the optimistic gate first. Same-screen,
+   deterministic, rare-failure, trivial-rollback changes may use the
+   variables pattern for one display site or snapshot → patch → rollback
+   + settle invalidate for multiple display sites, all keys via factory.
+   Navigating, destructive, confirmed, or server-computed mutations await
+   the server with loading/error UI and then navigate/close/invalidate.
 5. Realtime → `useWSSubscriptions(setup, deps)`, typed `ws.on<E>()`,
    per-event patching (no global invalidate) when payload carries the
    full object.
