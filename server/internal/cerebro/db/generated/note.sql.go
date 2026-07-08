@@ -72,6 +72,41 @@ func (q *Queries) CanUserCommentOnArtifact(ctx context.Context, arg CanUserComme
 	return allowed, err
 }
 
+const canUserEditArtifact = `-- name: CanUserEditArtifact :one
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = $1
+      AND (
+        (n.artifact_id IS NOT NULL AND (n.owner_id = $2 OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)))
+        OR (n.artifact_id IS NULL AND (
+              cerebro_artifact_folder_grant_visible(a.folder_id, $2)
+              OR (a.author_type = 'member' AND a.author_id = $2)
+        ))
+      )
+) AS allowed
+`
+
+type CanUserEditArtifactParams struct {
+	ID    pgtype.UUID `json:"id"`
+	PUser pgtype.UUID `json:"p_user"`
+}
+
+// FIR-2697: WRITE access for ANY artifact, used to gate document version
+// save/restore. The personal-Notes save/restore path keeps its own stricter
+// owner-only rule (requireOwner in the handler) — this query is only consulted
+// for plain DOCUMENTS (no cerebro_note row), so it never loosens note behavior.
+// A document is writable when the caller reaches its folder (or an ancestor) via
+// a Collections grant, OR authored the document themselves (covers a root
+// document with no folder — e.g. a member restoring a version of a doc they
+// created). Deny-by-default otherwise.
+func (q *Queries) CanUserEditArtifact(ctx context.Context, arg CanUserEditArtifactParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserEditArtifact, arg.ID, arg.PUser)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
 const canUserEditNote = `-- name: CanUserEditNote :one
 SELECT EXISTS (
     SELECT 1 FROM cerebro_note n

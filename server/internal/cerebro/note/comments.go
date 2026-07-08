@@ -432,7 +432,7 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 
 	// Snapshot the pre-accept state, then write the spliced body, then snapshot
 	// the result — so the change shows up in version history and is undoable.
-	h.snapshotVersion(ctx, noteID, ownerUUID, artifact.Title, artifact.Body, "edit", "", false)
+	h.snapshotVersion(ctx, noteID, ownerUUID, "member", artifact.Title, artifact.Body, "edit", "", false)
 	updated, err := h.Upstream.UpdateArtifact(ctx, db.UpdateArtifactParams{
 		ID:            noteID,
 		WorkspaceID:   wsUUID,
@@ -445,7 +445,7 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 	if err != nil {
 		return errCannotApply("failed to apply suggestion")
 	}
-	h.snapshotVersion(ctx, noteID, ownerUUID, updated.Title, updated.Body, "edit", "", false)
+	h.snapshotVersion(ctx, noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", false)
 	return nil
 }
 

@@ -481,6 +481,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "search_notes", Description: "Full-text search across notes/documents — matches title, body, and comments.", Status: ToolStatusExcluded},
 	{Name: "schedule_wakeup", Description: "Schedule an agent to wake up on an issue at a time or when a watched event happens.", Status: ToolStatusImplemented},
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
+	{Name: "suggest_artifact_folder", Description: "Propose an existing folder for an artifact; a person accepts before it moves.", Status: ToolStatusExcluded},
 	{Name: "set_group_capability", Description: "Grant a capability to a group.", Status: ToolStatusExcluded},
 	{Name: "skill_audit", Description: "Audit skill metadata and governance state.", Status: ToolStatusExcluded},
 	{Name: "skill_fork", Description: "Fork a skill into a new owned copy.", Status: ToolStatusExcluded},

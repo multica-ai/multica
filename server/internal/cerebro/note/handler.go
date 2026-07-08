@@ -699,7 +699,7 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	// edits by the same author becomes one entry (see snapshotVersion). Only
 	// snapshot when something actually changed.
 	if updated.Title != artifact.Title || updated.Body != artifact.Body {
-		h.snapshotVersion(r.Context(), noteID, ownerUUID, updated.Title, updated.Body, "edit", "", true)
+		h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", true)
 	}
 
 	writeJSON(w, http.StatusOK, NoteResponse{
@@ -928,6 +928,36 @@ func (h *Handler) requireOwner(w http.ResponseWriter, r *http.Request, noteID, o
 	}
 	if uuidStr(noteRow.OwnerID) != uuidStr(ownerUUID) {
 		writeError(w, http.StatusForbidden, "only the owner can change this note")
+		return false
+	}
+	return true
+}
+
+// requireCanSaveVersion gates the manual "Save version" and "Restore" endpoints
+// for BOTH notes and documents (FIR-2697). A note keeps its stricter, unchanged
+// rule: only its owner may checkpoint or restore it (requireOwner). A plain
+// document (no cerebro_note row) is instead gated by document edit access
+// (CanUserEditArtifact) — folder-grant or the member author. This never loosens
+// note behavior; it only extends save/restore to documents.
+func (h *Handler) requireCanSaveVersion(w http.ResponseWriter, r *http.Request, artifactID, callerUUID pgtype.UUID) bool {
+	if _, err := h.Cerebro.GetNote(r.Context(), artifactID); err == nil {
+		// It is a Notes-feature note → preserve owner-only behavior.
+		return h.requireOwner(w, r, artifactID, callerUUID)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load document")
+		return false
+	}
+	// Plain document → edit access controls save/restore.
+	allowed, err := h.Cerebro.CanUserEditArtifact(r.Context(), cerebrodb.CanUserEditArtifactParams{
+		ID:    artifactID,
+		PUser: callerUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load document")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "you don't have edit access to this document")
 		return false
 	}
 	return true

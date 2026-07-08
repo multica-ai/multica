@@ -21,6 +21,7 @@ export {
 } from "./entity-meta-header";
 export { FindReplaceBar } from "./find-replace-bar";
 export { FolderAccessControl } from "./folder-access-control";
+export { FolderSuggestionBanner } from "./folder-suggestion-banner";
 export { KindIcon, KIND_LABELS } from "./kind-icon";
 export { KIND_TEMPLATES, KIND_HELP } from "./kind-templates";
 export { MermaidDiagram } from "./mermaid-diagram";

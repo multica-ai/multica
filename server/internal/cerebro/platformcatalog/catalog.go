@@ -327,6 +327,11 @@ var catalog = []Capability{
 			"PUT /api/artifact-folders/{id}",
 			"PUT /api/artifact-folders/{id}/visibility",
 			"DELETE /api/artifact-folders/{id}",
+			// FIR-2697: folder suggestions — request one for an artifact, then
+			// accept (moves the artifact into the suggested folder) or reject it.
+			"POST /api/artifacts/{id}/folder-suggestion",
+			"POST /api/artifact-folder-suggestions/{id}/accept",
+			"POST /api/artifact-folder-suggestions/{id}/reject",
 			"POST /api/artifact-uploads",
 			"POST /api/upload-file",
 			"DELETE /api/attachments/{id}",

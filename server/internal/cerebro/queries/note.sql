@@ -100,6 +100,28 @@ SELECT EXISTS (
       )
 ) AS allowed;
 
+-- name: CanUserEditArtifact :one
+-- FIR-2697: WRITE access for ANY artifact, used to gate document version
+-- save/restore. The personal-Notes save/restore path keeps its own stricter
+-- owner-only rule (requireOwner in the handler) — this query is only consulted
+-- for plain DOCUMENTS (no cerebro_note row), so it never loosens note behavior.
+-- A document is writable when the caller reaches its folder (or an ancestor) via
+-- a Collections grant, OR authored the document themselves (covers a root
+-- document with no folder — e.g. a member restoring a version of a doc they
+-- created). Deny-by-default otherwise.
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = sqlc.arg(id)
+      AND (
+        (n.artifact_id IS NOT NULL AND (n.owner_id = sqlc.arg(p_user) OR cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(p_user))))
+        OR (n.artifact_id IS NULL AND (
+              cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(p_user))
+              OR (a.author_type = 'member' AND a.author_id = sqlc.arg(p_user))
+        ))
+      )
+) AS allowed;
+
 -- name: CanUserCommentOnArtifact :one
 -- FIR-1621: comments are not note-only — a plain document (any artifact, kind
 -- != 'note') can carry comments too, so the same note-comments panel works in

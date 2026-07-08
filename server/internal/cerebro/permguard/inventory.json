@@ -505,6 +505,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/artifact-folder-suggestions/{id}/accept",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/artifact-folder-suggestions/{id}/reject",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/artifact-folders/",
       "gate": "workspace_member"
     },
@@ -514,6 +522,10 @@
     },
     {
       "id": "POST /api/artifacts/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/artifacts/{id}/folder-suggestion",
       "gate": "workspace_member"
     },
     {
@@ -1941,6 +1953,10 @@
     {
       "id": "set_artifact_folder",
       "gate": "via:PUT /api/artifacts/{id}/folder"
+    },
+    {
+      "id": "suggest_artifact_folder",
+      "gate": "via:POST /api/artifacts/{id}/folder-suggestion"
     },
     {
       "id": "set_group_capability",

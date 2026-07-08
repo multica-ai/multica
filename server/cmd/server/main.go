@@ -43,6 +43,8 @@ import (
 	cerebrodriftwatch "github.com/multica-ai/multica/server/internal/cerebro/driftwatch"
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 note types sweeper import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 artifact version listener import
+	cerebronote "github.com/multica-ai/multica/server/internal/cerebro/note"
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning sweeper import
 	cerebrolearn "github.com/multica-ai/multica/server/internal/cerebro"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -387,6 +389,8 @@ func main() {
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
 	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
 	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 snapshot a version whenever an agent-created document (artifact) is created/updated, reusing the note version engine.
+	cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read

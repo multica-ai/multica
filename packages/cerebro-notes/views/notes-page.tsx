@@ -41,6 +41,7 @@ import {
   EditorActionsMenu,
   EntityMetaHeader,
   FindReplaceBar,
+  FolderSuggestionBanner,
 } from "@multica/cerebro-artifacts/views/components";
 import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import {
@@ -1213,6 +1214,10 @@ export function NoteEditor({
           />
 
           <NoteReferences noteId={note.id} />
+
+          {/* FIR-2697 part 2 — a pending agent folder suggestion for this note.
+              A note is an artifact, so it reuses the Documents banner. */}
+          <FolderSuggestionBanner artifactId={note.id} canResolve={canEdit} />
 
           {/* Body uses the SAME rich editor as issue comments + descriptions, so
               "@" behaves identically (people, agents, issues, …) inline. When

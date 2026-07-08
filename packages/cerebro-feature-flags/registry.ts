@@ -74,6 +74,31 @@ export type CerebroFlagKey =
   | "cerebro_note_comments"
   //   - version history (see who changed what, restore an earlier version),
   | "cerebro_note_versions"
+  // FIR-2697: extend that same version-history engine to agent-created
+  // DOCUMENTS (any artifact, not just personal notes). When on, updating a
+  // document snapshots a new version of the same file instead of leaving no
+  // trail, and the Documents editor shows a "Version history" action to view /
+  // restore earlier versions. Off by default until QA'd on staging.
+  | "cerebro_document_versions"
+  // FIR-2697 part 2: folder suggestions with accept. When on, an agent can
+  // PROPOSE an existing folder for a document/note instead of moving it
+  // outright; the artifact only moves once a human accepts the proposal, shown
+  // as a banner in the editor. Notes and Documents keep separate folder trees.
+  // Off by default until QA'd on staging.
+  | "cerebro_folder_suggestions"
+  // FIR-2697 part 3: automatic Agent Runs folder structure at Collections level.
+  // When on, the first time an agent saves a document/note in a run the server
+  // silently creates (get-or-create) the folder path
+  // Agent Runs > member > agent > run and files the artifact there, stamping a
+  // Collections sharing grant on every folder it creates. No notifications.
+  // Off by default until QA'd on staging.
+  | "cerebro_agent_runs_folders"
+  // FIR-2697 part 4: an agent-authored document/note attached to a chat message
+  // or issue comment (via a `mention://artifact/<id>` token) must always have a
+  // folder — the server files a folder-less one into the same Agent Runs
+  // structure part 3 builds — and the artifact card links to that folder.
+  // Off by default until QA'd on staging.
+  | "cerebro_attachment_folder"
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
@@ -434,6 +459,14 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
   cerebro_note_versions: false,
+  // FIR-2697: document version history — off until QA'd on staging.
+  cerebro_document_versions: false,
+  // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.
+  cerebro_folder_suggestions: false,
+  // FIR-2697 part 3: automatic Agent Runs folder structure — off until QA'd.
+  cerebro_agent_runs_folders: false,
+  // FIR-2697 part 4: attach ⇒ always has a folder + card links to it — off until QA'd.
+  cerebro_attachment_folder: false,
   cerebro_note_lock: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
@@ -894,6 +927,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
+  },
+  {
+    key: "cerebro_attachment_folder",
+    label: "Attached documents show their folder",
+    group: "issues",
+    description:
+      "FIR-2697 part 4. When an agent-authored document/note is attached to a chat message or issue comment (via a `mention://artifact/<id>` token), guarantee it has a folder: a folder-less one is filed into the same automatic Agent Runs structure (part 3). The white artifact card then shows and links to that folder. Only agent documents are affected — raw file uploads have no document behind them. Needs `Artifact references in comments` on to render the card; pairs with `Automatic Agent Runs folders`. Off leaves attaching unchanged.",
   },
   {
     key: "cerebro_attachment_chips",

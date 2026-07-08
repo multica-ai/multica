@@ -1907,7 +1907,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/{id}", h.UpdateArtifact)
 				r.Put("/{id}/scope", h.UpdateArtifactScope)
 				r.Put("/{id}/folder", h.MoveArtifactToFolder)
+				// CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — propose/read a folder for an artifact.
+				r.Post("/{id}/folder-suggestion", h.CreateArtifactFolderSuggestion)
+				r.Get("/{id}/folder-suggestion", h.GetArtifactFolderSuggestion)
 				r.Delete("/{id}", h.DeleteArtifact)
+			})
+			// CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — review inbox + accept/reject.
+			r.Route("/api/artifact-folder-suggestions", func(r chi.Router) {
+				r.Get("/", h.ListArtifactFolderSuggestions)
+				r.Post("/{id}/accept", h.AcceptArtifactFolderSuggestion)
+				r.Post("/{id}/reject", h.RejectArtifactFolderSuggestion)
 			})
 			r.Route("/api/artifact-folders", func(r chi.Router) {
 				r.Get("/", h.ListArtifactFolders)

@@ -98,6 +98,33 @@ export interface CreateArtifactFolderRequest {
   kind?: ArtifactFolderKind;
 }
 
+// CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — an agent proposes an
+// existing folder for a document/note; a person accepts before the artifact
+// actually moves. Notes and documents keep separate folder trees (surface).
+export type ArtifactFolderSuggestionStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "superseded";
+
+export interface ArtifactFolderSuggestion {
+  id: string;
+  workspace_id: string;
+  artifact_id: string;
+  artifact_title?: string;
+  folder_id: string;
+  folder_name?: string;
+  surface: ArtifactFolderKind;
+  status: ArtifactFolderSuggestionStatus;
+  reason: string;
+  suggested_by_type: ArtifactAuthorType;
+  suggested_by_id: string;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UpdateArtifactFolderRequest {
   name?: string;
   parent_id?: string | null;

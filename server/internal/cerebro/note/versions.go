@@ -63,22 +63,35 @@ func versionToResponse(v cerebrodb.CerebroNoteVersion) VersionResponse {
 	}
 }
 
-// snapshotVersion records the given title+body as a version of the note. When
-// coalesce is true an 'edit' save by the same author within coalesceWindow of
-// the latest version rolls that version forward (no new row); otherwise — or
-// for 'manual'/'restore' reasons — a new monotonic version is inserted.
+// snapshotVersion records the given title+body as a version of the note or
+// document. When coalesce is true an 'edit' save by the same author within
+// coalesceWindow of the latest version rolls that version forward (no new row);
+// otherwise — or for 'manual'/'restore' reasons — a new monotonic version is
+// inserted.
+//
+// authorType is 'member' or 'agent': personal-Notes edits are always by a
+// member (the owner), while agent-created documents (FIR-2697) are versioned on
+// behalf of the agent that saved them, so the history shows who changed what.
 //
 // Best-effort: callers treat a snapshot failure as non-fatal (the live note
 // content has already been saved on the artifact). reason is one of
 // 'edit'|'manual'|'restore'.
-func (h *Handler) snapshotVersion(ctx context.Context, noteID, authorID pgtype.UUID, title, body, reason, label string, coalesce bool) {
-	latest, err := h.Cerebro.GetLatestNoteVersion(ctx, noteID)
+func (h *Handler) snapshotVersion(ctx context.Context, noteID, authorID pgtype.UUID, authorType, title, body, reason, label string, coalesce bool) {
+	writeVersionSnapshot(ctx, h.Cerebro, noteID, authorID, authorType, title, body, reason, label, coalesce)
+}
+
+// writeVersionSnapshot is the storage-only core shared by the note editor path
+// (Handler.snapshotVersion) and the artifact event listener (FIR-2697). It takes
+// the cerebro Queries directly so a background listener with no HTTP Handler can
+// snapshot too. See Handler.snapshotVersion for the coalescing semantics.
+func writeVersionSnapshot(ctx context.Context, q *cerebrodb.Queries, noteID, authorID pgtype.UUID, authorType, title, body, reason, label string, coalesce bool) {
+	latest, err := q.GetLatestNoteVersion(ctx, noteID)
 	hasLatest := err == nil
 
 	if coalesce && hasLatest && reason == "edit" && latest.Reason == "edit" &&
-		uuidStr(latest.AuthorID) == uuidStr(authorID) &&
+		latest.AuthorType == authorType && uuidStr(latest.AuthorID) == uuidStr(authorID) &&
 		latest.UpdatedAt.Valid && time.Since(latest.UpdatedAt.Time) < coalesceWindow {
-		_, _ = h.Cerebro.RollForwardNoteVersion(ctx, cerebrodb.RollForwardNoteVersionParams{
+		_, _ = q.RollForwardNoteVersion(ctx, cerebrodb.RollForwardNoteVersionParams{
 			ID:       latest.ID,
 			Title:    title,
 			Body:     body,
@@ -91,7 +104,7 @@ func (h *Handler) snapshotVersion(ctx context.Context, noteID, authorID pgtype.U
 	if hasLatest {
 		nextNo = latest.VersionNo + 1
 	}
-	_, _ = h.Cerebro.InsertNoteVersion(ctx, cerebrodb.InsertNoteVersionParams{
+	_, _ = q.InsertNoteVersion(ctx, cerebrodb.InsertNoteVersionParams{
 		NoteID:     noteID,
 		VersionNo:  nextNo,
 		Title:      title,
@@ -99,7 +112,7 @@ func (h *Handler) snapshotVersion(ctx context.Context, noteID, authorID pgtype.U
 		ByteSize:   int32(len(body)),
 		Reason:     reason,
 		Label:      pgText(label),
-		AuthorType: "member",
+		AuthorType: authorType,
 		AuthorID:   authorID,
 	})
 }
@@ -112,14 +125,16 @@ type saveVersionRequest struct {
 
 // --- handlers ---
 
-// ListVersions returns the note's history, newest first. Any viewer who can see
-// the note may read its history.
+// ListVersions returns the note or document history, newest first. Anyone who
+// may open the artifact may read its history: requireCanComment is the unified
+// gate that applies the note's visibility rule for a note and folder access for
+// a plain document (FIR-2697 reuses it so document version history works too).
 func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
-	_, ownerUUID, ok := h.scope(w, r, userID)
+	_, callerUUID, ok := h.scope(w, r, userID)
 	if !ok {
 		return
 	}
@@ -127,7 +142,7 @@ func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireCanSee(w, r, noteID, ownerUUID) {
+	if !h.requireCanComment(w, r, noteID, callerUUID) {
 		return
 	}
 	rows, err := h.Cerebro.ListNoteVersions(r.Context(), noteID)
@@ -158,7 +173,7 @@ func (h *Handler) SaveVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, noteID, ownerUUID) {
+	if !h.requireCanSaveVersion(w, r, noteID, ownerUUID) {
 		return
 	}
 	var req saveVersionRequest
@@ -169,7 +184,7 @@ func (h *Handler) SaveVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
-	h.snapshotVersion(r.Context(), noteID, ownerUUID, artifact.Title, artifact.Body, "manual", req.Label, false)
+	h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", artifact.Title, artifact.Body, "manual", req.Label, false)
 	latest, err := h.Cerebro.GetLatestNoteVersion(r.Context(), noteID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save version")
@@ -194,7 +209,7 @@ func (h *Handler) RestoreVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, noteID, ownerUUID) {
+	if !h.requireCanSaveVersion(w, r, noteID, ownerUUID) {
 		return
 	}
 	versionID, ok := subPathUUID(w, r, "versionId")
@@ -212,7 +227,7 @@ func (h *Handler) RestoreVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Capture the pre-restore state so the restore can itself be undone.
-	h.snapshotVersion(r.Context(), noteID, ownerUUID, artifact.Title, artifact.Body, "edit", "", false)
+	h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", artifact.Title, artifact.Body, "edit", "", false)
 
 	updated, err := h.Upstream.UpdateArtifact(r.Context(), db.UpdateArtifactParams{
 		ID:            noteID,
@@ -228,7 +243,7 @@ func (h *Handler) RestoreVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Record the restored state as its own version entry.
-	h.snapshotVersion(r.Context(), noteID, ownerUUID, updated.Title, updated.Body, "restore", "", false)
+	h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", updated.Title, updated.Body, "restore", "", false)
 
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(updated.ID),

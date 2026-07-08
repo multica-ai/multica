@@ -94,6 +94,7 @@ import type {
   Attachment,
   Artifact,
   ArtifactFolder,
+  ArtifactFolderSuggestion,
   ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,
@@ -4153,6 +4154,47 @@ export class ApiClient {
     return this.fetch(`/api/artifacts/${id}/folder`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — an agent proposes an
+  // existing folder for a document/note; a person accepts before it moves.
+  async getArtifactFolderSuggestion(
+    artifactId: string,
+  ): Promise<{ suggestion: ArtifactFolderSuggestion | null }> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`);
+  }
+
+  async createArtifactFolderSuggestion(
+    artifactId: string,
+    data: { folder_id: string; reason?: string },
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listArtifactFolderSuggestions(
+    surface?: string,
+  ): Promise<ArtifactFolderSuggestion[]> {
+    const qs = surface ? `?surface=${encodeURIComponent(surface)}` : "";
+    return this.fetch(`/api/artifact-folder-suggestions${qs}`);
+  }
+
+  async acceptArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/accept`, {
+      method: "POST",
+    });
+  }
+
+  async rejectArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/reject`, {
+      method: "POST",
     });
   }
 
