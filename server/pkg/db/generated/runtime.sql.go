@@ -265,7 +265,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -319,6 +319,11 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.EndpointType,
+			&i.Capabilities,
+			&i.Models,
+			&i.Tools,
+			&i.RuntimeFeatures,
 		); err != nil {
 			return nil, err
 		}
@@ -378,7 +383,7 @@ func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pg
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE id = $1
 `
 
@@ -403,12 +408,17 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -438,12 +448,17 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -475,6 +490,11 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.EndpointType,
+			&i.Capabilities,
+			&i.Models,
+			&i.Tools,
+			&i.RuntimeFeatures,
 		); err != nil {
 			return nil, err
 		}
@@ -487,7 +507,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -524,6 +544,11 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.EndpointType,
+			&i.Capabilities,
+			&i.Models,
+			&i.Tools,
+			&i.RuntimeFeatures,
 		); err != nil {
 			return nil, err
 		}
@@ -602,8 +627,108 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 	return items, nil
 }
 
+const listPendingAgentProfileUpdates = `-- name: ListPendingAgentProfileUpdates :many
+SELECT
+    a.id AS agent_id,
+    a.workspace_id,
+    a.name,
+    a.description,
+    a.instructions,
+    a.runtime_mode,
+    a.runtime_config,
+    a.custom_args,
+    a.mcp_config,
+    a.model,
+    a.thinking_level,
+    a.profile_version,
+    a.runtime_policy,
+    a.memory_policy,
+    a.approval_policy,
+    COALESCE(s.applied_version, 0)::integer AS applied_version,
+    COALESCE(s.status, 'pending')::text AS sync_status,
+    s.error AS sync_error
+FROM agent a
+LEFT JOIN agent_runtime_profile_state s
+  ON s.agent_id = a.id AND s.runtime_id = a.runtime_id
+WHERE a.runtime_id = $1
+  AND a.archived_at IS NULL
+  AND (
+      s.runtime_id IS NULL
+      OR s.status <> 'synced'
+      OR s.applied_version < a.profile_version
+      OR s.desired_version < a.profile_version
+  )
+ORDER BY a.updated_at ASC
+LIMIT COALESCE($2, 10)
+`
+
+type ListPendingAgentProfileUpdatesParams struct {
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	Limit     interface{} `json:"limit"`
+}
+
+type ListPendingAgentProfileUpdatesRow struct {
+	AgentID        pgtype.UUID `json:"agent_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Name           string      `json:"name"`
+	Description    string      `json:"description"`
+	Instructions   string      `json:"instructions"`
+	RuntimeMode    string      `json:"runtime_mode"`
+	RuntimeConfig  []byte      `json:"runtime_config"`
+	CustomArgs     []byte      `json:"custom_args"`
+	McpConfig      []byte      `json:"mcp_config"`
+	Model          pgtype.Text `json:"model"`
+	ThinkingLevel  pgtype.Text `json:"thinking_level"`
+	ProfileVersion int32       `json:"profile_version"`
+	RuntimePolicy  []byte      `json:"runtime_policy"`
+	MemoryPolicy   []byte      `json:"memory_policy"`
+	ApprovalPolicy []byte      `json:"approval_policy"`
+	AppliedVersion int32       `json:"applied_version"`
+	SyncStatus     string      `json:"sync_status"`
+	SyncError      pgtype.Text `json:"sync_error"`
+}
+
+func (q *Queries) ListPendingAgentProfileUpdates(ctx context.Context, arg ListPendingAgentProfileUpdatesParams) ([]ListPendingAgentProfileUpdatesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingAgentProfileUpdates, arg.RuntimeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingAgentProfileUpdatesRow{}
+	for rows.Next() {
+		var i ListPendingAgentProfileUpdatesRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Instructions,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ProfileVersion,
+			&i.RuntimePolicy,
+			&i.MemoryPolicy,
+			&i.ApprovalPolicy,
+			&i.AppliedVersion,
+			&i.SyncStatus,
+			&i.SyncError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features FROM agent_runtime
 WHERE id = $1
 FOR UPDATE
 `
@@ -643,15 +768,104 @@ func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRu
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
+}
+
+const markAgentProfileAppliedForRuntime = `-- name: MarkAgentProfileAppliedForRuntime :one
+INSERT INTO agent_runtime_profile_state (
+    runtime_id,
+    agent_id,
+    desired_version,
+    applied_version,
+    status,
+    error,
+    updated_at
+) VALUES ($1, $2, $3, $3, $4, $5, now())
+ON CONFLICT (runtime_id, agent_id)
+DO UPDATE SET
+    desired_version = GREATEST(agent_runtime_profile_state.desired_version, EXCLUDED.desired_version),
+    applied_version = CASE
+        WHEN EXCLUDED.status = 'synced' THEN GREATEST(agent_runtime_profile_state.applied_version, EXCLUDED.applied_version)
+        ELSE agent_runtime_profile_state.applied_version
+    END,
+    status = EXCLUDED.status,
+    error = EXCLUDED.error,
+    updated_at = now()
+RETURNING runtime_id, agent_id, desired_version, applied_version, status, error, updated_at
+`
+
+type MarkAgentProfileAppliedForRuntimeParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	ProfileVersion int32       `json:"profile_version"`
+	Status         string      `json:"status"`
+	Error          pgtype.Text `json:"error"`
+}
+
+func (q *Queries) MarkAgentProfileAppliedForRuntime(ctx context.Context, arg MarkAgentProfileAppliedForRuntimeParams) (AgentRuntimeProfileState, error) {
+	row := q.db.QueryRow(ctx, markAgentProfileAppliedForRuntime,
+		arg.RuntimeID,
+		arg.AgentID,
+		arg.ProfileVersion,
+		arg.Status,
+		arg.Error,
+	)
+	var i AgentRuntimeProfileState
+	err := row.Scan(
+		&i.RuntimeID,
+		&i.AgentID,
+		&i.DesiredVersion,
+		&i.AppliedVersion,
+		&i.Status,
+		&i.Error,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markAgentProfilePendingForRuntime = `-- name: MarkAgentProfilePendingForRuntime :exec
+INSERT INTO agent_runtime_profile_state (
+    runtime_id,
+    agent_id,
+    desired_version,
+    applied_version,
+    status,
+    error,
+    updated_at
+) VALUES ($1, $2, $3, 0, 'pending', NULL, now())
+ON CONFLICT (runtime_id, agent_id)
+DO UPDATE SET
+    desired_version = EXCLUDED.desired_version,
+    status = CASE
+        WHEN agent_runtime_profile_state.applied_version >= EXCLUDED.desired_version THEN 'synced'
+        ELSE 'pending'
+    END,
+    error = NULL,
+    updated_at = now()
+`
+
+type MarkAgentProfilePendingForRuntimeParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	DesiredVersion int32       `json:"desired_version"`
+}
+
+func (q *Queries) MarkAgentProfilePendingForRuntime(ctx context.Context, arg MarkAgentProfilePendingForRuntimeParams) error {
+	_, err := q.db.Exec(ctx, markAgentProfilePendingForRuntime, arg.RuntimeID, arg.AgentID, arg.DesiredVersion)
+	return err
 }
 
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features
 `
 
 // Used on the offline→online transition (and on first heartbeat after
@@ -678,6 +892,11 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
 }
@@ -930,7 +1149,7 @@ const updateAgentRuntimeCustomName = `-- name: UpdateAgentRuntimeCustomName :one
 UPDATE agent_runtime
 SET custom_name = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features
 `
 
 type UpdateAgentRuntimeCustomNameParams struct {
@@ -964,6 +1183,11 @@ func (q *Queries) UpdateAgentRuntimeCustomName(ctx context.Context, arg UpdateAg
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
 }
@@ -974,7 +1198,7 @@ SET custom_name = $1, updated_at = now()
 WHERE workspace_id = $2
   AND daemon_id = $3
   AND ($4::uuid IS NULL OR owner_id = $4)
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features
 `
 
 type UpdateAgentRuntimeCustomNameByDaemonParams struct {
@@ -1022,6 +1246,11 @@ func (q *Queries) UpdateAgentRuntimeCustomNameByDaemon(ctx context.Context, arg 
 			&i.Visibility,
 			&i.ProfileID,
 			&i.CustomName,
+			&i.EndpointType,
+			&i.Capabilities,
+			&i.Models,
+			&i.Tools,
+			&i.RuntimeFeatures,
 		); err != nil {
 			return nil, err
 		}
@@ -1037,7 +1266,7 @@ const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
 UPDATE agent_runtime
 SET visibility = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features
 `
 
 type UpdateAgentRuntimeVisibilityParams struct {
@@ -1070,6 +1299,11 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 	)
 	return i, err
 }
@@ -1084,9 +1318,14 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
+    endpoint_type,
+    capabilities,
+    models,
+    tools,
+    runtime_features,
     owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
 ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1094,43 +1333,58 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
+    endpoint_type = EXCLUDED.endpoint_type,
+    capabilities = EXCLUDED.capabilities,
+    models = EXCLUDED.models,
+    tools = EXCLUDED.tools,
+    runtime_features = EXCLUDED.runtime_features,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	EndpointType    string      `json:"endpoint_type"`
+	Capabilities    []byte      `json:"capabilities"`
+	Models          []byte      `json:"models"`
+	Tools           []byte      `json:"tools"`
+	RuntimeFeatures []byte      `json:"runtime_features"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
 }
 
 type UpsertAgentRuntimeRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	DaemonID       pgtype.Text        `json:"daemon_id"`
-	Name           string             `json:"name"`
-	RuntimeMode    string             `json:"runtime_mode"`
-	Provider       string             `json:"provider"`
-	Status         string             `json:"status"`
-	DeviceInfo     string             `json:"device_info"`
-	Metadata       []byte             `json:"metadata"`
-	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	Visibility     string             `json:"visibility"`
-	ProfileID      pgtype.UUID        `json:"profile_id"`
-	CustomName     pgtype.Text        `json:"custom_name"`
-	Inserted       bool               `json:"inserted"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DaemonID        pgtype.Text        `json:"daemon_id"`
+	Name            string             `json:"name"`
+	RuntimeMode     string             `json:"runtime_mode"`
+	Provider        string             `json:"provider"`
+	Status          string             `json:"status"`
+	DeviceInfo      string             `json:"device_info"`
+	Metadata        []byte             `json:"metadata"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID  pgtype.Text        `json:"legacy_daemon_id"`
+	Visibility      string             `json:"visibility"`
+	ProfileID       pgtype.UUID        `json:"profile_id"`
+	CustomName      pgtype.Text        `json:"custom_name"`
+	EndpointType    string             `json:"endpoint_type"`
+	Capabilities    []byte             `json:"capabilities"`
+	Models          []byte             `json:"models"`
+	Tools           []byte             `json:"tools"`
+	RuntimeFeatures []byte             `json:"runtime_features"`
+	Inserted        bool               `json:"inserted"`
 }
 
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
@@ -1150,6 +1404,11 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.Status,
 		arg.DeviceInfo,
 		arg.Metadata,
+		arg.EndpointType,
+		arg.Capabilities,
+		arg.Models,
+		arg.Tools,
+		arg.RuntimeFeatures,
 		arg.OwnerID,
 	)
 	var i UpsertAgentRuntimeRow
@@ -1171,6 +1430,11 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 		&i.Inserted,
 	)
 	return i, err
@@ -1186,10 +1450,15 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
+    endpoint_type,
+    capabilities,
+    models,
+    tools,
+    runtime_features,
     owner_id,
     profile_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -1198,44 +1467,59 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
+    endpoint_type = EXCLUDED.endpoint_type,
+    capabilities = EXCLUDED.capabilities,
+    models = EXCLUDED.models,
+    tools = EXCLUDED.tools,
+    runtime_features = EXCLUDED.runtime_features,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, endpoint_type, capabilities, models, tools, runtime_features, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeWithProfileParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	EndpointType    string      `json:"endpoint_type"`
+	Capabilities    []byte      `json:"capabilities"`
+	Models          []byte      `json:"models"`
+	Tools           []byte      `json:"tools"`
+	RuntimeFeatures []byte      `json:"runtime_features"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	ProfileID       pgtype.UUID `json:"profile_id"`
 }
 
 type UpsertAgentRuntimeWithProfileRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	DaemonID       pgtype.Text        `json:"daemon_id"`
-	Name           string             `json:"name"`
-	RuntimeMode    string             `json:"runtime_mode"`
-	Provider       string             `json:"provider"`
-	Status         string             `json:"status"`
-	DeviceInfo     string             `json:"device_info"`
-	Metadata       []byte             `json:"metadata"`
-	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	Visibility     string             `json:"visibility"`
-	ProfileID      pgtype.UUID        `json:"profile_id"`
-	CustomName     pgtype.Text        `json:"custom_name"`
-	Inserted       bool               `json:"inserted"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DaemonID        pgtype.Text        `json:"daemon_id"`
+	Name            string             `json:"name"`
+	RuntimeMode     string             `json:"runtime_mode"`
+	Provider        string             `json:"provider"`
+	Status          string             `json:"status"`
+	DeviceInfo      string             `json:"device_info"`
+	Metadata        []byte             `json:"metadata"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID  pgtype.Text        `json:"legacy_daemon_id"`
+	Visibility      string             `json:"visibility"`
+	ProfileID       pgtype.UUID        `json:"profile_id"`
+	CustomName      pgtype.Text        `json:"custom_name"`
+	EndpointType    string             `json:"endpoint_type"`
+	Capabilities    []byte             `json:"capabilities"`
+	Models          []byte             `json:"models"`
+	Tools           []byte             `json:"tools"`
+	RuntimeFeatures []byte             `json:"runtime_features"`
+	Inserted        bool               `json:"inserted"`
 }
 
 // Custom-runtime registration: a daemon resolved a workspace runtime_profile's
@@ -1255,6 +1539,11 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		arg.Status,
 		arg.DeviceInfo,
 		arg.Metadata,
+		arg.EndpointType,
+		arg.Capabilities,
+		arg.Models,
+		arg.Tools,
+		arg.RuntimeFeatures,
 		arg.OwnerID,
 		arg.ProfileID,
 	)
@@ -1277,6 +1566,11 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		&i.Visibility,
 		&i.ProfileID,
 		&i.CustomName,
+		&i.EndpointType,
+		&i.Capabilities,
+		&i.Models,
+		&i.Tools,
+		&i.RuntimeFeatures,
 		&i.Inserted,
 	)
 	return i, err

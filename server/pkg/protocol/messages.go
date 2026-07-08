@@ -153,6 +153,7 @@ type DaemonHeartbeatAckPayload struct {
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 	FeatureFlags            *DaemonFeatureFlagSnapshot              `json:"feature_flags,omitempty"`
+	PendingProfileUpdates   []DaemonHeartbeatPendingProfileUpdate   `json:"pending_profile_updates,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
 	// heartbeat so the daemon can process them concurrently. Old daemons
 	// that don't know this field silently ignore it (standard JSON behavior)
@@ -196,4 +197,30 @@ type DaemonHeartbeatPendingLocalSkills struct {
 type DaemonHeartbeatPendingLocalSkillImport struct {
 	ID       string `json:"id"`
 	SkillKey string `json:"skill_key"`
+}
+
+// DaemonHeartbeatPendingProfileUpdate is the server-authoritative AgentProfile
+// desired state a daemon should apply before running future tasks for that
+// agent. Secret-bearing env values intentionally stay out of this payload; the
+// task claim path still scopes and redacts those values separately.
+type DaemonHeartbeatPendingProfileUpdate struct {
+	AgentID        string          `json:"agent_id"`
+	RuntimeID      string          `json:"runtime_id"`
+	WorkspaceID    string          `json:"workspace_id"`
+	Version        int32           `json:"version"`
+	AppliedVersion int32           `json:"applied_version"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	Instructions   string          `json:"instructions"`
+	RuntimeMode    string          `json:"runtime_mode"`
+	RuntimeConfig  json.RawMessage `json:"runtime_config,omitempty"`
+	CustomArgs     []string        `json:"custom_args,omitempty"`
+	McpConfig      json.RawMessage `json:"mcp_config,omitempty"`
+	Model          string          `json:"model,omitempty"`
+	ThinkingLevel  string          `json:"thinking_level,omitempty"`
+	RuntimePolicy  json.RawMessage `json:"runtime_policy,omitempty"`
+	MemoryPolicy   json.RawMessage `json:"memory_policy,omitempty"`
+	ApprovalPolicy json.RawMessage `json:"approval_policy,omitempty"`
+	SyncStatus     string          `json:"sync_status,omitempty"`
+	SyncError      string          `json:"sync_error,omitempty"`
 }

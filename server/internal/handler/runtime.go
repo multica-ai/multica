@@ -20,10 +20,10 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	DaemonID     *string `json:"daemon_id"`
-	Name         string  `json:"name"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	DaemonID    *string `json:"daemon_id"`
+	Name        string  `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.
@@ -34,6 +34,11 @@ type AgentRuntimeResponse struct {
 	Status       string  `json:"status"`
 	DeviceInfo   string  `json:"device_info"`
 	Metadata     any     `json:"metadata"`
+	EndpointType string  `json:"endpoint_type"`
+	Capabilities any     `json:"capabilities"`
+	Models       any     `json:"models"`
+	Tools        any     `json:"tools"`
+	Features     any     `json:"runtime_features"`
 	OwnerID      *string `json:"owner_id"`
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
@@ -55,6 +60,10 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	capabilities := decodeRuntimeJSON(rt.Capabilities, map[string]any{})
+	models := decodeRuntimeJSON(rt.Models, []any{})
+	tools := decodeRuntimeJSON(rt.Tools, []any{})
+	features := decodeRuntimeJSON(rt.RuntimeFeatures, map[string]any{})
 
 	return AgentRuntimeResponse{
 		ID:           uuidToString(rt.ID),
@@ -68,6 +77,11 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Status:       rt.Status,
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
+		EndpointType: rt.EndpointType,
+		Capabilities: capabilities,
+		Models:       models,
+		Tools:        tools,
+		Features:     features,
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		ProfileID:    uuidToPtr(rt.ProfileID),
@@ -75,6 +89,17 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}
+}
+
+func decodeRuntimeJSON(raw []byte, fallback any) any {
+	if len(raw) == 0 {
+		return fallback
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil || v == nil {
+		return fallback
+	}
+	return v
 }
 
 // ---------------------------------------------------------------------------

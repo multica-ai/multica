@@ -158,6 +158,143 @@ model = "o3"
 	}
 }
 
+func TestStripCodexPluginRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	in := `model = "gpt-5.5"
+
+[marketplaces.openai-bundled]
+source = "builtin"
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[[marketplaces.custom]]
+name = "custom"
+
+[profiles.default]
+model = "gpt-5.5"
+`
+	got := stripCodexPluginRuntimeConfig(in)
+	if strings.Contains(got, "[marketplaces.") || strings.Contains(got, "[plugins.") || strings.Contains(got, "[[marketplaces.") {
+		t.Fatalf("plugin runtime config should be stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, `model = "gpt-5.5"`) {
+		t.Fatalf("top-level model should be preserved, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[profiles.default]") {
+		t.Fatalf("unrelated profile table should be preserved, got:\n%s", got)
+	}
+}
+
+func TestStripCodexUserMCPRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	in := `model = "gpt-5.5"
+
+[mcp_servers.drawio-app]
+url = "https://mcp.draw.io/mcp"
+
+[mcp_servers.node_repl.env]
+CODEX_HOME = "/Users/xiaoxiao/.codex"
+
+[profiles.default]
+model = "gpt-5.5"
+`
+	got := stripCodexUserMCPRuntimeConfig(in)
+	if strings.Contains(got, "[mcp_servers.") || strings.Contains(got, "mcp.draw.io") || strings.Contains(got, "node_repl") {
+		t.Fatalf("MCP runtime config should be stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, `model = "gpt-5.5"`) {
+		t.Fatalf("top-level model should be preserved, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[profiles.default]") {
+		t.Fatalf("unrelated profile table should be preserved, got:\n%s", got)
+	}
+}
+
+func TestSanitizeCopiedCodexConfigCanStripPluginRuntime(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	original := `model = "gpt-5.5"
+
+[[skills.config]]
+name = "superpowers:brainstorming"
+enabled = false
+
+[marketplaces.openai-primary-runtime]
+source = "builtin"
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[profiles.default]
+model = "gpt-5.5"
+`
+	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if err := sanitizeCopiedCodexConfigWithOptions(configPath, true, false); err != nil {
+		t.Fatalf("sanitizeCopiedCodexConfigWithOptions failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	got := string(data)
+	for _, forbidden := range []string{"[[skills.config]]", "[marketplaces.", "[plugins.", "superpowers:brainstorming", "openai-primary-runtime"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("expected %q to be stripped, got:\n%s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "[profiles.default]") {
+		t.Fatalf("unrelated tables should be preserved, got:\n%s", got)
+	}
+}
+
+func TestSanitizeCopiedCodexConfigCanStripUserMCP(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	original := `model = "gpt-5.5"
+
+[mcp_servers.drawio-app]
+url = "https://mcp.draw.io/mcp"
+
+[mcp_servers.node_repl.env]
+CODEX_HOME = "/Users/xiaoxiao/.codex"
+
+[features]
+memories = false
+`
+	if err := os.WriteFile(configPath, []byte(original), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if err := sanitizeCopiedCodexConfigWithOptions(configPath, false, true); err != nil {
+		t.Fatalf("sanitizeCopiedCodexConfigWithOptions failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	got := string(data)
+	for _, forbidden := range []string{"[mcp_servers.", "mcp.draw.io", "node_repl"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("expected %q to be stripped, got:\n%s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "[features]") {
+		t.Fatalf("unrelated feature table should be preserved, got:\n%s", got)
+	}
+}
+
 func TestSanitizeCopiedCodexConfigNoop(t *testing.T) {
 	t.Parallel()
 

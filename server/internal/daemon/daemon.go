@@ -832,8 +832,17 @@ func (d *Daemon) deregisterRuntimes() {
 	}
 }
 
-// resolveAuth loads the auth token from the CLI config for the active profile.
+// resolveAuth loads the auth token from MULTICA_TOKEN first, then falls back
+// to the CLI config for the active profile. IM-managed local daemons use
+// short-lived mdt_ daemon tokens and must not require an interactive login.
 func (d *Daemon) resolveAuth() error {
+	if token := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); token != "" {
+		d.client.SetToken(token)
+		d.logger.Info("authenticated")
+		d.logger.Debug("auth token loaded", "source", "env", "token_len", len(token))
+		return nil
+	}
+
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
@@ -967,6 +976,8 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	req := map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
+		"daemon_mode":       "local",
+		"endpoint_type":     "local_device",
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
@@ -1667,6 +1678,11 @@ func (d *Daemon) tokenRenewalLoop(ctx context.Context) {
 // handle them. Failures are debug-level except for 401, which gets a
 // user-actionable warning.
 func (d *Daemon) tryRenewToken(ctx context.Context) {
+	if strings.HasPrefix(d.client.Token(), "mdt_") {
+		d.logger.Debug("daemon token renewal skipped")
+		return
+	}
+
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -1730,6 +1746,10 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
+
+	if d.cfg.WorkspaceID != "" {
+		return d.syncFixedWorkspace(ctx, d.cfg.WorkspaceID)
+	}
 
 	apiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -1859,6 +1879,56 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
 	}
+	return nil
+}
+
+func (d *Daemon) syncFixedWorkspace(ctx context.Context, workspaceID string) error {
+	d.mu.Lock()
+	_, current := d.workspaces[workspaceID]
+	d.mu.Unlock()
+
+	if current {
+		if _, err := d.refreshWorkspaceRepos(ctx, workspaceID); err != nil {
+			d.logger.Debug("fixed workspace sync: refresh settings failed", "workspace_id", workspaceID, "error", err)
+		}
+		if !d.workspaceNeedsRuntimeRecovery(workspaceID) {
+			return nil
+		}
+		d.logger.Info("fixed workspace has no runtimes; retrying registration", "workspace_id", workspaceID)
+		if err := d.reregisterWorkspaceAfterRuntimeGone(ctx, workspaceID); err != nil {
+			return fmt.Errorf("retry fixed workspace registration: %w", err)
+		}
+		d.notifyRuntimeSetChanged()
+		return nil
+	}
+
+	resp, _, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	runtimeIDs := make([]string, len(resp.Runtimes))
+	for i, rt := range resp.Runtimes {
+		runtimeIDs[i] = rt.ID
+		d.logger.Info("registered runtime", "workspace_id", workspaceID, "runtime_id", rt.ID, "provider", rt.Provider)
+	}
+	d.mu.Lock()
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+	for _, rt := range resp.Runtimes {
+		d.runtimeIndex[rt.ID] = rt
+	}
+	d.mu.Unlock()
+
+	if d.repoCache != nil && len(resp.Repos) > 0 {
+		go d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	}
+	for _, rid := range runtimeIDs {
+		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+			d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
+		}
+	}
+
+	d.notifyRuntimeSetChanged()
+	d.logger.Info("watching fixed workspace", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 	return nil
 }
 
@@ -2004,14 +2074,18 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 		return
 	}
 	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil || len(resp.PendingProfileUpdates) > 0 {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
+			"profile_updates", len(resp.PendingProfileUpdates),
 		)
+	}
+	for _, profile := range resp.PendingProfileUpdates {
+		go d.handleProfileUpdate(ctx, runtimeID, profile)
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
@@ -2037,6 +2111,23 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
+	}
+}
+
+func (d *Daemon) handleProfileUpdate(ctx context.Context, runtimeID string, profile PendingProfileUpdate) {
+	d.logger.Info("agent profile update received",
+		"runtime_id", runtimeID,
+		"agent_id", profile.AgentID,
+		"profile_version", profile.Version,
+		"applied_version", profile.AppliedVersion,
+	)
+	if err := d.client.ReportProfileApplied(ctx, runtimeID, profile.AgentID, profile.Version, "synced", ""); err != nil {
+		d.logger.Warn("failed to report agent profile applied",
+			"runtime_id", runtimeID,
+			"agent_id", profile.AgentID,
+			"profile_version", profile.Version,
+			"error", err,
+		)
 	}
 }
 

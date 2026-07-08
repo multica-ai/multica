@@ -1239,6 +1239,118 @@ func withURLParams(req *http.Request, kv ...string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func TestDaemonProfileSyncHeartbeatAndApplied(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	daemonID := "profile-sync-daemon"
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, endpoint_type, capabilities, models, tools,
+			runtime_features, owner_id, last_seen_at
+		)
+		VALUES (
+			$1, $2, 'Profile Sync Runtime', 'local', 'codex', 'online',
+			'profile sync test', '{}'::jsonb, 'local_device', '{}'::jsonb,
+			'[]'::jsonb, '[]'::jsonb, '{}'::jsonb, $3, now()
+		)
+		RETURNING id
+	`, testWorkspaceID, daemonID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_args, runtime_policy, memory_policy, approval_policy
+		)
+		VALUES (
+			$1, 'profile-sync-agent', '', 'local', '{}'::jsonb, $2, 'private',
+			1, $3, 'initial instructions', '[]'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+		)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("setup agent: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime_profile_state WHERE runtime_id = $1 OR agent_id = $2`, runtimeID, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	updateReq := withURLParams(
+		newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+			"instructions": "updated instructions",
+		}),
+		"id", agentID,
+	)
+	updateW := httptest.NewRecorder()
+	testHandler.UpdateAgent(updateW, updateReq)
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("update agent: expected 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+
+	var updated struct {
+		ProfileVersion int32 `json:"profile_version"`
+	}
+	if err := json.NewDecoder(updateW.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.ProfileVersion != 2 {
+		t.Fatalf("expected profile version 2 after runtime-affecting update, got %d", updated.ProfileVersion)
+	}
+
+	rt, err := testHandler.Queries.GetAgentRuntime(ctx, parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	ack, _, err := testHandler.processHeartbeat(ctx, rt, true)
+	if err != nil {
+		t.Fatalf("process heartbeat: %v", err)
+	}
+	if len(ack.PendingProfileUpdates) != 1 {
+		t.Fatalf("expected one pending profile update, got %d", len(ack.PendingProfileUpdates))
+	}
+	pending := ack.PendingProfileUpdates[0]
+	if pending.AgentID != agentID || pending.Version != updated.ProfileVersion || pending.Instructions != "updated instructions" {
+		t.Fatalf("unexpected pending profile update: %+v", pending)
+	}
+
+	appliedReq := withURLParams(
+		newDaemonTokenRequest(
+			http.MethodPost,
+			"/api/daemon/runtimes/"+runtimeID+"/profiles/"+agentID+"/applied",
+			map[string]any{"profile_version": updated.ProfileVersion, "status": "synced"},
+			testWorkspaceID,
+			daemonID,
+		),
+		"runtimeId", runtimeID,
+		"agentId", agentID,
+	)
+	appliedW := httptest.NewRecorder()
+	testHandler.MarkDaemonAgentProfileApplied(appliedW, appliedReq)
+	if appliedW.Code != http.StatusOK {
+		t.Fatalf("mark profile applied: expected 200, got %d: %s", appliedW.Code, appliedW.Body.String())
+	}
+
+	ack, _, err = testHandler.processHeartbeat(ctx, rt, true)
+	if err != nil {
+		t.Fatalf("process second heartbeat: %v", err)
+	}
+	if len(ack.PendingProfileUpdates) != 0 {
+		t.Fatalf("expected no pending profile updates after applied report, got %+v", ack.PendingProfileUpdates)
+	}
+}
+
 func TestListTaskMessagesByUser_InvalidTaskIDReturnsBadRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/optimistic-optimistic-1778739487737/messages", nil)

@@ -229,6 +229,9 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			CustomArgs:         []byte("[]"),
 			McpConfig:          nil,
 			Model:              pgtype.Text{},
+			RuntimePolicy:      []byte("{}"),
+			MemoryPolicy:       []byte("{}"),
+			ApprovalPolicy:     []byte("{}"),
 		})
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): create assistant failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -308,6 +311,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 
 	if assistantCreated {
+		h.markAgentProfilePending(r.Context(), assistant)
 		resp := agentToResponse(assistant)
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -153,6 +154,22 @@ func normalizeGOOS(goos string) string {
 // Called by Daemon.Run after config is loaded.
 func (c *Client) SetVersion(v string) {
 	c.version = v
+}
+
+func daemonHTTPTraceEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MULTICA_DAEMON_TRACE_HTTP")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func traceDaemonHTTP(method, path string, status int, dur time.Duration, err error) {
+	if !daemonHTTPTraceEnabled() {
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon_http method=%s path=%s error=%q duration_ms=%d\n", method, path, err.Error(), dur.Milliseconds())
+		return
+	}
+	fmt.Fprintf(os.Stderr, "daemon_http method=%s path=%s status=%d duration_ms=%d\n", method, path, status, dur.Milliseconds())
 }
 
 // setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
@@ -341,6 +358,7 @@ type (
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+	PendingProfileUpdate    = protocol.DaemonHeartbeatPendingProfileUpdate
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -352,6 +370,14 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (c *Client) ReportProfileApplied(ctx context.Context, runtimeID, agentID string, profileVersion int32, status, errText string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/profiles/%s/applied", runtimeID, agentID), map[string]any{
+		"profile_version": profileVersion,
+		"status":          status,
+		"error":           errText,
+	}, nil)
 }
 
 // ReportUpdateResult sends the CLI update result back to the server.
@@ -694,10 +720,13 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 	}
 	c.setIdentityHeaders(req)
 
+	start := time.Now()
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		traceDaemonHTTP(http.MethodPost, path, 0, time.Since(start), err)
 		return err
 	}
+	traceDaemonHTTP(http.MethodPost, path, resp.StatusCode, time.Since(start), nil)
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
@@ -721,10 +750,13 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	}
 	c.setIdentityHeaders(req)
 
+	start := time.Now()
 	resp, err := c.client.Do(req)
 	if err != nil {
+		traceDaemonHTTP(http.MethodGet, path, 0, time.Since(start), err)
 		return err
 	}
+	traceDaemonHTTP(http.MethodGet, path, resp.StatusCode, time.Since(start), nil)
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {

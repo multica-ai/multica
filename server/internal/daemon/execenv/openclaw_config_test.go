@@ -545,6 +545,42 @@ func TestPrepareOpenclawConfigKeyMissingTreatedAsEmpty(t *testing.T) {
 	}
 }
 
+func TestPrepareOpenclawConfigFallsBackToAgentsListCommand(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userConfigPath},
+		"config get agents.list --json": {
+			err: errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list. Run openclaw config validate to inspect config shape.)"),
+		},
+		"agents list --json": {stdout: `[
+			{"id":"main","workspace":"/Users/me/.openclaw/workspace","agentDir":"/Users/me/.openclaw/agents/main/agent","isDefault":true}
+		]`},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	agents := got["agents"].(map[string]any)
+	if _, ok := agents["list"]; ok {
+		t.Fatalf("registry-sourced agents.list should not be written back into config wrapper: %v", agents)
+	}
+	if agents["defaults"].(map[string]any)["workspace"] != workDir {
+		t.Fatalf("defaults.workspace = %v, want %q", agents["defaults"], workDir)
+	}
+}
+
 // TestPrepareOpenclawConfigFreshInstallNoOnDiskConfig — the only legitimate
 // "synthesize minimal" case. `openclaw config file` reports a path (the
 // default) but the file does not exist yet. We emit a wrapper with the

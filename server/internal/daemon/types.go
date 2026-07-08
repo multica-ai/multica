@@ -140,16 +140,20 @@ type ChatAttachmentMeta struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Instructions  string            `json:"instructions"`
-	Skills        []SkillData       `json:"skills,omitempty"`
-	SkillRefs     []SkillRefData    `json:"skill_refs,omitempty"`
-	CustomEnv     map[string]string `json:"custom_env,omitempty"`
-	CustomArgs    []string          `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
-	Model         string            `json:"model,omitempty"`
-	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Instructions   string            `json:"instructions"`
+	Skills         []SkillData       `json:"skills,omitempty"`
+	SkillRefs      []SkillRefData    `json:"skill_refs,omitempty"`
+	CustomEnv      map[string]string `json:"custom_env,omitempty"`
+	CustomArgs     []string          `json:"custom_args,omitempty"`
+	McpConfig      json.RawMessage   `json:"mcp_config,omitempty"`
+	Model          string            `json:"model,omitempty"`
+	ThinkingLevel  string            `json:"thinking_level,omitempty"`
+	ProfileVersion int32             `json:"profile_version,omitempty"`
+	RuntimePolicy  json.RawMessage   `json:"runtime_policy,omitempty"`
+	MemoryPolicy   json.RawMessage   `json:"memory_policy,omitempty"`
+	ApprovalPolicy json.RawMessage   `json:"approval_policy,omitempty"`
 	// RuntimeConfig is the per-provider runtime_config JSON as stored on
 	// the agent record, forwarded verbatim by the claim endpoint. The
 	// daemon decodes provider-specific fields (e.g. openclaw mode +

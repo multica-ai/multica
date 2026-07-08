@@ -28,7 +28,7 @@ func parseFrontmatter(t *testing.T, content string) map[string]any {
 	return m
 }
 
-// TestEnsureSkillFrontmatterReSynthesizesInvalidYAML is the regression guard for
+// TestEnsureSkillFrontmatterSanitizesInvalidYAML is the regression guard for
 // the bug this change set fixes: a SKILL.md whose frontmatter has a `name` but
 // is not valid YAML (an unquoted `: ` in the description is the canonical case)
 // must be rewritten into a parseable block instead of being shipped as-is, or a
@@ -44,20 +44,20 @@ func TestEnsureSkillFrontmatterReSynthesizesInvalidYAML(t *testing.T) {
 	got := ensureSkillFrontmatter(broken, "my-slug", "DB description: with a colon")
 
 	fm := parseFrontmatter(t, got)
-	if name, _ := fm["name"].(string); name != "my-slug" {
-		t.Errorf("name = %#v, want %q", fm["name"], "my-slug")
+	if name, _ := fm["name"].(string); name != "keep-me" {
+		t.Errorf("name = %#v, want %q", fm["name"], "keep-me")
 	}
-	if desc, _ := fm["description"].(string); desc != "DB description: with a colon" {
-		t.Errorf("description = %#v, want the DB description verbatim", fm["description"])
+	if desc, _ := fm["description"].(string); desc != "bad: value here" {
+		t.Errorf("description = %#v, want the upstream description", fm["description"])
 	}
 	if !strings.Contains(got, "Real skill body.") {
-		t.Errorf("body was dropped during re-synthesis:\n%s", got)
+		t.Errorf("body was dropped during sanitization:\n%s", got)
 	}
 }
 
 // When the existing frontmatter is invalid AND the DB description is empty, the
-// writer still has to produce parseable YAML — just with name alone. (An empty
-// description is dropped rather than emitted as `description: ""`.)
+// writer still has to produce parseable YAML without replacing upstream values
+// from the skill file.
 func TestEnsureSkillFrontmatterReSynthesizesInvalidYAMLWithEmptyDescription(t *testing.T) {
 	t.Parallel()
 
@@ -66,14 +66,14 @@ func TestEnsureSkillFrontmatterReSynthesizesInvalidYAMLWithEmptyDescription(t *t
 	got := ensureSkillFrontmatter(broken, "my-slug", "")
 
 	fm := parseFrontmatter(t, got)
-	if name, _ := fm["name"].(string); name != "my-slug" {
-		t.Errorf("name = %#v, want %q", fm["name"], "my-slug")
+	if name, _ := fm["name"].(string); name != "keep-me" {
+		t.Errorf("name = %#v, want %q", fm["name"], "keep-me")
 	}
-	if _, present := fm["description"]; present {
-		t.Errorf("description should be omitted when DB description is empty, got %#v", fm["description"])
+	if desc, _ := fm["description"].(string); desc != "bad: value" {
+		t.Errorf("description = %#v, want the upstream description", fm["description"])
 	}
 	if !strings.Contains(got, "body text") {
-		t.Errorf("body was dropped during re-synthesis:\n%s", got)
+		t.Errorf("body was dropped during sanitization:\n%s", got)
 	}
 }
 

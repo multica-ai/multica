@@ -1788,6 +1788,40 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteFirstTurnUserMessageDoesNotSatisfyProgress(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-user-message"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-user-message","turn":{"id":"turn-user-message"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-user-message","item":{"type":"userMessage","id":"user-1"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-user-message","item":{"type":"userMessage","id":"user-1"}}}'`+"\n"+
+		`sleep 5`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 200 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("expected first-turn no-progress error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("userMessage should not demote first-turn timeout to semantic inactivity, got %q", result.Error)
+	}
+}
+
 func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

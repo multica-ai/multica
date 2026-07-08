@@ -168,8 +168,10 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 // ---------------------------------------------------------------------------
 
 type DaemonRegisterRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	DaemonID    string `json:"daemon_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	DaemonID     string `json:"daemon_id"`
+	DaemonMode   string `json:"daemon_mode"`   // "local" or "cloud"
+	EndpointType string `json:"endpoint_type"` // "daemon", "local_device", or "cloud_service"
 	// LegacyDaemonIDs lists prior hostname-derived daemon_ids this machine
 	// may have registered under before switching to a persistent UUID. The
 	// handler merges any matching runtime rows into the new row so agents
@@ -187,13 +189,46 @@ type DaemonRegisterRequest struct {
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
 		// so task routing (agent.New) is unchanged.
-		ProfileID string `json:"profile_id"`
+		ProfileID       string          `json:"profile_id"`
+		Capabilities    json.RawMessage `json:"capabilities"`
+		Models          json.RawMessage `json:"models"`
+		Tools           json.RawMessage `json:"tools"`
+		RuntimeFeatures json.RawMessage `json:"runtime_features"`
 	} `json:"runtimes"`
 	FailedProfiles []struct {
 		ProfileID   string `json:"profile_id"`
 		CommandName string `json:"command_name"`
 		Reason      string `json:"reason"`
 	} `json:"failed_profiles"`
+}
+
+func normalizeDaemonMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "cloud":
+		return "cloud"
+	default:
+		return "local"
+	}
+}
+
+func normalizeDaemonEndpointType(endpointType, mode string) string {
+	switch strings.ToLower(strings.TrimSpace(endpointType)) {
+	case "daemon", "local_device", "cloud_service":
+		return strings.ToLower(strings.TrimSpace(endpointType))
+	default:
+		if mode == "cloud" {
+			return "cloud_service"
+		}
+		return "local_device"
+	}
+}
+
+func jsonValueOrDefault(raw json.RawMessage, fallback []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return append([]byte(nil), fallback...)
+	}
+	return append([]byte(nil), trimmed...)
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -343,6 +378,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.DaemonID = strings.TrimSpace(req.DaemonID)
 	req.DeviceName = strings.TrimSpace(req.DeviceName)
+	req.DaemonMode = normalizeDaemonMode(req.DaemonMode)
+	req.EndpointType = normalizeDaemonEndpointType(req.EndpointType, req.DaemonMode)
 
 	if req.DaemonID == "" {
 		writeError(w, http.StatusBadRequest, "daemon_id is required")
@@ -414,7 +451,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
 			"launched_by": req.LaunchedBy,
+			"daemon_mode": req.DaemonMode,
 		})
+		capabilities := jsonValueOrDefault(runtime.Capabilities, []byte("{}"))
+		models := jsonValueOrDefault(runtime.Models, []byte("[]"))
+		tools := jsonValueOrDefault(runtime.Tools, []byte("[]"))
+		features := jsonValueOrDefault(runtime.RuntimeFeatures, []byte("{}"))
 
 		var registered db.AgentRuntime
 		var inserted bool
@@ -443,16 +485,21 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			provider = profile.ProtocolFamily
 
 			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
-				WorkspaceID: wsUUID,
-				DaemonID:    strToText(req.DaemonID),
-				Name:        name,
-				RuntimeMode: "local",
-				Provider:    provider,
-				Status:      status,
-				DeviceInfo:  deviceInfo,
-				Metadata:    metadata,
-				OwnerID:     ownerID,
-				ProfileID:   profileUUID,
+				WorkspaceID:     wsUUID,
+				DaemonID:        strToText(req.DaemonID),
+				Name:            name,
+				RuntimeMode:     req.DaemonMode,
+				Provider:        provider,
+				Status:          status,
+				DeviceInfo:      deviceInfo,
+				Metadata:        metadata,
+				EndpointType:    req.EndpointType,
+				Capabilities:    capabilities,
+				Models:          models,
+				Tools:           tools,
+				RuntimeFeatures: features,
+				OwnerID:         ownerID,
+				ProfileID:       profileUUID,
 			})
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
@@ -469,35 +516,45 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 			inserted = prow.Inserted
 			registered = db.AgentRuntime{
-				ID:             prow.ID,
-				WorkspaceID:    prow.WorkspaceID,
-				DaemonID:       prow.DaemonID,
-				Name:           prow.Name,
-				CustomName:     prow.CustomName,
-				RuntimeMode:    prow.RuntimeMode,
-				Provider:       prow.Provider,
-				Status:         prow.Status,
-				DeviceInfo:     prow.DeviceInfo,
-				Metadata:       prow.Metadata,
-				LastSeenAt:     prow.LastSeenAt,
-				CreatedAt:      prow.CreatedAt,
-				UpdatedAt:      prow.UpdatedAt,
-				OwnerID:        prow.OwnerID,
-				LegacyDaemonID: prow.LegacyDaemonID,
-				Visibility:     prow.Visibility,
-				ProfileID:      prow.ProfileID,
+				ID:              prow.ID,
+				WorkspaceID:     prow.WorkspaceID,
+				DaemonID:        prow.DaemonID,
+				Name:            prow.Name,
+				CustomName:      prow.CustomName,
+				RuntimeMode:     prow.RuntimeMode,
+				Provider:        prow.Provider,
+				Status:          prow.Status,
+				DeviceInfo:      prow.DeviceInfo,
+				Metadata:        prow.Metadata,
+				LastSeenAt:      prow.LastSeenAt,
+				CreatedAt:       prow.CreatedAt,
+				UpdatedAt:       prow.UpdatedAt,
+				OwnerID:         prow.OwnerID,
+				LegacyDaemonID:  prow.LegacyDaemonID,
+				Visibility:      prow.Visibility,
+				ProfileID:       prow.ProfileID,
+				EndpointType:    prow.EndpointType,
+				Capabilities:    prow.Capabilities,
+				Models:          prow.Models,
+				Tools:           prow.Tools,
+				RuntimeFeatures: prow.RuntimeFeatures,
 			}
 		} else {
 			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-				WorkspaceID: wsUUID,
-				DaemonID:    strToText(req.DaemonID),
-				Name:        name,
-				RuntimeMode: "local",
-				Provider:    provider,
-				Status:      status,
-				DeviceInfo:  deviceInfo,
-				Metadata:    metadata,
-				OwnerID:     ownerID,
+				WorkspaceID:     wsUUID,
+				DaemonID:        strToText(req.DaemonID),
+				Name:            name,
+				RuntimeMode:     req.DaemonMode,
+				Provider:        provider,
+				Status:          status,
+				DeviceInfo:      deviceInfo,
+				Metadata:        metadata,
+				EndpointType:    req.EndpointType,
+				Capabilities:    capabilities,
+				Models:          models,
+				Tools:           tools,
+				RuntimeFeatures: features,
+				OwnerID:         ownerID,
 			})
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
@@ -514,23 +571,28 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 			inserted = row.Inserted
 			registered = db.AgentRuntime{
-				ID:             row.ID,
-				WorkspaceID:    row.WorkspaceID,
-				DaemonID:       row.DaemonID,
-				Name:           row.Name,
-				CustomName:     row.CustomName,
-				RuntimeMode:    row.RuntimeMode,
-				Provider:       row.Provider,
-				Status:         row.Status,
-				DeviceInfo:     row.DeviceInfo,
-				Metadata:       row.Metadata,
-				LastSeenAt:     row.LastSeenAt,
-				CreatedAt:      row.CreatedAt,
-				UpdatedAt:      row.UpdatedAt,
-				OwnerID:        row.OwnerID,
-				LegacyDaemonID: row.LegacyDaemonID,
-				Visibility:     row.Visibility,
-				ProfileID:      row.ProfileID,
+				ID:              row.ID,
+				WorkspaceID:     row.WorkspaceID,
+				DaemonID:        row.DaemonID,
+				Name:            row.Name,
+				CustomName:      row.CustomName,
+				RuntimeMode:     row.RuntimeMode,
+				Provider:        row.Provider,
+				Status:          row.Status,
+				DeviceInfo:      row.DeviceInfo,
+				Metadata:        row.Metadata,
+				LastSeenAt:      row.LastSeenAt,
+				CreatedAt:       row.CreatedAt,
+				UpdatedAt:       row.UpdatedAt,
+				OwnerID:         row.OwnerID,
+				LegacyDaemonID:  row.LegacyDaemonID,
+				Visibility:      row.Visibility,
+				ProfileID:       row.ProfileID,
+				EndpointType:    row.EndpointType,
+				Capabilities:    row.Capabilities,
+				Models:          row.Models,
+				Tools:           row.Tools,
+				RuntimeFeatures: row.RuntimeFeatures,
 			}
 		}
 
@@ -825,6 +887,12 @@ type DaemonHeartbeatRequest struct {
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 }
 
+type DaemonProfileAppliedRequest struct {
+	ProfileVersion int32  `json:"profile_version"`
+	Status         string `json:"status"`
+	Error          string `json:"error"`
+}
+
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
 // heartbeat hot path. Probes are read-only (ZCARD in Redis) so a timeout is
 // ack-safe: the worst case is "we didn't find out if anything was queued this
@@ -993,6 +1061,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.FeatureFlags != nil {
 		resp["feature_flags"] = ack.FeatureFlags
 	}
+	if len(ack.PendingProfileUpdates) > 0 {
+		resp["pending_profile_updates"] = ack.PendingProfileUpdates
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1031,6 +1102,73 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
 	return ack, err
+}
+
+func (h *Handler) MarkDaemonAgentProfileApplied(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	agentID := chi.URLParam(r, "agentId")
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "agent_id")
+	if !ok {
+		return
+	}
+	agentRow, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: runtime.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if uuidToString(agentRow.RuntimeID) != runtimeID {
+		writeError(w, http.StatusBadRequest, "agent is not bound to this runtime")
+		return
+	}
+
+	var req DaemonProfileAppliedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	switch status {
+	case "", "synced", "applied":
+		status = "synced"
+	case "failed":
+	default:
+		writeError(w, http.StatusBadRequest, "status must be synced or failed")
+		return
+	}
+	if req.ProfileVersion <= 0 {
+		req.ProfileVersion = agentRow.ProfileVersion
+	}
+	if status == "failed" && strings.TrimSpace(req.Error) == "" {
+		writeError(w, http.StatusBadRequest, "error is required when status is failed")
+		return
+	}
+	state, err := h.Queries.MarkAgentProfileAppliedForRuntime(r.Context(), db.MarkAgentProfileAppliedForRuntimeParams{
+		RuntimeID:      runtime.ID,
+		AgentID:        agentRow.ID,
+		ProfileVersion: req.ProfileVersion,
+		Status:         status,
+		Error:          pgtype.Text{String: strings.TrimSpace(req.Error), Valid: strings.TrimSpace(req.Error) != ""},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record profile state")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtime_id":      uuidToString(state.RuntimeID),
+		"agent_id":        uuidToString(state.AgentID),
+		"desired_version": state.DesiredVersion,
+		"applied_version": state.AppliedVersion,
+		"status":          state.Status,
+		"error":           textToPtr(state.Error),
+		"updated_at":      timestampToString(state.UpdatedAt),
+	})
 }
 
 // recordHeartbeat marks the runtime as alive. When LivenessStore is available
@@ -1109,6 +1247,12 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	}
 	if h.DaemonFeatureFlags != nil {
 		ack.FeatureFlags = h.DaemonFeatureFlags.EvaluateForRuntime(ctx, rt)
+	}
+
+	if pendingProfiles, err := h.pendingProfileUpdates(ctx, rt); err != nil {
+		slog.Warn("pending profile updates failed", "runtime_id", runtimeID, "error", err)
+	} else if len(pendingProfiles) > 0 {
+		ack.PendingProfileUpdates = pendingProfiles
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
@@ -1245,6 +1389,59 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	}
 
 	return ack, m, nil
+}
+
+func (h *Handler) pendingProfileUpdates(ctx context.Context, rt db.AgentRuntime) ([]protocol.DaemonHeartbeatPendingProfileUpdate, error) {
+	rows, err := h.Queries.ListPendingAgentProfileUpdates(ctx, db.ListPendingAgentProfileUpdatesParams{
+		RuntimeID: rt.ID,
+		Limit:     int32(10),
+	})
+	if err != nil {
+		return nil, err
+	}
+	updates := make([]protocol.DaemonHeartbeatPendingProfileUpdate, 0, len(rows))
+	for _, row := range rows {
+		var customArgs []string
+		if len(row.CustomArgs) > 0 {
+			if err := json.Unmarshal(row.CustomArgs, &customArgs); err != nil {
+				slog.Warn("failed to unmarshal profile custom_args",
+					"agent_id", uuidToString(row.AgentID),
+					"runtime_id", uuidToString(rt.ID),
+					"error", err,
+				)
+			}
+		}
+		if customArgs == nil {
+			customArgs = []string{}
+		}
+		update := protocol.DaemonHeartbeatPendingProfileUpdate{
+			AgentID:        uuidToString(row.AgentID),
+			RuntimeID:      uuidToString(rt.ID),
+			WorkspaceID:    uuidToString(row.WorkspaceID),
+			Version:        row.ProfileVersion,
+			AppliedVersion: row.AppliedVersion,
+			Name:           row.Name,
+			Description:    row.Description,
+			Instructions:   row.Instructions,
+			RuntimeMode:    row.RuntimeMode,
+			RuntimeConfig:  json.RawMessage(jsonValueOrDefault(row.RuntimeConfig, []byte("{}"))),
+			CustomArgs:     customArgs,
+			Model:          row.Model.String,
+			ThinkingLevel:  row.ThinkingLevel.String,
+			RuntimePolicy:  json.RawMessage(jsonValueOrDefault(row.RuntimePolicy, []byte("{}"))),
+			MemoryPolicy:   json.RawMessage(jsonValueOrDefault(row.MemoryPolicy, []byte("{}"))),
+			ApprovalPolicy: json.RawMessage(jsonValueOrDefault(row.ApprovalPolicy, []byte("{}"))),
+			SyncStatus:     row.SyncStatus,
+		}
+		if len(row.McpConfig) > 0 {
+			update.McpConfig = json.RawMessage(row.McpConfig)
+		}
+		if row.SyncError.Valid {
+			update.SyncError = row.SyncError.String
+		}
+		updates = append(updates, update)
+	}
+	return updates, nil
 }
 
 // logHeartbeatEndpointSlow emits one structured log when /api/daemon/heartbeat
@@ -1429,15 +1626,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:            uuidToString(agent.ID),
-			Name:          agent.Name,
-			Instructions:  agent.Instructions,
-			CustomEnv:     customEnv,
-			CustomArgs:    customArgs,
-			McpConfig:     mcpConfig,
-			Model:         agent.Model.String,
-			ThinkingLevel: agent.ThinkingLevel.String,
-			RuntimeConfig: runtimeConfig,
+			ID:             uuidToString(agent.ID),
+			Name:           agent.Name,
+			Instructions:   agent.Instructions,
+			CustomEnv:      customEnv,
+			CustomArgs:     customArgs,
+			McpConfig:      mcpConfig,
+			Model:          agent.Model.String,
+			ThinkingLevel:  agent.ThinkingLevel.String,
+			ProfileVersion: agent.ProfileVersion,
+			RuntimePolicy:  json.RawMessage(jsonValueOrDefault(agent.RuntimePolicy, []byte("{}"))),
+			MemoryPolicy:   json.RawMessage(jsonValueOrDefault(agent.MemoryPolicy, []byte("{}"))),
+			ApprovalPolicy: json.RawMessage(jsonValueOrDefault(agent.ApprovalPolicy, []byte("{}"))),
+			RuntimeConfig:  runtimeConfig,
 		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)

@@ -1117,12 +1117,13 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 // often already carries its own YAML frontmatter — possibly with a `name`
 // that differs from the DB row's display name to match a specific runtime's
 // expectations. The writer must not clobber that block; it should only
-// synthesize when frontmatter is absent.
+// synthesize when frontmatter is absent, while still normalizing single-line
+// descriptions into YAML-safe strings for runtimes with strict parsers.
 func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	preExisting := "---\nname: upstream-name\ndescription: imported as-is\n---\n\nbody"
+	preExisting := "---\nname: upstream-name\ndescription: Use when doing work: includes colon\n---\n\nbody"
 	ctx := TaskContextForEnv{
 		IssueID: "preserve-frontmatter-test",
 		AgentSkills: []SkillContextForEnv{
@@ -1142,8 +1143,9 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read SKILL.md: %v", err)
 	}
-	if string(skillMd) != preExisting {
-		t.Errorf("SKILL.md was rewritten; got:\n%s\nwant:\n%s", skillMd, preExisting)
+	want := "---\nname: upstream-name\ndescription: \"Use when doing work: includes colon\"\n---\n\nbody"
+	if string(skillMd) != want {
+		t.Errorf("SKILL.md was not normalized correctly; got:\n%s\nwant:\n%s", skillMd, want)
 	}
 }
 
@@ -1178,7 +1180,7 @@ func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
 		t.Fatalf("failed to read SKILL.md: %v", err)
 	}
 	got := string(skillMd)
-	want := "---\nname: review-prs\ndescription: Review pull requests\n---\n\nbody"
+	want := "---\nname: review-prs\ndescription: \"Review pull requests\"\n---\n\nbody"
 	if got != want {
 		t.Errorf("SKILL.md was not patched correctly;\n got: %q\nwant: %q", got, want)
 	}
@@ -2058,6 +2060,111 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err, want)
 		}
+	}
+}
+
+func TestPrepareCodexHomeCanSkipPluginCacheExposure(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	sharedHome := t.TempDir()
+	sharedConfig := `model = "gpt-5.5"
+
+[marketplaces.openai-bundled]
+source = "builtin"
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[profiles.default]
+model = "gpt-5.5"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(sharedConfig), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
+	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
+	}
+
+	t.Setenv("CODEX_HOME", sharedHome)
+	t.Setenv("MULTICA_CODEX_EXPOSE_PLUGIN_CACHE", "false")
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(codexHome, "plugins", "cache")); !os.IsNotExist(err) {
+		t.Fatalf("plugin cache exposure should be absent when disabled, err=%v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	tomlStr := string(data)
+	for _, forbidden := range []string{"[marketplaces.", "[plugins.", "openai-bundled"} {
+		if strings.Contains(tomlStr, forbidden) {
+			t.Fatalf("plugin runtime config should be stripped when cache exposure is disabled, got:\n%s", tomlStr)
+		}
+	}
+	if !strings.Contains(tomlStr, `model = "gpt-5.5"`) {
+		t.Fatalf("top-level model should be preserved, got:\n%s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, "[profiles.default]") {
+		t.Fatalf("unrelated profiles should be preserved, got:\n%s", tomlStr)
+	}
+}
+
+func TestPrepareCodexHomeCanStripInheritedUserMCP(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	sharedHome := t.TempDir()
+	sharedConfig := `model = "gpt-5.5"
+
+[mcp_servers.drawio-app]
+url = "https://mcp.draw.io/mcp"
+
+[mcp_servers.node_repl.env]
+CODEX_HOME = "/Users/xiaoxiao/.codex"
+
+[profiles.default]
+model = "gpt-5.5"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(sharedConfig), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+
+	t.Setenv("CODEX_HOME", sharedHome)
+	t.Setenv("MULTICA_CODEX_INHERIT_USER_MCP", "false")
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws",
+		TaskID:         "task",
+		AgentName:      "agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "issue",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(env.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	tomlStr := string(data)
+	for _, forbidden := range []string{"[mcp_servers.", "mcp.draw.io", "node_repl"} {
+		if strings.Contains(tomlStr, forbidden) {
+			t.Fatalf("inherited user MCP should be stripped when disabled, got:\n%s", tomlStr)
+		}
+	}
+	if !strings.Contains(tomlStr, "[profiles.default]") {
+		t.Fatalf("unrelated profiles should be preserved, got:\n%s", tomlStr)
 	}
 }
 

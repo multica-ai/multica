@@ -325,23 +325,13 @@ func ensureSkillFrontmatter(content, slug, description string) string {
 	// Frontmatter exists and has a parseable name. If it's valid YAML, leave
 	// it untouched so upstream-imported frontmatter survives round-trips.
 	if hasFrontmatterName(content[fmStart:]) {
-		if isFrontmatterValidYAML(content) {
-			return content
-		}
-		// Frontmatter has a name but the YAML is invalid (e.g. unquoted
-		// colon in the description). Strip and re-synthesize so runtimes
-		// like Codex don't hard-reject the whole skill at load time.
-		// frontmatterParts returns the full content as the body when it
-		// can't find a closing delimiter, so the malformed block is kept
-		// rather than silently dropped.
-		_, body, _ := frontmatterParts(content)
-		return synthesizeFrontmatter(body, slug, description)
+		return sanitizeSkillFrontmatterScalars(content, fmStart)
 	}
 	// Frontmatter exists but lacks a parseable `name`. Inject one as the
 	// first key of the existing block and keep the rest verbatim (including
 	// `description`, body, and any runtime-specific keys the import path
 	// preserved).
-	return content[:fmStart] + "name: " + slug + "\n" + content[fmStart:]
+	return sanitizeSkillFrontmatterScalars(content[:fmStart]+"name: "+slug+"\n"+content[fmStart:], fmStart)
 }
 
 // synthesizeFrontmatter produces a SKILL.md body with a YAML frontmatter block
@@ -464,6 +454,35 @@ func yamlEscapeInline(s string) string {
 	escaped := strings.ReplaceAll(flat, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	return `"` + escaped + `"`
+}
+
+func sanitizeSkillFrontmatterScalars(content string, fmStart int) string {
+	closeRel := strings.Index(content[fmStart:], "\n---")
+	if closeRel < 0 {
+		return content
+	}
+	fmEnd := fmStart + closeRel
+	body := content[fmStart:fmEnd]
+	lines := strings.Split(body, "\n")
+	changed := false
+	for i, line := range lines {
+		trimmedLeft := strings.TrimLeft(line, " \t")
+		indent := line[:len(line)-len(trimmedLeft)]
+		if !strings.HasPrefix(trimmedLeft, "description:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmedLeft, "description:"))
+		if value == "" || strings.HasPrefix(value, `"`) || strings.HasPrefix(value, `'`) ||
+			strings.HasPrefix(value, "|") || strings.HasPrefix(value, ">") {
+			continue
+		}
+		lines[i] = indent + "description: " + yamlEscapeInline(value)
+		changed = true
+	}
+	if !changed {
+		return content
+	}
+	return content[:fmStart] + strings.Join(lines, "\n") + content[fmEnd:]
 }
 
 // sanitizeSkillName converts a skill name to a safe directory name.

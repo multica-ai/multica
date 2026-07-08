@@ -474,6 +474,9 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		CustomArgs:         ca,
 		McpConfig:          nil,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		RuntimePolicy:      []byte("{}"),
+		MemoryPolicy:       []byte("{}"),
+		ApprovalPolicy:     []byte("{}"),
 	})
 	if err != nil {
 		// Mirror handler/agent.go:CreateAgent: when the duplicate is the
@@ -583,6 +586,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		h.TaskService.ReconcileAgentStatus(r.Context(), agent.ID)
 		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
 	}
+	h.markAgentProfilePending(r.Context(), agent)
 
 	resp := agentToResponse(agent)
 	// Templates attach skills via AddAgentSkill above, so the freshly built

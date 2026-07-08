@@ -30,26 +30,53 @@ func stripSkillsConfigEntries(content string) string {
 		return content
 	}
 
+	return stripTOMLBlocks(content, func(header string) bool {
+		return header == "skills.config"
+	})
+}
+
+// stripCodexPluginRuntimeConfig removes plugin marketplace/runtime tables from
+// a copied Codex config.toml. This is only used when
+// MULTICA_CODEX_EXPOSE_PLUGIN_CACHE disables plugin cache exposure; keeping
+// plugin tables without the matching cache makes Codex try to load plugins
+// from absent per-task paths on every cold start.
+func stripCodexPluginRuntimeConfig(content string) string {
+	return stripTOMLBlocks(content, func(header string) bool {
+		return header == "plugins" ||
+			header == "marketplaces" ||
+			strings.HasPrefix(header, "plugins.") ||
+			strings.HasPrefix(header, "marketplaces.")
+	})
+}
+
+// stripCodexUserMCPRuntimeConfig removes MCP server tables copied from the
+// host user's Codex config. Managed MCP from the agent profile is written
+// later by pkg/agent/codex.go, so this only affects implicit inheritance.
+func stripCodexUserMCPRuntimeConfig(content string) string {
+	return stripTOMLBlocks(content, func(header string) bool {
+		return header == "mcp_servers" || strings.HasPrefix(header, "mcp_servers.")
+	})
+}
+
+func stripTOMLBlocks(content string, dropHeader func(string) bool) string {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
-	inSkillsConfig := false
+	dropping := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// A new TOML header always closes the current `[[skills.config]]`
-		// block, regardless of whether it's another entry of the same array
-		// or a different table.
 		if strings.HasPrefix(trimmed, "[") {
-			if trimmed == "[[skills.config]]" {
-				inSkillsConfig = true
+			header, ok := tomlHeaderName(trimmed)
+			if ok && dropHeader(header) {
+				dropping = true
 				continue
 			}
-			inSkillsConfig = false
+			dropping = false
 			out = append(out, line)
 			continue
 		}
 
-		if inSkillsConfig {
+		if dropping {
 			continue
 		}
 		out = append(out, line)
@@ -65,10 +92,26 @@ func stripSkillsConfigEntries(content string) string {
 	return stripped
 }
 
+func tomlHeaderName(trimmedLine string) (string, bool) {
+	if strings.HasPrefix(trimmedLine, "[[") && strings.Contains(trimmedLine, "]]") {
+		end := strings.Index(trimmedLine, "]]")
+		return strings.TrimSpace(trimmedLine[2:end]), true
+	}
+	if strings.HasPrefix(trimmedLine, "[") && strings.Contains(trimmedLine, "]") {
+		end := strings.Index(trimmedLine, "]")
+		return strings.TrimSpace(trimmedLine[1:end]), true
+	}
+	return "", false
+}
+
 // sanitizeCopiedCodexConfig rewrites the per-task config.toml in place,
 // dropping `[[skills.config]]` entries inherited from the shared
 // `~/.codex/config.toml`. No-op if the file doesn't exist or doesn't change.
 func sanitizeCopiedCodexConfig(configPath string) error {
+	return sanitizeCopiedCodexConfigWithOptions(configPath, false, false)
+}
+
+func sanitizeCopiedCodexConfigWithOptions(configPath string, stripPluginRuntime bool, stripUserMCP bool) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,6 +120,12 @@ func sanitizeCopiedCodexConfig(configPath string) error {
 		return fmt.Errorf("read config.toml: %w", err)
 	}
 	stripped := stripSkillsConfigEntries(string(data))
+	if stripPluginRuntime {
+		stripped = stripCodexPluginRuntimeConfig(stripped)
+	}
+	if stripUserMCP {
+		stripped = stripCodexUserMCPRuntimeConfig(stripped)
+	}
 	if stripped == string(data) {
 		return nil
 	}

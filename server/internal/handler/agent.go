@@ -70,7 +70,11 @@ type AgentResponse struct {
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel string `json:"thinking_level"`
+	ThinkingLevel  string          `json:"thinking_level"`
+	ProfileVersion int32           `json:"profile_version"`
+	RuntimePolicy  json.RawMessage `json:"runtime_policy"`
+	MemoryPolicy   json.RawMessage `json:"memory_policy"`
+	ApprovalPolicy json.RawMessage `json:"approval_policy"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -139,6 +143,18 @@ func agentToResponse(a db.Agent) AgentResponse {
 	if a.McpConfig != nil {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
+	runtimePolicy := json.RawMessage(a.RuntimePolicy)
+	if len(runtimePolicy) == 0 {
+		runtimePolicy = json.RawMessage("{}")
+	}
+	memoryPolicy := json.RawMessage(a.MemoryPolicy)
+	if len(memoryPolicy) == 0 {
+		memoryPolicy = json.RawMessage("{}")
+	}
+	approvalPolicy := json.RawMessage(a.ApprovalPolicy)
+	if len(approvalPolicy) == 0 {
+		approvalPolicy = json.RawMessage("{}")
+	}
 
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
@@ -170,6 +186,10 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
+		ProfileVersion:           a.ProfileVersion,
+		RuntimePolicy:            runtimePolicy,
+		MemoryPolicy:             memoryPolicy,
+		ApprovalPolicy:           approvalPolicy,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -387,16 +407,20 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID            string                      `json:"id"`
-	Name          string                      `json:"name"`
-	Instructions  string                      `json:"instructions"`
-	Skills        []service.AgentSkillData    `json:"skills,omitempty"`
-	SkillRefs     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
-	CustomEnv     map[string]string           `json:"custom_env,omitempty"`
-	CustomArgs    []string                    `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage             `json:"mcp_config,omitempty"`
-	Model         string                      `json:"model,omitempty"`
-	ThinkingLevel string                      `json:"thinking_level,omitempty"`
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	Instructions   string                      `json:"instructions"`
+	Skills         []service.AgentSkillData    `json:"skills,omitempty"`
+	SkillRefs      []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	CustomEnv      map[string]string           `json:"custom_env,omitempty"`
+	CustomArgs     []string                    `json:"custom_args,omitempty"`
+	McpConfig      json.RawMessage             `json:"mcp_config,omitempty"`
+	Model          string                      `json:"model,omitempty"`
+	ThinkingLevel  string                      `json:"thinking_level,omitempty"`
+	ProfileVersion int32                       `json:"profile_version,omitempty"`
+	RuntimePolicy  json.RawMessage             `json:"runtime_policy,omitempty"`
+	MemoryPolicy   json.RawMessage             `json:"memory_policy,omitempty"`
+	ApprovalPolicy json.RawMessage             `json:"approval_policy,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -762,6 +786,9 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
+	RuntimePolicy      json.RawMessage            `json:"runtime_policy"`
+	MemoryPolicy       json.RawMessage            `json:"memory_policy"`
+	ApprovalPolicy     json.RawMessage            `json:"approval_policy"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -796,6 +823,13 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	}
 
 	return raw, nil
+}
+
+func jsonObjectOrDefault(raw json.RawMessage) []byte {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return []byte("{}")
+	}
+	return append([]byte(nil), raw...)
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -912,6 +946,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
+	runtimePolicy := jsonObjectOrDefault(req.RuntimePolicy)
+	memoryPolicy := jsonObjectOrDefault(req.MemoryPolicy)
+	approvalPolicy := jsonObjectOrDefault(req.ApprovalPolicy)
 
 	// composio_toolkit_allowlist: the JSON field is a list-of-slugs that gets
 	// stored as TEXT[]. We normalise here (lowercase + trim + dedupe) so the
@@ -942,6 +979,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:                mc,
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		RuntimePolicy:            runtimePolicy,
+		MemoryPolicy:             memoryPolicy,
+		ApprovalPolicy:           approvalPolicy,
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -969,6 +1009,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
+	h.markAgentProfilePending(r.Context(), created)
 
 	resp := agentToResponse(created)
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
@@ -992,6 +1033,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		suppressComposioToolkitAllowlist(&resp)
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) markAgentProfilePending(ctx context.Context, a db.Agent) {
+	if !a.RuntimeID.Valid {
+		return
+	}
+	if err := h.Queries.MarkAgentProfilePendingForRuntime(ctx, db.MarkAgentProfilePendingForRuntimeParams{
+		RuntimeID:      a.RuntimeID,
+		AgentID:        a.ID,
+		DesiredVersion: a.ProfileVersion,
+	}); err != nil {
+		slog.Warn("mark agent profile pending failed",
+			"agent_id", uuidToString(a.ID),
+			"runtime_id", uuidToString(a.RuntimeID),
+			"profile_version", a.ProfileVersion,
+			"error", err,
+		)
+	}
 }
 
 type UpdateAgentRequest struct {
@@ -1030,7 +1089,10 @@ type UpdateAgentRequest struct {
 	//   - field present with non-empty value → set (validated server-side)
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
-	ThinkingLevel *string `json:"thinking_level"`
+	ThinkingLevel  *string         `json:"thinking_level"`
+	RuntimePolicy  json.RawMessage `json:"runtime_policy"`
+	MemoryPolicy   json.RawMessage `json:"memory_policy"`
+	ApprovalPolicy json.RawMessage `json:"approval_policy"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -1247,8 +1309,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
 	}
+	profileAffectsRuntime := false
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}
+		profileAffectsRuntime = true
 	}
 	if req.Description != nil {
 		if utf8.RuneCountInString(*req.Description) > maxAgentDescriptionLength {
@@ -1256,9 +1320,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		profileAffectsRuntime = true
 	}
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
+		profileAffectsRuntime = true
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
@@ -1271,15 +1337,30 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		preserveMaskedGatewayToken(req.RuntimeConfig, existing.RuntimeConfig)
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
+		profileAffectsRuntime = true
 	}
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)
 		params.CustomArgs = ca
+		profileAffectsRuntime = true
 	}
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
+		profileAffectsRuntime = true
+	}
+	if raw, ok := rawFields["runtime_policy"]; ok {
+		params.RuntimePolicy = jsonObjectOrDefault(raw)
+		profileAffectsRuntime = true
+	}
+	if raw, ok := rawFields["memory_policy"]; ok {
+		params.MemoryPolicy = jsonObjectOrDefault(raw)
+		profileAffectsRuntime = true
+	}
+	if raw, ok := rawFields["approval_policy"]; ok {
+		params.ApprovalPolicy = jsonObjectOrDefault(raw)
+		profileAffectsRuntime = true
 	}
 
 	// Resolve the runtime that will be in force after this update so the
@@ -1316,6 +1397,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+		profileAffectsRuntime = true
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -1370,6 +1452,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+		profileAffectsRuntime = true
 	} else if req.RuntimeID != nil && existing.Model.Valid && agent.ModelKnownIncompatibleWithProvider(targetProvider, existing.Model.String) {
 		// Model is runtime-native. When moving an agent across known provider
 		// families and the caller did not choose a replacement model, clear the
@@ -1377,6 +1460,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// receiving an obvious foreign model ID (e.g. Claude Code -> Codex).
 		// Unknown/custom model strings are preserved by the helper.
 		params.Model = pgtype.Text{String: "", Valid: true}
+		profileAffectsRuntime = true
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
@@ -1396,6 +1480,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		value := *req.ThinkingLevel
 		if value == "" {
 			shouldClearThinkingLevel = true
+			profileAffectsRuntime = true
 		} else {
 			// Need the target runtime's provider to validate. Re-fetch only when
 			// we haven't already loaded it above (i.e. the request didn't change
@@ -1414,6 +1499,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
+			profileAffectsRuntime = true
 		}
 	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
 		// Runtime is changing but the caller didn't touch thinking_level.
@@ -1495,6 +1581,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
 			return
 		}
+		profileAffectsRuntime = true
 	}
 	if shouldClearThinkingLevel {
 		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
@@ -1503,6 +1590,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
 			return
 		}
+		profileAffectsRuntime = true
+	}
+	if profileAffectsRuntime {
+		updated, err = h.Queries.BumpAgentProfileVersion(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("bump agent profile version failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent profile version")
+			return
+		}
+		h.markAgentProfilePending(r.Context(), updated)
 	}
 	if shouldClearComposioAllowlist {
 		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)

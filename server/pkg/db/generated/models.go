@@ -48,6 +48,10 @@ type Agent struct {
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
 	PermissionMode string `json:"permission_mode"`
+	ProfileVersion int32  `json:"profile_version"`
+	RuntimePolicy  []byte `json:"runtime_policy"`
+	MemoryPolicy   []byte `json:"memory_policy"`
+	ApprovalPolicy []byte `json:"approval_policy"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
@@ -61,23 +65,38 @@ type AgentInvocationTarget struct {
 }
 
 type AgentRuntime struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	DaemonID       pgtype.Text        `json:"daemon_id"`
-	Name           string             `json:"name"`
-	RuntimeMode    string             `json:"runtime_mode"`
-	Provider       string             `json:"provider"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DaemonID        pgtype.Text        `json:"daemon_id"`
+	Name            string             `json:"name"`
+	RuntimeMode     string             `json:"runtime_mode"`
+	Provider        string             `json:"provider"`
+	Status          string             `json:"status"`
+	DeviceInfo      string             `json:"device_info"`
+	Metadata        []byte             `json:"metadata"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID  pgtype.Text        `json:"legacy_daemon_id"`
+	Visibility      string             `json:"visibility"`
+	ProfileID       pgtype.UUID        `json:"profile_id"`
+	CustomName      pgtype.Text        `json:"custom_name"`
+	EndpointType    string             `json:"endpoint_type"`
+	Capabilities    []byte             `json:"capabilities"`
+	Models          []byte             `json:"models"`
+	Tools           []byte             `json:"tools"`
+	RuntimeFeatures []byte             `json:"runtime_features"`
+}
+
+type AgentRuntimeProfileState struct {
+	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	DesiredVersion int32              `json:"desired_version"`
+	AppliedVersion int32              `json:"applied_version"`
 	Status         string             `json:"status"`
-	DeviceInfo     string             `json:"device_info"`
-	Metadata       []byte             `json:"metadata"`
-	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Error          pgtype.Text        `json:"error"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
-	Visibility     string             `json:"visibility"`
-	ProfileID      pgtype.UUID        `json:"profile_id"`
-	CustomName     pgtype.Text        `json:"custom_name"`
 }
 
 type AgentSkill struct {

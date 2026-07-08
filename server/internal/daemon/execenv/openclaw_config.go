@@ -409,6 +409,9 @@ func rewriteAgentsListWorkspaces(list []any, workDir string) []any {
 		}
 		copyEntry := make(map[string]any, len(entry)+1)
 		for k, v := range entry {
+			if isOpenclawAgentsListRuntimeField(k) {
+				continue
+			}
 			copyEntry[k] = v
 		}
 		copyEntry["workspace"] = workDir
@@ -418,6 +421,15 @@ func rewriteAgentsListWorkspaces(list []any, workDir string) []any {
 		return nil
 	}
 	return out
+}
+
+func isOpenclawAgentsListRuntimeField(key string) bool {
+	switch key {
+	case "agentDir", "bindings", "isDefault":
+		return true
+	default:
+		return false
+	}
 }
 
 // stripUserMcpServers removes only `mcp.servers` from a resolved user
@@ -685,6 +697,14 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 	defer cancel()
 	out, err := openclawExec(ctx, bin, "config", "get", "agents.list", "--json")
 	if err != nil {
+		if isOpenclawAgentsListPathMissing(err) {
+			fallback, fallbackErr := openclawExec(ctx, bin, "agents", "list", "--json")
+			if fallbackErr != nil {
+				return nil, true, fallbackErr
+			}
+			list, parseErr := parseOpenclawAgentsList(fallback, "`openclaw agents list --json`")
+			return list, true, parseErr
+		}
 		if isOpenclawKeyMissing(err) {
 			// New schema: the config path is gone; the agents live in the
 			// sqlite registry. Resolve them via the subcommand instead.
@@ -737,13 +757,17 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 		}
 		return nil, err
 	}
+	return parseOpenclawAgentsList(out, "`openclaw config get agents.list --json`")
+}
+
+func parseOpenclawAgentsList(out, source string) ([]any, error) {
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
-		return nil, fmt.Errorf("parse `openclaw agents list --json` output: %w", err)
+		return nil, fmt.Errorf("parse %s output: %w", source, err)
 	}
 	return list, nil
 }
@@ -868,4 +892,11 @@ func isOpenclawUnknownSubcommand(err error) bool {
 		strings.Contains(msg, "unknown option") ||
 		strings.Contains(msg, "does not recognize") ||
 		strings.Contains(msg, "unknown argument")
+}
+
+func isOpenclawAgentsListPathMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Config path not found: agents.list")
 }

@@ -42,9 +42,14 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
+    endpoint_type,
+    capabilities,
+    models,
+    tools,
+    runtime_features,
     owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
 -- Built-in runtimes carry no profile_id. The arbiter is the partial unique
 -- index from migration 121 (WHERE profile_id IS NULL); the predicate must be
 -- spelled out so Postgres selects that partial index, not the custom-runtime
@@ -56,6 +61,11 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
+    endpoint_type = EXCLUDED.endpoint_type,
+    capabilities = EXCLUDED.capabilities,
+    models = EXCLUDED.models,
+    tools = EXCLUDED.tools,
+    runtime_features = EXCLUDED.runtime_features,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
@@ -78,10 +88,15 @@ INSERT INTO agent_runtime (
     status,
     device_info,
     metadata,
+    endpoint_type,
+    capabilities,
+    models,
+    tools,
+    runtime_features,
     owner_id,
     profile_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -90,10 +105,91 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
+    endpoint_type = EXCLUDED.endpoint_type,
+    capabilities = EXCLUDED.capabilities,
+    models = EXCLUDED.models,
+    tools = EXCLUDED.tools,
+    runtime_features = EXCLUDED.runtime_features,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
+
+-- name: ListPendingAgentProfileUpdates :many
+SELECT
+    a.id AS agent_id,
+    a.workspace_id,
+    a.name,
+    a.description,
+    a.instructions,
+    a.runtime_mode,
+    a.runtime_config,
+    a.custom_args,
+    a.mcp_config,
+    a.model,
+    a.thinking_level,
+    a.profile_version,
+    a.runtime_policy,
+    a.memory_policy,
+    a.approval_policy,
+    COALESCE(s.applied_version, 0)::integer AS applied_version,
+    COALESCE(s.status, 'pending')::text AS sync_status,
+    s.error AS sync_error
+FROM agent a
+LEFT JOIN agent_runtime_profile_state s
+  ON s.agent_id = a.id AND s.runtime_id = a.runtime_id
+WHERE a.runtime_id = @runtime_id
+  AND a.archived_at IS NULL
+  AND (
+      s.runtime_id IS NULL
+      OR s.status <> 'synced'
+      OR s.applied_version < a.profile_version
+      OR s.desired_version < a.profile_version
+  )
+ORDER BY a.updated_at ASC
+LIMIT COALESCE(sqlc.narg('limit'), 10);
+
+-- name: MarkAgentProfilePendingForRuntime :exec
+INSERT INTO agent_runtime_profile_state (
+    runtime_id,
+    agent_id,
+    desired_version,
+    applied_version,
+    status,
+    error,
+    updated_at
+) VALUES (@runtime_id, @agent_id, @desired_version, 0, 'pending', NULL, now())
+ON CONFLICT (runtime_id, agent_id)
+DO UPDATE SET
+    desired_version = EXCLUDED.desired_version,
+    status = CASE
+        WHEN agent_runtime_profile_state.applied_version >= EXCLUDED.desired_version THEN 'synced'
+        ELSE 'pending'
+    END,
+    error = NULL,
+    updated_at = now();
+
+-- name: MarkAgentProfileAppliedForRuntime :one
+INSERT INTO agent_runtime_profile_state (
+    runtime_id,
+    agent_id,
+    desired_version,
+    applied_version,
+    status,
+    error,
+    updated_at
+) VALUES (@runtime_id, @agent_id, @profile_version, @profile_version, @status, @error, now())
+ON CONFLICT (runtime_id, agent_id)
+DO UPDATE SET
+    desired_version = GREATEST(agent_runtime_profile_state.desired_version, EXCLUDED.desired_version),
+    applied_version = CASE
+        WHEN EXCLUDED.status = 'synced' THEN GREATEST(agent_runtime_profile_state.applied_version, EXCLUDED.applied_version)
+        ELSE agent_runtime_profile_state.applied_version
+    END,
+    status = EXCLUDED.status,
+    error = EXCLUDED.error,
+    updated_at = now()
+RETURNING *;
 
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and

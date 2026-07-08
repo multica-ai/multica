@@ -44,6 +44,11 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// StripUserMCP removes inherited [mcp_servers.*] tables from the copied
+	// user config. Managed MCP from agent.mcp_config is still materialised by
+	// the Codex backend later; this only controls fallback to the host user's
+	// global Codex MCP config.
+	StripUserMCP bool
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -98,13 +103,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	pluginCacheExposureEnabled := codexPluginCacheExposureEnabled()
+
 	// Drop `[[skills.config]]` entries inherited from the user's
 	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
 	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
 	// `missing field path` and bails out of `thread/start`. Multica writes the
 	// agent's active skills directly to `codex-home/skills/`, so the
 	// user-level registry is redundant here. See codex_skill_strip.go.
-	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
+	if err := sanitizeCopiedCodexConfigWithOptions(filepath.Join(codexHome, "config.toml"), !pluginCacheExposureEnabled, opts.StripUserMCP); err != nil {
 		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
 	}
 
@@ -112,8 +119,12 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		return fmt.Errorf("sync codex model_catalog_json: %w", err)
 	}
 
-	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
-		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+	if pluginCacheExposureEnabled {
+		if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
+			logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+		}
+	} else if err := removeCodexPluginCacheExposure(codexHome); err != nil {
+		logger.Warn("execenv: codex-home plugin cache cleanup failed", "error", err)
 	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
@@ -257,6 +268,38 @@ func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 
 	if err := createDirLink(src, dst); err != nil {
 		return fmt.Errorf("expose shared plugin cache: %w", err)
+	}
+	return nil
+}
+
+func codexPluginCacheExposureEnabled() bool {
+	switch os.Getenv("MULTICA_CODEX_EXPOSE_PLUGIN_CACHE") {
+	case "0", "false", "FALSE", "False", "no", "NO", "No":
+		return false
+	default:
+		return true
+	}
+}
+
+func codexUserMCPInheritanceEnabled() bool {
+	switch os.Getenv("MULTICA_CODEX_INHERIT_USER_MCP") {
+	case "0", "false", "FALSE", "False", "no", "NO", "No":
+		return false
+	default:
+		return true
+	}
+}
+
+func removeCodexPluginCacheExposure(codexHome string) error {
+	dst := filepath.Join(codexHome, "plugins", "cache")
+	if _, err := os.Lstat(dst); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat codex plugin cache path: %w", err)
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("remove codex plugin cache path: %w", err)
 	}
 	return nil
 }

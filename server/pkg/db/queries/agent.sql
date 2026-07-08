@@ -21,11 +21,11 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    composio_toolkit_allowlist, permission_mode
+    runtime_policy, memory_policy, approval_policy, composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19,
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -56,6 +56,9 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    runtime_policy = COALESCE(sqlc.narg('runtime_policy'), runtime_policy),
+    memory_policy = COALESCE(sqlc.narg('memory_policy'), memory_policy),
+    approval_policy = COALESCE(sqlc.narg('approval_policy'), approval_policy),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -68,6 +71,12 @@ RETURNING *;
 -- dedicated query when the agent owner removes every toolkit; subsequent
 -- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: BumpAgentProfileVersion :one
+UPDATE agent
+SET profile_version = profile_version + 1, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

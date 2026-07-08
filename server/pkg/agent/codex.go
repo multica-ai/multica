@@ -851,6 +851,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
+		b.cfg.Logger.Info("codex latency checkpoint", "stage", "initialize", "elapsed", time.Since(startTime).Round(time.Millisecond).String())
 		c.notify("initialized")
 
 		// 2. Start a new thread, or resume the prior one for this issue. When
@@ -870,6 +871,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		} else {
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
+		b.cfg.Logger.Info("codex latency checkpoint", "stage", "thread_ready", "elapsed", time.Since(startTime).Round(time.Millisecond).String(), "resumed", resumed)
 
 		// 3. Send turn and wait for completion
 		turnParams := map[string]any{
@@ -917,6 +919,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				return
 			}
 		}
+		b.cfg.Logger.Info("codex latency checkpoint", "stage", "turn_start_ack", "elapsed", time.Since(startTime).Round(time.Millisecond).String())
 
 		lastSemanticActivity := time.Now()
 		lastSemanticActivityDescription := "turn/start"
@@ -928,6 +931,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		var firstTurnNoProgressTimerC <-chan time.Time
 		firstTurnStarted := false
 		firstTurnProgressObserved := false
+		firstTextObserved := false
 		stopFirstTurnNoProgressTimer := func() {
 			if firstTurnNoProgressTimer == nil {
 				return
@@ -962,6 +966,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
 					firstTurnProgressObserved = true
 					stopFirstTurnNoProgressTimer()
+					b.cfg.Logger.Info("codex latency checkpoint", "stage", "first_semantic_progress", "elapsed", time.Since(startTime).Round(time.Millisecond).String(), "activity", activity)
+				}
+				if !firstTextObserved && (strings.HasPrefix(activity, "item/started:agentMessage") || strings.HasPrefix(activity, "item/agentMessage/delta")) {
+					firstTextObserved = true
+					b.cfg.Logger.Info("codex latency checkpoint", "stage", "first_text", "elapsed", time.Since(startTime).Round(time.Millisecond).String(), "activity", activity)
 				}
 			case <-firstTurnNoProgressTimerC:
 				waitingForTurn = false
@@ -1236,7 +1245,26 @@ func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) ti
 }
 
 func isCodexFirstTurnProgressActivity(activity string) bool {
-	return activity != "" && activity != "status:running" && activity != "error:retry"
+	return activity != "" &&
+		activity != "status:running" &&
+		activity != "error:retry" &&
+		!isCodexUserMessageActivity(activity)
+}
+
+func isCodexUserMessageActivity(activity string) bool {
+	return strings.HasPrefix(activity, "item/started:userMessage") ||
+		strings.HasPrefix(activity, "item/completed:userMessage")
+}
+
+func isCodexItemProgressActivity(method, itemType string) bool {
+	if !strings.HasPrefix(method, "item/") {
+		return false
+	}
+	// The app-server echoes the submitted user prompt as a userMessage item
+	// before the model starts. Treating that echo as semantic progress masks
+	// first-turn stalls where Codex accepts the turn but never produces model
+	// output, tool calls, completion, or a terminal error.
+	return itemType != "userMessage"
 }
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
@@ -1894,7 +1922,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
-	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+	if isCodexItemProgressActivity(method, itemType) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
 	}
 	if item == nil {
@@ -1954,10 +1982,6 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			}
 		}
 	}
-}
-
-func isCodexItemProgressActivity(method string) bool {
-	return strings.HasPrefix(method, "item/")
 }
 
 func describeCodexItemProgressActivity(method, itemType, itemID string) string {

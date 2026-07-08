@@ -77,6 +77,7 @@ type Config struct {
 	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
 	DeviceName                     string
 	RuntimeName                    string
+	WorkspaceID                    string                // optional fixed workspace for daemon-token auth (env: MULTICA_WORKSPACE_ID)
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
@@ -437,6 +438,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.RuntimeName != "" {
 		runtimeName = overrides.RuntimeName
 	}
+	workspaceID := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACE_ID"))
 
 	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
 	workspacesRoot, err := ResolveWorkspacesRoot(profile, overrides.WorkspacesRoot)
@@ -511,6 +513,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		LegacyDaemonIDs:                legacyDaemonIDs,
 		DeviceName:                     deviceName,
 		RuntimeName:                    runtimeName,
+		WorkspaceID:                    workspaceID,
 		Profile:                        profile,
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,
