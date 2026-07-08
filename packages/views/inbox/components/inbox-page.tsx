@@ -223,7 +223,7 @@ export function InboxPage() {
   // -- Shared sub-components --------------------------------------------------
 
   const listHeader = (
-    <PageHeader className="justify-between">
+    <PageHeader className="justify-between border-b-0">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
@@ -273,7 +273,7 @@ export function InboxPage() {
       <p className="text-sm">{t(($) => $.list.empty)}</p>
     </div>
   ) : (
-    <div>
+    <div className="p-1">
       {items.map((item) => (
         <InboxListItem
           key={item.id}

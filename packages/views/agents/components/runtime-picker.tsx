@@ -72,7 +72,6 @@ export function RuntimePicker({
   }, [filteredRuntimes, search, currentUserId]);
 
   const showSearch = runtimes.length > SEARCH_THRESHOLD;
-  const showGroupHeaders = machines.length > 1;
 
   const selectedRuntime =
     runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
@@ -210,17 +209,19 @@ export function RuntimePicker({
             ) : (
               machines.map((machine) => (
                 <div key={machine.id}>
-                  {showGroupHeaders && (
-                    <div className="flex items-center justify-between gap-2 px-2 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground">
-                      <span className="truncate">{machine.title}</span>
-                      <span className="shrink-0 tabular-nums">
-                        {t(($) => $.create_dialog.runtime_group_online, {
-                          online: machine.onlineCount,
-                          total: machine.runtimes.length,
-                        })}
-                      </span>
-                    </div>
-                  )}
+                  {/* Always show the machine header — even when a search or a
+                      single-machine workspace narrows it to one group — so the
+                      grouping stays consistent instead of collapsing to a flat
+                      list. */}
+                  <div className="flex items-center justify-between gap-2 px-2 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground">
+                    <span className="truncate">{machine.title}</span>
+                    <span className="shrink-0 tabular-nums">
+                      {t(($) => $.create_dialog.runtime_group_online, {
+                        online: machine.onlineCount,
+                        total: machine.runtimes.length,
+                      })}
+                    </span>
+                  </div>
                   {machine.runtimes.map((device) => {
                     const ownerMember = getOwnerMember(device.owner_id);
                     const disabled = !isRuntimeUsableForUser(

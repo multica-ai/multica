@@ -244,6 +244,10 @@ func (s *registrationSession) snapshot() RegistrationSessionState {
 		InstallationID: s.installationID,
 		ErrorReason:    s.errorReason,
 		ErrorMessage:   s.errorMessage,
+		// InitiatorID is immutable after BeginInstall, so it is safe to
+		// read outside the mutex too — it is included here so the status
+		// handler can scope reads to the session's initiator.
+		InitiatorID: s.initiatorID,
 	}
 }
 
@@ -272,18 +276,22 @@ func (s *registrationSession) markError(reason, msg string, gcAfter time.Time) {
 
 // RegistrationSessionState is the read-only snapshot the handler
 // serializes to the frontend. Internal mutex is hidden by construction.
+// InitiatorID is not serialized to the client — the handler uses it only
+// to authorize the status read (session initiator or workspace admin).
 type RegistrationSessionState struct {
 	ID             string
 	Status         RegistrationSessionStatus
 	InstallationID pgtype.UUID
 	ErrorReason    string
 	ErrorMessage   string
+	InitiatorID    pgtype.UUID
 }
 
 // BeginInstallParams is the trusted input from the handler — the
 // workspace, agent, and initiating user have already been authenticated
-// and authorized at the router (admin role on the workspace; agent
-// belongs to the workspace).
+// and authorized by the handler (canManageAgent: the agent's owner OR a
+// workspace owner/admin; agent belongs to the workspace). The service
+// re-checks agent↔workspace membership below as defense-in-depth.
 type BeginInstallParams struct {
 	WorkspaceID pgtype.UUID
 	AgentID     pgtype.UUID
@@ -323,11 +331,11 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	if !p.WorkspaceID.Valid || !p.AgentID.Valid || !p.InitiatorID.Valid {
 		return BeginInstallResult{}, errors.New("lark registration: workspace, agent, and initiator are required")
 	}
-	// Agent ownership pre-check — without this, a workspace admin
-	// could open an install session against another workspace's agent
-	// by guessing the UUID, and the device_code minted against Lark
-	// would still produce credentials. The handler does the same
-	// check; doing it here too keeps the service self-defending.
+	// Agent↔workspace pre-check — without this, a caller could open an
+	// install session against another workspace's agent by guessing the
+	// UUID, and the device_code minted against Lark would still produce
+	// credentials. The handler already loads this agent to run
+	// canManageAgent; re-checking here keeps the service self-defending.
 	//
 	// We keep the agent: its name pre-fills the bot name on Lark's
 	// PersonalAgent creation form (see botNamePreset) so the installed

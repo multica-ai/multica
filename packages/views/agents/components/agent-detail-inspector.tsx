@@ -245,6 +245,7 @@ export function AgentDetailInspector({
             <LarkAgentBindButton
               agentId={agent.id}
               agentName={agent.name}
+              agentOwnerId={agent.owner_id}
               onShowConnectedDetails={onShowIntegrations}
             />
             <SlackAgentBindButton
