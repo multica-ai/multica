@@ -375,6 +375,25 @@ describe("ChatInput attachment wiring", () => {
 });
 
 describe("ChatInput async send", () => {
+  it("allows sending another message while a task is already running", async () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    renderInput({ isRunning: true, onSend, onStop });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "queue next" } });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledWith("queue next", undefined);
+    expect(onStop).not.toHaveBeenCalled();
+  });
+
   it("restores a cancelled empty run draft into the editor", async () => {
     const onRestoreDraftConsumed = vi.fn();
     renderInput({
