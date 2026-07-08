@@ -193,6 +193,52 @@ export function useSetChatSessionPinned() {
 }
 
 /**
+ * Archives or unarchives a chat session. Optimistically flips `status` in the
+ * cached list so the row moves between the active list and the "Archived" view
+ * instantly (both filter on status locally); rolls back on error. Bumps
+ * `updated_at` so the row re-sorts by activity in whichever view it lands.
+ * The matching `chat:session_updated` WS event carries the new status to other
+ * tabs/devices — see use-realtime-sync.ts.
+ */
+export function useSetChatSessionArchived() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (data: { sessionId: string; archived: boolean }) => {
+      logger.info("setChatSessionArchived.start", data);
+      return api.setChatSessionArchived(data.sessionId, data.archived);
+    },
+    onMutate: async ({ sessionId, archived }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+
+      const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+
+      const nowIso = new Date().toISOString();
+      const patch = (old?: ChatSession[]) =>
+        old &&
+        sortChatSessions(
+          old.map((s) =>
+            s.id === sessionId
+              ? { ...s, status: archived ? "archived" : "active", updated_at: nowIso }
+              : s,
+          ),
+        );
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
+
+      return { prevSessions };
+    },
+    onError: (err, vars, ctx) => {
+      logger.error("setChatSessionArchived.error.rollback", { sessionId: vars.sessionId, err });
+      if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
  * Hard-deletes a chat session. Optimistically removes the row from the
  * sessions list so the dropdown updates instantly; rolls back on error.
  * The matching `chat:session_deleted` WS event keeps other tabs/devices

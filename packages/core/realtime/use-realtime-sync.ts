@@ -1124,14 +1124,17 @@ export function useRealtimeSync(
         chat_session_id: string;
         title?: string;
         pinned?: boolean;
+        status?: "active" | "archived";
         updated_at?: string;
       };
       chatWsLogger.info("chat:session_updated (global)", payload);
       const id = getCurrentWsId();
       if (!id) return;
-      // `pinned` is present only on pin/unpin events; a plain rename omits it,
-      // so leave the existing pin state untouched then. When it changes we
-      // re-sort so the row jumps to / from the top like the server order.
+      // `pinned` is present only on pin/unpin events and `status` only on
+      // archive/unarchive; a plain rename omits both, so leave the existing
+      // state untouched then. When either changes we re-sort so the row lands
+      // in the right place (pin → top; archive → the other list) like the
+      // server order.
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(id), (old) => {
         if (!old) return old;
         const next = old.map((s) =>
@@ -1140,11 +1143,14 @@ export function useRealtimeSync(
                 ...s,
                 title: payload.title ?? s.title,
                 pinned: payload.pinned ?? s.pinned,
+                status: payload.status ?? s.status,
                 updated_at: payload.updated_at ?? s.updated_at,
               }
             : s,
         );
-        return payload.pinned === undefined ? next : sortChatSessions(next);
+        return payload.pinned === undefined && payload.status === undefined
+          ? next
+          : sortChatSessions(next);
       });
     });
 

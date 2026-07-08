@@ -254,8 +254,9 @@ type UpdateChatSessionRequest struct {
 
 // UpdateChatSession updates user-editable fields on a chat session — today
 // just `title`, surfaced by the inline rename affordance in the session
-// dropdown. Title is the only field accepted: `status` is legacy + read-only,
-// agent/creator/workspace are immutable, the resume pointers
+// dropdown. Title is the only field accepted here: `status` has its own
+// archive/unarchive endpoint (SetChatSessionArchived), `pinned` its own pin
+// endpoint, agent/creator/workspace are immutable, the resume pointers
 // (session_id / work_dir / runtime_id) are daemon-owned.
 func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -350,6 +351,55 @@ func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
 		Pinned:        &pinned,
+		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+}
+
+type SetChatSessionArchivedRequest struct {
+	Archived bool `json:"archived"`
+}
+
+// SetChatSessionArchived archives or unarchives a chat session owned by the
+// caller. Archiving is the reversible sibling of delete: the row stays in the
+// user's history (behind the "Archived" entry) and the conversation becomes
+// read-only — SendChatMessage refuses status='archived'. Hard delete is only
+// offered from the archived list, so nothing is destroyed in one hover click.
+func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req SetChatSessionArchivedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
+		ID:       session.ID,
+		Archived: req.Archived,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	status := updated.Status
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: resolvedSessionID,
+		Title:         updated.Title,
+		Status:        &status,
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	})
 
@@ -501,10 +551,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// New archive flow doesn't exist anymore, but legacy rows with
-	// status='archived' may still be in the DB from before the feature
-	// was removed. Refuse to enqueue new agent work for them — frontend
-	// surfaces these as read-only.
+	// Archived sessions are read-only: refuse to enqueue new agent work for
+	// them (see SetChatSessionArchived). The frontend disables the composer
+	// for status='archived' and only offers unarchive/delete there. Legacy
+	// soft-archived rows from before the feature are covered by the same check.
 	if session.Status != "active" {
 		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return

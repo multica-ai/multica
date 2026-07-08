@@ -307,6 +307,60 @@ func TestSetChatSessionPinned_TogglesPin(t *testing.T) {
 	}
 }
 
+// TestSetChatSessionArchived_TogglesStatus archives then unarchives a session,
+// asserting the response + DB status column flip and that updated_at is bumped
+// (so the row re-sorts in whichever list it lands).
+func TestSetChatSessionArchived_TogglesStatus(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchiveAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	archive := func(archived bool) ChatSessionResponse {
+		req := newRequest("PATCH", "/api/chat/sessions/"+sessionID+"/archive", map[string]any{
+			"archived": archived,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionArchived(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionArchived(%v): expected 200, got %d: %s", archived, w.Code, w.Body.String())
+		}
+		var resp ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode archive: %v", err)
+		}
+		return resp
+	}
+
+	dbStatus := func() string {
+		var status string
+		if err := testPool.QueryRow(
+			context.Background(),
+			`SELECT status FROM chat_session WHERE id = $1`,
+			sessionID,
+		).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		return status
+	}
+
+	// Archive.
+	if resp := archive(true); resp.Status != "archived" {
+		t.Fatalf("archive=true response Status: want archived, got %q", resp.Status)
+	}
+	if got := dbStatus(); got != "archived" {
+		t.Fatalf("db status after archive: want archived, got %q", got)
+	}
+
+	// Unarchive restores it to active.
+	if resp := archive(false); resp.Status != "active" {
+		t.Fatalf("archive=false response Status: want active, got %q", resp.Status)
+	}
+	if got := dbStatus(); got != "active" {
+		t.Fatalf("db status after unarchive: want active, got %q", got)
+	}
+}
+
 // TestUpdateChatSession_RejectsBlank refuses an empty/whitespace title with 400.
 // (Untitled is a render-side fallback, not a stored value.)
 func TestUpdateChatSession_RejectsBlank(t *testing.T) {

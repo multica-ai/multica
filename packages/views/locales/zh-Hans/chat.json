@@ -133,11 +133,16 @@
     "waiting": "等待回复",
     "pin": "置顶",
     "unpin": "取消置顶",
-    "pinned": "已置顶"
+    "pinned": "已置顶",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "archived_title": "已归档"
   },
   "header": {
     "view_profile": "查看 Agent 资料",
     "rename": "重命名会话",
-    "delete": "删除会话"
+    "delete": "删除会话",
+    "archive": "归档会话",
+    "unarchive": "取消归档"
   }
 }
