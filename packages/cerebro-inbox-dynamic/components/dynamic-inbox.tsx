@@ -81,7 +81,7 @@ import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxScrollAnchor } from "../use-inbox-scroll-anchor";
-import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam, nextInboxMessageUrl } from "../message-link";
+import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam, nextInboxMessageUrl, noteMentionTarget, noteMentionUrl } from "../message-link";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
@@ -234,6 +234,13 @@ export function DynamicInbox() {
   // pane messages use. Held separately from `selected` (which is the inbox
   // feed union) so it doesn't disturb feed selection/snapshot logic.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  // FIR-2826 — when a note is opened from a note-comment mention, carry the
+  // mentioned comment id into the pane so NoteEditor opens the comments panel
+  // and scrolls to that comment (parity with the classic inbox's `&comment=`
+  // deep link). Undefined when the note is opened from the Notes box.
+  const [selectedNoteComment, setSelectedNoteComment] = useState<
+    string | null
+  >(null);
   const [secretarySelectedKey, setSecretarySelectedKey] = useState<string | null>(null);
   const [secretaryCompletedKeys, setSecretaryCompletedKeys] = useState<Set<string>>(
     () => new Set(),
@@ -299,17 +306,23 @@ export function DynamicInbox() {
     setSelectedSnapshot(null);
     setNewChat(null);
     setSelectedNote(null);
+    setSelectedNoteComment(null);
   }, [secretarySelectedKey]);
 
   // TECH-3690 — open a note in the detail pane; clears any feed/chat selection
-  // so the pane shows the note, not a stale message.
-  const openNoteInPane = useCallback((noteId: string) => {
-    setSecretarySelectedKey(null);
-    setSelected(null);
-    setSelectedSnapshot(null);
-    setNewChat(null);
-    setSelectedNote(noteId);
-  }, []);
+  // so the pane shows the note, not a stale message. FIR-2826 — an optional
+  // commentId opens the note straight at that comment (note-comment mention).
+  const openNoteInPane = useCallback(
+    (noteId: string, commentId?: string | null) => {
+      setSecretarySelectedKey(null);
+      setSelected(null);
+      setSelectedSnapshot(null);
+      setNewChat(null);
+      setSelectedNote(noteId);
+      setSelectedNoteComment(commentId ?? null);
+    },
+    [],
+  );
 
   // TECH-3598 #2 — deep-link parity for notifications that carry no issue_id.
   // Skill change-requests open the skill detail with the proposal focused;
@@ -343,11 +356,16 @@ export function DynamicInbox() {
         push(`${paths.agentDetail(item.details.agent_id)}?tab=instructions${cr ? `&cr=${cr}` : ""}`);
         return true;
       }
-      if (item.details?.note_id) {
-        // TECH-3690 — open the note in the detail pane (parity with the Notes
-        // box); fall back to the full Notes page when the pane is off.
-        if (noteInboxPaneEnabled) openNoteInPane(item.details.note_id);
-        else push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
+      // TECH-3690 — open the note in the detail pane (parity with the Notes
+      // box); fall back to the full Notes page when the pane is off. FIR-2826 —
+      // carry the comment id (a note-comment mention) so the note opens at the
+      // exact comment: the pane forwards it to NoteEditor, and the full-page
+      // fallback appends `&comment=` like the classic inbox.
+      const noteTarget = noteMentionTarget(item);
+      if (noteTarget) {
+        if (noteInboxPaneEnabled)
+          openNoteInPane(noteTarget.noteId, noteTarget.commentId);
+        else push(noteMentionUrl(paths.notes(), noteTarget));
         return true;
       }
       return false;
@@ -723,11 +741,18 @@ export function DynamicInbox() {
     if (!selected) {
       if (selectedNote) {
         return (
-          <ErrorBoundary resetKeys={[selectedNote]}>
+          // FIR-2826 — key on note + comment so re-opening the same note at a
+          // different comment remounts NoteEditor and re-runs its open-comment
+          // effect (which only fires once per mount).
+          <ErrorBoundary resetKeys={[selectedNote, selectedNoteComment]}>
             <NoteInboxDetail
-              key={selectedNote}
+              key={`${selectedNote}:${selectedNoteComment ?? ""}`}
               noteId={selectedNote}
-              onClose={() => setSelectedNote(null)}
+              initialCommentId={selectedNoteComment}
+              onClose={() => {
+                setSelectedNote(null);
+                setSelectedNoteComment(null);
+              }}
             />
           </ErrorBoundary>
         );
@@ -891,7 +916,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, selectedNotifIsChannel, selectedNotifKindPending, typeLabels]); // FIR-1576 — re-render the channel-vs-issue branch when the selected notif's kind resolves
+  }, [selected, selectedNote, selectedNoteComment, clearSelection, newChat, onArchive, selectedChannelCommentId, selectedNotifIsChannel, selectedNotifKindPending, typeLabels]); // FIR-1576 — re-render the channel-vs-issue branch when the selected notif's kind resolves
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),

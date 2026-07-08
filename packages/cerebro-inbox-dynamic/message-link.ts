@@ -11,10 +11,47 @@
 // workspace-global / shareable), while every other entry is keyed by its own
 // id. The `kind:` prefix keeps the three id spaces (notif/channel/chat) from
 // ever colliding.
+import type { InboxItem } from "@multica/core/types";
 import type { DynInboxEntry } from "./section-filter";
 
 /** URL search-param name that holds the open message's key. */
 export const INBOX_MESSAGE_PARAM = "message";
+
+/** FIR-2826 — the note (and optional comment) a note-mention inbox item points at. */
+export interface NoteMentionTarget {
+  noteId: string;
+  /** Set when the mention was in a comment on the note; opens that exact comment. */
+  commentId: string | null;
+}
+
+/**
+ * FIR-2826 — resolve the note a `mentioned` inbox item deep-links to. A note
+ * @-mention rides in `details.note_id`; a note-COMMENT mention additionally
+ * carries `details.comment_id` so the note can open straight at that comment
+ * (parity with the classic inbox). Returns `null` when the item is not a note
+ * mention.
+ */
+export function noteMentionTarget(item: InboxItem): NoteMentionTarget | null {
+  const noteId = item.details?.note_id;
+  if (!noteId) return null;
+  const commentId = item.details?.comment_id;
+  return { noteId, commentId: commentId ? commentId : null };
+}
+
+/**
+ * FIR-2826 — full Notes-page URL for a note mention, appending `&comment=` when
+ * the mention targets a specific comment. Used as the fallback when the note
+ * inbox pane is off.
+ */
+export function noteMentionUrl(
+  notesPath: string,
+  target: NoteMentionTarget,
+): string {
+  const commentQ = target.commentId
+    ? `?comment=${encodeURIComponent(target.commentId)}`
+    : "";
+  return `${notesPath}/${encodeURIComponent(target.noteId)}${commentQ}`;
+}
 
 /**
  * Stable, copyable key for an inbox entry. Mirrors the selection identity used

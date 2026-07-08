@@ -186,6 +186,17 @@ export function NotesPage({
     () => notes.find((n) => n.id === selectedId) ?? null,
     [notes, selectedId],
   );
+  const urlNoteId = navigation.searchParams.get("note");
+  const urlCommentId = navigation.searchParams.get("comment");
+  const initialCommentForSelected =
+    selectedId && (selectedId === initialNoteId || selectedId === urlNoteId)
+      ? initialCommentId ?? urlCommentId
+      : null;
+
+  React.useEffect(() => {
+    const noteFromUrl = initialNoteId ?? urlNoteId;
+    if (!selectedId && noteFromUrl) setSelectedId(noteFromUrl);
+  }, [initialNoteId, selectedId, urlNoteId]);
 
   // FIR-2595 + FIR-2688: keep the browser address bar in sync with the open
   // note OR the open folder, so both URLs are shareable ("kopier den fra
@@ -203,18 +214,29 @@ export function NotesPage({
     if (selectedId) {
       // Note open: `/notes/:id`. Guard on pathname so a deep link like
       // /notes/:id?comment=x keeps its ?comment param untouched on load.
-      const desired = wsPaths.noteDetail(selectedId);
-      if (navigation.pathname === desired) return;
+      // FIR-2826 — when the legacy `/notes?note=<id>&comment=<comment-id>`
+      // entry route is normalized to `/notes/<id>`, keep the comment param so
+      // the route remount still passes initialCommentId to NoteEditor.
+      const commentParam = initialCommentForSelected
+        ? `?comment=${encodeURIComponent(initialCommentForSelected)}`
+        : "";
+      const desired = `${wsPaths.noteDetail(selectedId)}${commentParam}`;
+      const searchString = navigation.searchParams.toString();
+      const current = searchString
+        ? `${navigation.pathname}?${searchString}`
+        : navigation.pathname;
+      if (current === desired) return;
       navigation.replaceSilent(desired);
       return;
     }
+    if (urlNoteId) return;
     // No note open: the folder owns the URL. Write unconditionally so leaving a
     // folder clears a stale `?folder`; History-API writes don't re-render, so
     // the effect only fires on a real selection change (loop-free).
     navigation.replaceSilent(
       folderId ? wsPaths.notesFolder(folderId) : wsPaths.notes(),
     );
-  }, [selectedId, folderId, wsPaths, navigation]);
+  }, [selectedId, folderId, wsPaths, navigation, urlNoteId, initialCommentForSelected]);
 
   const noteFolderIds = React.useMemo(
     () => new Set(folders.map((f) => f.id)),
@@ -410,9 +432,7 @@ export function NotesPage({
               note={selected}
               wsId={wsId}
               onBack={() => setSelectedId(null)}
-              initialCommentId={
-                selected.id === initialNoteId ? initialCommentId : null
-              }
+              initialCommentId={initialCommentForSelected}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -786,6 +806,13 @@ function NoteListSection({
   );
 }
 
+// FIR-2826 — the desktop comments rail is wider by default and drag-resizable.
+// Width is clamped and remembered per browser so it survives reloads.
+const COMMENTS_WIDTH_KEY = "note:comments-width";
+const COMMENTS_MIN_WIDTH = 300;
+const COMMENTS_MAX_WIDTH = 760;
+const COMMENTS_DEFAULT_WIDTH = 420;
+
 export function NoteEditor({
   note,
   wsId,
@@ -796,7 +823,7 @@ export function NoteEditor({
   note: Note;
   wsId: string;
   onBack: () => void;
-  // TECH-3690: when set, renders an "Åbn fuldt" button in the action bar that
+  // TECH-3690: when set, renders an "Open full" button in the action bar that
   // jumps to the full Notes surface. Used when the editor is embedded in the
   // inbox detail pane; undefined on the full Notes page (already full).
   onOpenFull?: () => void;
@@ -838,6 +865,46 @@ export function NoteEditor({
 
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
+  // FIR-2826 — remembered width of the desktop comments rail (drag-resizable via
+  // the handle on its left edge). Seeded from localStorage, clamped to sane
+  // bounds so a stale/garbage value can't collapse or overflow the rail.
+  const [commentsWidth, setCommentsWidth] = React.useState<number>(() => {
+    const saved = Number(localStorage.getItem(COMMENTS_WIDTH_KEY));
+    return Number.isFinite(saved) &&
+      saved >= COMMENTS_MIN_WIDTH &&
+      saved <= COMMENTS_MAX_WIDTH
+      ? saved
+      : COMMENTS_DEFAULT_WIDTH;
+  });
+  const startCommentsResize = React.useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = commentsWidth;
+      let latest = startW;
+      const onMove = (ev: PointerEvent) => {
+        // The rail sits on the right edge, so dragging its left handle to the
+        // left (smaller clientX) widens it.
+        const next = Math.min(
+          COMMENTS_MAX_WIDTH,
+          Math.max(COMMENTS_MIN_WIDTH, startW + (startX - ev.clientX)),
+        );
+        latest = next;
+        setCommentsWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.style.userSelect = "";
+        localStorage.setItem(COMMENTS_WIDTH_KEY, String(Math.round(latest)));
+      };
+      // Suppress text selection while dragging across the editor.
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [commentsWidth],
+  );
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
@@ -1026,8 +1093,8 @@ export function NoteEditor({
           rest (pin, comments, history, add reference, create issue, delete)
           collapse into a single "⋯" menu so the bar no longer feels cluttered.
           FIR-1676: on mobile the row wraps to a second line instead of clipping
-          the "⋯" menu off the right edge (Jesper: "ellers skal der være 2
-          rækker"). On desktop it stays a single row with "⋯" pushed right. */}
+          the "⋯" menu off the right edge (Jesper: otherwise there must be two
+          rows). On desktop it stays a single row with "⋯" pushed right. */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
@@ -1047,11 +1114,11 @@ export function NoteEditor({
             className="shrink-0 gap-1.5"
             onClick={onOpenFull}
           >
-            <ExternalLink className="size-4" /> Åbn fuldt
+            <ExternalLink className="size-4" /> Open full
           </Button>
         )}
 
-        {/* Folder first (request 4 — "folders skal ligge i række 1"). Only the
+        {/* Folder first (request 4 — "folders must be on row 1"). Only the
             owner may move a note; everyone else sees a read-only folder badge
             (FIR-1460, request 2). */}
         {isOwner ? (
@@ -1271,9 +1338,24 @@ export function NoteEditor({
           <DocumentToolsSidebar body={liveBody} contentRef={contentScrollRef} />
         </div>
 
-        {/* Desktop: comments as an inline side rail. */}
+        {/* Desktop: comments as an inline side rail. FIR-2826 — wider default
+            and drag-resizable via the handle on its left edge. */}
         {commentsEnabled && showComments && !isMobile && (
-          <div className="w-80 shrink-0 border-l">
+          <div
+            className="relative shrink-0 border-l"
+            style={{ width: commentsWidth }}
+          >
+            {/* Drag handle: a hit strip straddling the left border with a
+                thin bar that brightens on hover/drag. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize comments panel"
+              onPointerDown={startCommentsResize}
+              className="group absolute -left-1 top-0 bottom-0 z-10 w-2 cursor-col-resize"
+            >
+              <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-primary/40 group-active:bg-primary/60" />
+            </div>
             <NoteCommentsPanel
               noteId={note.id}
               noteBody={note.body}
