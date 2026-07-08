@@ -89,6 +89,20 @@
     "direction_desc": "降順",
     "section_columns": "表示する列"
   },
+  "finder": {
+    "action": "AI で検索",
+    "title": "AI でスキルを検索",
+    "subtitle": "オンラインのエージェントにワークスペースのスキル推薦を依頼します。",
+    "agent_label": "エージェント",
+    "agent_placeholder": "エージェントを選択",
+    "prompt_label": "スキルは何を支援するべきですか？",
+    "prompt_placeholder": "例: React のレンダリング性能を改善し、不要な再レンダリングを避ける",
+    "no_agents": "スキル検索に使用できるオンラインエージェントがありません。",
+    "cancel": "キャンセル",
+    "submit": "スキルを検索",
+    "toast_queued": "スキル検索を開始しました。結果はインボックスに表示されます。",
+    "fallback_error": "スキル検索を開始できませんでした"
+  },
   "detail": {
     "all_skills": "すべてのスキル",
     "read_only": "読み取り専用",
