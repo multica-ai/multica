@@ -3,9 +3,61 @@ import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { chatKeys } from "./queries";
 import { createLogger } from "../logger";
-import type { ChatSession } from "../types";
+import type { ChatSession, ChatPinnedAgent } from "../types";
 
 const logger = createLogger("chat.mut");
+
+/** Pin an agent to the quick-agent bar (optimistic append). */
+export function usePinChatAgent() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (agentId: string) => api.pinChatAgent(agentId),
+    onMutate: async (agentId) => {
+      await qc.cancelQueries({ queryKey: chatKeys.pinnedAgents(wsId) });
+      const prev = qc.getQueryData<ChatPinnedAgent[]>(chatKeys.pinnedAgents(wsId));
+      qc.setQueryData<ChatPinnedAgent[]>(chatKeys.pinnedAgents(wsId), (old) => {
+        if (old?.some((p) => p.agent_id === agentId)) return old;
+        const maxPos = old?.reduce((m, p) => Math.max(m, p.position), 0) ?? 0;
+        return [...(old ?? []), { agent_id: agentId, position: maxPos + 1 }];
+      });
+      return { prev };
+    },
+    onError: (err, agentId, ctx) => {
+      logger.error("pinChatAgent.error.rollback", { agentId, err });
+      if (ctx?.prev) qc.setQueryData(chatKeys.pinnedAgents(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.pinnedAgents(wsId) });
+    },
+  });
+}
+
+/** Unpin an agent from the quick-agent bar (optimistic removal). */
+export function useUnpinChatAgent() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (agentId: string) => api.unpinChatAgent(agentId),
+    onMutate: async (agentId) => {
+      await qc.cancelQueries({ queryKey: chatKeys.pinnedAgents(wsId) });
+      const prev = qc.getQueryData<ChatPinnedAgent[]>(chatKeys.pinnedAgents(wsId));
+      qc.setQueryData<ChatPinnedAgent[]>(chatKeys.pinnedAgents(wsId), (old) =>
+        old?.filter((p) => p.agent_id !== agentId),
+      );
+      return { prev };
+    },
+    onError: (err, agentId, ctx) => {
+      logger.error("unpinChatAgent.error.rollback", { agentId, err });
+      if (ctx?.prev) qc.setQueryData(chatKeys.pinnedAgents(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.pinnedAgents(wsId) });
+    },
+  });
+}
 
 export function useCreateChatSession() {
   const qc = useQueryClient();
@@ -49,7 +101,7 @@ export function useMarkChatSessionRead() {
       const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
 
       const clear = (old?: ChatSession[]) =>
-        old?.map((s) => (s.id === sessionId ? { ...s, has_unread: false } : s));
+        old?.map((s) => (s.id === sessionId ? { ...s, has_unread: false, unread_count: 0 } : s));
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), clear);
 
       return { prevSessions };

@@ -144,7 +144,9 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				CreatorID:   uuidToString(s.CreatorID),
 				Title:       s.Title,
 				Status:      s.Status,
-				HasUnread:   s.HasUnread,
+				HasUnread:   s.UnreadCount > 0,
+				UnreadCount: int(s.UnreadCount),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -170,7 +172,9 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				CreatorID:   uuidToString(s.CreatorID),
 				Title:       s.Title,
 				Status:      s.Status,
-				HasUnread:   s.HasUnread,
+				HasUnread:   s.UnreadCount > 0,
+				UnreadCount: int(s.UnreadCount),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -1023,10 +1027,37 @@ type ChatSessionResponse struct {
 	CreatorID   string `json:"creator_id"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
-	// Only populated by list endpoints — single-session fetches return false.
-	HasUnread bool   `json:"has_unread"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	// Only populated by list endpoints — single-session fetches return 0/false/nil.
+	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
+	HasUnread   bool             `json:"has_unread"`
+	UnreadCount int              `json:"unread_count"`
+	LastMessage *ChatLastMessage `json:"last_message"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at"`
+}
+
+// ChatLastMessage is a preview of a session's most recent message, used to
+// render the IM-style conversation list (name + snippet + time). nil when the
+// session has no messages yet.
+type ChatLastMessage struct {
+	Content       string  `json:"content"`
+	Role          string  `json:"role"`
+	CreatedAt     string  `json:"created_at"`
+	FailureReason *string `json:"failure_reason"`
+}
+
+// buildChatLastMessage assembles the preview from list-row columns; returns nil
+// when there is no last message (the LEFT JOIN produced a NULL timestamp).
+func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text) *ChatLastMessage {
+	if !at.Valid {
+		return nil
+	}
+	return &ChatLastMessage{
+		Content:       content,
+		Role:          role,
+		CreatedAt:     timestampToString(at),
+		FailureReason: textToPtr(failure),
+	}
 }
 
 type ChatMessageResponse struct {

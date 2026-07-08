@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "チャット",
+    "select_prompt": "会話を選ぶか、＋ で新規作成してください"
+  },
   "fab": {
     "running": "Multica が作業中です...",
     "unread_other": "未読のチャット {{count}}件",
@@ -87,7 +91,8 @@
     "first_time_actions": "要約を頼んだり、今日の予定を立てたり、簡単なタスクを任せたりしてみましょう。",
     "returning_title_named": "こんにちは、{{name}} です",
     "returning_title_default": "Multica へようこそ",
-    "returning_subtitle": "こう聞いてみましょう"
+    "returning_subtitle": "こう聞いてみましょう",
+    "chat_with_named": "{{name}} とチャット"
   },
   "starter_prompts": {
     "list_open": "オープンなタスクを優先度順にまとめて",
@@ -118,5 +123,21 @@
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
     }
+  },
+  "list": {
+    "typing": "入力中…",
+    "failed": "送信失敗",
+    "you_prefix": "あなた：",
+    "no_messages": "メッセージはまだありません",
+    "quick_agents": "よく使う Agent",
+    "add": "追加",
+    "add_agent": "よく使う Agent を追加",
+    "unpin_agent": "よく使うから外す",
+    "waiting": "返信待ち"
+  },
+  "header": {
+    "view_profile": "Agent のプロフィール",
+    "rename": "名前を変更",
+    "delete": "チャットを削除"
   }
 }

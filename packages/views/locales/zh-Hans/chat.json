@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "Chat",
+    "select_prompt": "选择一个对话，或点 + 新建"
+  },
   "fab": {
     "running": "Multica 正在工作...",
     "unread_other": "{{count}} 条未读对话",
@@ -87,7 +91,8 @@
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
     "returning_title_default": "欢迎使用 Multica",
-    "returning_subtitle": "试试问"
+    "returning_subtitle": "试试问",
+    "chat_with_named": "与 {{name}} 对话"
   },
   "starter_prompts": {
     "list_open": "按优先级列出我未完成的任务",
@@ -118,5 +123,21 @@
       "searching_web": "搜索网页",
       "fallback": "处理中"
     }
+  },
+  "list": {
+    "typing": "正在输入…",
+    "failed": "发送失败",
+    "you_prefix": "你：",
+    "no_messages": "还没有消息",
+    "quick_agents": "常用 Agent",
+    "add": "添加",
+    "add_agent": "添加常用 Agent",
+    "unpin_agent": "移出常用",
+    "waiting": "等待回复"
+  },
+  "header": {
+    "view_profile": "查看 Agent 资料",
+    "rename": "重命名会话",
+    "delete": "删除会话"
   }
 }

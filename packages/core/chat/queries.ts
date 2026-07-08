@@ -22,6 +22,8 @@ export const chatKeys = {
   pendingTask: (sessionId: string) => [...chatKeys.pendingTaskAll(), sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
+  /** Per-user pinned agents for the quick-agent bar. */
+  pinnedAgents: (wsId: string) => [...chatKeys.all(wsId), "pinned-agents"] as const,
   /**
    * Boolean "does the user have any in-flight chat task" — the FAB's cheap
    * running indicator. Separate cache from the detailed `pendingTasks` list so
@@ -44,6 +46,14 @@ export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
+    staleTime: Infinity,
+  });
+}
+
+export function chatPinnedAgentsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.pinnedAgents(wsId),
+    queryFn: () => api.listChatPinnedAgents(),
     staleTime: Infinity,
   });
 }

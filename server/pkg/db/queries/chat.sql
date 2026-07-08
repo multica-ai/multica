@@ -12,21 +12,49 @@ SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListChatSessionsByCreator :many
--- Returns active sessions with a boolean unread flag. Unread is strictly
--- per-session: either the user has uncleared assistant replies in this
--- session or they don't. Counting messages would be misleading.
+-- IM-style list: each active session with its unread *count* (assistant
+-- messages after the read cursor), a preview of the latest message, and
+-- ordered by most-recent activity so a new reply bumps a session to the top.
 SELECT cs.*,
-       (cs.unread_since IS NOT NULL)::bool AS has_unread
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason
 FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
-ORDER BY cs.updated_at DESC;
+ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
 SELECT cs.*,
-       (cs.unread_since IS NOT NULL)::bool AS has_unread
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason
 FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
-ORDER BY cs.updated_at DESC;
+ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
@@ -198,16 +226,9 @@ SELECT EXISTS (
 ) AS has_pending;
 
 -- name: MarkChatSessionRead :exec
--- Clears unread_since, dropping the session's unread count to 0.
-UPDATE chat_session SET unread_since = NULL
+-- Advances the read cursor to now, dropping the session's unread_count to 0.
+UPDATE chat_session SET last_read_at = now()
 WHERE id = $1;
-
--- name: SetUnreadSinceIfNull :exec
--- Atomically stamps the first unread assistant message's arrival time.
--- No-op if the session is already in "has unread" state — keeps the earliest
--- unread boundary stable across multiple incoming replies.
-UPDATE chat_session SET unread_since = now()
-WHERE id = $1 AND unread_since IS NULL;
 
 -- name: GetMostRecentUserChatMessage :one
 -- Returns the most recent role='user' message in a session. Used by the
