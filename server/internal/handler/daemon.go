@@ -2338,23 +2338,27 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 }
 
 // reconcileCommentsOnCompletion closes the at-least-once gap for member
-// comments that arrive after a run's claim response was built (MUL-4195).
+// comments a completing run did NOT deliver (MUL-4195).
 //
-// The merge path (mergeCommentIntoPendingTask) folds comments into a task only
-// while it is still PRE-CLAIM (queued/deferred); those all ride the claim
-// response and are genuinely delivered. Once a task is dispatched, its claim
-// response — including its coalesced_comment_ids — is already built and sent, so
-// any member comment created after that is NOT delivered to the run. This pass
-// runs at completion and schedules a bounded follow-up for exactly those
-// undelivered comments.
+// The merge path (mergeCommentIntoPendingTask) folds a comment into a task only
+// while it is still PRE-CLAIM (queued/deferred), so trigger_comment_id plus
+// coalesced_comment_ids is EXACTLY the set the run's claim response carried —
+// its "delivered set". Anything a member posted during this run's lifetime that
+// is NOT in that set was never delivered and must earn a follow-up.
 //
-// Anchor = dispatched_at, NOT started_at (MUL-4195 review must-fix #2). The
-// claim response is built the instant the task transitions queued→dispatched;
-// started_at is only written later by StartTask. A comment landing in the
-// dispatch→start window has created_at < started_at and would be missed by a
-// started_at anchor, but is caught by dispatched_at. Comments merged while the
-// task was queued have created_at < dispatched_at and are correctly excluded
-// (they were delivered), so this never re-fires for already-covered input.
+// Anchor = created_at + delivered-set exclusion, NOT a dispatch/start timestamp
+// (MUL-4195 review round-3 must-fix). A timestamp anchor cannot tell a
+// delivered comment from an undelivered one, and there is a race it structurally
+// misses: a comment created while the task was still queued, but whose merge
+// lost the race to the daemon claiming the task (queued→dispatched) — the merge
+// then finds no pre-claim row (ErrNoRows), the enqueue path defers to reconcile,
+// yet the comment's created_at is BEFORE dispatched_at, so a dispatched_at
+// anchor would skip it and it would vanish. Anchoring on the task's own
+// created_at reaches back over the whole run, and excluding the delivered set
+// (trigger + coalesced) is what prevents re-firing comments the run actually
+// received. Together they catch the pre-dispatch merge-race comment, the
+// dispatch→start comment, and the during-run comment, while never double-firing
+// a delivered one.
 //
 // Scope + loop safety:
 //   - Only MEMBER comments qualify (agent replies / acknowledgements /
@@ -2365,27 +2369,16 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 //   - Every undelivered qualifying comment is replayed through the normal
 //     enqueue path in chronological order, so they coalesce into a SINGLE
 //     follow-up task (the first enqueues it, the rest merge in). Bounded to one
-//     run, and terminating: the follow-up's own dispatched_at is later than all
-//     of these comments, so its completion finds nothing older.
+//     run, and terminating: the follow-up's own created_at is later than all of
+//     these comments and its delivered set will contain them, so its completion
+//     finds nothing to re-schedule.
 func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
-	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid {
-		return
-	}
-	// dispatched_at is the moment the claim response was built; fall back to
-	// started_at / created_at defensively for rows that somehow lack it.
-	anchor := task.DispatchedAt
-	if !anchor.Valid {
-		anchor = task.StartedAt
-	}
-	if !anchor.Valid {
-		anchor = task.CreatedAt
-	}
-	if !anchor.Valid {
+	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
 	}
 	comments, err := h.Queries.ListMemberCommentsForIssueSince(ctx, db.ListMemberCommentsForIssueSinceParams{
 		IssueID: task.IssueID,
-		Since:   anchor,
+		Since:   task.CreatedAt,
 	})
 	if err != nil {
 		slog.Warn("reconcile comments on completion: list member comments failed",
@@ -2394,6 +2387,19 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	}
 	if len(comments) == 0 {
 		return
+	}
+	// The delivered set: everything this run's claim response actually carried.
+	// Because merges only ever touch pre-claim rows, this is exactly
+	// trigger_comment_id ∪ coalesced_comment_ids. Any member comment since the
+	// task was created that is NOT in here was never delivered to the run.
+	delivered := make(map[string]struct{}, len(task.CoalescedCommentIds)+1)
+	if task.TriggerCommentID.Valid {
+		delivered[uuidToString(task.TriggerCommentID)] = struct{}{}
+	}
+	for _, id := range task.CoalescedCommentIds {
+		if id.Valid {
+			delivered[uuidToString(id)] = struct{}{}
+		}
 	}
 	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
@@ -2405,6 +2411,10 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	scheduled := 0
 	for i := range comments {
 		c := comments[i]
+		if _, ok := delivered[uuidToString(c.ID)]; ok {
+			// Already delivered to this run (trigger or pre-claim coalesced).
+			continue
+		}
 		if isNoteComment(c.Content) {
 			continue
 		}

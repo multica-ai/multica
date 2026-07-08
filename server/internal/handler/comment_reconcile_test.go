@@ -80,8 +80,8 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	// A running task whose started_at is in the past.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -143,8 +143,8 @@ func TestCompleteTask_NoReconcileWhenNoNewMemberComment(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -208,8 +208,8 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	// A running task for A whose started_at is in the past.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentA, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -391,8 +391,8 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 	// built at dispatch.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, dispatched_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '5 minutes', now() - interval '2 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, dispatched_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes', now() - interval '2 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -444,4 +444,87 @@ func containsUUID(ids []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestCompleteTask_ReconcilesPreDispatchMergeRaceComment is the MUL-4195
+// round-3 must-fix regression test. A member comment is created while the task
+// is still queued, but its merge loses the race to the daemon claiming the task
+// (queued→dispatched); the merge then finds no pre-claim row and the enqueue
+// path defers to reconcile. The comment's created_at is BEFORE dispatched_at,
+// so a dispatched_at-anchored reconcile would skip it and it would vanish. The
+// created_at anchor + delivered-set exclusion must catch it — while NOT
+// re-firing a comment that WAS delivered as a pre-claim coalesced entry.
+func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'pre-dispatch race fixture', 'in_progress', 'none', $2, 'member', 999006, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Timeline: task created 10m ago; the run's trigger 10m ago; a delivered
+	// pre-claim coalesced comment 8m ago; the RACE comment 7m ago (still before
+	// dispatch); dispatched 6m ago; started 5m ago.
+	insertComment := func(content, age string) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval) RETURNING id
+		`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	triggerCommentID := insertComment("initial request", "10 minutes")
+	deliveredCoalescedID := insertComment("folded in while queued (delivered)", "8 minutes")
+	raceCommentID := insertComment("posted before dispatch, merge lost the race", "7 minutes")
+
+	// The running task: created before every comment window, with the delivered
+	// comment recorded in coalesced_comment_ids, dispatched after the race
+	// comment, started later still.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue
+			(agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, status, priority, created_at, dispatched_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], 'running', 0,
+			now() - interval '10 minutes', now() - interval '6 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Exactly one follow-up, and it must be for the RACE comment — the
+	// delivered coalesced comment must be excluded (not re-fired).
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+		t.Fatalf("expected exactly 1 follow-up for the pre-dispatch race comment, got %d", n)
+	}
+	trigger, _, coalesced := taskTriggerOriginatorCoalesced(t, issueID, agentID)
+	if trigger != raceCommentID {
+		t.Errorf("follow-up trigger must be the race comment %s, got %s", raceCommentID, trigger)
+	}
+	if containsUUID(coalesced, deliveredCoalescedID) || trigger == deliveredCoalescedID {
+		t.Errorf("the already-delivered coalesced comment %s must be excluded from the follow-up, got trigger=%s coalesced=%v",
+			deliveredCoalescedID, trigger, coalesced)
+	}
 }
