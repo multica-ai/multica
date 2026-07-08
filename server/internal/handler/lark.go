@@ -114,7 +114,12 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 // Membership is checked at the router; the per-agent authorization
 // (canManageAgent: the bound agent's owner OR a workspace owner/admin)
 // is enforced here, symmetric with BeginLarkInstall so an agent owner
-// can unbind the bot they bound (MUL-4213).
+// can unbind the bot they bound (MUL-4213). When the bound agent has
+// been hard-deleted the installation is an orphan (the active-connection
+// query skips it and disconnecting it is the documented cleanup path);
+// revoke then falls back to workspace owner/admin only, so the cleanup
+// entry point keeps working without handing a plain member orphan-row
+// rights.
 func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.LarkInstallations == nil {
 		writeError(w, http.StatusServiceUnavailable, "lark integration not configured")
@@ -143,17 +148,22 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to load installation")
 		return
 	}
-	// Authorize against the bound agent: its owner or a workspace
-	// owner/admin may revoke. canManageAgent writes the 403/404 itself.
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+	// Authorize against the bound agent. Normally its owner or a workspace
+	// owner/admin may revoke (canManageAgent writes the 403/404 itself).
+	// If the agent has been hard-deleted the installation is an orphan, so
+	// fall back to workspace owner/admin-only cleanup instead of 404-ing
+	// the disconnect entry point (see ListByWorkspace vs the orphan-
+	// filtered active list). No FK/cascade: the missing agent is handled
+	// in the application layer.
+	agent, agentErr := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID:          inst.AgentID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "lark installation not found")
-		return
-	}
-	if !h.canManageAgent(w, r, agent) {
+	if agentErr != nil {
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(wsUUID), "lark installation not found", "owner", "admin"); !ok {
+			return
+		}
+	} else if !h.canManageAgent(w, r, agent) {
 		return
 	}
 	if err := h.LarkInstallations.Revoke(r.Context(), instUUID); err != nil {

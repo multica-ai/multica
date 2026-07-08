@@ -415,3 +415,57 @@ RETURNING id
 		t.Fatalf("revoke as workspace owner: want 204, got %d", code)
 	}
 }
+
+// TestRevokeLarkInstallation_OrphanCleanableByAdminNotMember pins the
+// orphan-cleanup path (Elon review on MUL-4213 / PR #5079): when the bound
+// agent has been hard-deleted, the agent-owner authorization has no agent to
+// resolve, so revoke must fall back to workspace owner/admin — a workspace
+// owner can still disconnect the orphan (the documented cleanup entry point),
+// while a plain member cannot.
+func TestRevokeLarkInstallation_OrphanCleanableByAdminNotMember(t *testing.T) {
+	wireLarkInstallServices(t)
+	// Only need a plain member; the installation binds a deleted agent.
+	_, _, memberID := privateAgentTestFixture(t)
+
+	// agent_id references no agent row (hard-deleted / never existed). There
+	// is no FK, so the row persists as an orphan — exactly the ListByWorkspace
+	// case the active-connection query filters out.
+	const orphanAgent = "5d0a0000-0000-4000-8000-0000000000aa"
+	seedOrphan := func() string {
+		if _, err := testPool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE workspace_id = $1 AND agent_id = $2 AND channel_type = 'feishu'`,
+			testWorkspaceID, orphanAgent); err != nil {
+			t.Fatalf("clear prior orphan: %v", err)
+		}
+		var instID string
+		if err := testPool.QueryRow(context.Background(), `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', 'cli_orphan'), $3, 'active')
+RETURNING id
+`, testWorkspaceID, orphanAgent, testUserID).Scan(&instID); err != nil {
+			t.Fatalf("seed orphan installation: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, instID)
+		})
+		return instID
+	}
+
+	revoke := func(userID, instID string) int {
+		req := newRequestAs(userID, http.MethodDelete,
+			"/api/workspaces/"+testWorkspaceID+"/lark/installations/"+instID, nil)
+		req = withURLParams(req, "id", testWorkspaceID, "installationId", instID)
+		w := httptest.NewRecorder()
+		testHandler.RevokeLarkInstallation(w, req)
+		return w.Code
+	}
+
+	// Plain member: no agent to own, so orphan cleanup is denied.
+	if code := revoke(memberID, seedOrphan()); code != http.StatusForbidden {
+		t.Fatalf("orphan revoke as plain member: want 403, got %d", code)
+	}
+	// Workspace owner/admin: can disconnect the orphan.
+	if code := revoke(testUserID, seedOrphan()); code != http.StatusNoContent {
+		t.Fatalf("orphan revoke as workspace owner: want 204, got %d", code)
+	}
+}
