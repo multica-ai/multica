@@ -125,6 +125,9 @@ services:
       GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
       GITLAB_SECRET_KEY: ${GITLAB_SECRET_KEY:-}
     restart: unless-stopped
+    networks:
+      - default
+      - shared-network
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
@@ -136,6 +139,9 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
+    networks:
+      - default
+      - shared-network
 
 volumes:
   pgdata:
