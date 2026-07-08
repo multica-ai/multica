@@ -53,6 +53,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         : isStaging
           ? "ai.multica.mobile.staging"
           : "ai.multica.mobile.dev",
+      // Without an adaptive icon, Android (and OEM launchers like Honor's
+      // Magic UI in particular) re-pads the flat `icon` above as a legacy
+      // icon, shrinking it well inside the launcher slot. `foregroundImage`
+      // is the mark cropped out of icon.png with a transparent background,
+      // sized to Android's ~66% safe zone; `backgroundColor` is sampled
+      // from icon.png's own card color so both platforms read as one brand.
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon-foreground.png",
+        backgroundColor: "#1B1F2B",
+      },
     },
     plugins: [
       "expo-router",
