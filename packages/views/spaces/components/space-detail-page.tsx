@@ -60,6 +60,11 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
   // Full list (not active-only): an archived space's settings stay viewable.
   const { data: spaces = [], isSuccess } = useQuery(spaceListOptions(wsId));
   const space = spaces.find((tm) => tm.key.toLowerCase() === spaceKey.toLowerCase());
+  // No space is flagged "default" — every workspace just always keeps at
+  // least one active space (archiving the last one is rejected server-side).
+  // This is that same rule surfaced client-side, computed from the sibling
+  // count rather than a stored flag.
+  const isLastActiveSpace = spaces.filter((s) => !s.archived_at).length <= 1;
 
   if (!space) {
     return isSuccess ? (
@@ -74,16 +79,15 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
       <PageHeader className="gap-2">
         <SpaceIcon space={space} />
         <h1 className="text-sm font-medium">{space.name}</h1>
-        {space.is_default && <Badge variant="secondary">{t(($) => $.state.default)}</Badge>}
         {space.archived_at && <Badge variant="outline">{t(($) => $.state.archived)}</Badge>}
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
           <Identity space={space} />
-          <MembersSection space={space} />
+          <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
           <GotoSection space={space} />
-          <ArchiveSection space={space} />
+          <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
         </div>
       </div>
     </div>
@@ -185,9 +189,9 @@ function Identity({ space }: { space: Space }) {
  * Member stack + config popover. The checkbox set is the full source of
  * truth; saving replaces the space's membership wholesale. Deselecting
  * everyone means the space has no reason to exist — saving then archives it,
- * behind a confirm (blocked for the default space).
+ * behind a confirm (blocked when this is the workspace's last active space).
  */
-function MembersSection({ space }: { space: Space }) {
+function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActiveSpace: boolean }) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
@@ -241,8 +245,8 @@ function MembersSection({ space }: { space: Space }) {
 
   const save = async () => {
     if (selected.length === 0) {
-      if (space.is_default) {
-        toast.error(t(($) => $.settings.default_cannot_archive));
+      if (isLastActiveSpace) {
+        toast.error(t(($) => $.settings.last_space_cannot_archive));
         return;
       }
       // Empty membership funnels into archive, which is admin-only —
@@ -425,7 +429,13 @@ function GotoSection({ space }: { space: Space }) {
   );
 }
 
-function ArchiveSection({ space }: { space: Space }) {
+function ArchiveSection({
+  space,
+  isLastActiveSpace,
+}: {
+  space: Space;
+  isLastActiveSpace: boolean;
+}) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
@@ -437,8 +447,8 @@ function ArchiveSection({ space }: { space: Space }) {
   // meaningless). Every other blocked state renders disabled with the reason
   // in a tooltip — nothing is hidden, so the rule is always discoverable.
   if (space.archived_at) return null;
-  const blockedReason = space.is_default
-    ? "default"
+  const blockedReason = isLastActiveSpace
+    ? "last"
     : !isAdmin
       ? "admin"
       : null;
@@ -460,10 +470,10 @@ function ArchiveSection({ space }: { space: Space }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">
         {t(($) => $.settings.danger_title)}
       </h3>
-      {/* Archiving is admin-only and never applies to the default space
-          (server enforces both). Blocked states stay visible but disabled
-          with the reason, so users learn the rule instead of wondering
-          where the action went. */}
+      {/* Archiving is admin-only and never allowed on a workspace's last
+          active space (server enforces both). Blocked states stay visible
+          but disabled with the reason, so users learn the rule instead of
+          wondering where the action went. */}
       <Tooltip>
         <TooltipTrigger render={<span className="-mx-1.5 inline-flex w-fit" />}>
           <button
@@ -477,8 +487,8 @@ function ArchiveSection({ space }: { space: Space }) {
         </TooltipTrigger>
         {blockedReason !== null && (
           <TooltipContent>
-            {blockedReason === "default"
-              ? t(($) => $.settings.default_cannot_archive)
+            {blockedReason === "last"
+              ? t(($) => $.settings.last_space_cannot_archive)
               : t(($) => $.settings.archive_admin_only)}
           </TooltipContent>
         )}

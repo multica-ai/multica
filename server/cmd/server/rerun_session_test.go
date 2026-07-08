@@ -37,7 +37,7 @@ func setupRerunTestFixture(t *testing.T) (string, string, string) {
 	// coexist in the same test (e.g. TestRerunIssueRejectsCrossIssueTask).
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
-		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Rerun test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2,
+		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Rerun test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2,
 		       (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
@@ -522,7 +522,7 @@ func TestRerunIssueRejectsCrossIssueTask(t *testing.T) {
 	var issueBID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
-		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Rerun cross-issue test', 'todo', 'none', 'member', m.user_id, 'agent', $2,
+		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Rerun cross-issue test', 'todo', 'none', 'member', m.user_id, 'agent', $2,
 		       (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id

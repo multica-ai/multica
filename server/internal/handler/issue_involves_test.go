@@ -109,6 +109,15 @@ func setupInvolvesFixture(t *testing.T) *involvesFixture {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, otherWsID) })
 	fx.otherWsID = otherWsID
 
+	// The other workspace needs its own default Space to satisfy the NOT NULL
+	// space_id constraint, mirroring how production backfills one per workspace.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default', 'OTH', $2)
+	`, otherWsID, fx.userID); err != nil {
+		t.Fatalf("create other-ws default space: %v", err)
+	}
+
 	// Membership in other workspace (so the user could legitimately be assigned
 	// there too — exercises whether subquery workspace_id clause filters it out).
 	if _, err := testPool.Exec(ctx, `
@@ -212,9 +221,10 @@ func insertIssueTo(t *testing.T, ctx context.Context, workspaceID, title, assign
 		INSERT INTO issue (
 			workspace_id, title, description, status, priority,
 			assignee_type, assignee_id, creator_type, creator_id,
-			position, number
+			position, number, space_id
 		)
-		VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, 0, $6)
+		VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, 0, $6,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, workspaceID, title, assigneeType, assigneeID, testUserID, number).Scan(&id); err != nil {
 		t.Fatalf("create issue %q: %v", title, err)

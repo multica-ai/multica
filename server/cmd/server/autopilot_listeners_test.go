@@ -444,6 +444,7 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Offline create-issue autopilot",
 		Description:        pgtype.Text{String: "WS-1325 regression test", Valid: true},
 		AssigneeType:       "agent",

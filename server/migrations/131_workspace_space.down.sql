@@ -14,6 +14,5 @@ ALTER TABLE project DROP CONSTRAINT IF EXISTS uq_project_workspace_id;
 DROP TABLE IF EXISTS workspace_space_member;
 
 DROP INDEX IF EXISTS idx_workspace_space_active;
-DROP INDEX IF EXISTS uq_workspace_space_default;
 DROP INDEX IF EXISTS uq_workspace_space_workspace_key_lower;
 DROP TABLE IF EXISTS workspace_space;

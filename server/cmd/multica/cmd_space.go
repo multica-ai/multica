@@ -53,7 +53,6 @@ type spaceCLIResponse struct {
 	Description  string  `json:"description"`
 	Icon         *string `json:"icon"`
 	IssueCounter int32   `json:"issue_counter"`
-	IsDefault    bool    `json:"is_default"`
 	ArchivedAt   *string `json:"archived_at"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -280,9 +279,6 @@ func printSpaceResult(cmd *cobra.Command, space spaceCLIResponse) error {
 
 func spaceState(space spaceCLIResponse) string {
 	var parts []string
-	if space.IsDefault {
-		parts = append(parts, "default")
-	}
 	if space.ArchivedAt != nil && *space.ArchivedAt != "" {
 		parts = append(parts, "archived")
 	}

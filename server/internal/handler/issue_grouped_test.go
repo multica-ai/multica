@@ -68,9 +68,10 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 			INSERT INTO issue (
 				workspace_id, title, description, status, priority,
 				assignee_type, assignee_id, creator_type, creator_id,
-				position, number
+				position, number, space_id
 			)
-			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7)
+			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7,
+				(SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 			RETURNING id
 		`, testWorkspaceID, title, assigneeType, assigneeID, testUserID, position, number).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
@@ -175,15 +176,15 @@ func TestListGroupedIssuesFiltersBySpace(t *testing.T) {
 
 	var spaceA, spaceB string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Space A', $2, true)
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Space A', $2)
 		RETURNING id
 	`, workspaceID, keyA).Scan(&spaceA); err != nil {
 		t.Fatalf("create space A: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Space B', $2, false)
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Space B', $2)
 		RETURNING id
 	`, workspaceID, keyB).Scan(&spaceB); err != nil {
 		t.Fatalf("create space B: %v", err)

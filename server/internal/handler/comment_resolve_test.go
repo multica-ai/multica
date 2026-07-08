@@ -128,7 +128,7 @@ func newResolveTestFixture(t *testing.T) resolveTestFixture {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, creator_type, creator_id, title)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'member', $2, $3)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'member', $2, $3)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "resolve fixture").Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

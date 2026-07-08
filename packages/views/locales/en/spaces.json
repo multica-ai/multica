@@ -14,7 +14,6 @@
     "actions": "Actions"
   },
   "state": {
-    "default": "Default",
     "active": "Active",
     "archived": "Archived"
   },
@@ -76,7 +75,7 @@
     "members_empty": "No members yet",
     "archive_confirm_title": "Archive space?",
     "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
-    "default_cannot_archive": "The default space cannot be archived",
+    "last_space_cannot_archive": "A workspace must keep at least one space",
     "archive_admin_only": "Only admins can archive a space",
     "goto": "Go to"
   },

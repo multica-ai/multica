@@ -982,7 +982,6 @@ type WorkspaceSpace struct {
 	Description  string             `json:"description"`
 	Icon         pgtype.Text        `json:"icon"`
 	IssueCounter int32              `json:"issue_counter"`
-	IsDefault    bool               `json:"is_default"`
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`

@@ -82,8 +82,8 @@ func createHeadShaDedupFixture(t *testing.T, ctx context.Context, pool *pgxpool.
 		t.Fatalf("create member: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
-		VALUES ($1, 'Default', 'HSD', true, $2)
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default', 'HSD', $2)
 	`, workspaceID, userID); err != nil {
 		t.Fatalf("create default space: %v", err)
 	}
@@ -115,7 +115,7 @@ func createHeadShaDedupFixture(t *testing.T, ctx context.Context, pool *pgxpool.
 	var issueID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'in_review', 'none', $3, 'member', $4, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'in_review', 'none', $3, 'member', $4, 0)
 		RETURNING id
 	`, workspaceID, "head sha dedup issue", userID, 970000+int(suffix%1000)).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

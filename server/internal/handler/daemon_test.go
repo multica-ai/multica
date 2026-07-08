@@ -159,7 +159,7 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES (
-			$1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'in_progress', 'none', $3, 'member',
+			$1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'in_progress', 'none', $3, 'member',
 			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
 			0
 		)
@@ -1069,7 +1069,7 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	var issueID, taskID string
 	err := testPool.QueryRow(context.Background(), `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'daemon-auth-test-issue', 'todo', 'medium', $2, 'member')
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'daemon-auth-test-issue', 'todo', 'medium', $2, 'member')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID)
 	if err != nil {
@@ -1177,7 +1177,7 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	var issueID string
 	err := testPool.QueryRow(context.Background(), `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID)
 	if err != nil {
@@ -1274,8 +1274,8 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Default', 'FOR', true)
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Default', 'FOR')
 	`, foreignWorkspaceID); err != nil {
 		t.Fatalf("setup: seed foreign default space: %v", err)
 	}
@@ -1306,7 +1306,7 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'foreign-workspace-issue', 'todo', 'medium', $2, 'agent')
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'foreign-workspace-issue', 'todo', 'medium', $2, 'agent')
 		RETURNING id
 	`, foreignWorkspaceID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create foreign issue: %v", err)
@@ -1398,7 +1398,7 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 	var issueXID, taskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'cancel-crossissue-x', 'todo', 'medium', $2, 'member', 91001, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'cancel-crossissue-x', 'todo', 'medium', $2, 'member', 91001, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueXID); err != nil {
 		t.Fatalf("setup: create issue X: %v", err)
@@ -1418,7 +1418,7 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 	var issueYID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'cancel-crossissue-y', 'todo', 'medium', $2, 'member', 91002, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'cancel-crossissue-y', 'todo', 'medium', $2, 'member', 91002, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueYID); err != nil {
 		t.Fatalf("setup: create issue Y: %v", err)
@@ -1465,7 +1465,7 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 	var issueID, taskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'cancel-happy-path', 'todo', 'medium', $2, 'member', 91003, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'cancel-happy-path', 'todo', 'medium', $2, 'member', 91003, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -1687,7 +1687,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	var legacyIssueID, legacyTaskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'legacy-task-owner', 'todo', 'medium', $2, 'member', 97501, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'legacy-task-owner', 'todo', 'medium', $2, 'member', 97501, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&legacyIssueID); err != nil {
 		t.Fatalf("seed legacy issue: %v", err)
@@ -2066,7 +2066,7 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 			workspace_id, space_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'run_only fixture', $2, 'run_only', 'member', $3)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'run_only fixture', $2, 'run_only', 'member', $3)
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
@@ -2178,7 +2178,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (
 			workspace_id, space_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'project repo override', 'todo', 'medium', $3, 'member', 88001, 0)
+		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'project repo override', 'todo', 'medium', $3, 'member', 88001, 0)
 		RETURNING id
 	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -2269,7 +2269,7 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (
 			workspace_id, space_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'project description', 'todo', 'medium', $3, 'member', 88002, 0)
+		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'project description', 'todo', 'medium', $3, 'member', 88002, 0)
 		RETURNING id
 	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -2391,7 +2391,7 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (
 			workspace_id, space_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'no project repos', 'todo', 'medium', $3, 'member', 88002, 0)
+		) VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'no project repos', 'todo', 'medium', $3, 'member', 88002, 0)
 		RETURNING id
 	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -2458,7 +2458,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 			workspace_id, space_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'claim workspace fixture', $2, 'run_only', 'member', $3)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'claim workspace fixture', $2, 'run_only', 'member', $3)
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
@@ -2558,8 +2558,8 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, is_default)
-		VALUES ($1, 'Default', 'MFC', true)
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Default', 'MFC')
 	`, foreignWorkspaceID); err != nil {
 		t.Fatalf("setup: seed foreign default space: %v", err)
 	}
@@ -2567,7 +2567,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'mismatch-foreign-issue', 'todo', 'medium', $2, 'member', 77001, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'mismatch-foreign-issue', 'todo', 'medium', $2, 'member', 77001, 0)
 		RETURNING id
 	`, foreignWorkspaceID, testUserID).Scan(&foreignIssueID); err != nil {
 		t.Fatalf("setup: create foreign issue: %v", err)
@@ -2637,7 +2637,7 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2743,7 +2743,7 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'mul-1198 dedup fixture', 'in_progress', 'none', $2, 'member', 81199, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'mul-1198 dedup fixture', 'in_progress', 'none', $2, 'member', 81199, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2822,7 +2822,7 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'trivial-done-suppression fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'trivial-done-suppression fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2893,7 +2893,7 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'assignment-trivial-done fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'assignment-trivial-done fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -3163,7 +3163,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	var skipIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'runtime-session-skip fixture', 'in_progress', 'none', $2, 'member', 81203, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'runtime-session-skip fixture', 'in_progress', 'none', $2, 'member', 81203, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&skipIssueID); err != nil {
 		t.Fatalf("setup: create skip issue: %v", err)
@@ -3211,7 +3211,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	var resumeIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'runtime-session-resume fixture', 'in_progress', 'none', $2, 'member', 81204, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'runtime-session-resume fixture', 'in_progress', 'none', $2, 'member', 81204, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&resumeIssueID); err != nil {
 		t.Fatalf("setup: create resume issue: %v", err)
@@ -3249,7 +3249,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	var commentIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'comment-triggered-session-skip fixture', 'in_progress', 'none', $2, 'member', 81205, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'comment-triggered-session-skip fixture', 'in_progress', 'none', $2, 'member', 81205, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&commentIssueID); err != nil {
 		t.Fatalf("setup: create comment-triggered issue: %v", err)
@@ -3304,7 +3304,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	var freshIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&freshIssueID); err != nil {
 		t.Fatalf("setup: create force-fresh issue: %v", err)
@@ -3818,7 +3818,7 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 			workspace_id, space_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
-		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'gc-check autopilot', $2, 'run_only', 'member', $3)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'gc-check autopilot', $2, 'run_only', 'member', $3)
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)

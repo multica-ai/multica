@@ -192,11 +192,11 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjectSpaces = `-- name: ListProjectSpaces :many
-SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at FROM workspace_space wt
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at FROM workspace_space wt
 JOIN project_space pt ON pt.space_id = wt.id AND pt.workspace_id = wt.workspace_id
 WHERE pt.workspace_id = $1
   AND pt.project_id = $2
-ORDER BY wt.is_default DESC, wt.name ASC, wt.created_at ASC
+ORDER BY wt.name ASC, wt.created_at ASC
 `
 
 type ListProjectSpacesParams struct {
@@ -221,7 +221,6 @@ func (q *Queries) ListProjectSpaces(ctx context.Context, arg ListProjectSpacesPa
 			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
-			&i.IsDefault,
 			&i.ArchivedAt,
 			&i.ArchivedBy,
 			&i.CreatedBy,
@@ -240,13 +239,13 @@ func (q *Queries) ListProjectSpaces(ctx context.Context, arg ListProjectSpacesPa
 
 const listProjectSpacesByProjects = `-- name: ListProjectSpacesByProjects :many
 SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
-       wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by,
+       wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by,
        wt.created_by, wt.created_at, wt.updated_at
 FROM project_space pt
 JOIN workspace_space wt ON wt.id = pt.space_id AND wt.workspace_id = pt.workspace_id
 WHERE pt.workspace_id = $1
   AND pt.project_id = ANY($2::uuid[])
-ORDER BY pt.project_id, wt.is_default DESC, wt.name ASC, wt.created_at ASC
+ORDER BY pt.project_id, wt.name ASC, wt.created_at ASC
 `
 
 type ListProjectSpacesByProjectsParams struct {
@@ -263,7 +262,6 @@ type ListProjectSpacesByProjectsRow struct {
 	Description  string             `json:"description"`
 	Icon         pgtype.Text        `json:"icon"`
 	IssueCounter int32              `json:"issue_counter"`
-	IsDefault    bool               `json:"is_default"`
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
@@ -289,7 +287,6 @@ func (q *Queries) ListProjectSpacesByProjects(ctx context.Context, arg ListProje
 			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
-			&i.IsDefault,
 			&i.ArchivedAt,
 			&i.ArchivedBy,
 			&i.CreatedBy,

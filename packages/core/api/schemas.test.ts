@@ -525,7 +525,6 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     description: "",
     icon: null,
     issue_counter: 3,
-    is_default: true,
     archived_at: null,
     created_by: "user-1",
     created_at: "2026-05-01T00:00:00Z",
@@ -536,7 +535,6 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     const parsed = SpaceSchema.parse({ ...baseSpace, future_field: "ignored" });
     expect(parsed.id).toBe("space-1");
     expect(parsed.key).toBe("FE");
-    expect(parsed.is_default).toBe(true);
   });
 
   it("defaults scalar fields when an older backend omits them", () => {
@@ -546,7 +544,6 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     expect(parsed.description).toBe("");
     expect(parsed.icon).toBeNull();
     expect(parsed.issue_counter).toBe(0);
-    expect(parsed.is_default).toBe(false);
     expect(parsed.archived_at).toBeNull();
   });
 

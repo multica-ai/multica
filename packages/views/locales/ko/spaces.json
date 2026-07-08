@@ -14,7 +14,6 @@
     "actions": "작업"
   },
   "state": {
-    "default": "기본",
     "active": "활성",
     "archived": "보관됨"
   },
@@ -75,7 +74,7 @@
     "members_empty": "아직 멤버가 없습니다",
     "archive_confirm_title": "Space를 보관할까요?",
     "archive_confirm_body": "모든 멤버를 제거하면 {{name}}이(가) 보관됩니다. 기존 이슈는 계속 볼 수 있습니다.",
-    "default_cannot_archive": "기본 Space는 보관할 수 없습니다",
+    "last_space_cannot_archive": "워크스페이스에는 최소 하나의 Space가 있어야 합니다",
     "archive_admin_only": "관리자만 Space를 보관할 수 있습니다",
     "goto": "이동"
   },

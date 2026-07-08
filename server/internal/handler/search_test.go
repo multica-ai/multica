@@ -69,14 +69,11 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 	if !strings.Contains(query, "i.number = ") {
 		t.Error("query should contain number match in WHERE clause")
 	}
-	// Identifier search must constrain by Space key with a default-space fallback
-	// so NULL-space rows (rolling-deploy window) still match, mirroring
-	// GetIssueBySpaceKeyAndNumber.
-	if !strings.Contains(query, "lower(COALESCE(wt.key, dt.key)) = lower(") {
-		t.Error("identifier search should constrain by COALESCE(wt.key, dt.key)")
-	}
-	if !strings.Contains(query, "LEFT JOIN workspace_space dt ON dt.workspace_id = i.workspace_id AND dt.is_default") {
-		t.Error("identifier search should LEFT JOIN the default space for the null-space fallback")
+	// Identifier search constrains by the issue's own Space key (wt, from the
+	// query's base join) — issue.space_id is NOT NULL as of migration 132, so
+	// no fallback join is needed.
+	if !strings.Contains(query, "lower(wt.key) = lower(") {
+		t.Error("identifier search should constrain by lower(wt.key)")
 	}
 	if args[4] != int(42) || args[5] != "MUL" {
 		t.Errorf("expected number/space key args at positions 4/5, got %#v", args)
@@ -84,20 +81,6 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 	// Tier 0 rank for identifier match.
 	if !strings.Contains(query, "THEN 0") {
 		t.Error("query should contain tier 0 rank for identifier match")
-	}
-}
-
-// TestBuildSearchQuery_BareNumberNoDefaultSpaceJoin confirms a bare-number
-// search (no Space key) does not pull in the default-space fallback join — the
-// null-space fallback is only needed when an identifier pins a specific key.
-func TestBuildSearchQuery_BareNumberNoDefaultSpaceJoin(t *testing.T) {
-	query, _ := buildSearchQuery("42", []string{"42"}, 42, "", true, false)
-
-	if strings.Contains(query, "workspace_space dt") {
-		t.Error("bare-number search should not add the default-space fallback join")
-	}
-	if !strings.Contains(query, "i.number = ") {
-		t.Error("bare-number search should still match on i.number")
 	}
 }
 

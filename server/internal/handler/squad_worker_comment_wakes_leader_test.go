@@ -246,8 +246,8 @@ func TestCreateComment_WorkerAgentCommentWakesPrivateSquadLeader_MUL4015(t *test
 	// keeps the assign-time originator resolution to M.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-		VALUES ($1, 'member', $2, 'private squad worker-comment MUL-4015', 'squad', $3)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'member', $2, 'private squad worker-comment MUL-4015', 'squad', $3, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create private squad issue: %v", err)

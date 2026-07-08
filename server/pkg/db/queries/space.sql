@@ -1,13 +1,23 @@
 -- name: ListWorkspaceSpaces :many
 SELECT * FROM workspace_space
 WHERE workspace_id = $1
-ORDER BY is_default DESC, archived_at NULLS FIRST, name ASC, created_at ASC;
+ORDER BY archived_at NULLS FIRST, name ASC, created_at ASC;
 
 -- name: ListActiveWorkspaceSpaces :many
 SELECT * FROM workspace_space
 WHERE workspace_id = $1
   AND archived_at IS NULL
-ORDER BY is_default DESC, name ASC, created_at ASC;
+ORDER BY name ASC, created_at ASC;
+
+-- name: ListActiveWorkspaceSpacesForUpdate :many
+-- Locks every active Space row for this workspace so a concurrent archive on
+-- another Space in the same workspace serializes behind this one. Used by
+-- ArchiveSpace to count active Spaces before archiving without racing another
+-- archive down to zero.
+SELECT * FROM workspace_space
+WHERE workspace_id = $1
+  AND archived_at IS NULL
+FOR UPDATE;
 
 -- name: ListWorkspaceSpacesByIDs :many
 SELECT * FROM workspace_space
@@ -19,8 +29,13 @@ SELECT * FROM workspace_space
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: GetDefaultWorkspaceSpace :one
+-- Fallback Space when none is specified: the workspace's earliest-created
+-- active Space. No is_default flag — deterministic from created_at, and
+-- always resolvable because ArchiveSpace refuses to archive a workspace's
+-- last active Space.
 SELECT * FROM workspace_space
-WHERE workspace_id = $1 AND is_default
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
 -- name: GetWorkspaceSpaceByKey :one
@@ -31,9 +46,9 @@ LIMIT 1;
 
 -- name: CreateWorkspaceSpace :one
 INSERT INTO workspace_space (
-    workspace_id, name, key, description, icon, is_default, created_by
+    workspace_id, name, key, description, icon, created_by
 ) VALUES (
-    $1, $2, $3, COALESCE(sqlc.narg('description')::text, ''), sqlc.narg('icon')::text, $4, sqlc.narg('created_by')
+    $1, $2, $3, COALESCE(sqlc.narg('description')::text, ''), sqlc.narg('icon')::text, sqlc.narg('created_by')
 ) RETURNING *;
 
 -- name: UpdateWorkspaceSpace :one
@@ -47,13 +62,15 @@ WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: ArchiveWorkspaceSpace :one
+-- Callers must first lock the workspace's active Spaces (see
+-- ListActiveWorkspaceSpacesForUpdate) and confirm more than one remains —
+-- this query no longer guards that itself.
 UPDATE workspace_space SET
     archived_at = now(),
     archived_by = $3,
     updated_at = now()
 WHERE id = $1
   AND workspace_id = $2
-  AND is_default = false
   AND archived_at IS NULL
 RETURNING *;
 
@@ -105,7 +122,7 @@ FROM workspace_space wt
 LEFT JOIN workspace_space_member m
     ON m.space_id = wt.id AND m.user_id = $2
 WHERE wt.workspace_id = $1
-ORDER BY wt.is_default DESC, wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC;
+ORDER BY wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC;
 
 -- name: RemoveWorkspaceSpaceMember :execrows
 DELETE FROM workspace_space_member

@@ -34,7 +34,7 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	var issueID string
 	err = testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
-		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Sweeper test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2
+		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Sweeper test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
@@ -501,7 +501,7 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	var issueID string
 	err = testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
-		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Stuck in_progress issue', 'in_progress', 'none', 'member', m.user_id, 'agent', $2
+		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Stuck in_progress issue', 'in_progress', 'none', 'member', m.user_id, 'agent', $2
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
@@ -591,7 +591,7 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	var issueID string
 	err = testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
-		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'Already in_review issue', 'in_review', 'none', 'member', m.user_id, 'agent', $2
+		SELECT $1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Already in_review issue', 'in_review', 'none', 'member', m.user_id, 'agent', $2
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
@@ -671,7 +671,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 		if err := testPool.QueryRow(ctx, `
 			WITH bumped AS (
 				UPDATE workspace_space SET issue_counter = issue_counter + 1
-				WHERE workspace_id = $1 AND is_default RETURNING id AS space_id, issue_counter
+				WHERE workspace_id = $1 RETURNING id AS space_id, issue_counter
 			)
 			INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 			SELECT $1, (SELECT space_id FROM bumped), $3, 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
@@ -783,7 +783,7 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 		if err := testPool.QueryRow(ctx, `
 			WITH bumped AS (
 				UPDATE workspace_space SET issue_counter = issue_counter + 1
-				WHERE workspace_id = $1 AND is_default RETURNING id AS space_id, issue_counter
+				WHERE workspace_id = $1 RETURNING id AS space_id, issue_counter
 			)
 			INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 			SELECT $1, (SELECT space_id FROM bumped), 'Queued TTL batch test', 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)

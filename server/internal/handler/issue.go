@@ -493,19 +493,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, querySpaceKey
 	numParam := ""
 	spaceKeyParam := ""
 	// identifierKeyExpr is the Space key an identifier search ("MUL-123") matches
-	// against. During the rolling-deploy window some issues still have a NULL
-	// space_id; those rows carry the workspace's default-space key, so we fall
-	// back to it exactly like GetIssueBySpaceKeyAndNumber does. defaultSpaceJoin
-	// is only added when an identifier search needs the fallback.
-	// TODO(migration-b): remove null-space fallback after migration 132 has run in production
+	// against. issue.space_id is NOT NULL as of migration 132, so wt.key (the
+	// issue's own Space) is always present via the wt join.
 	identifierKeyExpr := "wt.key"
-	defaultSpaceJoin := ""
 	if hasNum {
 		numParam = nextArg(queryNum)
 		if querySpaceKey != "" {
 			spaceKeyParam = nextArg(querySpaceKey)
-			identifierKeyExpr = "COALESCE(wt.key, dt.key)"
-			defaultSpaceJoin = "\n\t\tLEFT JOIN workspace_space dt ON dt.workspace_id = i.workspace_id AND dt.is_default"
 			whereParts = append(whereParts, fmt.Sprintf("(i.number = %s AND lower(%s) = lower(%s))", numParam, identifierKeyExpr, spaceKeyParam))
 		} else {
 			whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
@@ -654,13 +648,12 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, querySpaceKey
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
-	LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id%s
+	LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 	WHERE i.workspace_id = %s AND %s
 	ORDER BY %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		commentSubquery,
-		defaultSpaceJoin,
 		wsParam,
 		whereClause,
 		rankExpr,

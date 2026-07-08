@@ -69,7 +69,6 @@ CREATE TABLE workspace_space (
     description TEXT NOT NULL DEFAULT '',
     icon TEXT,
     issue_counter INT NOT NULL DEFAULT 0 CHECK (issue_counter >= 0),
-    is_default BOOLEAN NOT NULL DEFAULT false,
     archived_at TIMESTAMPTZ,
     archived_by UUID REFERENCES "user"(id) ON DELETE SET NULL,
     created_by UUID REFERENCES "user"(id) ON DELETE SET NULL,
@@ -78,11 +77,15 @@ CREATE TABLE workspace_space (
     UNIQUE(workspace_id, id)
 );
 
+-- No is_default flag: every workspace is guaranteed >=1 active Space by the
+-- ArchiveSpace handler refusing to archive the last one (see space.sql /
+-- ArchiveWorkspaceSpace). The Space callers fall back to when none is
+-- specified (GetDefaultWorkspaceSpace) is simply the workspace's
+-- earliest-created active Space — deterministic from created_at, nothing to
+-- store. The row backfilled below is that earliest Space by construction,
+-- since no Space could exist for a workspace before this migration ran.
 CREATE UNIQUE INDEX uq_workspace_space_workspace_key_lower
     ON workspace_space(workspace_id, lower(key));
-CREATE UNIQUE INDEX uq_workspace_space_default
-    ON workspace_space(workspace_id)
-    WHERE is_default;
 CREATE INDEX idx_workspace_space_active
     ON workspace_space(workspace_id)
     WHERE archived_at IS NULL;
@@ -139,13 +142,15 @@ ALTER TABLE autopilot
 CREATE INDEX idx_autopilot_workspace_space
     ON autopilot(workspace_id, space_id);
 
-INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
+-- This is the only Space any workspace has at this point in the migration, so
+-- every join below against workspace_space by workspace_id alone already
+-- resolves to exactly this row — no is_default marker needed to disambiguate.
+INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
 SELECT
     w.id,
     w.name,
     pg_temp.normalize_space_key(w.issue_prefix),
     w.issue_counter,
-    true,
     (
         SELECT m.user_id
         FROM member m
@@ -159,26 +164,23 @@ INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role)
 SELECT wt.workspace_id, wt.id, m.user_id,
        CASE WHEN m.role IN ('owner', 'admin') THEN 'lead' ELSE 'member' END
 FROM workspace_space wt
-JOIN member m ON m.workspace_id = wt.workspace_id
-WHERE wt.is_default;
+JOIN member m ON m.workspace_id = wt.workspace_id;
 
 UPDATE issue i
 SET space_id = wt.id
 FROM workspace_space wt
 WHERE wt.workspace_id = i.workspace_id
-  AND wt.is_default
   AND i.space_id IS NULL;
 
 UPDATE autopilot a
 SET space_id = wt.id
 FROM workspace_space wt
 WHERE wt.workspace_id = a.workspace_id
-  AND wt.is_default
   AND a.space_id IS NULL;
 
 INSERT INTO project_space (workspace_id, project_id, space_id)
 SELECT p.workspace_id, p.id, wt.id
 FROM project p
-JOIN workspace_space wt ON wt.workspace_id = p.workspace_id AND wt.is_default;
+JOIN workspace_space wt ON wt.workspace_id = p.workspace_id;
 
 DROP FUNCTION pg_temp.normalize_space_key(text);

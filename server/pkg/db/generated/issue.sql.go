@@ -639,12 +639,10 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 
 const getIssueBySpaceKeyAndNumber = `-- name: GetIssueBySpaceKeyAndNumber :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.space_id FROM issue i
-LEFT JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id
-LEFT JOIN workspace_space default_space ON default_space.workspace_id = i.workspace_id AND default_space.is_default
+JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND lower(COALESCE(issue_space.key, default_space.key)) = lower($2)
+  AND lower(issue_space.key) = lower($2)
   AND i.number = $3
-  AND (i.space_id IS NOT NULL OR default_space.id IS NOT NULL)
 `
 
 type GetIssueBySpaceKeyAndNumberParams struct {
@@ -653,7 +651,8 @@ type GetIssueBySpaceKeyAndNumberParams struct {
 	Number      int32       `json:"number"`
 }
 
-// TODO(migration-b): remove null-space fallback after migration 132 has run in production
+// issue.space_id is NOT NULL as of migration 132, which ships in the same
+// release as this query, so no null-space fallback is needed.
 func (q *Queries) GetIssueBySpaceKeyAndNumber(ctx context.Context, arg GetIssueBySpaceKeyAndNumberParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, getIssueBySpaceKeyAndNumber, arg.WorkspaceID, arg.Lower, arg.Number)
 	var i Issue
