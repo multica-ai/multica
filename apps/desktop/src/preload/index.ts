@@ -293,11 +293,58 @@ const updaterAPI = {
   > => ipcRenderer.invoke("updater:check"),
 };
 
+// === cli-config bridge (Layer 2 of #3875) ===
+// Renderer reads/writes the OpenClaw override block in
+// ~/.multica/profiles/<profile>/config.json via main-process fs IPC; see
+// apps/desktop/src/main/cli-config.ts for the underlying handlers and the
+// reasoning for not exposing a server-side endpoint instead.
+
+export interface OpenClawOverridePayload {
+  binaryPath: string;
+  stateDir: string;
+  envBinaryPath: string;
+  envStateDir: string;
+  configPath: string;
+}
+
+export interface SaveOpenClawResult {
+  ok: boolean;
+  reason?: "io_error" | "parse_error" | "invalid_input";
+  error?: string;
+}
+
+const cliConfigAPI = {
+  /**
+   * Read the per-machine OpenClaw override + live env values for the given
+   * Multica profile (`""` for the default).
+   *
+   * Throws on disk I/O errors so the renderer surfaces a real failure path
+   * instead of silently rendering the empty-state form on top of a broken
+   * config.json (which would let a subsequent save clobber it).
+   */
+  getOpenclaw: (profile: string): Promise<OpenClawOverridePayload> =>
+    ipcRenderer.invoke("cli-config:get-openclaw", profile),
+
+  /**
+   * Persist `backends.openclaw.{binary_path, state_dir}` to disk. Empty
+   * strings remove that specific override; emptying both prunes the whole
+   * `backends.openclaw` branch so a cleared config round-trips byte-
+   * identical to a never-configured one.
+   */
+  saveOpenclaw: (args: {
+    profile: string;
+    binaryPath: string;
+    stateDir: string;
+  }): Promise<SaveOpenClawResult> =>
+    ipcRenderer.invoke("cli-config:save-openclaw", args),
+};
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
+  contextBridge.exposeInMainWorld("cliConfigAPI", cliConfigAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
@@ -307,4 +354,6 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.cliConfigAPI = cliConfigAPI;
 }

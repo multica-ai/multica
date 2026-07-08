@@ -6,6 +6,7 @@ import {
   Globe,
   Loader2,
   MoreHorizontal,
+  Settings,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -494,24 +495,34 @@ export function RuntimeRowMenu({
   profile,
   wsId,
   canDelete,
+  onConfigureOpenclaw,
 }: {
   runtime: AgentRuntime;
   profile: RuntimeProfile | null;
   wsId: string;
   canDelete: boolean;
+  /**
+   * Opens the "Choose OpenClaw instance" dialog (Layer 2 of #3875). Only
+   * provided for the built-in `openclaw` runtime row by the parent page —
+   * for every other provider the prop is omitted and the menu item does
+   * not render. Kept as an opt-in callback rather than a hard-coded
+   * provider check so the menu can grow more per-provider entries without
+   * RuntimeRowMenu having to know which providers support which actions.
+   */
+  onConfigureOpenclaw?: () => void;
 }) {
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. We
-  // used to also hide it for self-healing runtimes (live local daemon
-  // re-registers within seconds), but MUL-3352 surfaced that owners read
-  // a missing kebab as "I lost my permission" rather than "the daemon
-  // would undo this". The dialog now carries the self-heal warning and
-  // the user gets to decide.
 
-  if (!canDelete) {
+  const showConfigure =
+    !!onConfigureOpenclaw && runtime.provider === "openclaw";
+
+  // Drop the kebab when there's nothing for it to do. Originally this was
+  // `if (!canDelete)`; we widen it to "no actions at all" so the kebab
+  // still appears when only Configure is available (built-in OpenClaw row
+  // for an admin who can't delete a built-in).
+  if (!canDelete && !showConfigure) {
     return <span aria-hidden />;
   }
 
@@ -529,15 +540,23 @@ export function RuntimeRowMenu({
             </button>
           }
         />
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setDeleteOpen(true)}
-            title={t(($) => $.list.delete_permission_hint)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.list.delete_action)}
-          </DropdownMenuItem>
+        <DropdownMenuContent align="end" className="w-48">
+          {showConfigure && (
+            <DropdownMenuItem onClick={onConfigureOpenclaw}>
+              <Settings className="h-3.5 w-3.5" />
+              {t(($) => $.openclawConfig.menu_item)}
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+              title={t(($) => $.list.delete_permission_hint)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t(($) => $.list.delete_action)}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       {isCustomRuntime && profile ? (
@@ -572,6 +591,7 @@ export function RuntimeList({
   runtimes,
   updatableIds,
   now,
+  onConfigureOpenclaw,
 }: {
   runtimes: AgentRuntime[];
   // Kept on the API surface for callers, but unused here: the CLI column
@@ -581,6 +601,14 @@ export function RuntimeList({
   // on the page-level wrapper that still computes the set.
   updatableIds?: Set<string>;
   now: number;
+  /**
+   * Threaded through to each row's RuntimeRowMenu. When set, the menu on
+   * the OpenClaw row gains a "Choose OpenClaw instance..." entry that
+   * invokes this callback. When omitted (e.g. on the web build that has
+   * no Electron IPC bridge), the entry is hidden entirely. See
+   * RuntimeRowMenu's `onConfigureOpenclaw` prop for the row-level guard.
+   */
+  onConfigureOpenclaw?: () => void;
 }) {
   void updatableIds;
 
@@ -746,6 +774,7 @@ export function RuntimeList({
                     profile={row.profile}
                     wsId={wsId}
                     canDelete={row.canDelete}
+                    onConfigureOpenclaw={onConfigureOpenclaw}
                   />
                 </span>
               </ListGridCell>

@@ -394,5 +394,43 @@
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
     "no_data": "还没有使用数据"
+  },
+  "openclawConfig": {
+    "menu_item": "选择 OpenClaw 实例…",
+    "dialog_title": "选择 OpenClaw 实例",
+    "dialog_description": "OpenClaw 支持多份独立的实例 —— 每份实例有自己的 agent、API key、对话历史。告诉这台机器的 daemon 用哪一份实例。该设置只对本机生效，不会上传。",
+    "field_label": "实例所在目录",
+    "field_optional": "可选",
+    "field_placeholder": "例如:~/.openclaw-dev",
+    "browse_button": "浏览…",
+    "field_hint_loading": "正在加载当前配置…",
+    "field_hint_validating": "正在验证…",
+    "field_hint_empty": "留空 = 使用 OpenClaw 默认实例（~/.openclaw）。",
+    "field_hint_ok": "目录存在，可读可写。",
+    "env_wins_title": "OPENCLAW_STATE_DIR 已在 daemon 环境中设置。",
+    "env_wins_desc": "启动时会覆盖 config.json，实际生效值: {{path}}",
+    "restart_warning": "保存后 daemon 会自动重启,此运行时上正在执行的任务会被取消。",
+    "recover_title": "daemon 上次启动失败",
+    "recover_desc": "下方字段显示的是当前 config.json 里的值 —— daemon 用它起不来。请检查并修改后保存。",
+    "cancel": "取消",
+    "save_button": "保存并重启 daemon",
+    "saving": "保存中…",
+    "load_error": "无法加载 OpenClaw 配置",
+    "save_error": "无法保存 OpenClaw 配置",
+    "save_success": "OpenClaw 实例已更新。",
+    "default_state_label": "默认 (~/.openclaw)",
+    "desktop_only": "此操作仅在 Multica 桌面端可用。",
+    "daemon_failed_title": "OpenClaw 启动失败",
+    "daemon_failed_desc": "daemon 在使用 {{path}} 时无法启动。打开 OpenClaw 配置选择其他实例。",
+    "reconfigure_button": "重新配置",
+    "view_log_button": "查看 daemon 日志",
+    "field_error": {
+      "not_absolute": "路径必须是绝对路径。",
+      "not_found": "目录不存在。",
+      "not_a_directory": "不是目录。",
+      "not_readable": "目录不可读。",
+      "not_writable": "目录不可写。",
+      "other": "无法校验路径。"
+    }
   }
 }
