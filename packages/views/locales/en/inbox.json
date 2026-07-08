@@ -11,6 +11,8 @@
   },
   "list": {
     "empty": "No notifications",
+    "load_more": "Load more",
+    "loading_more": "Loading...",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "time": {

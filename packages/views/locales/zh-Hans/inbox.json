@@ -11,6 +11,8 @@
   },
   "list": {
     "empty": "暂无通知",
+    "load_more": "加载更多",
+    "loading_more": "加载中...",
     "mark_done_tooltip": "标为已完成",
     "archive_tooltip": "归档",
     "time": {

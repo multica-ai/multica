@@ -33,6 +33,18 @@ export interface InboxWorkspaceUnread {
   count: number;
 }
 
+export interface InboxCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface InboxPage {
+  items: InboxItem[];
+  limit: number;
+  has_more: boolean;
+  next_cursor: InboxCursor | null;
+}
+
 export interface InboxItem {
   id: string;
   workspace_id: string;

@@ -11,6 +11,8 @@
   },
   "list": {
     "empty": "알림이 없습니다",
+    "load_more": "더 보기",
+    "loading_more": "불러오는 중...",
     "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
     "time": {

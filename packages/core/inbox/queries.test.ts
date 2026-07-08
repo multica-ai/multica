@@ -148,6 +148,17 @@ describe("unreadWorkspaceIds", () => {
 });
 
 describe("inboxKeys.unreadSummary", () => {
+  it("keeps workspace-scoped inbox caches under the same prefix", () => {
+    expect(inboxKeys.all("ws-1")).toEqual(["inbox", "ws-1"]);
+    expect(inboxKeys.list("ws-1")).toEqual(["inbox", "ws-1", "list"]);
+    expect(inboxKeys.pages("ws-1")).toEqual(["inbox", "ws-1", "pages"]);
+    expect(inboxKeys.unreadCount("ws-1")).toEqual([
+      "inbox",
+      "ws-1",
+      "unread-count",
+    ]);
+  });
+
   it("is a stable account-level key independent of any workspace", () => {
     expect(inboxKeys.unreadSummary()).toEqual(["inbox", "unread-summary"]);
   });

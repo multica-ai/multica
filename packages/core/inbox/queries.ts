@@ -1,10 +1,12 @@
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
+  pages: (wsId: string) => [...inboxKeys.all(wsId), "pages"] as const,
+  unreadCount: (wsId: string) => [...inboxKeys.all(wsId), "unread-count"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
   // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
@@ -14,6 +16,26 @@ export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),
     queryFn: () => api.listInbox(),
+  });
+}
+
+export function inboxPageOptions(wsId: string, limit = 50) {
+  return infiniteQueryOptions({
+    queryKey: inboxKeys.pages(wsId),
+    queryFn: ({ pageParam }) =>
+      api.listInboxPage({ before: pageParam, limit }),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
+    enabled: !!wsId,
+  });
+}
+
+export function inboxUnreadCountOptions(wsId: string) {
+  return queryOptions({
+    queryKey: inboxKeys.unreadCount(wsId),
+    queryFn: () => api.getUnreadInboxCount(),
+    enabled: !!wsId,
   });
 }
 
@@ -59,11 +81,9 @@ export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string>
  */
 export function useInboxUnreadCount(wsId: string | null | undefined): number {
   const { data } = useQuery({
-    queryKey: inboxKeys.list(wsId ?? ""),
-    queryFn: () => api.listInbox(),
+    ...inboxUnreadCountOptions(wsId ?? ""),
     enabled: !!wsId,
-    select: (items: InboxItem[]) =>
-      deduplicateInboxItems(items).filter((i) => !i.read).length,
+    select: (value) => value.count,
   });
   return data ?? 0;
 }

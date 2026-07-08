@@ -11,6 +11,8 @@
   },
   "list": {
     "empty": "通知はありません",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中...",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
     "time": {

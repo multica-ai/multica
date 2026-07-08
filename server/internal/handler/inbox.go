@@ -5,12 +5,19 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+const (
+	defaultInboxPageLimit = 50
+	maxInboxPageLimit     = 100
 )
 
 type InboxItemResponse struct {
@@ -30,6 +37,18 @@ type InboxItemResponse struct {
 	ActorType     *string         `json:"actor_type"`
 	ActorID       *string         `json:"actor_id"`
 	Details       json.RawMessage `json:"details"`
+}
+
+type InboxCursorResponse struct {
+	CreatedAt string `json:"created_at"`
+	ID        string `json:"id"`
+}
+
+type InboxPageResponse struct {
+	Items      []InboxItemResponse  `json:"items"`
+	Limit      int32                `json:"limit"`
+	HasMore    bool                 `json:"has_more"`
+	NextCursor *InboxCursorResponse `json:"next_cursor"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -73,6 +92,41 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 	}
 }
 
+func inboxPageRowToResponse(r db.ListInboxItemsPageRow) InboxItemResponse {
+	return InboxItemResponse{
+		ID:            uuidToString(r.ID),
+		WorkspaceID:   uuidToString(r.WorkspaceID),
+		RecipientType: r.RecipientType,
+		RecipientID:   uuidToString(r.RecipientID),
+		Type:          r.Type,
+		Severity:      r.Severity,
+		IssueID:       uuidToPtr(r.IssueID),
+		Title:         r.Title,
+		Body:          textToPtr(r.Body),
+		Read:          r.Read,
+		Archived:      r.Archived,
+		CreatedAt:     timestampToString(r.CreatedAt),
+		IssueStatus:   textToPtr(r.IssueStatus),
+		ActorType:     textToPtr(r.ActorType),
+		ActorID:       uuidToPtr(r.ActorID),
+		Details:       json.RawMessage(r.Details),
+	}
+}
+
+func parseInboxPageLimit(raw string) int32 {
+	if raw == "" {
+		return defaultInboxPageLimit
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return defaultInboxPageLimit
+	}
+	if limit > maxInboxPageLimit {
+		return maxInboxPageLimit
+	}
+	return int32(limit)
+}
+
 func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID pgtype.UUID) InboxItemResponse {
 	if !issueID.Valid {
 		return resp
@@ -96,22 +150,68 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+	limit := parseInboxPageLimit(r.URL.Query().Get("limit"))
+	beforeCreatedAtRaw := r.URL.Query().Get("before_created_at")
+	beforeIDRaw := r.URL.Query().Get("before_id")
+	if (beforeCreatedAtRaw == "") != (beforeIDRaw == "") {
+		writeError(w, http.StatusBadRequest, "before_created_at and before_id must be provided together")
+		return
+	}
+
+	var beforeCreatedAt pgtype.Timestamptz
+	var beforeID pgtype.UUID
+	if beforeCreatedAtRaw != "" {
+		t, err := time.Parse(time.RFC3339Nano, beforeCreatedAtRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid before_created_at")
+			return
+		}
+		beforeCreatedAt = pgtype.Timestamptz{Time: t, Valid: true}
+		var ok bool
+		beforeID, ok = parseUUIDOrBadRequest(w, beforeIDRaw, "before_id")
+		if !ok {
+			return
+		}
+	}
+
+	rows, err := h.Queries.ListInboxItemsPage(r.Context(), db.ListInboxItemsPageParams{
+		WorkspaceID:     wsUUID,
+		RecipientType:   "member",
+		RecipientID:     parseUUID(userID),
+		BeforeCreatedAt: beforeCreatedAt,
+		BeforeID:        beforeID,
+		RowLimit:        limit + 1,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list inbox")
 		return
 	}
 
-	resp := make([]InboxItemResponse, len(items))
-	for i, item := range items {
-		resp[i] = inboxRowToResponse(item)
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
+		rows = rows[:limit]
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	items := make([]InboxItemResponse, len(rows))
+	for i, item := range rows {
+		items[i] = inboxPageRowToResponse(item)
+	}
+
+	var nextCursor *InboxCursorResponse
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		nextCursor = &InboxCursorResponse{
+			CreatedAt: timestampToString(last.CreatedAt),
+			ID:        uuidToString(last.ID),
+		}
+	}
+
+	writeJSON(w, http.StatusOK, InboxPageResponse{
+		Items:      items,
+		Limit:      limit,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	})
 }
 
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
