@@ -80,6 +80,8 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectDescription      string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	ProjectWorkdirPolicy    string                  // advisory project workdir policy
+	ProjectCanonicalWorkdir string                  // preferred local path when configured
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string

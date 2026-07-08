@@ -167,10 +167,12 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	workspacesRoot := t.TempDir()
 
 	taskCtx := TaskContextForEnv{
-		IssueID:            "11111111-2222-3333-4444-555555555555",
-		ProjectID:          "22222222-3333-4444-5555-666666666666",
-		ProjectTitle:       "Agent UX 2026",
-		ProjectDescription: "Always write copy in British English. Ship behind a feature flag.",
+		IssueID:                 "11111111-2222-3333-4444-555555555555",
+		ProjectID:               "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:            "Agent UX 2026",
+		ProjectDescription:      "Always write copy in British English. Ship behind a feature flag.",
+		ProjectWorkdirPolicy:    "advisory",
+		ProjectCanonicalWorkdir: filepath.Join(workspacesRoot, "agent-ux"),
 		ProjectResources: []ProjectResourceForEnv{
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
@@ -199,10 +201,12 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		t.Fatalf("failed to read resources.json: %v", err)
 	}
 	var got struct {
-		ProjectID          string `json:"project_id"`
-		ProjectTitle       string `json:"project_title"`
-		ProjectDescription string `json:"project_description"`
-		Resources          []struct {
+		ProjectID               string `json:"project_id"`
+		ProjectTitle            string `json:"project_title"`
+		ProjectDescription      string `json:"project_description"`
+		ProjectWorkdirPolicy    string `json:"project_workdir_policy"`
+		ProjectCanonicalWorkdir string `json:"project_canonical_workdir"`
+		Resources               []struct {
 			ID           string          `json:"id"`
 			ResourceType string          `json:"resource_type"`
 			ResourceRef  json.RawMessage `json:"resource_ref"`
@@ -219,6 +223,12 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 	if got.ProjectDescription != taskCtx.ProjectDescription {
 		t.Errorf("resources.json project_description = %q, want %q", got.ProjectDescription, taskCtx.ProjectDescription)
+	}
+	if got.ProjectWorkdirPolicy != taskCtx.ProjectWorkdirPolicy {
+		t.Errorf("resources.json project_workdir_policy = %q, want %q", got.ProjectWorkdirPolicy, taskCtx.ProjectWorkdirPolicy)
+	}
+	if got.ProjectCanonicalWorkdir != taskCtx.ProjectCanonicalWorkdir {
+		t.Errorf("resources.json project_canonical_workdir = %q, want %q", got.ProjectCanonicalWorkdir, taskCtx.ProjectCanonicalWorkdir)
 	}
 	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
 		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
@@ -237,6 +247,9 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		"## Project Context",
 		"Agent UX 2026",
 		"Always write copy in British English. Ship behind a feature flag.",
+		"Preferred project workdir",
+		taskCtx.ProjectCanonicalWorkdir,
+		"advisory product hint",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
 		"checkout ref: `release/v2`",

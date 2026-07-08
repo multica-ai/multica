@@ -2,6 +2,8 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export type ProjectWorkdirPolicy = "none" | "advisory";
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -12,6 +14,8 @@ export interface Project {
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  workdir_policy: ProjectWorkdirPolicy;
+  canonical_workdir: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;
@@ -27,6 +31,8 @@ export interface CreateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent";
   lead_id?: string;
+  workdir_policy?: ProjectWorkdirPolicy;
+  canonical_workdir?: string;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -40,6 +46,8 @@ export interface UpdateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
+  workdir_policy?: ProjectWorkdirPolicy;
+  canonical_workdir?: string | null;
 }
 
 export interface ListProjectsResponse {

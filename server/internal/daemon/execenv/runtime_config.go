@@ -601,6 +601,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString(desc)
 			b.WriteString("\n\n")
 		}
+		if ctx.ProjectWorkdirPolicy == "advisory" && ctx.ProjectCanonicalWorkdir != "" {
+			fmt.Fprintf(&b, "Preferred project workdir: `%s`.\n\n", ctx.ProjectCanonicalWorkdir)
+			b.WriteString("This is an advisory product hint, not a security sandbox. Keep repository checkouts, generated files, and task artifacts under that path when practical, but do not assume filesystem access is technically restricted to it.\n\n")
+		}
 		if len(ctx.ProjectResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
