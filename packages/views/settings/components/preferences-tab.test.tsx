@@ -65,26 +65,6 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
-vi.mock("@multica/core/chat", async () => {
-  const actual =
-    await vi.importActual<typeof import("@multica/core/chat")>(
-      "@multica/core/chat",
-    );
-  type ChatState = {
-    floatingChatEnabled: boolean;
-    setFloatingChatEnabled: (enabled: boolean) => void;
-  };
-  const state = (): ChatState => ({
-    floatingChatEnabled: true,
-    setFloatingChatEnabled: () => {},
-  });
-  const useChatStore = Object.assign(
-    (sel?: (s: ChatState) => unknown) => (sel ? sel(state()) : state()),
-    { getState: state },
-  );
-  return { ...actual, useChatStore };
-});
-
 import { PreferencesTab } from "./preferences-tab";
 
 const TEST_RESOURCES = {
