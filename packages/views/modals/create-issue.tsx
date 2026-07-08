@@ -51,7 +51,8 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
-import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -279,13 +280,15 @@ export function ManualCreatePanel({
   );
   // Every issue belongs to exactly one space, so the picker always resolves to
   // a value. Associations are creation-time defaults, never constraints:
-  // explicit pick → parent's space → single-space project → workspace default.
+  // explicit pick → parent's space → single-space project → last used → personal default.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const defaultSpaceId = useMemo(() => creationDefaultSpaceId(spaces), [spaces]);
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
   const projectSpaceId =
     selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
-  const effectiveSpaceId = spaceId ?? parentSpaceId ?? projectSpaceId ?? defaultSpaceId;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId });
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -408,6 +411,7 @@ export function ManualCreatePanel({
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
+      setLastSpaceId(finalSpaceId ?? null);
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't

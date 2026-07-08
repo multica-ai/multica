@@ -28,23 +28,19 @@
   "dialog": {
     "create_title": "Space を作成",
     "edit_title": "Space を編集",
-    "description": "Space はイシュー識別子と安定した作業領域を所有します。v1 のメンバー情報は表示用です。",
-    "tab_main": "基本情報",
-    "tab_members": "メンバー ({{count}})",
     "member_search": "メンバーを検索…",
     "member_search_empty": "一致するメンバーはいません",
     "creator_row": "作成者 · リード",
     "name_required": "名前が必要です",
     "members_entry": "メンバー",
-    "member_count": "{{count}} 人選択",
-    "members_pick_title": "メンバーを選択",
-    "back": "戻る"
+    "member_count": "{{count}} 人選択"
   },
   "form": {
     "name": "名前",
     "name_placeholder": "Engineering",
     "key": "識別子",
     "key_hint": "この Space の issue 番号に使われます（例: ENG-123）。1〜7 文字の大文字英数字、先頭は英字。",
+    "key_reserved": "NEW は予約済みの識別子です。別の識別子を選んでください。",
     "key_locked": "issue が作成された後は識別子を変更できません。",
     "icon": "アイコン",
     "description": "説明",

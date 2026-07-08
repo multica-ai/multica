@@ -12,7 +12,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
-import { creationDefaultSpaceId } from "@multica/core/spaces/default-space";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
@@ -205,8 +206,6 @@ export function AgentCreatePanel({
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
     return seed ?? null;
   });
-  // No "last picked" memory for spaces: the default is always the first space
-  // in the user's personal order (predictable), unless context seeds one.
   const [spaceId, setSpaceId] = useState<string | null>(
     (data?.space_id as string | undefined) ?? null,
   );
@@ -223,10 +222,11 @@ export function AgentCreatePanel({
 
   // Every issue belongs to exactly one space, so the header picker always
   // resolves to a value. Associations are creation-time defaults, never
-  // constraints: explicit pick (incl. remembered) → parent's space →
-  // single-space project → workspace default.
+  // constraints: explicit pick → parent's space → single-space project →
+  // last used → personal default.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const defaultSpaceId = useMemo(() => creationDefaultSpaceId(spaces), [spaces]);
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -238,7 +238,10 @@ export function AgentCreatePanel({
   );
   const projectSpaceId =
     selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
-  const effectiveSpaceId = spaceId ?? parentSpaceId ?? projectSpaceId ?? defaultSpaceId ?? null;
+  const effectiveSpaceId =
+    spaceId ??
+    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId }) ??
+    null;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -362,6 +365,7 @@ export function AgentCreatePanel({
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
+      setLastSpaceId(finalSpaceId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {

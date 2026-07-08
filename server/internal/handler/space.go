@@ -116,7 +116,7 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 		key = defaultSpaceKeyFromSlug(req.Name)
 	}
 	if !validSpaceKey(key) {
-		writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$")
+		writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$ and must not be a reserved word (e.g. NEW)")
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
@@ -442,7 +442,7 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 	if req.Key != nil {
 		key := normalizeSpaceKey(*req.Key)
 		if !validSpaceKey(key) {
-			writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$")
+			writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$ and must not be a reserved word (e.g. NEW)")
 			return
 		}
 		// Key changes are admin-only: the key is the workspace-wide issue

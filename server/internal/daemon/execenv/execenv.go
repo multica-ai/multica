@@ -114,6 +114,9 @@ type TaskContextForEnv struct {
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
 	Repos                         []RepoContextForEnv     // workspace repos available for checkout
+	SpaceID                       string                  // issue/autopilot/quick-create Space — always set for issue-bound tasks
+	SpaceKey                      string                  // Space issue namespace key, e.g. MUL
+	SpaceName                     string                  // human-readable Space name
 	ProjectID                     string                  // issue's project, when present
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section

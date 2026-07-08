@@ -18,6 +18,7 @@ import {
   SpaceAutopilotsRoute,
   SpaceDetailRoute,
 } from "./pages/space-surface-pages";
+import { CreateSpacePage } from "@multica/views/spaces";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
@@ -151,6 +152,11 @@ export const appRoutes: RouteObject[] = [
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },
+          },
+          {
+            path: "space/new",
+            element: <CreateSpacePage />,
+            handle: { title: "New space" },
           },
           {
             path: "space/:spaceKey/issues",

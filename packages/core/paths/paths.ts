@@ -32,6 +32,9 @@ function workspaceScoped(slug: string) {
     spaceProjects: (key: string) => `${ws}/space/${encode(key)}/projects`,
     spaceAutopilots: (key: string) => `${ws}/space/${encode(key)}/autopilots`,
     spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
+    // Static sibling of spaceDetail — "new" is a reserved space key
+    // (RESERVED_SPACE_KEYS) precisely so it can never collide with this route.
+    spaceNew: () => `${ws}/space/new`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

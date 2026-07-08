@@ -200,8 +200,8 @@ func writeAvailableCommands(b *strings.Builder) {
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — full issue.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. Resolved threads come back folded by default on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); pass `--full` to expand. Page older replies / threads with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields; pass `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--space <space-id-or-key>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. Omitting `--space` falls back to the workspace's default Space. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--space <space-id-or-key>] [--project <project-id>] [--due-date <RFC3339>]` — update fields; `--space` moves the issue to another Space (renumbers it; the old identifier keeps resolving); pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`. `multica issue comment add --help` for full flags.\n")
@@ -221,7 +221,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** For anything beyond `issue create`, run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--space <space-id-or-key>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. Omitting `--space` falls back to the workspace's default Space. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
 }
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
@@ -253,6 +253,21 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// writeSpaceContext emits the Space Context section. Unlike Project (optional,
+// many-to-many), every issue-bound task has exactly one Space — it owns the
+// issue's identifier namespace (SPACE_KEY-NUMBER), so this always fires when
+// the context carries one.
+func writeSpaceContext(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.SpaceID == "" {
+		return
+	}
+	b.WriteString("## Space Context\n\n")
+	if ctx.SpaceName != "" && ctx.SpaceKey != "" {
+		fmt.Fprintf(b, "This issue belongs to the **%s** Space (key `%s`) — it owns this issue's identifier namespace (`%s-N`).\n\n", ctx.SpaceName, ctx.SpaceKey, ctx.SpaceKey)
+	}
+	b.WriteString("Pass `--space <space-id-or-key>` on `multica issue create` to file a new issue under a specific Space instead of the workspace default. `multica issue update <id> --space <space-id-or-key>` moves an existing issue to another Space — it is renumbered under the target Space, and the old identifier is recorded as an alias that keeps resolving forever, so this is always safe.\n\n")
 }
 
 // writeProjectContext emits the Project Context section when the issue
@@ -562,6 +577,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	if kind.hasIssueContext() {
+		writeSpaceContext(&b, ctx)
 		writeProjectContext(&b, ctx)
 		writeIssueMetadata(&b)
 	}

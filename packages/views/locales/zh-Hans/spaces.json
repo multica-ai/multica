@@ -1,10 +1,10 @@
 {
   "page": {
-    "title": "Spaces",
-    "new_space": "新建 Space",
-    "loading": "正在加载 Spaces...",
-    "empty_title": "还没有 Space",
-    "create_first": "创建第一个 Space"
+    "title": "空间",
+    "new_space": "新建空间",
+    "loading": "正在加载空间...",
+    "empty_title": "还没有空间",
+    "create_first": "创建第一个空间"
   },
   "table": {
     "key": "标识符",
@@ -19,32 +19,28 @@
     "archived": "已归档"
   },
   "actions": {
-    "edit": "编辑 Space",
-    "archive": "归档 Space",
+    "edit": "编辑空间",
+    "archive": "归档空间",
     "cancel": "取消",
     "save": "保存",
     "saving": "保存中..."
   },
   "dialog": {
-    "create_title": "创建 Space",
-    "edit_title": "编辑 Space",
-    "description": "Space 拥有 issue 编号命名空间和稳定工作域。v1 中成员关系仅用于展示。",
-    "tab_main": "主要信息",
-    "tab_members": "成员 ({{count}})",
+    "create_title": "创建空间",
+    "edit_title": "编辑空间",
     "member_search": "搜索成员…",
     "member_search_empty": "没有匹配的成员",
     "creator_row": "创建人 · 负责人",
     "name_required": "需要填写名称",
     "members_entry": "成员",
-    "member_count": "已选 {{count}} 人",
-    "members_pick_title": "选择成员",
-    "back": "返回"
+    "member_count": "已选 {{count}} 人"
   },
   "form": {
     "name": "名称",
     "name_placeholder": "Engineering",
     "key": "标识符",
-    "key_hint": "用于该 Space 的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
+    "key_hint": "用于该空间的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
+    "key_reserved": "NEW 是保留标识符，请换一个。",
     "key_locked": "已有 issue 创建后，标识符会被锁定。",
     "icon": "图标",
     "description": "描述",
@@ -56,17 +52,17 @@
     "description_limit": "最多 {{max}} 个字符（当前 {{count}}）"
   },
   "picker": {
-    "placeholder": "Space",
-    "empty": "没有可用的 Space",
-    "selected_count_other": "已选 {{count}} 个 Space"
+    "placeholder": "空间",
+    "empty": "没有可用的空间",
+    "selected_count_other": "已选 {{count}} 个空间"
   },
-  "toast_created": "Space 已创建",
-  "toast_updated": "Space 已更新",
-  "toast_archived": "Space 已归档",
-  "toast_archive_failed": "归档 Space 失败",
-  "toast_save_failed": "保存 Space 失败",
+  "toast_created": "空间已创建",
+  "toast_updated": "空间已更新",
+  "toast_archived": "空间已归档",
+  "toast_archive_failed": "归档空间失败",
+  "toast_save_failed": "保存空间失败",
   "surface": {
-    "not_found": "未找到 Space"
+    "not_found": "未找到空间"
   },
   "settings": {
     "stats_title": "概况",
@@ -77,17 +73,17 @@
     "archive_hint": "归档后停止接收新工作;已有 issue 仍可查看。",
     "members": "成员",
     "members_empty": "暂无成员",
-    "archive_confirm_title": "归档 Space？",
+    "archive_confirm_title": "归档空间？",
     "archive_confirm_body": "移除全部成员将归档 {{name}}。已有 issue 仍可查看。",
-    "default_cannot_archive": "默认 Space 不能归档",
-    "archive_admin_only": "只有管理员可以归档 Space",
+    "default_cannot_archive": "默认空间不能归档",
+    "archive_admin_only": "只有管理员可以归档空间",
     "goto": "前往"
   },
   "conflict": {
     "title": "{{space}} 不在该项目中",
-    "body": "Space {{space}} 尚未加入项目 {{project}}。可以把 Space 加入项目，或把 issue 改到项目已有的 Space。",
+    "body": "空间 {{space}} 尚未加入项目 {{project}}。可以把空间加入项目，或把 issue 改到项目已有的空间。",
     "add_space": "把 {{space}} 加入项目",
-    "project_spaces": "项目的 Space",
+    "project_spaces": "项目的空间",
     "move_issue": "把 issue 改到 {{space}}"
   }
 }

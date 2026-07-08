@@ -5,7 +5,6 @@ import { CreateWorkspaceModal } from "./create-workspace";
 import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateProjectModal } from "./create-project";
 import { CreateSquadModal } from "./create-squad";
-import { CreateSpaceModal } from "./create-space";
 import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
@@ -27,11 +26,9 @@ export function ModalRegistry() {
     case "quick-create-issue":
       return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
     case "create-project":
-      return <CreateProjectModal onClose={close} />;
+      return <CreateProjectModal onClose={close} data={data} />;
     case "create-squad":
       return <CreateSquadModal onClose={close} />;
-    case "create-space":
-      return <CreateSpaceModal onClose={close} />;
     case "feedback":
       return <FeedbackModal onClose={close} data={data} />;
     case "issue-set-parent":

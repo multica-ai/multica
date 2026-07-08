@@ -75,6 +75,7 @@
     "./spaces/queries": "./spaces/queries.ts",
     "./spaces/mutations": "./spaces/mutations.ts",
     "./spaces/default-space": "./spaces/default-space.ts",
+    "./spaces/last-space-store": "./spaces/last-space-store.ts",
     "./layout/sidebar-store": "./layout/sidebar-store.ts",
     "./labels": "./labels/index.ts",
     "./labels/queries": "./labels/queries.ts",

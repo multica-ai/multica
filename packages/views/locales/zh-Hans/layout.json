@@ -4,7 +4,7 @@
     "chat": "聊天",
     "my_issues": "我的 issue",
     "issues": "Issues",
-    "spaces": "Spaces",
+    "spaces": "空间",
     "projects": "项目",
     "autopilots": "自动化",
     "agents": "智能体",
@@ -47,7 +47,7 @@
       "description": "和团队及其他用户一起交流。",
       "dismiss": "关闭"
     },
-    "new_space": "新建 Space",
-    "spaces_empty": "新建第一个 Space"
+    "new_space": "新建空间",
+    "spaces_empty": "新建第一个空间"
   }
 }
