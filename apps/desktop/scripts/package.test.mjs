@@ -50,6 +50,23 @@ describe("normalizeGitVersion", () => {
     expect(normalizeGitVersion("2f24057b")).toBe("0.0.0-g2f24057b");
   });
 
+  it("degrades a non-semver tag prefix that slips past the --match filter", () => {
+    // `git describe` is invoked with `--match 'v[0-9]*'` so a release-train
+    // tag like `release_iteration/…` is never the nearest match; the version
+    // resolves to the `vX.Y.Z-N-g<hash>` shape instead. If that filter ever
+    // regresses, the describe output carries the non-semver tag verbatim and
+    // must NOT be passed through as a version — it has no `major.minor.patch`
+    // prefix, so it degrades to the `0.0.0-g<hash>` fallback rather than
+    // producing something electron-updater would choke on.
+    expect(
+      normalizeGitVersion("release_iteration/Sprint_0705-3-g9adfcd4d8"),
+    ).toBe("0.0.0-grelease_iteration/Sprint_0705-3-g9adfcd4d8");
+    // With the filter in place the real input is well-formed and passes through.
+    expect(normalizeGitVersion("v0.3.35-38-g9adfcd4d8")).toBe(
+      "0.3.35-38-g9adfcd4d8",
+    );
+  });
+
   it("prefixes an all-digit hash so the pre-release is valid semver", () => {
     // A short hash that is all decimal digits with a leading zero would
     // produce `0.0.0-0123456` — a numeric pre-release identifier must not

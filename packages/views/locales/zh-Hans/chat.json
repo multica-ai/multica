@@ -18,7 +18,15 @@
     "show_details": "查看详情",
     "replied_in": "{{elapsed}} 内回复",
     "failed_after": "{{elapsed}} 后失败",
-    "task_failed_fallback": "task 失败",
+    "failure": {
+      "agent_error": "智能体运行时出错，没能完成回复。请重试。",
+      "timeout": "智能体处理超时，未能完成。可以重试，或把需求拆得更小一些。",
+      "codex_semantic_inactivity": "智能体长时间无响应，已停止。请重试。",
+      "runtime_offline": "智能体当前离线，暂时无法回复。等它恢复在线后再试。",
+      "runtime_recovery": "智能体在完成前重启了。请重试。",
+      "manual": "这次回复已取消。",
+      "fallback": "出了点问题，智能体未能完成回复。请重试。"
+    },
     "tools_other": "{{count}} 个工具",
     "tool_result_named": "{{tool}} 结果：",
     "tool_result_unnamed": "结果：",

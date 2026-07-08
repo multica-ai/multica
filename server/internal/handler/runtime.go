@@ -24,6 +24,10 @@ type AgentRuntimeResponse struct {
 	WorkspaceID  string  `json:"workspace_id"`
 	DaemonID     *string `json:"daemon_id"`
 	Name         string  `json:"name"`
+	// CustomName is the user-set display override (MUL-4217); null when the
+	// runtime still uses its daemon-proposed Name. Clients show
+	// CustomName ?? Name and seed the rename field from this raw value.
+	CustomName   *string `json:"custom_name"`
 	RuntimeMode  string  `json:"runtime_mode"`
 	Provider     string  `json:"provider"`
 	LaunchHeader string  `json:"launch_header"`
@@ -57,6 +61,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		WorkspaceID:  uuidToString(rt.WorkspaceID),
 		DaemonID:     textToPtr(rt.DaemonID),
 		Name:         rt.Name,
+		CustomName:   textToPtr(rt.CustomName),
 		RuntimeMode:  rt.RuntimeMode,
 		Provider:     rt.Provider,
 		LaunchHeader: agent.LaunchHeader(rt.Provider),
@@ -408,7 +413,21 @@ type UpdateAgentRuntimeRequest struct {
 	// or workspace admins can bind agents) and "public" (any workspace
 	// member can). Owner / workspace admin only, gated by canEditRuntime.
 	Visibility *string `json:"visibility,omitempty"`
+	// CustomName sets or clears a user-facing display override (MUL-4217).
+	// An empty / whitespace-only string clears it (revert to the
+	// daemon-proposed name). Owner / workspace admin only.
+	CustomName *string `json:"custom_name,omitempty"`
+	// ApplyToMachine, when true alongside CustomName, applies the name to
+	// every runtime sharing this runtime's daemon_id (a machine hosts one
+	// runtime per provider) instead of just this one. Ignored when the
+	// runtime has no daemon_id.
+	ApplyToMachine bool `json:"apply_to_machine,omitempty"`
 }
+
+// maxRuntimeCustomNameLen caps a runtime's custom name. Default names are
+// short (e.g. "Claude (host.local)"); 100 chars is generous headroom while
+// keeping the picker rows and machine headers from overflowing.
+const maxRuntimeCustomNameLen = 100
 
 // UpdateAgentRuntime handles PATCH /api/runtimes/:id. Currently visibility
 // is editable; the request shape is open-ended so future fields (display
@@ -442,6 +461,8 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate every field before any mutation so a bad value in one field
+	// can't leave a partially-applied PATCH.
 	var (
 		newVisibility  string
 		needVisibility bool
@@ -458,6 +479,15 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.CustomName != nil {
+		if len([]rune(strings.TrimSpace(*req.CustomName))) > maxRuntimeCustomNameLen {
+			writeError(w, http.StatusBadRequest, "custom name is too long")
+			return
+		}
+	}
+
+	changed := false
+
 	if needVisibility {
 		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
 			ID:         runtimeUUID,
@@ -469,6 +499,59 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rt = updated
+		changed = true
+	}
+
+	if req.CustomName != nil {
+		// An empty / whitespace-only name clears the override (NULL), so the
+		// runtime falls back to its daemon-proposed Name.
+		trimmed := strings.TrimSpace(*req.CustomName)
+		customName := pgtype.Text{String: trimmed, Valid: trimmed != ""}
+
+		if req.ApplyToMachine && rt.DaemonID.Valid {
+			// Non-admins may only relabel their own runtimes on the machine;
+			// owners/admins rename every runtime sharing the daemon_id. A NULL
+			// owner filter means "all runtimes on this machine".
+			var ownerFilter pgtype.UUID
+			if !roleAllowed(member.Role, "owner", "admin") {
+				ownerFilter = member.UserID
+			}
+			rows, err := h.Queries.UpdateAgentRuntimeCustomNameByDaemon(r.Context(), db.UpdateAgentRuntimeCustomNameByDaemonParams{
+				CustomName:  customName,
+				WorkspaceID: rt.WorkspaceID,
+				DaemonID:    rt.DaemonID,
+				OwnerID:     ownerFilter,
+			})
+			if err != nil {
+				slog.Error("UpdateAgentRuntimeCustomNameByDaemon failed", "error", err, "runtime_id", runtimeID)
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			// The actor always owns (or admins) the runtime addressed by :id,
+			// so it is among the updated rows — surface it in the response.
+			for _, row := range rows {
+				if uuidToString(row.ID) == uuidToString(runtimeUUID) {
+					rt = row
+					break
+				}
+			}
+			changed = true
+		} else {
+			updated, err := h.Queries.UpdateAgentRuntimeCustomName(r.Context(), db.UpdateAgentRuntimeCustomNameParams{
+				CustomName: customName,
+				ID:         runtimeUUID,
+			})
+			if err != nil {
+				slog.Error("UpdateAgentRuntimeCustomName failed", "error", err, "runtime_id", runtimeID)
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			rt = updated
+			changed = true
+		}
+	}
+
+	if changed {
 		// Notify connected clients that runtime metadata changed so the
 		// list/detail pages refresh — matches the pattern used by
 		// DeleteAgentRuntime.
