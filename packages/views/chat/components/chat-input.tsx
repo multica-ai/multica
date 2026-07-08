@@ -113,10 +113,12 @@ export function ChatInput({
   // mid-compose gives each agent its own draft. This is a STORAGE key, not
   // a React identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Used to force a
-  // remount when the user explicitly switches agent (so Tiptap's
-  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…").
-  // A cancelled-run draft restore does NOT bump this key: it just writes
+  // `editorKey` — React `key` on the ContentEditor. Forces a fresh editor
+  // instance when the user explicitly switches agent. Placeholder text itself
+  // no longer depends on this: ContentEditor's placeholder-sync effect
+  // refreshes it live (e.g. across archived ↔ active sessions of the SAME
+  // agent, where this key does not change). A cancelled-run draft restore
+  // does NOT bump this key either: it just writes
   // the restored text into `inputDraft`, and the editor's own
   // defaultValue-sync effect (content-editor.tsx) pushes it into the live
   // instance. There is no second copy of the draft to drift or resurface.
