@@ -15,7 +15,7 @@ When an agent is assigned a task in Multica:
 
 1. The daemon detects the task assignment
 2. It creates an isolated workspace directory
-3. It spawns the appropriate agent CLI (Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, or Hermes)
+3. It spawns the appropriate agent CLI (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, or Trae CLI)
 4. The agent executes autonomously, streaming progress back to Multica
 5. Results are reported — success, failure, or blockers
 
@@ -29,10 +29,18 @@ Real-time progress is streamed via WebSocket so you can follow along in the Mult
 |----------|-------------|-------------|
 | Claude Code | `claude` | Anthropic's coding agent |
 | Codex | `codex` | OpenAI's coding agent |
-| Gemini CLI | `gemini` | Google's coding agent |
+| Antigravity | `agy` | Google's coding agent |
+| CodeBuddy | `codebuddy` | Tencent's Claude Code-compatible coding agent |
+| Copilot | `copilot` | GitHub's coding agent |
+| Cursor | `cursor-agent` | Anysphere's coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | OpenCode | `opencode` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
+| Kimi | `kimi` | Moonshot coding agent |
+| Kiro CLI | `kiro-cli` | Amazon coding agent |
+| Pi | `pi` | Inflection AI coding agent |
+| Qoder | `qodercli` | Alibaba coding agent |
+| Trae CLI | `traecli` | ByteDance coding agent |
 
 The daemon auto-detects which CLIs are available on your PATH and registers them as available runtimes.
 

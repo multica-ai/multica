@@ -66,11 +66,38 @@ type ModelListRequest struct {
 // model the runtime advertises as its preferred pick (e.g. Claude
 // Code's shipped default, or hermes' currentModelId) so the UI can
 // badge it — don't drop it when marshalling.
+//
+// `Thinking` carries the per-model reasoning-effort catalog discovered
+// by the daemon for runtimes that support it (claude, codex — see
+// MUL-2339). nil means "no picker for this model"; the UI hides the
+// thinking_level selector. Older daemons (pre-2026-05) won't send this
+// field, which is fine: the UI hides the selector and the agent runs
+// with the runtime default.
 type ModelEntry struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider,omitempty"`
-	Default  bool   `json:"default,omitempty"`
+	ID       string         `json:"id"`
+	Label    string         `json:"label"`
+	Provider string         `json:"provider,omitempty"`
+	Default  bool           `json:"default,omitempty"`
+	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// ModelThinking is the wire shape for the per-model thinking catalog.
+// Mirrors agent.ModelThinking so the daemon's report passes through
+// without remapping.
+type ModelThinking struct {
+	SupportedLevels []ThinkingLevel `json:"supported_levels"`
+	DefaultLevel    string          `json:"default_level,omitempty"`
+}
+
+// ThinkingLevel is the wire shape for a single entry in a model's
+// reasoning-effort catalog. `Value` is the literal token the daemon
+// passes to the CLI; `Label` is the human-readable display string;
+// `Description` is optional helper copy (Codex's debug-models output
+// includes one per level).
+type ThinkingLevel struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 const (

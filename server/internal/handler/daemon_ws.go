@@ -20,6 +20,8 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workspaceIDs := make([]string, 0, len(runtimeIDs))
+	seenWorkspaceIDs := make(map[string]struct{}, len(runtimeIDs))
 	for _, runtimeID := range runtimeIDs {
 		rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 		if !ok {
@@ -29,12 +31,25 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "runtime not found")
 			return
 		}
+		workspaceID := uuidToString(rt.WorkspaceID)
+		if workspaceID != "" {
+			if _, ok := seenWorkspaceIDs[workspaceID]; !ok {
+				seenWorkspaceIDs[workspaceID] = struct{}{}
+				workspaceIDs = append(workspaceIDs, workspaceID)
+			}
+		}
+	}
+
+	primaryWorkspaceID := ""
+	if len(workspaceIDs) > 0 {
+		primaryWorkspaceID = workspaceIDs[0]
 	}
 
 	h.DaemonHub.HandleWebSocket(w, r, daemonws.ClientIdentity{
 		DaemonID:      middleware.DaemonIDFromContext(r.Context()),
 		UserID:        requestUserID(r),
-		WorkspaceID:   middleware.DaemonWorkspaceIDFromContext(r.Context()),
+		WorkspaceID:   primaryWorkspaceID,
+		WorkspaceIDs:  workspaceIDs,
 		RuntimeIDs:    runtimeIDs,
 		ClientVersion: r.Header.Get("X-Client-Version"),
 	})

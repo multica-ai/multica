@@ -1,0 +1,93 @@
+---
+title: 聊天集成（channels）
+description: Multica 如何把智能体接入聊天平台——一个统一的 channel 引擎，加上针对飞书（Lark）和 Slack 的各平台适配器——涵盖入站流水线、会话与授权。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+**channel** 把一个 Multica [智能体](/agents)接入聊天平台，团队就能在他们日常沟通的地方直接使用它。目前有两个 channel——[Lark（飞书）](/lark-bot-integration) 和 [Slack](/slack-bot-integration)——两者都跑在**同一个引擎**上：一个平台无关的内核，加上一层很薄的各平台适配器。新增一个平台是「实现适配器」，而不是「重建流水线」。
+
+**安装（installation）** 是把这一切串起来的单元：一个 Bot 绑定到一个 `(workspace, agent)`。入站消息被路由到某个安装，再经过共享的流水线；智能体的回复会被发回同一个聊天里。
+
+## 架构
+
+<Mermaid chart={`
+flowchart LR
+  subgraph P["聊天平台"]
+    LK["Lark / 飞书"]
+    SL["Slack"]
+  end
+  subgraph ENG["Channel 引擎（平台无关）"]
+    direction TB
+    SUP["Supervisor<br/>每个安装一条实时连接"]
+    ROU["路由流水线：<br/>路由 → 去重 → 鉴权 → 会话 → 触发"]
+  end
+  LK -->|长连接| SUP
+  SL -->|Socket Mode| SUP
+  SUP -->|原始事件| ADP["各平台适配器<br/>转换 + ResolverSet"]
+  ADP --> ROU
+  ROU -->|智能体任务| RUN["守护进程运行智能体"]
+  RUN -->|回复| OUT["各平台出站<br/>（bot token → 平台 API）"]
+  OUT --> P
+`} />
+
+## 入站流水线（通用）
+
+每一条入站消息——无论来自 Lark 还是 Slack——都会走引擎 `Router` 里同一套有序步骤。平台适配器只提供各平台特有的部分（即 `ResolverSet`）；策略本身住在引擎里。
+
+1. **路由到安装** —— 把事件映射到一个 `channel_installation`（→ workspace + agent）。Lark 按 `app_id` 路由；Slack 按事件携带的 app id 路由。
+2. **寻址过滤** —— 在群 / 频道里，只有 **@ 了 Bot** 的消息才会继续往下走；无关的群聊闲谈会被丢弃（不读取）。
+3. **去重** —— 一个两阶段的 `(installation, message_id)` 认领机制保证恰好处理一次，即便跨多个服务器副本也成立。
+4. **身份 + 授权** —— 把发送者的平台用户 id 解析成一个 Multica 用户（即[账号绑定](#账号绑定)），然后再次校验 workspace 成员身份。未绑定的发送者会收到一条「绑定你的账号」提示；非成员会被丢弃。
+5. **会话** —— 为这段对话找到或创建一个 [chat 会话](/chat)，并把消息追加进去（见[会话](#会话与上下文)）。
+6. **触发** —— 入队一个智能体[任务](/tasks)；一个[守护进程](/daemon-runtimes)运行智能体，回复会被发回聊天里。
+
+## 会话与上下文
+
+智能体的上下文就是**这段 chat 会话的对话记录**——也就是随时间被纳入该会话的那些消息。这套对话记录模型是通用的（每个 channel 共用）。各平台不同的地方在于适配器拼出来的**会话隔离键**：
+
+| 平台 | 隔离键 | 效果 |
+|---|---|---|
+| **Lark / 飞书** | 聊天 id | 每个聊天 / 群一个会话——同一个聊天里连续的几轮会累积成一份对话记录（多轮记忆）。 |
+| **Slack** | 私聊：频道；频道：`channel + thread root` | 每段私聊是一个会话；**每个 @bot 的 thread 是它自己的会话**，所以同一个频道里的两个 thread 不会混在一起。 |
+
+<Callout type="info">
+在群里，只有 **@ 了 Bot** 的消息才会被纳入。目前两个 channel 都不会读取频道里其他（没 @ 的）消息或历史滚动记录，所以智能体看不到那些没有点名它的消息。把周边历史作为上下文拉取进来，是计划中的增强功能。
+</Callout>
+
+## 账号绑定
+
+在共享群里，有两道相互独立的关卡保护着 Bot——两者都在引擎里对每一条消息强制执行，且 Lark 和 Slack 一视同仁：
+
+- **账号绑定（认证）** —— 发送者的平台用户 id 必须关联到一个 Multica 用户。某人第一次给 Bot 发消息时，会拿到一个一次性链接，把自己的身份绑定到**他自己的** Multica 账号；在那之前不会有任何智能体运行。
+- **Workspace 成员身份（授权）** —— 绑定后的 Multica 用户必须是该安装所属 workspace 的成员，每条消息都会重新校验。非成员会被静默丢弃。
+
+所以把 Bot 加进一个公开频道是安全的：只有已绑定身份的 workspace 成员才能驱动智能体，而且每个发送者都会被独立校验。面向用户的提示文案请见各平台的页面。
+
+## 两个 channel
+
+<Callout type="info">
+**Lark（飞书）—— 扫码安装。** workspace 管理员用飞书 App 扫一个二维码就能绑定一个智能体；无需任何开发者后台步骤。一个智能体一个 Bot。见 [Lark Bot 接入](/lark-bot-integration)。
+</Callout>
+
+<Callout type="info">
+**Slack —— 自带应用。** workspace 管理员创建一个 Slack app，把它安装到自己的 Slack workspace，再把它的 bot token + app-level token 粘贴进 Multica。每个智能体都有自己的 Slack app，所以多个智能体可以在同一个 Slack workspace 里各自拥有一个独立的 Bot。manifest 和分步设置见 [Slack Bot 接入](/slack-bot-integration)。
+</Callout>
+
+## 自部署
+
+每个 channel 在**你设置好它的静态加密密钥之前都是关闭的**（这个密钥会在每个 Bot 的 token 落库之前对其加密）：
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+在 Multica Cloud 上两者都已配置好。完整参考见[环境变量](/environment-variables)。
+
+## 下一步
+
+- [Lark Bot 接入](/lark-bot-integration) —— 扫码安装，私聊 / @ 提及 / `/issue`
+- [Slack Bot 接入](/slack-bot-integration) —— 自带应用的设置（manifest + token），每个智能体一个 Bot
+- [智能体](/agents) · [Chat](/chat) · [任务](/tasks)

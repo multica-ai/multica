@@ -52,7 +52,7 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: Run tests
-        run: cd server && go test ./...
+        run: cd server && go test -race ./...
 
   release:
     needs: verify
@@ -321,6 +321,47 @@ jobs:
         run: |
           docker buildx imagetools inspect \
             ghcr.io/${{ github.repository_owner }}/multica-web:${{ steps.meta.outputs.version }}
+
+  helm-chart:
+    needs: [verify, docker-backend-merge, docker-web-merge]
+    if: github.repository_owner == 'multica-ai'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-helm-chart-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      CHART_DIR: deploy/helm/multica
+      OCI_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Sync chart metadata with release tag
+        env:
+          TAG_NAME: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          chart_version="${TAG_NAME#v}"
+          sed -i -E "s/^version:.*/version: ${chart_version}/" "$CHART_DIR/Chart.yaml"
+          sed -i -E "s/^appVersion:.*/appVersion: \"${TAG_NAME}\"/" "$CHART_DIR/Chart.yaml"
+          echo "CHART_VERSION=${chart_version}" >> "$GITHUB_ENV"
+
+      - name: Lint chart
+        run: helm lint "$CHART_DIR"
+
+      - name: Package chart
+        run: helm package "$CHART_DIR" --destination .chart-packages
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to GHCR
+        run: helm push ".chart-packages/multica-${CHART_VERSION}.tgz" "$OCI_REGISTRY"
+
+      - name: Verify published chart
+        run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
   # Build the Desktop installers for Linux and Windows and upload them to
   # the GitHub Release that the `release` job above just published. macOS

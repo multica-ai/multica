@@ -18,9 +18,9 @@ import (
 // shared storage.
 
 const (
-	updateKeyPrefix          = "mul:update:req:"
-	updatePendingPrefix      = "mul:update:pending:"
-	updateActivePrefix       = "mul:update:active:"
+	updateKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":update:req:"
+	updatePendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":update:pending:"
+	updateActivePrefix       = "mul:" + runtimePendingRedisHashTag + ":update:active:"
 	updateRedisPopMaxRetries = 5
 )
 

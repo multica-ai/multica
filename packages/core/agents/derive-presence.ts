@@ -62,7 +62,14 @@ export function deriveWorkloadDetail(tasks: readonly AgentTask[]): WorkloadDetai
   for (const t of tasks) {
     if (t.status === "running") {
       runningCount += 1;
-    } else if (t.status === "queued" || t.status === "dispatched") {
+    } else if (
+      t.status === "queued" ||
+      t.status === "dispatched" ||
+      // The daemon parked this task on a busy local_directory path. It's
+      // still on the agent's plate (counts toward "queued" presence), but
+      // it hasn't reached the run phase yet.
+      t.status === "waiting_local_directory"
+    ) {
       queuedCount += 1;
     }
     // Terminal statuses (completed / failed / cancelled) intentionally
@@ -87,6 +94,20 @@ interface DerivePresenceInput {
 }
 
 export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPresenceDetail {
+  // Archived wins over every runtime/task signal — a retired agent must
+  // never read as live anywhere. Short-circuit before deriving runtime
+  // health or workload so a leftover online runtime row or a stale snapshot
+  // task can't leak "Online" / "Working" into any consumer.
+  if (input.agent.archived_at) {
+    return {
+      availability: "archived",
+      workload: "idle",
+      runningCount: 0,
+      queuedCount: 0,
+      capacity: input.agent.max_concurrent_tasks,
+    };
+  }
+
   const availability = deriveAgentAvailability(input.runtime, input.now);
   const detail = deriveWorkloadDetail(input.tasks);
 

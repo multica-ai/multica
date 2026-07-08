@@ -1,0 +1,190 @@
+---
+title: GitHub 連携
+description: GitHub App を一度連携すれば、ブランチ・タイトル・本文にイシュー識別子を含む PR が該当イシューに自動で紐づきます。そして PR をマージするとイシューが Done に移動します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**設定 → GitHub** で GitHub アカウントまたは組織を一度だけ連携してください。その後は、ブランチ名・タイトル・本文にイシュー識別子（例: `MUL-123`）を含むあらゆる pull request が該当する[イシュー](/issues)に**自動で紐づき**、イシューサイドバーの **Pull requests** に表示され、PR がマージされるとイシューが **Done** に移動します。
+
+イシューごとの設定はありません。フロー全体が識別子で駆動されます。
+
+## 連携が行うこと
+
+| 場所 | 動作 |
+|---|---|
+| **設定 → GitHub** | ワークスペースの admin には、マスタートグル、**Connect GitHub** ボタン、機能スイッチ（PR サイドバー、Co-authored-by、自動紐づけ）を備えた GitHub タブが表示されます。インストール後は GitHub タブに戻ります。 |
+| **イシューサイドバー → Pull requests** | このイシューに自動で紐づいたすべての PR が、タイトル、リポジトリ、状態（`Open` / `Draft` / `Merged` / `Closed`）、作成者とともに表示されます。行をクリックすると GitHub の該当 PR に移動します。 |
+| **Webhook（バックグラウンド）** | すべての `pull_request` イベントで、Multica は PR 行を upsert し、PR からイシュー識別子をスキャンして、紐づけ行を（再）構築します。冪等性があり、同じ delivery を再送しても変化はありません。 |
+| **マージ時のステータス自動変更** | PR が `merged` に遷移すると、まだ `Done` でも `Cancelled` でもない、紐づいたすべてのイシューが `Done` に移動します。ステータス変更は source `github_pr_merged` でタイムラインに記録されます。 |
+
+ミラーリングされるのは PR 自体のみです。コミット、オープンな PR のないブランチ ref、CI チェックの状態はモデル化され**ません**。この連携は意図的に狭く設計されています。
+
+## 識別子のマッチング方法
+
+Webhook は次の順序で 3 つのフィールドから識別子を抽出します: **PR head ブランチ**、**PR タイトル**、**PR 本文**。マッチャーは次のとおりです。
+
+- 大文字小文字を区別しません — `mul-123`、`MUL-123`、`Mul-123` はすべてマッチします。
+- 境界があります — 左側の `\b` と右側の数字アンカーにより、`v1.2-3` のようなバージョン番号やメール形式の文字列を誤って拾わないようにしています。
+- ワークスペーススコープに限定されます — そのワークスペース固有の[イシュー prefix](/workspaces)にのみマッチします。prefix が `MUL` のワークスペースでは、整数が別のイシューと一致しても `FOO-1` は無視されます。
+- 重複が除去されます — 本文に `MUL-1, MUL-1` と並べても、イシューは一度だけ紐づきます。
+
+1 つの PR で**複数のイシュー**を参照できます。`Closes MUL-1, MUL-2` は PR を両方のイシューに紐づけ、マージすると両方が `Done` に進みます。
+
+## マージ時の Done 自動変更ルール
+
+PR の `merged` フィールドが `true` に切り替わると、紐づいたすべてのイシューが評価されます。
+
+| イシューの現在のステータス | 結果 |
+|---|---|
+| `done` | 変化なし（すでに終了状態）。 |
+| `cancelled` | **変化なし** — cancelled はユーザーが作業を明示的に放棄したことを意味するため、連携はこのシグナルを上書きしません。 |
+| それ以外すべて（`todo`、`in_progress`、`in_review`、`blocked`、`backlog`） | `done` に移動。 |
+
+PR をマージ**せずに**クローズした場合は、PR カードの状態が `Closed` に更新されるだけです。紐づいたイシューはそのまま維持されます — マージせずにクローズすることが何を意味するかはユーザーが決めるからです。
+
+<Callout type="info">
+この動作はタイムライン上で `system` アクターに帰属します。イシューの購読者は、人がステータスを移動したときと同じように、ステータス変更に関するインボックス通知を受け取ります。
+</Callout>
+
+## 自動で紐づかないもの
+
+- **コミットメッセージ内の識別子** — ブランチ / タイトル / 本文のみがスキャンされます。`MUL-123: fix login` というタイトルのコミットは、同じ文字列が PR タイトルや本文にも現れない限り自動では紐づきません。
+- **PR コメント内の識別子** — PR 自体のメタデータのみがスキャンされ、後から付いた GitHub コメントは無視されます。
+- **App がインストールされていないリポジトリの PR** — App がなければ、Multica は webhook をまったく受け取りません。
+- **PR をイシューに手動で紐づける** — まだこのための UI はありません。チームの慣習で識別子を Multica が読まない場所に置いている場合は、PR タイトルや本文に追加してください。
+
+## 連携解除
+
+**設定 → GitHub** にはインストール一覧はありません — 既存のインストールは GitHub から直接管理します。
+
+- **GitHub から** — `https://github.com/settings/installations`（個人）または `https://github.com/organizations/<org>/settings/installations`（組織）で Multica GitHub App をアンインストールします。Multica は `installation.deleted` webhook を受け取ってリアルタイムで行を削除し、開いている Settings タブはリロードなしで更新されます。
+- **Multica 内部からの連携解除は admin 専用です** — GitHub タブの連携解除コントロールは、admin 以外のユーザーには非表示です。マスター GitHub スイッチがオフでも利用可能なままなので、admin はワンクリックで機能を無効化した後でも、古いインストールを取り消せます。
+
+連携解除後も、ミラーリングされた PR 行はデータベースに残り、過去のイシューサイドバーで何が紐づいていたかを引き続き表示しますが、そのインストールから新たに入ってくる webhook イベントは受理されなくなります。
+
+## 権限と可視性
+
+- **連携 / 連携解除**にはワークスペースの **owner または admin** が必要です。member にはカードの説明は見えますが、Connect ボタンは見えません。
+- イシューの **Pull requests** サイドバーは、そのイシューを閲覧できる誰にでも表示されます — イシュー詳細の他の部分と同じ権限です。
+- GitHub App は pull request とメタデータへの**読み取り専用**アクセスを要求します。Multica はコミット、コメント、ステータスチェックを GitHub に書き戻すことはありません。
+
+## セルフホストのセットアップ
+
+Multica Cloud で Multica を実行している場合、連携はすでに構成済みです — このセクションは飛ばしてください。
+
+セルフホストの場合は、GitHub App を 1 つ作成し、サーバーを指すように設定し、環境変数を 2 つ設定します。フロー全体は以下のとおりです。
+
+### 1. GitHub App を作成する
+
+次のいずれかにアクセスしてください。
+
+- 個人アカウント → `https://github.com/settings/apps/new`
+- 組織 → `https://github.com/organizations/<org>/settings/apps/new`
+
+次を入力します。
+
+| フィールド | 値 |
+|---|---|
+| **GitHub App name** | 見分けやすい名前、例: `Multica` または `Multica (staging)`。 |
+| **Homepage URL** | Multica フロントエンド、例: `https://multica.example.com`。 |
+| **Callback URL** | 空欄のままにしてください — Multica は OAuth ユーザー ID を使用しません。 |
+| **Setup URL** | `https://<api-host>/api/github/setup`。**「Redirect on update」をチェックしてください。** |
+| **Webhook → Active** | 有効。 |
+| **Webhook URL** | `https://<api-host>/api/webhooks/github`。 |
+| **Webhook secret** | 長いランダム文字列を生成してください（例: `openssl rand -hex 32`）。手順 2 で同じ値を Multica の env に貼り付けます。 |
+| **Permissions → Repository → Pull requests** | **Read-only**。 |
+| **Permissions → Repository → Metadata** | Read-only（必須）。 |
+| **Subscribe to events** | **Pull request** をチェックしてください。 |
+| **Where can this GitHub App be installed?** | お好みで。単一組織のセットアップなら `Only on this account` で十分です。 |
+
+**Create GitHub App** の後、App の詳細ページから 2 つのことを控えておいてください。
+
+- 上部の **public link** — その末尾が slug です。`https://github.com/apps/multica-acme` → slug = `multica-acme`。
+- 先ほど生成した **webhook secret**（後で GitHub から読み戻すことはできません — 今すぐ保存してください）。
+
+<Callout type="warning">
+**Webhook secret ≠ Client secret。** App 設定ページには両方のフィールドが並んで配置されています。**Webhook secret** は `pull_request` の payload に署名する値で、Multica が必要とするものです。**Client secret** は OAuth 用で、この連携では使用しません。この 2 つを混同すると、すべての webhook delivery で紛らわしい `401 invalid signature` が発生します。
+</Callout>
+
+### 2. 環境変数を設定する
+
+API サーバーで:
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+
+# 任意（推奨）— インストール時点で接続済みアカウント名を取得できるため、
+# 最初の webhook が届くまで待たなくて済みます:
+GITHUB_APP_ID=<App 設定ページに表示される数値の App ID>
+GITHUB_APP_PRIVATE_KEY=<BEGIN/END 行を含む完全な PEM ブロック>
+```
+
+`GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` は必須です。どちらかが欠けていると:
+
+- Settings の `Connect GitHub` が**無効**になり、「not configured」のヒントが表示されます。
+- `/api/webhooks/github` エンドポイントが **`503 github webhooks not configured`** を返します — Multica は secret なしでイベントを処理することを拒否し、すべての署名を黙って有効として扱うことはありません。
+
+`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は**任意**です。これらを設定すると、setup コールバックが GitHub の App 認証された `/app/installations/{id}` エンドポイントを呼び出して、インストール時点で実際の組織名やユーザー名を取得できます。設定しない場合、接続カードには一時的に `Connected to unknown` と表示され、GitHub から `installation.created` webhook が届くと（通常は数秒以内に）Multica が行を更新し、リアルタイムブロードキャストを発行するため、開いている Settings タブは手動更新なしで反映されます。秘密鍵は App 設定ページの **Private keys → Generate a private key** で生成し、PEM ブロック全体（`-----BEGIN/END RSA PRIVATE KEY-----` の行を含む）を改行を保ったまま env 変数に貼り付けてください。
+
+`FRONTEND_ORIGIN` も設定されている必要があります（どのプロダクションのセルフホストでもすでに設定されています）。インストール後、setup コールバックがユーザーを `<FRONTEND_ORIGIN>/settings?tab=github` に戻します。
+
+env 変数を設定した後は API を再起動してください。
+
+### 3. マイグレーションを実行する
+
+この連携はテーブルをマイグレーション `079_github_integration` で提供します。古いデプロイをアップグレードする場合:
+
+```bash
+make migrate-up
+```
+
+3 つのテーブルが作成されます: `github_installation`、`github_pull_request`、`issue_pull_request`。これらはワークスペースとともに cascade-delete されるため、ワークスペースを削除すると自動的にクリーンアップされます。
+
+### 4. UI から連携する
+
+Multica で:
+
+1. owner または admin 権限で **設定 → GitHub** を開きます。
+2. **Connect GitHub** をクリックします。GitHub が新しいタブで開きます。
+3. アクセスを付与するリポジトリを選び、**Install** します。
+4. GitHub が `<api-host>/api/github/setup` にリダイレクトしてインストールを記録し、`<FRONTEND_ORIGIN>/settings?tab=github&github_connected=1` に戻します。
+
+その後、ブランチ / タイトル / 本文にイシュー識別子を含む PR を開いてみてください — 数秒以内に、そのイシューの詳細ページに Pull requests ブロックが表示されます。
+
+### 5. curl プローブで検証する
+
+インストール後に GitHub の **Recent Deliveries** ページで `401 invalid signature` が報告される場合、両側の secret が異なっています。どちらが間違っているかを最も速く突き止める方法は、GitHub を迂回することです。
+
+```bash
+SECRET="<the value you put in GITHUB_WEBHOOK_SECRET>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/github \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP ステータス | 意味 | 解決方法 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | サーバーがロードした secret が `$SECRET` と一致します。不一致は GitHub 側にあります。 | App → Webhook secret を編集 → **同じ値を貼り付け** → **Save changes**（保存せずにフィールドの外をクリックすると古い secret が維持されます）。再送してください。 |
+| `401 invalid signature` | サーバーがロードした secret が思っている値で**ありません**。 | env 変数が実行中のプロセスに反映されたか確認してください（例: `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" \| wc -c`）。再デプロイしてください。 |
+| `503 github webhooks not configured` | プロセスで `GITHUB_WEBHOOK_SECRET` が空です。 | env 変数を設定し、API を再起動してください。 |
+
+## 制限事項
+
+現時点で知っておくべき、いくつかの粗い部分があります。
+
+- **まだ手動の紐づけ UI はありません** — PR を紐づける唯一の方法は、ブランチ、タイトル、本文に識別子を置くことです。
+- **CI / チェック状態はありません** — PR 自体のみがミラーリングされます。ビルド状態、レビューコメント、レビュアーは Multica には表示されません。
+- マージ → Done ルールに対する**ワークスペースレベルの設定はありません** — 固定のデフォルトです（`cancelled` でない限り `merged → done`）。ワークスペースでカスタマイズできるマッピングは将来の追加予定です。
+- **1 つのイシューに複数の PR が紐づく場合、マージは保守的です** — 2 つの PR がどちらも `MUL-123` を参照していて最初の 1 つがマージされると、イシューはただちに `Done` に移動します。進める前に紐づいたすべての PR が解決されるのを待つ後続の変更が進行中です。
+
+## 次に
+
+- [イシュー](/issues) — PR から参照されるイシュー識別子（`MUL-123`）
+- [ワークスペース](/workspaces) — ワークスペース固有のイシュー prefix を設定する場所
+- [環境変数](/environment-variables) — 上記の GitHub 変数を含む env の完全なリファレンス

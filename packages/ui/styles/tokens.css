@@ -96,6 +96,12 @@
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
+    /* In-page find (Cmd/Ctrl+F) match tints, painted via the CSS Custom
+       Highlight API. Bright fill + dark text so matches stay legible in
+       both themes; the active match steps to orange. */
+    --find-match: oklch(0.92 0.15 100);
+    --find-match-active: oklch(0.82 0.17 62);
+    --find-match-foreground: oklch(0.22 0.03 92);
 }
 
 .dark {
@@ -142,4 +148,7 @@
     --scrollbar-thumb: oklch(1 0 0 / 8%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
     --scrollbar-track: transparent;
+    --find-match: oklch(0.82 0.16 100);
+    --find-match-active: oklch(0.76 0.18 60);
+    --find-match-foreground: oklch(0.18 0.02 92);
 }

@@ -110,7 +110,7 @@ export function getDefaultTriggerConfig(): TriggerConfig {
 }
 
 function sortedDays(days: number[]): number[] {
-  return [...new Set(days)].sort((a, b) => a - b);
+  return Array.from(new Set(days)).toSorted((a, b) => a - b);
 }
 
 export function toCronExpression(cfg: TriggerConfig): string {

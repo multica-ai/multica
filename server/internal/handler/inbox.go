@@ -195,6 +195,42 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
 }
 
+// InboxWorkspaceUnreadResponse is one workspace's unread inbox count in the
+// cross-workspace summary.
+type InboxWorkspaceUnreadResponse struct {
+	WorkspaceID string `json:"workspace_id"`
+	Count       int64  `json:"count"`
+}
+
+// UnreadInboxSummary returns per-workspace unread inbox counts across every
+// workspace the user belongs to. The sidebar uses it to light a dot on the
+// workspace switcher when a workspace OTHER than the active one has unread
+// items, without fetching each workspace's full inbox list. It is
+// account-level by nature: it ignores the active workspace and keys only on
+// the authenticated user.
+func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
+		return
+	}
+
+	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = InboxWorkspaceUnreadResponse{
+			WorkspaceID: uuidToString(row.WorkspaceID),
+			Count:       row.Count,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

@@ -5,43 +5,45 @@ export const runtimeKeys = {
   all: (wsId: string) => ["runtimes", wsId] as const,
   list: (wsId: string) => [...runtimeKeys.all(wsId), "list"] as const,
   listMine: (wsId: string) => [...runtimeKeys.all(wsId), "list", "mine"] as const,
-  usage: (rid: string, days: number) =>
-    ["runtimes", "usage", rid, days] as const,
-  usageByAgent: (rid: string, days: number) =>
-    ["runtimes", "usage", "by-agent", rid, days] as const,
-  usageByHour: (rid: string, days: number) =>
-    ["runtimes", "usage", "by-hour", rid, days] as const,
+  usage: (rid: string, days: number, tz: string) =>
+    ["runtimes", "usage", rid, days, tz] as const,
+  usageByAgent: (rid: string, days: number, tz: string) =>
+    ["runtimes", "usage", "by-agent", rid, days, tz] as const,
+  // by-hour now follows the viewer's tz, like the other reports.
+  usageByHour: (rid: string, days: number, tz: string) =>
+    ["runtimes", "usage", "by-hour", rid, days, tz] as const,
   latestVersion: () => ["runtimes", "latestVersion"] as const,
 };
 
-// Per-runtime usage. Used by the list view (each row pulls its own activity
-// sparkline + 30d cost) and by the detail page. TanStack Query naturally
-// deduplicates concurrent calls for the same runtime, so multiple components
-// observing the same runtimeId share one network request.
-export function runtimeUsageOptions(runtimeId: string, days: number) {
+// `tz` is the viewer's IANA name — all reports follow the viewer's tz.
+export function runtimeUsageOptions(
+  runtimeId: string,
+  days: number,
+  tz: string,
+) {
   return queryOptions({
-    queryKey: runtimeKeys.usage(runtimeId, days),
-    queryFn: () => api.getRuntimeUsage(runtimeId, { days }),
+    queryKey: runtimeKeys.usage(runtimeId, days, tz),
+    queryFn: () => api.getRuntimeUsage(runtimeId, { days, tz }),
     staleTime: 60 * 1000,
   });
 }
 
-// Per-agent token totals for one runtime — drives the "Cost by agent" tab
-// on the runtime detail page. Server-side aggregation keeps the response
-// small (one row per agent) regardless of task volume.
-export function runtimeUsageByAgentOptions(runtimeId: string, days: number) {
+export function runtimeUsageByAgentOptions(
+  runtimeId: string,
+  days: number,
+  tz: string,
+) {
   return queryOptions({
-    queryKey: runtimeKeys.usageByAgent(runtimeId, days),
-    queryFn: () => api.getRuntimeUsageByAgent(runtimeId, { days }),
+    queryKey: runtimeKeys.usageByAgent(runtimeId, days, tz),
+    queryFn: () => api.getRuntimeUsageByAgent(runtimeId, { days, tz }),
     staleTime: 60 * 1000,
   });
 }
 
-// Hourly (0..23) token totals for one runtime — drives the "By hour" tab.
-export function runtimeUsageByHourOptions(runtimeId: string, days: number) {
+export function runtimeUsageByHourOptions(runtimeId: string, days: number, tz: string) {
   return queryOptions({
-    queryKey: runtimeKeys.usageByHour(runtimeId, days),
-    queryFn: () => api.getRuntimeUsageByHour(runtimeId, { days }),
+    queryKey: runtimeKeys.usageByHour(runtimeId, days, tz),
+    queryFn: () => api.getRuntimeUsageByHour(runtimeId, { days, tz }),
     staleTime: 60 * 1000,
   });
 }

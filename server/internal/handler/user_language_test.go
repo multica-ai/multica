@@ -63,6 +63,46 @@ func TestUpdateMeAcceptsLanguage(t *testing.T) {
 	}
 }
 
+func TestUpdateMeAcceptsKoreanLanguage(t *testing.T) {
+	userID := newLanguageTestUser(t, "lang-ko@multica.ai")
+
+	w := httptest.NewRecorder()
+	req := newPatchMeRequest(userID, `{"language":"ko"}`)
+	testHandler.UpdateMe(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["language"].(string); got != "ko" {
+		t.Fatalf("expected response language=ko, got %v", resp["language"])
+	}
+}
+
+func TestUpdateMeAcceptsJapaneseLanguage(t *testing.T) {
+	userID := newLanguageTestUser(t, "lang-ja@multica.ai")
+
+	w := httptest.NewRecorder()
+	req := newPatchMeRequest(userID, `{"language":"ja"}`)
+	testHandler.UpdateMe(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["language"].(string); got != "ja" {
+		t.Fatalf("expected response language=ja, got %v", resp["language"])
+	}
+}
+
 func TestUpdateMeRejectsUnsupportedLanguage(t *testing.T) {
 	userID := newLanguageTestUser(t, "lang-reject@multica.ai")
 

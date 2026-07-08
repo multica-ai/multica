@@ -13,7 +13,7 @@ Three things get decided when you create a workspace:
 
 - **Workspace name** — the display name members see. Spaces and non-ASCII characters are allowed. You can change it later.
 - **Slug** — the string used in the workspace URL. Lowercase letters and digits only (joined with `-`). **It cannot be changed after creation**, so pick carefully. If the slug is taken or hits a system-reserved word, the create screen will ask you to choose another.
-- **Issue prefix** — the prefix for every issue number in the workspace (the `MUL` in `MUL-123`). Use uppercase letters.
+- **Issue prefix** — the prefix for every issue number in the workspace (the `MUL` in `MUL-123`). Uppercase letters and digits, up to 10 characters.
 
 <Callout type="warning">
 **Avoid changing the issue prefix.** Issue numbers are rendered with the current prefix — change it and `MUL-5` instantly becomes `NEW-5`. Every external link, Slack mention, and historical reference in comments breaks against the old number. Treat the issue prefix as "set at creation, never touched."

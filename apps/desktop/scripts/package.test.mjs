@@ -38,11 +38,27 @@ describe("normalizeGitVersion", () => {
     expect(normalizeGitVersion("v1.0.0-rc.2")).toBe("1.0.0-rc.2");
   });
 
-  it("falls back to 0.0.0-<hash> when no tags are reachable", () => {
+  it("falls back to 0.0.0-g<hash> when no tags are reachable", () => {
     // `git describe --tags --always` returns just the short commit hash
-    // when there are no tags in the history at all.
-    expect(normalizeGitVersion("f1415e96")).toBe("0.0.0-f1415e96");
-    expect(normalizeGitVersion("abc1234")).toBe("0.0.0-abc1234");
+    // when there are no tags in the history at all. A hash that begins with
+    // a digit (e.g. "2f24057b") is still not valid semver and must fall
+    // through — otherwise electron-updater rejects it on launch. The `g`
+    // prefix mirrors git describe's own `g<hash>` shorthand and keeps the
+    // pre-release identifier a single alphanumeric token.
+    expect(normalizeGitVersion("f1415e96")).toBe("0.0.0-gf1415e96");
+    expect(normalizeGitVersion("abc1234")).toBe("0.0.0-gabc1234");
+    expect(normalizeGitVersion("2f24057b")).toBe("0.0.0-g2f24057b");
+  });
+
+  it("prefixes an all-digit hash so the pre-release is valid semver", () => {
+    // A short hash that is all decimal digits with a leading zero would
+    // produce `0.0.0-0123456` — a numeric pre-release identifier must not
+    // have a leading zero, so that value is invalid semver and
+    // electron-updater would throw on the no-tag builds this fallback
+    // exists to protect. The `g` prefix makes it a single alphanumeric
+    // identifier, which is always valid.
+    expect(normalizeGitVersion("0123456")).toBe("0.0.0-g0123456");
+    expect(normalizeGitVersion("04567")).toBe("0.0.0-g04567");
   });
 });
 

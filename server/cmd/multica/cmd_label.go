@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -81,7 +80,7 @@ func runLabelList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	params := url.Values{}
@@ -132,7 +131,7 @@ func runLabelGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	labelRef, err := resolveLabelID(ctx, client, args[0])
@@ -178,7 +177,7 @@ func runLabelCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	body := map[string]any{"name": name, "color": color}
@@ -206,7 +205,7 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	labelRef, err := resolveLabelID(ctx, client, args[0])
@@ -249,7 +248,7 @@ func runLabelDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	labelRef, err := resolveLabelID(ctx, client, args[0])

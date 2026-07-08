@@ -6,6 +6,8 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -87,7 +89,6 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
     metadata: {},
     owner_id: ME,
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: "2026-04-27T11:59:50Z",
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
@@ -106,10 +107,10 @@ function makeTemplate(runtimeId: string): Agent {
     avatar_url: null,
     runtime_mode: "local",
     runtime_config: {},
-    custom_env: {},
     custom_args: [],
-    custom_env_redacted: false,
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
@@ -120,6 +121,10 @@ function makeTemplate(runtimeId: string): Agent {
     archived_at: null,
     archived_by: null,
   };
+}
+
+function enterBlankForm() {
+  fireEvent.click(screen.getByText("Start blank"));
 }
 
 function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
@@ -146,13 +151,6 @@ function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
       </QueryClientProvider>
     </I18nProvider>,
   );
-  // Without a `template`, the dialog opens on the blank-vs-template
-  // chooser. These tests target the manual form's runtime picker, so
-  // advance through the chooser to the form. Duplicate mode jumps
-  // straight to the form and doesn't render the chooser.
-  if (!template) {
-    fireEvent.click(screen.getByText(enAgents.create_dialog.chooser.blank_title));
-  }
   return { onCreate, onClose };
 }
 
@@ -177,6 +175,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       visibility: "private",
     });
     renderDialog([mine, othersPrivate]);
+    enterBlankForm();
 
     // Flip to "All" so other-owned runtimes show.
     fireEvent.click(screen.getByText("All"));
@@ -202,6 +201,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       visibility: "public",
     });
     renderDialog([mine, othersPublic]);
+    enterBlankForm();
 
     fireEvent.click(screen.getByText("All"));
     fireEvent.click(
@@ -229,6 +229,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       visibility: "private",
     });
     renderDialog([othersPrivate, mine]);
+    enterBlankForm();
 
     // The trigger label shows the selected runtime name. The picker must
     // not seed with the other-owned private runtime even if it sorted
@@ -293,5 +294,143 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The dialog's default (workspace) still needs to be usable by ME:
+    // reset flags before every test so a stray "on" state in one test
+    // can't bleed into the next.
+    configStore.getState().setFeatureFlags({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    configStore.getState().setFeatureFlags({});
+  });
+
+  it("keeps the legacy Workspace/Personal toggle when the flag is OFF", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+    enterBlankForm();
+
+    // Legacy copy is rendered — matches VISIBILITY_DESCRIPTION.
+    expect(screen.getByText(/All members can assign/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Legacy Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    // Legacy path submits visibility, NOT permission_mode/invocation_targets.
+    expect(payload.visibility).toBe("workspace");
+    expect(payload.permission_mode).toBeUndefined();
+    expect(payload.invocation_targets).toBeUndefined();
+  });
+
+  it("submits permission_mode=public_to + workspace target when the flag is ON (default)", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+    enterBlankForm();
+
+    // New copy replaces the old one.
+    expect(screen.getByText("Only you can run this agent")).toBeInTheDocument();
+    expect(screen.getByText("Choose who can run this agent")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Access Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    // MUL-3963 payload shape.
+    expect(payload.visibility).toBeUndefined();
+    expect(payload.permission_mode).toBe("public_to");
+    expect(payload.invocation_targets).toEqual([
+      { target_type: "workspace" },
+    ]);
+  });
+
+  it("submits permission_mode=private with empty targets when Private is chosen", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+    enterBlankForm();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Private Agent" },
+    });
+    // Click the Private card. The Private description doubles as a stable
+    // click target inside the button.
+    fireEvent.click(screen.getByText("Only you can run this agent"));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    expect(payload.permission_mode).toBe("private");
+    expect(payload.invocation_targets).toEqual([]);
+  });
+
+  it("collapses an empty public_to (no workspace, no members) back to private on submit", async () => {
+    // MUL-3963 normalisation: a public_to with zero grants is a no-op share.
+    // The AccessPicker emits it as private; the create dialog does the same
+    // so the backend never sees a bogus "public with nothing" request.
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+    enterBlankForm();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Empty Public Agent" },
+    });
+    // Uncheck the workspace target — no members are ticked either.
+    // Checkbox order inside AccessSection when Public is selected:
+    // [0] "Everyone in workspace", [1..] member allow-list (ME excluded).
+    const boxes = screen.getAllByRole("checkbox");
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    expect(payload.permission_mode).toBe("private");
+    expect(payload.invocation_targets).toEqual([]);
+  });
+
+  it("includes ticked members in the invocation_targets payload", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+    enterBlankForm();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Shared Agent" },
+    });
+    // Only "Other" (excluding the current user Me) appears in the member
+    // list, so it's always the second checkbox after the workspace toggle.
+    const boxes = screen.getAllByRole("checkbox");
+    fireEvent.click(boxes[1]!);
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    expect(payload.permission_mode).toBe("public_to");
+    // Order: workspace target first (still on by default), member target after.
+    expect(payload.invocation_targets).toEqual([
+      { target_type: "workspace" },
+      { target_type: "member", target_id: OTHER },
+    ]);
   });
 });

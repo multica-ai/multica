@@ -24,12 +24,12 @@ func runVersion(cmd *cobra.Command, _ []string) error {
 
 	if output == "json" {
 		info := map[string]string{
-			"version":   version,
-			"commit":    commit,
-			"date":      date,
-			"go":        runtime.Version(),
-			"os":        runtime.GOOS,
-			"arch":      runtime.GOARCH,
+			"version": version,
+			"commit":  commit,
+			"date":    date,
+			"go":      runtime.Version(),
+			"os":      runtime.GOOS,
+			"arch":    runtime.GOARCH,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

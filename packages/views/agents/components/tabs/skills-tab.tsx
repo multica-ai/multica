@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Info, Plus, Trash2 } from "lucide-react";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
@@ -51,7 +51,7 @@ export function SkillsTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           {t(($) => $.tab_body.skills.intro)}
         </p>
@@ -65,13 +65,6 @@ export function SkillsTab({
           <Plus className="h-3 w-3" />
           {t(($) => $.tab_body.skills.add_action)}
         </Button>
-      </div>
-
-      <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
-        <p className="text-xs text-muted-foreground">
-          {t(($) => $.tab_body.skills.import_hint)}
-        </p>
       </div>
 
       {agent.skills.length === 0 ? (

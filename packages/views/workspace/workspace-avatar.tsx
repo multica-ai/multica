@@ -1,3 +1,4 @@
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 
 const sizeMap = {
@@ -8,11 +9,22 @@ const sizeMap = {
 
 interface WorkspaceAvatarProps {
   name: string;
+  avatarUrl?: string | null;
   size?: keyof typeof sizeMap;
   className?: string;
 }
 
-function WorkspaceAvatar({ name, size = "sm", className }: WorkspaceAvatarProps) {
+function WorkspaceAvatar({ name, avatarUrl, size = "sm", className }: WorkspaceAvatarProps) {
+  const resolvedUrl = resolvePublicFileUrl(avatarUrl);
+  if (resolvedUrl) {
+    return (
+      <img
+        src={resolvedUrl}
+        alt={name}
+        className={cn("inline-block shrink-0 border object-cover", sizeMap[size], className)}
+      />
+    );
+  }
   return (
     <span
       className={cn(

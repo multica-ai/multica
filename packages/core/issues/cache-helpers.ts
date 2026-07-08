@@ -64,9 +64,64 @@ export function removeIssueFromBuckets(
 }
 
 /**
+ * Count-only reconcile for an issue BEYOND the loaded window: its status
+ * changed server-side, so one unit of `total` moves between buckets while
+ * the loaded arrays stay untouched. `hasMore` (loaded < total) stays
+ * consistent for free.
+ */
+export function moveBucketTotal(
+  resp: ListIssuesCache,
+  from: IssueStatus,
+  to: IssueStatus,
+): ListIssuesCache {
+  if (from === to) return resp;
+  const fromBucket = getBucket(resp, from);
+  const toBucket = getBucket(resp, to);
+  let next = setBucket(resp, from, {
+    ...fromBucket,
+    total: Math.max(0, fromBucket.total - 1),
+  });
+  next = setBucket(next, to, { ...toBucket, total: toBucket.total + 1 });
+  return next;
+}
+
+/**
+ * Count-only reconcile for an issue BEYOND the loaded window that LEFT the
+ * list (reassigned / moved project): the bucket it was counted in loses one.
+ */
+export function decrementBucketTotal(
+  resp: ListIssuesCache,
+  status: IssueStatus,
+): ListIssuesCache {
+  const bucket = getBucket(resp, status);
+  return setBucket(resp, status, {
+    ...bucket,
+    total: Math.max(0, bucket.total - 1),
+  });
+}
+
+/**
+ * Insert `issue` into `issues` at the slot implied by `position ASC` — the same
+ * ordering the board renders (server `ORDER BY position ASC`). Returns a new
+ * array; the input is not mutated.
+ *
+ * Inserting at the right slot (instead of appending to the end) is what keeps an
+ * optimistic move from snapping: the card lands where it will be after the
+ * server confirms, so no later cache refresh teleports it to the column tail.
+ */
+export function insertByPosition(issues: Issue[], issue: Issue): Issue[] {
+  const idx = issues.findIndex((i) => i.position > issue.position);
+  if (idx === -1) return [...issues, issue];
+  return [...issues.slice(0, idx), issue, ...issues.slice(idx)];
+}
+
+/**
  * Merge `patch` into the issue with `id`. If `patch.status` differs from the
  * current bucket, the issue moves to the new bucket and both buckets' totals
- * are adjusted.
+ * are adjusted. The moved card — and a same-column card whose `position`
+ * changed — is re-inserted at its `position`-sorted slot rather than appended,
+ * so the cache order stays consistent with what the board renders. A plain
+ * field update (no status/position change) keeps the card in place.
  */
 export function patchIssueInBuckets(
   resp: ListIssuesCache,
@@ -80,9 +135,23 @@ export function patchIssueInBuckets(
 
   if (nextStatus === loc.status) {
     const bucket = getBucket(resp, loc.status);
+    const positionChanged =
+      patch.position !== undefined && patch.position !== loc.issue.position;
+    if (!positionChanged) {
+      // Plain field update (labels, metadata, title, …): keep the slot so a
+      // remote edit never reorders an otherwise-untouched column.
+      return setBucket(resp, loc.status, {
+        ...bucket,
+        issues: bucket.issues.map((i) => (i.id === id ? merged : i)),
+      });
+    }
+    // Same-column reorder: lift the card out and re-insert at its new slot.
     return setBucket(resp, loc.status, {
       ...bucket,
-      issues: bucket.issues.map((i) => (i.id === id ? merged : i)),
+      issues: insertByPosition(
+        bucket.issues.filter((i) => i.id !== id),
+        merged,
+      ),
     });
   }
 
@@ -93,7 +162,7 @@ export function patchIssueInBuckets(
     total: Math.max(0, fromBucket.total - 1),
   });
   next = setBucket(next, nextStatus, {
-    issues: [...toBucket.issues, merged],
+    issues: insertByPosition(toBucket.issues, merged),
     total: toBucket.total + 1,
   });
   return next;

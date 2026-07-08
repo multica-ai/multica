@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 这一页带你走一遍 Multica Cloud 的端到端流程——**注册 → 装 [命令行工具](/cli) → 启动 [守护进程](/daemon-runtimes) → 创建 [智能体](/agents) → 分配第一个 [任务](/tasks)**，约 5 分钟完成。
 
-前置只有一个：你本地已经装了至少一款 [AI 编程工具](/providers)（[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）中的一款。守护进程启动时会自动探测它们，没装任何一个的话守护进程会直接拒绝启动。
+前置只有一个：你本地已经装了至少一款 [AI 编程工具](/providers)（[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder) 或 [Trae CLI](/providers#trae)）中的一款。守护进程启动时会自动探测它们，没装任何一个的话守护进程会直接拒绝启动。
 
 ## 1. 注册账号
 
@@ -99,7 +99,7 @@ multica issue create --title "给 README 加一段 ASCII 架构图"
 multica issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `multica agent list --output json` 或 `multica workspace members --output json`。
+`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `multica agent list --output json` 或 `multica workspace member list --output json`。
 
 **接下来守护进程会**：
 
@@ -114,6 +114,6 @@ Web 界面会**实时**（通过 WebSocket）显示进度——不需要刷新�
 
 - [守护进程与运行时](/daemon-runtimes) —— 守护进程怎么运作、运行时概念
 - [执行任务](/tasks) —— 任务生命周期、重试规则
-- [AI 编程工具对照](/providers) —— 11 款工具的能力差异
+- [AI 编程工具对照](/providers) —— 14 款工具的能力差异
 - [桌面应用](/desktop-app) —— 不想自己跑守护进程的话
 - [Self-Host 快速上手](/self-host-quickstart) —— 在自己服务器上跑一套

@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -86,12 +89,12 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
 
-	// Copy config files (isolated per task).
+	// Sync config files from the shared source (isolated per task).
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
-		if err := copyFileIfExists(src, dst); err != nil {
-			logger.Warn("execenv: codex-home copy failed", "file", name, "error", err)
+		if err := syncCopiedFile(src, dst); err != nil {
+			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
 		}
 	}
 
@@ -103,6 +106,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// user-level registry is redundant here. See codex_skill_strip.go.
 	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
 		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
+	}
+
+	if err := syncCodexModelCatalog(codexHome, sharedHome); err != nil {
+		return fmt.Errorf("sync codex model_catalog_json: %w", err)
 	}
 
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
@@ -125,6 +132,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
 	}
 
+	// Disable Codex native auto-memory inside daemon-managed task sessions
+	// so cross-task and cross-workspace context leaks (multica#3130) cannot
+	// happen via `codex-home/memories/` or `~/.codex/memories/`. See
+	// codex_memory.go for the full rationale and escape hatch.
+	if err := ensureCodexMemoryConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure memory config failed", "error", err)
+	}
+
 	return nil
 }
 
@@ -142,6 +157,76 @@ func resolveSharedCodexHome() string {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func syncCodexModelCatalog(codexHome, sharedHome string) error {
+	configPath := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", configPath, err)
+	}
+
+	var cfg struct {
+		ModelCatalogJSON string `toml:"model_catalog_json"`
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	catalogPath := strings.TrimSpace(cfg.ModelCatalogJSON)
+	if catalogPath == "" {
+		return nil
+	}
+
+	src, err := resolveCodexConfigPath(catalogPath, sharedHome)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("model_catalog_json %q resolved to missing file %s: %w", catalogPath, src, err)
+	}
+
+	if filepath.IsAbs(catalogPath) || strings.HasPrefix(catalogPath, "~") {
+		return nil
+	}
+	cleanCatalogPath := filepath.Clean(catalogPath)
+	if !filepath.IsLocal(cleanCatalogPath) {
+		return fmt.Errorf("model_catalog_json %q must be a local relative path or an absolute path", catalogPath)
+	}
+	dst := filepath.Join(codexHome, cleanCatalogPath)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("create model catalog directory %s: %w", filepath.Dir(dst), err)
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove stale model catalog %s: %w", dst, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat model catalog %s: %w", dst, err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		return fmt.Errorf("copy model_catalog_json %s to %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
+	if filepath.IsAbs(configPath) {
+		return filepath.Clean(configPath), nil
+	}
+	if strings.HasPrefix(configPath, "~/") || strings.HasPrefix(configPath, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve model_catalog_json %q: user home: %w", configPath, err)
+		}
+		return filepath.Join(home, configPath[2:]), nil
+	}
+	if strings.HasPrefix(configPath, "~") {
+		return "", fmt.Errorf("model_catalog_json %q uses unsupported ~user expansion", configPath)
+	}
+	return filepath.Join(sharedHome, filepath.Clean(configPath)), nil
 }
 
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
@@ -263,18 +348,47 @@ func logCodexAuthState(authPath string, logger *slog.Logger) {
 // codex_sandbox.go's ensureCodexSandboxConfig so they can be updated
 // idempotently without touching user-managed keys.)
 
-// copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.
-// If dst already exists, it's not overwritten.
-func copyFileIfExists(src, dst string) error {
-	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return nil
+// syncCopiedFile mirrors a per-task dst onto the current state of the shared
+// src so the per-task copy tracks the shared source across Reuse() runs:
+//
+//   - src present, dst absent:  copy src → dst
+//   - src present, dst present: drop dst and re-copy src → dst (refresh)
+//   - src absent,  dst present: drop dst (the shared source has been removed,
+//     so the per-task stale copy must not linger)
+//   - src absent,  dst absent:  no-op
+//
+// Regression for MUL-2646: the prior "don't overwrite" guard left per-task
+// config.toml / config.json / instructions.md stuck on whatever snapshot they
+// were seeded with at first Prepare. A user who edited ~/.codex/config.toml
+// between runs — switching the active [model_providers.X] base_url, pointing
+// env_key at a freshly rotated API key, or removing the file outright to
+// drop a provider — kept hitting the stale per-task copy on session resume,
+// with Codex calling the new URL using the old key (or replaying a provider
+// the user had since deleted from the shared config).
+//
+// For config.toml the subsequent ensureCodex{Sandbox,MultiAgent,Memory}Config
+// passes recreate the file from scratch when the shared source is gone, so
+// the per-task home keeps the daemon-managed defaults but loses every
+// user-managed [model_providers.X] / model_provider line that no longer
+// exists in the shared config. For config.json / instructions.md there is
+// no daemon-managed default, so they simply disappear in lockstep with the
+// shared source.
+func syncCopiedFile(src, dst string) error {
+	_, srcErr := os.Stat(src)
+	srcMissing := os.IsNotExist(srcErr)
+	if srcErr != nil && !srcMissing {
+		return fmt.Errorf("stat src %s: %w", src, srcErr)
 	}
 
-	// Don't overwrite existing file.
-	if _, err := os.Stat(dst); err == nil {
-		return nil
+	if _, err := os.Lstat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove stale dst %s: %w", dst, err)
+		}
 	}
 
+	if srcMissing {
+		return nil
+	}
 	return copyFile(src, dst)
 }
 

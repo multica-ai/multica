@@ -793,6 +793,127 @@ func TestInboxThroughRouter(t *testing.T) {
 	}
 }
 
+func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
+	ctx := context.Background()
+
+	// Seed one unread inbox item for the test user in the test workspace.
+	var itemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title)
+		VALUES ($1, 'member', $2, 'issue_assigned', 'Summary fixture')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&itemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, itemID)
+	})
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID {
+			found = true
+			if s.Count < 1 {
+				t.Fatalf("expected unread count >= 1 for test workspace, got %d", s.Count)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected test workspace %s in unread summary, got %+v", testWorkspaceID, summary)
+	}
+
+	// After marking it read, the workspace should drop out of the summary.
+	if _, err := testPool.Exec(ctx, `UPDATE inbox_item SET read = true WHERE id = $1`, itemID); err != nil {
+		t.Fatalf("failed to mark item read: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary (after read): expected 200, got %d", resp.StatusCode)
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("expected no unread for test workspace after read, got count %d", s.Count)
+		}
+	}
+}
+
+// An issue's inbox notifications are deduplicated per issue: opening the issue
+// marks only the NEWEST item read, leaving older siblings unread. The summary
+// must mirror the inbox UI (issue is read when its newest item is read), so a
+// read-newest / unread-older issue must NOT light the switcher dot (MUL-3695).
+func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Dedup fixture', 'member', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to seed issue: %v", err)
+	}
+	// Deleting the issue cascades to its inbox_item rows (FK ON DELETE CASCADE).
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Older sibling stays unread; newer sibling is read (the one "opening the
+	// issue" would have marked read).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, created_at)
+		VALUES
+			($1, 'member', $2, 'new_comment',    'older', $3, false, now() - interval '1 hour'),
+			($1, 'member', $2, 'status_changed', 'newer', $3, true,  now())
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed inbox items: %v", err)
+	}
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("issue whose newest item is read must not count as unread, got count %d", s.Count)
+		}
+	}
+
+	// Now mark the newest item unread again → the issue becomes unread and the
+	// workspace reappears in the summary.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE inbox_item SET read = false WHERE issue_id = $1 AND title = 'newer'
+	`, issueID); err != nil {
+		t.Fatalf("failed to flip newest item unread: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	readJSON(t, resp, &summary)
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count >= 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected workspace in summary once newest item is unread, got %+v", summary)
+	}
+}
+
 // ---- 404 for non-existent resources ----
 
 func TestNonExistentResources(t *testing.T) {

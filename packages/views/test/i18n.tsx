@@ -6,6 +6,7 @@ import {
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { ReactElement, ReactNode } from "react";
 import { RESOURCES } from "../locales";
+import type { SupportedLocale } from "@multica/core/i18n";
 
 // Single i18n test wrapper for the whole package. Wraps the production
 // `RESOURCES` map (every namespace registered there is available to the
@@ -15,10 +16,10 @@ import { RESOURCES } from "../locales";
 // `TEST_RESOURCES` slice meant every test author had to remember to
 // extend the slice when their component started using a new namespace.
 //
-// Use `renderWithI18n` like the standard `render`. Pass `locale: "zh-Hans"`
-// to verify Chinese strings; default is "en".
+// Use `renderWithI18n` like the standard `render`. Pass `locale: "zh-Hans"`,
+// `locale: "ko"`, or `locale: "ja"` to verify localized strings; default is "en".
 type RenderArgs = Omit<RenderOptions, "wrapper"> & {
-  locale?: "en" | "zh-Hans";
+  locale?: SupportedLocale;
 };
 
 export function renderWithI18n(

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -165,6 +166,51 @@ func TestPostJSON(t *testing.T) {
 	})
 }
 
+func TestDeleteJSONResponse(t *testing.T) {
+	type respBody struct {
+		ID string `json:"id"`
+	}
+
+	t.Run("success decodes response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete {
+				t.Errorf("expected DELETE, got %s", r.Method)
+			}
+			if auth := r.Header.Get("Authorization"); auth != "Bearer test-token" {
+				t.Errorf("expected Authorization Bearer test-token, got %s", auth)
+			}
+			json.NewEncoder(w).Encode(respBody{ID: "comment-123"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		var out respBody
+		if err := client.DeleteJSONResponse(context.Background(), "/test", &out); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if out.ID != "comment-123" {
+			t.Errorf("expected ID comment-123, got %s", out.ID)
+		}
+	})
+
+	t.Run("error status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, "missing")
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		err := client.DeleteJSONResponse(context.Background(), "/test", nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got := err.Error(); got != "DELETE /test returned 404: missing" {
+			t.Errorf("unexpected error message: %s", got)
+		}
+	})
+}
+
 func TestDownloadFile(t *testing.T) {
 	t.Run("relative URL is resolved against BaseURL and sent with auth", func(t *testing.T) {
 		var gotPath, gotAuth string
@@ -302,8 +348,12 @@ func TestUploadFileWithURL(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "upload file returned 400") {
-			t.Errorf("unexpected error message: %s", err.Error())
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("expected *HTTPError, got %T: %v", err, err)
+		}
+		if httpErr.StatusCode != 400 {
+			t.Errorf("expected status 400, got %d", httpErr.StatusCode)
 		}
 	})
 

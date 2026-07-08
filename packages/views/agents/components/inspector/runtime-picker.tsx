@@ -55,7 +55,7 @@ export function RuntimePicker({
       filter === "mine" && currentUserId
         ? runtimes.filter((r) => r.owner_id === currentUserId)
         : runtimes;
-    return [...list].sort((a, b) => {
+    return list.toSorted((a, b) => {
       const aMine = a.owner_id === currentUserId;
       const bMine = b.owner_id === currentUserId;
       if (aMine && !bMine) return -1;

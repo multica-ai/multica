@@ -1,0 +1,262 @@
+---
+title: 프로젝트 리소스
+description: 타입이 지정된 포인터(Git 저장소, 로컬 디렉터리, 그리고 추후 더 많은 종류)를 프로젝트에 연결해, 에이전트가 범위가 한정된 컨텍스트로 가져갈 수 있게 합니다.
+---
+
+**프로젝트 리소스(Project Resource)** 는 타입이 지정된 포인터입니다 — Git 저장소 URL, 본인 기기의 경로, 내일이면 Notion 페이지까지 — 이것을 [프로젝트](/workspaces)에 연결합니다. [에이전트](/agents)가 해당 프로젝트 안의 이슈에 대해 실행될 때, 데몬은 프로젝트의 리소스 목록을 에이전트의 작업 디렉터리와 [메타 스킬](/skills) 프롬프트에 자동으로 기록합니다.
+
+그 결과: 에이전트는 어떤 저장소를 체크아웃해야 하는지(또는 어떤 로컬 디렉터리에서 작업해야 하는지), 그리고 이 프로젝트의 "주요 참고 자료"가 무엇인지를, 아무도 컨텍스트를 이슈 본문에 복사해 붙여 넣지 않아도 알게 됩니다.
+
+## 멘탈 모델
+
+프로젝트는 더 이상 단순한 라벨이 아닙니다. 작은 **리소스 컨테이너**입니다:
+
+- 프로젝트는 0..N개의 **리소스**를 가집니다.
+- 리소스는 `resource_type`(예: `github_repo`, `local_directory`)과 `resource_ref`(`resource_type`에 따라 타입이 정해지는 JSON 페이로드)를 가집니다.
+- 새 리소스 타입을 추가하려면 문자열 하나 + 핸들러 하나만 추가하면 됩니다. **스키마 마이그레이션도, 프런트엔드 재작성도 필요 없습니다.**
+
+이 형태는 의도적인 것입니다 — Multica가 에이전트 제공자에 이미 사용하는 것과 동일한 패턴입니다: `type` 판별자 하나와 타입이 지정된 페이로드. 스키마를 안정적으로 유지하므로, 추후 "Notion 페이지", "Google Doc", "업로드된 파일", "외부 URL"을 추가하는 것은 작고 점진적인 변경이 됩니다.
+
+오늘날 두 가지 리소스 타입이 제공됩니다: [`github_repo`](#resource-type-github_repo)(작업마다 격리된 워크트리로 클론)와 [`local_directory`](#resource-type-local_directory)(특정 데몬 기기의 폴더 안에서 직접 실행).
+
+## 리소스 타입: `github_repo`
+
+기본 리소스 타입입니다 — 작업마다 격리된 워크트리로 체크아웃됩니다:
+
+```json
+{
+  "resource_type": "github_repo",
+  "resource_ref": {
+    "url": "https://github.com/owner/repo",
+    "default_branch_hint": "main"
+  }
+}
+```
+
+`default_branch_hint`는 선택 사항입니다 — 지정하면 데몬이 이를 메타 스킬에 노출하므로, 에이전트가 어떤 브랜치를 기준으로 작업할지 알게 됩니다.
+
+## 리소스 타입: `local_directory`
+
+작업마다 다시 클론하기 곤란한 저장소 — 수 기가바이트짜리 게임 체크아웃, 대형 monorepo, 또는 작업마다 워크트리를 만드는 모델이 번거로운 모든 프로젝트 — 의 경우, 프로젝트는 대신 **특정 [데몬](/daemon-runtimes) 기기에 있는 기존 디렉터리**를 가리킬 수 있습니다. 에이전트는 클론도, 복사도, 워크트리도 없이 **그 폴더 안에서 직접** 실행됩니다.
+
+```json
+{
+  "resource_type": "local_directory",
+  "resource_ref": {
+    "local_path": "/Users/me/code/big-game",
+    "daemon_id": "0001234e-…",
+    "label": "main checkout"
+  }
+}
+```
+
+`github_repo`와 비교한 트레이드오프는 의도적입니다: 바인딩된 데몬만 해당 디렉터리에 대한 작업을 가져갈 수 있고, 같은 디렉터리에 대한 작업은 병렬이 아니라 **직렬로** 실행됩니다. 그 대가로 기존 체크아웃, 기존 브랜치, 기존 더티 상태를 그대로 유지합니다 — Multica는 절대 다시 클론하지 않습니다.
+
+### `github_repo` 대신 `local_directory`를 선택할 때
+
+| 고려 사항 | `github_repo`(워크트리) | `local_directory` |
+| --- | --- | --- |
+| 작업당 체크아웃 비용 | 새 클론 + 워크트리 | 없음 — 에이전트가 제자리에서 실행 |
+| 같은 저장소의 동시성 | 여러 작업 병렬 | 디렉터리당 한 번에 하나 |
+| 브랜치 / 더티 상태 | 작업마다 기본 브랜치에서 새 브랜치를 받음 | 디렉터리가 현재 가진 그대로 |
+| 실행 가능한 위치 | 모든 데몬 | 정확히 하나의 데몬(바인딩된 것) |
+| 디스크 사용량 | 작업당 워크트리 하나 | 오버헤드 0 — 기존 폴더 사용 |
+
+다음 중 **하나라도** 해당하면 `local_directory`를 선택하세요:
+
+1. **다시 클론하는 비용이 지나치게 큰 경우** — 수 기가바이트짜리 게임 체크아웃, 무거운 LFS 자산을 가진 monorepo, 또는 작업당 `git clone`이 실제 작업을 압도하는 모든 경우. 동시성을 클론 없는 실행과 맞바꾸는 것입니다.
+2. **변경이 세밀하고, 변경되는 즉시 로컬에서 리뷰하고 싶은 경우** — 단일 컴포넌트를 반복적으로 다듬고 있고, 몇 분마다 에이전트의 편집과 본인의 에디터를 오가고 싶으며, `~/multica_workspaces/`에서 파헤쳐야 하는 작업당 워크트리보다 기존 체크아웃을 진실의 원천으로 삼고 싶은 경우입니다.
+
+두 경우 모두에서 받아들이는 트레이드오프는 동일합니다: **이 버전은 파일 단위 쓰기 잠금을 제공하지 않습니다.** 디렉터리당 직렬 게이트(같은 폴더에서 한 번에 하나의 작업)가 서로 다른 두 이슈의 에이전트가 동시에 같은 파일을 건드리는 것을 막는 유일한 보호 장치입니다. 두 이슈의 에이전트를 같은 `local_directory`로 향하게 하면, 그 작업들은 병렬화되지 않고 대기열에 들어갑니다 — 이는 의도된 동작입니다. 같은 코드베이스에서 진짜 병렬성이 필요하다면 `github_repo`를 계속 사용하세요.
+
+### 로컬 디렉터리 연결하기
+
+폴더 선택기는 **Desktop 앱**에만 있습니다 — 웹 앱은 OS 경로를 읽을 방법이 없으므로 "로컬 디렉터리 추가" 버튼이 거기서는 숨겨져 있습니다. Desktop에서는:
+
+1. 프로젝트를 엽니다 → **Resources** 패널.
+2. **로컬 디렉터리 추가**를 클릭합니다. 네이티브 폴더 선택기가 열립니다.
+3. 폴더를 선택합니다. 그 경로는 **이 Desktop 설치가 현재 등록한 데몬**에 바인딩됩니다 — 리소스 레코드에는 경로와 해당 데몬의 ID가 함께 저장됩니다.
+
+Desktop에서는 이 기기의 데몬이 오프라인이거나, 프로젝트에 이미 이 데몬에 바인딩된 `local_directory`가 있을 때, 버튼은 계속 보이되 **힌트와 함께 비활성화**됩니다 — 그래서 *왜* 사용할 수 없는지 알 수 있습니다. (웹 앱에서는 애초에 폴더 선택기가 전혀 없으므로 버튼이 완전히 숨겨집니다.) 다른 기기의 디렉터리를 바인딩하려면, 그 기기에 Desktop을 설치하고 거기서 리소스를 추가하세요.
+
+CLI에서도 가능합니다(데몬 ID를 직접 제공하기만 하면 웹 전용 환경에서도 동작합니다):
+
+```bash
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /Users/me/code/big-game \
+  --daemon-id <daemon-uuid> \
+  --ref-label "main checkout"        # optional
+
+multica project resource update <project-id> <resource-id> \
+  --local-path /Users/me/code/big-game-new
+```
+
+`--daemon-id`는 `multica daemon list`에서 얻을 수 있습니다. CLI는 페이로드를 직접 전달하고 싶을 때를 위한 범용 `--ref '<json>'` 탈출구도 받습니다.
+
+### 경로 규칙
+
+연결하는 경로는 연결 시점 검증과 작업별 검증을 모두 통과해야 합니다. 둘 다 리소스를 소유한 데몬이 강제합니다 — 서버는 JSON만 저장합니다. 어떤 규칙이라도 위반하는 경로는 타입이 지정된 오류와 함께 작업을 실패시키고, 디렉터리는 손대지 않은 채로 남겨 둡니다:
+
+- 반드시 **절대 경로**여야 합니다.
+- 반드시 **존재**해야 하고 **디렉터리**여야 합니다(파일, 파일을 가리키는 symlink, 또는 디바이스 노드가 아니어야 합니다).
+- 데몬 프로세스가 **읽기와 쓰기**가 가능해야 합니다.
+- 시스템 루트나 사용자 프로필 전체일 수 없습니다 — `/`, `/Users`, `/home`, `/root`, `/etc`, `/tmp`, `/var`, `/usr`, `/opt`, `/Users/Shared`, 본인의 `$HOME`, 임의의 Windows 드라이브 루트(`C:\`, `D:\`, …), 또는 `C:\Users` / `C:\ProgramData` / `C:\Program Files` / `C:\Program Files (x86)` / `C:\Windows`.
+- 위 중 어느 것으로든 해석되는 symlink는 거부되며, OS가 별칭 처리하는 경로의 정규형(canonical form)도 마찬가지입니다(예: macOS에서 `/private/tmp`를 입력하는 것은 `/tmp`와 동일하게 거부됩니다).
+
+블랙리스트는 의도적으로 공격적입니다 — 홈 디렉터리를 선택하면 Multica의 런타임 파일이 계정의 루트에 놓이게 되는데, 이는 절대 원하는 결과가 아닙니다. 대신 하위 폴더(보통은 실제 프로젝트 체크아웃)를 선택하세요.
+
+### (프로젝트, 데몬)당 하나
+
+프로젝트는 **데몬당 최대 하나의 `local_directory`**만 가질 수 있습니다. 같은 데몬에 두 번째를 추가하려 하면 API가 `409`를 반환합니다. Desktop 버튼은 한도에 이미 도달하면 스스로 숨겨지고, 이유를 설명하는 툴팁을 표시합니다.
+
+서로 다른 데몬은 독립적입니다 — 공유 프로젝트는 팀원의 기기마다 하나씩 `local_directory`를 가질 수 있으며, 각각은 같은 프로젝트를 서로 다른 호스트의 서로 다른 폴더에 바인딩합니다. 데몬이 작업을 가져갈 때는 자신의 ID와 일치하는 행을 고르고 나머지는 무시합니다.
+
+### 리소스 타입 혼용, 그리고 여러 개의 `local_directory` 리소스
+
+실제로 등장하는 두 가지 교차 리소스 구성이 있습니다:
+
+- **같은 프로젝트에 `github_repo` + `local_directory`.** 일치하는 `local_directory` 바인딩을 가진 데몬에서는 로컬 디렉터리가 **우선**합니다: 에이전트는 당신의 폴더에서 실행되며, 데몬은 그 작업을 위해 `github_repo` 워크트리를 생성하거나 사용하지 않습니다. (워크스페이스별 저장소 캐시는 평소처럼 동기화될 수 있는데, 이는 이 작업의 작업 트리와는 무관한 백그라운드 동작입니다.) `github_repo` URL은 참고용으로 `.multica/project/resources.json`과 에이전트의 `## Repositories` 섹션에 여전히 나타나지만, 에이전트가 편집하는 작업 트리는 워크트리가 아니라 당신의 로컬 디렉터리입니다. 이 프로젝트에 대한 `local_directory` 행이 **없는** 데몬(다른 기기이거나, 그 팀원이 하나를 연결하기 전)에서는, 작업이 평소의 `github_repo` 워크트리 흐름으로 폴백합니다. 사실상 로컬 디렉터리는 워크트리 경로에 대한 데몬별 재정의입니다.
+- **같은 프로젝트에 두 개의 `local_directory` 리소스.** 각 `local_directory`는 정확히 하나의 데몬에 바인딩되므로, 이는 서로 다른 두 기기 사이에서만 발생합니다(API는 연결 시점에 같은 데몬에 두 개를 거부합니다, 위 참조). 작업은 어느 데몬이 로컬 디렉터리를 가졌는지가 아니라 에이전트의 런타임 할당에 따라 라우팅됩니다: 작업은 수신 에이전트의 런타임을 소유한 데몬에 도착하고, 그 데몬은 자신의 ID와 일치하는 `local_directory` 행을 고르고 나머지는 무시합니다. 로드 밸런싱은 없습니다 — 특정 기기가 작업을 실행하게 하려면, 그 기기의 런타임에 바인딩된 에이전트를 디스패치하세요.
+
+다른 곳에 하나가 바인딩된 프로젝트에 대해 `local_directory` 행이 없는 데몬은 **차단되지 않습니다** — 그 작업들은 단순히 프로젝트의 다른 리소스(보통 `github_repo` 폴백)를 통해 진행됩니다. `local_directory`는 바인딩된 데몬에 대해서만 의미가 있습니다.
+
+### 로컬 디렉터리에 대해 작업 실행하기
+
+프로젝트가 수신 데몬에 바인딩된 `local_directory`를 가진 이슈에서 작업이 디스패치되면, 데몬은:
+
+1. 경로를 다시 검증합니다(위의 규칙).
+2. symlink로 해석된 실제 경로를 키로 하여 디렉터리당 잠금을 획득합니다 — 그래서 같은 폴더로 향하는 두 경로(하나는 symlink 경유, 하나는 직접)도 여전히 직렬화됩니다.
+3. 에이전트의 `CLAUDE.md` / `AGENTS.md`(그리고 `.multica/project/resources.json`)를 **사용자의 디렉터리 안에** 기록합니다. 에이전트는 당신이 직접 그 폴더를 연 것과 똑같이 그곳에서 작업합니다.
+4. Multica의 런타임 산출물(`output/`, `logs/`, `.gc_meta.json`)은 사용자의 디렉터리 **바깥**의 별도 envRoot에 둡니다.
+
+같은 디렉터리에 대한 두 번째 작업이 첫 번째 작업이 실행 중일 때 도착하면, **로컬 디렉터리 대기 중(Waiting for local directory)** 상태로 멈춥니다. 이 상태는 작업이 있는 모든 곳에서 보입니다 — 채팅 작업 알약(pill), 에이전트 배너, 실행 로그, 활동 표시기 — 그리고 멈춘 작업은 에이전트의 "대기 중" 존재로 집계됩니다. 멈춘 작업을 취소하면 그 슬롯이 즉시 해제됩니다. 실행 중인 작업을 취소하면 다음 작업이 승격됩니다.
+
+이 대기는 타임아웃이 아닙니다 — 멈춘 작업은 잠금이 해제되거나 사용자 / 에이전트가 취소할 때까지 멈춰 있습니다.
+
+### Multica가 당신의 디렉터리에서 건드리는 것과 건드리지 않는 것
+
+- **기록합니다**: `CLAUDE.md` / `AGENTS.md`(또는 에이전트 제공자에 해당하는 등가물)와 `.multica/project/resources.json`을 디렉터리 루트에, 그래서 에이전트가 메타 스킬과 리소스 목록을 갖게 합니다. 커밋되기를 원하지 않으면 이것들을 `.gitignore`에 추가하세요.
+- **기록합니다**: 에이전트가 결정하는 모든 코드 편집을 — 당신이 직접 로컬에서 에이전트를 실행한 것과 정확히 같은 방식으로.
+- **절대 물리적으로 삭제하지 않습니다**: 디렉터리나 그 안의 어떤 것도. 가비지 컬렉션은 경로를 인식합니다: `local_directory` envRoot의 경우 `workspacesRoot` 아래의 자체 `output/`과 `logs/`만 정리하며, 사용자의 디렉터리는 출입 금지로 취급합니다.
+
+### v1 제한 사항(후속 작업에서 좁혀질 예정)
+
+첫 릴리스는 의도적으로 `github_repo`보다 더 날카로운 모서리를 가지고 출시됩니다. 이 목록은 시간이 지나며 줄어들 것으로 예상하세요 — 여기 문서화된 것은 오늘 사실인 내용입니다:
+
+- **자동 브랜치 전환 없음.** 에이전트는 당신이 체크아웃해 둔 브랜치에서 실행됩니다. 중요하다면 디스패치 전에 브랜치를 전환하세요.
+- **더티 트리 보호나 자동 커밋 없음.** 커밋되지 않은 변경은 에이전트에게 보이고, 제자리에서 수정될 수 있으며, stash되지 않습니다. 디렉터리를 실제 작업 트리로 취급하고 위험한 실행 전에 커밋하세요.
+- **자동 PR 없음.** 작업이 끝나면 변경은 만들어진 브랜치 그대로 남아 있습니다 — 아무것도 push되지 않고 PR도 열리지 않습니다. 준비되면 직접 push하고 PR을 여세요.
+- **`waiting_local_directory`는 상태를 보여 주지만 보유자는 보여 주지 않습니다.** 배지는 작업이 멈췄다고 알려 줍니다. 어떤 작업이나 어떤 파일 경로가 현재 디렉터리를 보유하고 있는지는 드러내지 않습니다.
+
+이것들은 로컬 디렉터리 작업의 에이전트 작업 수명 주기 후속 항목으로 추적됩니다. 그것이 출시되기 전까지는 `local_directory`를 "에이전트가 당신의 폴더에서, 당신이 하는 것과 같은 방식으로 실행된다"로 취급하세요.
+
+## 프로젝트 생성 시 저장소 연결하기
+
+**Web** 또는 **Desktop** 앱에서 *새 프로젝트*를 열면, 이제 상태 / 우선순위 / 리드 옆에 **Repos** 알약(pill)이 표시됩니다. 워크스페이스에 바인딩된 저장소를 선택하면(또는 임시 URL을 붙여 넣으면), 프로젝트가 생성되는 순간 그것들이 `github_repo` 리소스로 연결됩니다.
+
+**CLI**에서는:
+
+```bash
+# Create + attach in one shot. The server attaches resources in the same
+# transaction as the project create — invalid resources roll back the whole
+# operation, so you never end up with a project that has half its resources.
+multica project create \
+  --title "Agent UX 2026" \
+  --repo https://github.com/multica-ai/multica
+
+# Manage resources later
+multica project resource list <project-id>
+multica project resource add  <project-id> --type github_repo --url <url>
+multica project resource remove <project-id> <resource-id>
+
+# Generic escape hatch for any resource_type the server understands —
+# no CLI change needed when a new type ships:
+multica project resource add <project-id> \
+  --type notion_page \
+  --ref '{"page_id":"…","title":"…"}'
+```
+
+`--repo`는 반복할 수 있습니다. 각 값은 별도의 `github_repo` 리소스로 연결됩니다.
+
+## 런타임에 에이전트가 보는 것
+
+데몬이 프로젝트 안의 이슈를 위해 에이전트를 생성하면, 두 가지 일이 일어납니다:
+
+### 1. `.multica/project/resources.json`
+
+API 응답의 구조화된 패스스루(pass-through)로, 에이전트의 작업 디렉터리에 기록됩니다:
+
+```json
+{
+  "project_id": "…",
+  "project_title": "Agent UX 2026",
+  "resources": [
+    {
+      "id": "…",
+      "resource_type": "github_repo",
+      "resource_ref": {
+        "url": "https://github.com/multica-ai/multica",
+        "default_branch_hint": "main"
+      }
+    }
+  ]
+}
+```
+
+스킬, 헬퍼 스크립트, 또는 에이전트 자신이 이번 실행의 *정확한* 리소스 집합이 필요할 때 이 파일을 파싱할 수 있습니다.
+
+### 2. 메타 스킬 프롬프트의 "Project Context" 섹션
+
+에이전트의 `CLAUDE.md` / `AGENTS.md`(제공자에 따라 다름)에는 이제 사람이 읽을 수 있는 요약이 포함됩니다:
+
+```
+## Project Context
+
+This issue belongs to **Agent UX 2026**.
+
+Project resources (also written to `.multica/project/resources.json`):
+
+- **GitHub repo**: https://github.com/multica-ai/multica (default branch: `main`)
+
+Resources are pointers — open them only when relevant to the task. For
+`github_repo` resources, use `multica repo checkout <url>` to fetch the code.
+```
+
+이 텍스트는 의도적으로 최소한입니다. 전체 페이로드는 디스크에 있고, 프롬프트는 에이전트가 프로젝트가 존재한다는 것과 무엇이 연결되었는지를 알도록 방향만 잡아 줍니다.
+
+### 실패 모드
+
+리소스 가져오기는 **best-effort**입니다. API 호출이 실패하면 프롬프트에서 프로젝트 섹션이 생략되고 파일도 기록되지 않지만, 작업은 여전히 시작됩니다. 에이전트는 누락된 프로젝트 컨텍스트 때문에 멈추는 일이 절대 없습니다.
+
+## 새 리소스 타입 추가하기
+
+이 추상화의 핵심은 새 타입이 저렴하다는 것입니다. 전체 경로는:
+
+1. **서버 검증기**(`server/internal/handler/project_resource.go`) — `validateAndNormalizeResourceRef`에 새 페이로드를 파싱하고 정규화하는 case를 추가합니다.
+2. **데몬 메타 스킬 포매터**(`server/internal/daemon/execenv/runtime_config.go`) — `formatProjectResource`에 case를 추가해, 에이전트 프롬프트가 새 타입을 읽기 좋은 글머리 기호로 렌더링하게 합니다.
+3. **TypeScript 타입**(`packages/core/types/project.ts`) — `ProjectResourceType`를 확장하고 페이로드 인터페이스를 추가합니다.
+4. **UI 렌더러**(`packages/views/projects/components/project-resources-section.tsx`) — `ResourceRow`에 새 타입에 대한 case를 추가합니다.
+
+**스키마 마이그레이션도, 새 sqlc 쿼리도, 새 엔드포인트도, 그리고 CLI 변경도 없습니다** — CLI의 범용 `--ref '<json>'` 플래그가 검증기가 이해하는 모든 페이로드를 받으므로, 새 타입에 대한 첫날 지원은 순전히 위 네 단계입니다. (나중에 타입별 CLI 단축 명령을 *선택적으로* 추가할 수 있지만, 필수는 아닙니다.)
+
+같은 `project_resource` 테이블과 같은 세 개의 CRUD 호출이 모든 타입을 처리합니다.
+
+## 워크스페이스 저장소 vs. 프로젝트 저장소
+
+에이전트에게 보이는 저장소 목록(`CLAUDE.md` / `AGENTS.md`의 `## Repositories` 블록)은 데몬의 클레임 핸들러가 다음 우선순위로 선택합니다:
+
+- **프로젝트가 최소한 하나의 `github_repo` 리소스를 가짐** → 그 저장소만 에이전트에게 노출됩니다. 워크스페이스에 바인딩된 저장소는 의도적으로 숨겨, 에이전트가 이 이슈에 어느 것이 속하는지 추측하지 않아도 되게 합니다.
+- **프로젝트가 `github_repo` 리소스를 갖지 않음(또는 이슈가 프로젝트에 속하지 않음)** → 이전처럼 워크스페이스의 저장소 목록으로 폴백합니다.
+
+이는 에이전트의 작업 집합을 좁게 유지합니다: 프로젝트가 저장소를 명확히 밝히면 그것이 권위 있는 답입니다. `.multica/project/resources.json`의 구조화된 리소스 목록은 항상 전체 집합을 담으므로, 모든 것을 검사하려는 스킬은 여전히 그렇게 할 수 있습니다.
+
+데몬은 체크아웃 측에서도 이를 반영합니다: 프로젝트 범위의 `github_repo` URL을 가진 작업이 도착하면, 그 URL들은 에이전트가 생성되기 전에 워크스페이스별 허용 목록에 병합되고 *동시에* 로컬 저장소 캐시에 동기화됩니다. 그래서 워크스페이스 수준에서 바인딩되지 않은 프로젝트 저장소 URL도 여전히 `multica repo checkout`의 유효한 인자가 됩니다 — 데몬은 그것을 "구성되지 않음"으로 거부하지 않습니다. 허용 목록 분리는 내부적입니다: 워크스페이스에 바인딩된 URL과 작업 범위의 URL은 별도로 추적되므로, 워크스페이스 저장소 새로 고침이 실행 도중에 프로젝트 URL을 실수로 취소하는 일이 없습니다.
+
+## 여기서 의도적으로 범위에 **포함하지 않은** 것
+
+- **프로젝트 간 공유.** 오늘날 각 리소스는 정확히 하나의 프로젝트에만 존재합니다.
+- **스킬별 리소스 범위 지정.** 모든 리소스는 에이전트 실행의 모든 스킬에 보입니다. 타입 인식 필터링은 후속 작업입니다.
+- **캐싱 / 동기화.** `github_repo`는 그냥 메타데이터입니다 — 체크아웃은 여전히 필요할 때 `multica repo checkout`을 통해 일어납니다. Notion / Google Docs의 캐시된 문서 텍스트는 해당 타입과 함께 제공될 것입니다.
+
+이것들은 의도적인 누락입니다 — 첫 번째 컷의 목표는 가장 적은 수의 움직이는 부품으로 이 추상화를 검증하는 것입니다.

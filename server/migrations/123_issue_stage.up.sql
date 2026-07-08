@@ -1,0 +1,15 @@
+-- Per-issue `stage` ordinal: groups sub-issues sharing the same parent into
+-- ordered barrier groups. NULL = unstaged (the issue does not participate in
+-- staged grouping). Stage is interpreted relative to siblings under the same
+-- parent_issue_id; a value on a top-level issue is inert.
+--
+-- The child-done -> parent notification + assignee wake fires only when a
+-- stage barrier closes — i.e. every child in the lowest unfinished stage has
+-- reached a terminal status (done/cancelled). Unstaged sibling sets behave as
+-- a single implicit stage, so the wake fires once when the last child
+-- finishes rather than on every child. See
+-- server/internal/handler/issue_child_done.go (stageBarrierClosed).
+--
+-- Stages are 1-based; the CHECK keeps the column clean (NULL or >= 1) so the
+-- "unstaged" sentinel stays unambiguous.
+ALTER TABLE issue ADD COLUMN stage INTEGER CHECK (stage IS NULL OR stage >= 1);

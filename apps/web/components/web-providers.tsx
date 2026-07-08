@@ -1,16 +1,16 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
+import { useWelcomeStore } from "@multica/core/onboarding";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
-import { PageviewTracker } from "./pageview-tracker";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -66,17 +66,21 @@ export function WebProviders({
       wsUrl={deriveWsUrl()}
       cookieAuth={cookieAuth}
       onLogin={setLoggedInCookie}
-      onLogout={clearLoggedInCookie}
+      onLogout={() => {
+        // welcome-store holds the transient post-onboarding signal. Must
+        // clear on logout so user B logging into the same browser doesn't
+        // inherit user A's signal and have <WelcomeAfterOnboarding /> fire
+        // listAgents / createIssue against a workspace user B doesn't even
+        // belong to. The store's own docstring promises this reset; this
+        // is where it gets wired.
+        useWelcomeStore.getState().reset();
+        clearLoggedInCookie();
+      }}
       identity={identity}
       locale={locale}
       resources={resources}
       localeAdapter={localeAdapter}
     >
-      {/* Suspense boundary is required by Next.js for useSearchParams in
-          a client component mounted this high in the tree. */}
-      <Suspense fallback={null}>
-        <PageviewTracker />
-      </Suspense>
       <WebNavigationProvider>{children}</WebNavigationProvider>
     </CoreProvider>
   );

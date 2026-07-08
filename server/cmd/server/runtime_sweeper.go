@@ -9,6 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -35,8 +36,20 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
-	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
+	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// coarse server-side backstop keyed on started_at, AND-gated by daemon
+	// liveness (agent_runtime.last_seen_at freshness within
+	// staleThresholdSeconds): a running task whose runtime is still
+	// heartbeating is NEVER killed by this wall clock, even after the timeout
+	// elapses. This is what lets healthy multi-hour research / training runs
+	// survive on self-hosted deployments (MUL-4107) — the daemon itself
+	// decides stuck-vs-long-running via its inactivity watchdogs (idle/tool),
+	// so the server-side wall clock is only a defensive backstop for the
+	// pathological case where a runtime row somehow retains status='online'
+	// with a stale DB heartbeat for longer than this timeout. The primary
+	// "daemon died" path is `sweepStaleRuntimes` in the same tick (Redis
+	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
+	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
@@ -45,9 +58,8 @@ const (
 	// tasks already on the queue when a runtime drops off (or that lost
 	// the race against a runtime that went offline mid-tick) need a
 	// time-bounded exit. 2 hours is conservatively above any reasonable
-	// "queued behind a long-running task" window for an online runtime
-	// (default agent timeout is 2h, sweeper interval is 30s) so we don't
-	// expire legitimately-pending work, while still draining the historical
+	// "queued behind a long-running task" window for an online runtime, so we
+	// don't expire legitimately-pending work, while still draining the historical
 	// 87k autopilot backlog within ~24h once enabled.
 	queuedTTLSeconds = 2 * 3600.0
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
@@ -118,7 +130,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 	}
 	if taskSvc != nil && taskSvc.Analytics != nil {
 		for _, row := range staleRows {
-			taskSvc.Analytics.Capture(analytics.RuntimeOffline(
+			obsmetrics.RecordEvent(taskSvc.Analytics, taskSvc.Metrics, analytics.RuntimeOffline(
 				util.UUIDToString(row.OwnerID),
 				util.UUIDToString(row.WorkspaceID),
 				util.UUIDToString(row.ID),
@@ -235,14 +247,25 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 }
 
 // sweepStaleTasks fails tasks stuck in dispatched/running for too long,
-// even when the runtime is still online. This handles cases where:
-// - The agent process hangs and the daemon is still heartbeating
-// - The daemon failed to report task completion/failure
-// - A server restart left tasks in a non-terminal state
+// even when the runtime is still online at the row level. Each branch pairs
+// the wall clock with a task-appropriate liveness signal so healthy long
+// runs are preserved:
+//   - dispatched: excludes rows with an active prepare_lease (renewed by
+//     the daemon between claim and StartTask).
+//   - running: excludes rows whose runtime is 'online' with a fresh
+//     last_seen_at (renewed by the daemon heartbeat ~every 15s).
+//
+// The daemon-dead case is primarily handled upstream by sweepStaleRuntimes
+// in the same tick; this function is a defensive backstop for the residual
+// edge where a runtime row lingers online-with-stale-heartbeat past the
+// wall clock (MUL-4107).
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
+		// Reuse the runtime stale window so the running-task backstop
+		// exactly matches what sweepStaleRuntimes considers "not alive".
+		RuntimeStaleSecs: staleThresholdSeconds,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
@@ -253,6 +276,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
@@ -276,6 +300,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	}
 
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
@@ -305,7 +330,7 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 				if issue.Status == "in_progress" && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
-						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo"})
+						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})
 					}
 				}
 			}

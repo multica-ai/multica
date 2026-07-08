@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { Virtuoso, type Components } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -18,14 +19,20 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
-import { Markdown } from "@multica/views/common/markdown";
-import { copyMarkdown } from "../../editor";
+import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { MemoizedMarkdown } from "@multica/views/common/markdown";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
+import type {
+  ChatMessage,
+  ChatPendingTask,
+  TaskFailureReason,
+  TaskMessagePayload,
+} from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -42,16 +49,89 @@ interface ChatMessageListProps {
   pendingTask: ChatPendingTask | null | undefined;
   /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
   availability: AgentAvailability | undefined;
+  firstItemIndex?: number;
+  hasOlderMessages?: boolean;
+  isFetchingOlderMessages?: boolean;
+  onLoadOlderMessages?: () => void;
 }
+
+// ─── Virtuoso chrome ─────────────────────────────────────────────────────
+//
+// Header/Footer MUST be stable component references (module scope), never
+// inline arrows in the `components` prop: an inline `components={{ Footer:
+// () => … }}` creates a new component *type* every render, so React unmounts
+// and remounts the whole Header/Footer subtree each time. During task
+// streaming that tore down and rebuilt the entire live timeline — every row
+// and every Markdown parse — on every `task:message` event, freezing the
+// renderer for seconds at a time (MUL-3960). Per-render data flows through
+// Virtuoso's `context` prop instead, which reaches these components as an
+// ordinary prop (re-render, not remount).
+
+interface ChatListContext {
+  isFetchingOlderMessages: boolean;
+  hasLive: boolean;
+  liveTimeline: ChatTimelineItem[];
+  showStatusPill: boolean;
+  pendingTask: ChatPendingTask | null | undefined;
+  liveTaskMessages: readonly TaskMessagePayload[] | undefined;
+  availability: AgentAvailability | undefined;
+}
+
+function ChatListHeader({ context }: { context?: ChatListContext }) {
+  const { t } = useT("chat");
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pt-4">
+      {context?.isFetchingOlderMessages && (
+        <div className="text-center text-xs text-muted-foreground">
+          {t(($) => $.message_list.loading_older)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatListFooter({ context }: { context?: ChatListContext }) {
+  if (!context) return null;
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+      {context.hasLive && (
+        <div className="w-full space-y-1.5">
+          <TimelineView items={context.liveTimeline} isStreaming />
+        </div>
+      )}
+      {context.showStatusPill && context.pendingTask && (
+        <TaskStatusPill
+          pendingTask={context.pendingTask}
+          taskMessages={context.liveTaskMessages ?? []}
+          availability={context.availability}
+        />
+      )}
+    </div>
+  );
+}
+
+const LIST_COMPONENTS: Components<ChatMessage, ChatListContext> = {
+  Header: ChatListHeader,
+  Footer: ChatListFooter,
+};
 
 export function ChatMessageList({
   messages,
   pendingTask,
   availability,
+  firstItemIndex = 0,
+  hasOlderMessages = false,
+  isFetchingOlderMessages = false,
+  onLoadOlderMessages,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollContainerEl(node);
+  }, []);
   const fadeStyle = useScrollFade(scrollRef);
-  useAutoScroll(scrollRef);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
 
@@ -66,41 +146,72 @@ export function ChatMessageList({
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
   const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
+  const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
-    enabled: showLiveTimeline,
+    enabled: canFetchLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves
+  // the array reference when a duplicate event arrives, so this recomputes
+  // only when a genuinely new message lands — not on unrelated re-renders.
+  const liveTimeline: ChatTimelineItem[] = useMemo(
+    () => buildTimeline(liveTaskMessages ?? []),
+    [liveTaskMessages],
+  );
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
+  const totalCount = messages.length + (hasLive || showStatusPill ? 1 : 0);
+  const firstIndex = totalCount > 0 ? firstItemIndex : 0;
+
+  const listContext: ChatListContext = {
+    isFetchingOlderMessages,
+    hasLive,
+    liveTimeline,
+    showStatusPill,
+    pendingTask,
+    liveTaskMessages,
+    availability,
+  };
+
   return (
-    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
-      {/* Inner container matches issue / project detail width convention
-       *  (max-w-4xl + mx-auto) so switching between chat and content
-       *  views doesn't jolt the reading width. px-5 is a touch tighter
-       *  than issue-detail's px-8 because the chat window can be narrow. */}
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
-          />
-        ))}
-        {hasLive && (
-          <div className="w-full space-y-1.5">
-            <TimelineView items={liveTimeline} isStreaming />
+    <div
+      ref={setScrollContainerRef}
+      data-tab-scroll-root
+      style={fadeStyle}
+      className="flex-1 overflow-y-auto"
+    >
+      {!scrollContainerEl ? (
+        <div className="mx-auto w-full max-w-4xl px-5 pt-4 space-y-3">
+          <ChatMessageSkeleton />
+        </div>
+      ) : (
+      <Virtuoso
+        customScrollParent={scrollContainerEl}
+        data={messages}
+        firstItemIndex={firstIndex}
+        increaseViewportBy={{ top: 400, bottom: 600 }}
+        atBottomThreshold={120}
+        atBottomStateChange={setIsNearBottom}
+        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        startReached={() => {
+          if (hasOlderMessages && !isFetchingOlderMessages) {
+            onLoadOlderMessages?.();
+          }
+        }}
+        computeItemKey={(_, msg) => msg.id}
+        context={listContext}
+        components={LIST_COMPONENTS}
+        itemContent={(_, msg) => (
+          <div className="mx-auto w-full max-w-4xl px-5 py-2">
+            <MessageBubble
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+            />
           </div>
         )}
-        {showStatusPill && pendingTask && (
-          <TaskStatusPill
-            pendingTask={pendingTask}
-            taskMessages={liveTaskMessages ?? []}
-            availability={availability}
-          />
-        )}
-      </div>
+      />
+      )}
     </div>
   );
 }
@@ -132,20 +243,20 @@ export function ChatMessageSkeleton() {
   );
 }
 
-function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
-  return {
-    seq: m.seq,
-    type: m.type,
-    tool: m.tool,
-    content: m.content,
-    input: m.input,
-    output: m.output,
-  };
-}
-
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
+// memo: every streamed task:message re-renders ChatMessageList, and with it
+// every VISIBLE row via itemContent. Message objects are referentially
+// stable for unchanged messages and isPending is a boolean, so a shallow
+// memo skips reconciling rows the stream didn't touch — the persisted
+// history stays inert while only the live footer updates.
+const MessageBubble = memo(function MessageBubble({
+  message,
+  isPending,
+}: {
+  message: ChatMessage;
+  isPending: boolean;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -155,15 +266,20 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
            * Neutralise prose's leading/trailing margin so single-line
            * bubbles stay as compact as the plain-text version used to. */}
           <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown>{message.content}</Markdown>
+            <MemoizedMarkdown attachments={message.attachments}>{message.content}</MemoizedMarkdown>
           </div>
+          <AttachmentList
+            attachments={message.attachments}
+            content={message.content}
+            className="mt-1.5"
+          />
         </div>
       </div>
     );
   }
 
   return <AssistantMessage message={message} isPending={isPending} />;
-}
+});
 
 function AssistantMessage({
   message,
@@ -173,16 +289,21 @@ function AssistantMessage({
   isPending: boolean;
 }) {
   const taskId = message.task_id;
+  const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
   // task finishes, since WS already populated it.
   const { data: taskMessages } = useQuery({
     ...taskMessagesOptions(taskId ?? ""),
-    enabled: !!taskId,
+    enabled: canFetchTaskMessages,
   });
 
-  const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
+  // Same memoization rationale as the live timeline in ChatMessageList.
+  const timeline: ChatTimelineItem[] = useMemo(
+    () => buildTimeline(taskMessages ?? []),
+    [taskMessages],
+  );
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
@@ -202,12 +323,16 @@ function AssistantMessage({
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
-        <TimelineView items={timeline} />
+        <TimelineView items={timeline} attachments={message.attachments} />
       ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{message.content}</Markdown>
+          <MemoizedMarkdown attachments={message.attachments}>{message.content}</MemoizedMarkdown>
         </div>
       )}
+      <AttachmentList
+        attachments={message.attachments}
+        content={message.content}
+      />
       <MessageFooter
         message={message}
         timeline={timeline}
@@ -252,10 +377,9 @@ function MessageCopyButton({
 }) {
   const { t } = useT("chat");
   const handleCopy = async () => {
-    try {
-      await copyMarkdown(extractCopyText(message, timeline));
+    if (await copyText(extractCopyText(message, timeline))) {
       toast.success(t(($) => $.message_list.copied_toast));
-    } catch {
+    } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
     }
   };
@@ -382,9 +506,11 @@ function FailureBubble({
 function TimelineView({
   items,
   isStreaming,
+  attachments,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
+  attachments?: import("@multica/core/types").Attachment[];
 }) {
   const { preface, middle, final } = splitTimeline(items);
 
@@ -392,15 +518,23 @@ function TimelineView({
     <>
       {preface.length > 0 && (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
+          <MemoizedMarkdown attachments={attachments}>
+            {preface.map((t) => t.content ?? "").join("")}
+          </MemoizedMarkdown>
         </div>
       )}
       {middle.length > 0 && (
-        <OuterProcessFold items={middle} defaultOpen={!!isStreaming} />
+        <OuterProcessFold
+          items={middle}
+          defaultOpen={!!isStreaming}
+          attachments={attachments}
+        />
       )}
       {final.length > 0 && (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
+          <MemoizedMarkdown attachments={attachments}>
+            {final.map((t) => t.content ?? "").join("")}
+          </MemoizedMarkdown>
         </div>
       )}
     </>
@@ -410,9 +544,11 @@ function TimelineView({
 function OuterProcessFold({
   items,
   defaultOpen,
+  attachments,
 }: {
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
+  attachments?: import("@multica/core/types").Attachment[];
 }) {
   const { t } = useT("chat");
   // useState seeds once at mount — subsequent renders never overwrite the
@@ -433,7 +569,7 @@ function OuterProcessFold({
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
             item.type === "text" ? (
-              <MiddleTextRow key={item.seq} item={item} />
+              <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
             ) : (
               <ItemRow key={item.seq} item={item} />
             ),
@@ -448,10 +584,16 @@ function OuterProcessFold({
 // down-shifted (xs / muted) so it reads as part of the agent's process,
 // not the final answer — the final answer renders below the fold at full
 // prose size.
-function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
+function MiddleTextRow({
+  item,
+  attachments,
+}: {
+  item: ChatTimelineItem;
+  attachments?: import("@multica/core/types").Attachment[];
+}) {
   return (
     <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-      <Markdown>{item.content ?? ""}</Markdown>
+      <MemoizedMarkdown attachments={attachments}>{item.content ?? ""}</MemoizedMarkdown>
     </div>
   );
 }
@@ -593,4 +735,3 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
-

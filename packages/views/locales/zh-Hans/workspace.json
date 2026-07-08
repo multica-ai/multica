@@ -21,6 +21,10 @@
     "description": "一个工作区，让你和 AI 队友并肩协作——一起处理 issue、留下评论、共享同一份上下文。",
     "invite_hint": "工作区创建后可邀请队友加入。"
   },
+  "creation_disabled": {
+    "title": "已禁用创建工作区",
+    "description": "该 Multica 实例不允许创建新的工作区，请联系管理员邀请你加入已有工作区。"
+  },
   "no_access": {
     "title": "工作区不可用",
     "description": "该工作区不存在，或你没有访问权限。",

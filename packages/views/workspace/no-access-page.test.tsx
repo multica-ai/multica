@@ -12,6 +12,7 @@ const TEST_RESOURCES = {
 
 const navigate = vi.fn();
 const logout = vi.fn();
+const mockWorkspaces = vi.hoisted(() => [{ slug: "valid-team" }]);
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: navigate, replace: navigate }),
@@ -19,6 +20,25 @@ vi.mock("../navigation", () => ({
 
 vi.mock("../auth", () => ({
   useLogout: () => logout,
+}));
+
+vi.mock("@multica/core/paths", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/paths")>(
+      "@multica/core/paths",
+    );
+  return {
+    ...actual,
+    useHasOnboarded: () => true,
+  };
+});
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({ data: mockWorkspaces }),
+}));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
 }));
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -46,15 +66,15 @@ describe("NoAccessPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("navigates to root on 'Go to my workspaces'", () => {
+  it("navigates to the first accessible workspace on 'Go to my workspaces'", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /go to my workspaces/i }));
-    expect(navigate).toHaveBeenCalledWith("/");
+    expect(navigate).toHaveBeenCalledWith("/valid-team/issues");
   });
 
   it("clears last_workspace_slug cookie on mount so the proxy stops looping us back", () => {
     document.cookie = "last_workspace_slug=stale; path=/";
-    render(<NoAccessPage />);
+    renderPage();
     // Assert empty value, not just absence of "stale" — the proxy reads any
     // truthy value as a redirect target, so a buggy clear that left e.g.
     // `last_workspace_slug=other` would still trap users.

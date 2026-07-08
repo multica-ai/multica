@@ -91,7 +91,7 @@ export function sortUserItemsByRecency(
   items: MentionItem[],
   recency: RecencyMap,
 ): MentionItem[] {
-  return [...items].sort((a, b) => {
+  return items.toSorted((a, b) => {
     const ra = recency[recencyKey(a)] ?? 0;
     const rb = recency[recencyKey(b)] ?? 0;
     if (ra !== rb) return rb - ra;

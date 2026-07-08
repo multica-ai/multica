@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
@@ -61,12 +63,19 @@ export function DaemonSettingsTab() {
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
+  const [reauthLoading, setReauthLoading] = useState(false);
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
     window.daemonAPI.isCliInstalled().then(setCliInstalled);
     window.daemonAPI.getStatus().then(setStatus);
     return window.daemonAPI.onStatusChange(setStatus);
+  }, []);
+
+  const handleReauth = useCallback(async () => {
+    setReauthLoading(true);
+    await reauthenticateDaemon();
+    setReauthLoading(false);
   }, []);
 
   const updatePref = useCallback(
@@ -79,12 +88,55 @@ export function DaemonSettingsTab() {
     [],
   );
 
+  // The daemon runs somewhere the app can't drive (e.g. inside WSL2 behind a
+  // Windows desktop): /health is reachable but the lifecycle CLI can't reach
+  // its process. Auto-start/auto-stop can't work, so disable them and say why
+  // rather than letting the toggles silently no-op. See #3916.
+  const externallyManaged = status.externallyManaged === true;
+
   return (
     <div>
       <h2 className="text-lg font-semibold">Daemon</h2>
       <p className="text-sm text-muted-foreground mt-1">
         Configure how the local agent daemon behaves with the desktop app.
       </p>
+
+      {status.state === "auth_expired" && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-destructive">
+              Sign-in expired
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              The local daemon couldn&apos;t authenticate, so this device
+              can&apos;t take tasks. Sign in again to restore it.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            className="shrink-0"
+            onClick={handleReauth}
+            disabled={reauthLoading}
+          >
+            <LogIn className="size-3.5 mr-1.5" />
+            Sign in again
+          </Button>
+        </div>
+      )}
+
+      {externallyManaged && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 text-sm text-muted-foreground">
+            This device&apos;s daemon runs outside the app — for example inside
+            WSL2 — so the app can&apos;t start or stop it. Start or stop it from
+            that environment with{" "}
+            <code className="font-mono text-xs">multica daemon start</code> /{" "}
+            <code className="font-mono text-xs">multica daemon stop</code>.
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 divide-y">
         <SettingRow
@@ -94,7 +146,7 @@ export function DaemonSettingsTab() {
           <Switch
             checked={prefs.autoStart}
             onCheckedChange={(checked) => updatePref("autoStart", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
         </SettingRow>
 
@@ -105,7 +157,7 @@ export function DaemonSettingsTab() {
           <Switch
             checked={prefs.autoStop}
             onCheckedChange={(checked) => updatePref("autoStop", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
         </SettingRow>
 

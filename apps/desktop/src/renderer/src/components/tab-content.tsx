@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router-dom";
 import { useActiveGroup } from "@/stores/tab-store";
 import { TabNavigationProvider } from "@/platform/navigation";
 import { useTabRouterSync } from "@/hooks/use-tab-router-sync";
+import { useTabScrollRestore } from "@/hooks/use-tab-scroll-restore";
 import type { Tab } from "@/stores/tab-store";
 
 /**
@@ -13,6 +14,28 @@ import type { Tab } from "@/stores/tab-store";
 function TabRouterInner({ tab }: { tab: Tab }) {
   useTabRouterSync(tab.id, tab.router);
   return null;
+}
+
+/**
+ * Wraps a tab's subtree so its scroll position survives the round trip
+ * through `<Activity mode="hidden">`. Lives inside Activity so the hook's
+ * effects cycle with the tab's visibility — see `useTabScrollRestore` for
+ * the mechanism. `display: contents` keeps the wrapper transparent to
+ * the surrounding flex layout.
+ */
+function TabScrollRestoreWrapper({
+  tabPath,
+  children,
+}: {
+  tabPath: string;
+  children: React.ReactNode;
+}) {
+  const ref = useTabScrollRestore(tabPath);
+  return (
+    <div ref={ref} style={{ display: "contents" }}>
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -44,10 +67,12 @@ export function TabContent() {
           key={tab.id}
           mode={tab.id === group.activeTabId ? "visible" : "hidden"}
         >
-          <TabNavigationProvider router={tab.router}>
-            <RouterProvider router={tab.router} />
-            <TabRouterInner tab={tab} />
-          </TabNavigationProvider>
+          <TabScrollRestoreWrapper tabPath={tab.path}>
+            <TabNavigationProvider router={tab.router}>
+              <RouterProvider router={tab.router} />
+              <TabRouterInner tab={tab} />
+            </TabNavigationProvider>
+          </TabScrollRestoreWrapper>
         </Activity>
       ))}
     </>

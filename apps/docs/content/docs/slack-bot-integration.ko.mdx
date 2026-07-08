@@ -1,0 +1,186 @@
+---
+title: Slack Bot 연동
+description: Multica 에이전트를 자체 Slack 앱에 연결하세요 — 매니페스트로 앱을 만들고, 설치한 다음, bot + app-level 토큰을 붙여넣고, Slack 안에서 @로 멘션하거나 DM하거나 /issue를 입력하세요.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+아무 [에이전트](/agents)나 Slack 봇에 연결하면, 팀이 Slack 안에서 바로 그 에이전트와 함께 일할 수 있습니다 — 봇에게 DM을 보내거나, 채널에서 `@`로 멘션하거나, `/issue`를 입력해 앱을 열지 않고도 [Multica 이슈](/issues)를 생성하세요.
+
+Slack은 **자체 앱 사용(BYO)** 모델을 따릅니다: 워크스페이스 admin이 Slack 앱을 만들고, 자신의 Slack 워크스페이스에 설치한 다음, 토큰을 Multica에 붙여넣습니다. 각 에이전트가 **자체** Slack 앱을 갖습니다 — 그래서 하나의 Slack 워크스페이스 안에서 여러 에이전트가 각각 별개로 `@`로 멘션할 수 있는 봇을 가질 수 있습니다. (바인딩이 스캔하여 설치하는 방식인 [Lark](/lark-bot-integration)와는 다릅니다.)
+
+전체 설정은 아래에 있으며 약 5분이 걸립니다. 마지막에는 Multica에 붙여넣을 두 개의 토큰을 얻게 됩니다:
+
+- **Bot token** — `xoxb-`로 시작
+- **App-level token** — `xapp-`로 시작
+
+## Slack 앱 설정하기
+
+### 1. 매니페스트로 앱 만들기
+
+1. [https://api.slack.com/apps](https://api.slack.com/apps)로 이동해 **Create New App**을 클릭합니다.
+2. **From a manifest**를 선택합니다.
+3. 앱을 설치할 Slack 워크스페이스를 고릅니다.
+4. **YAML** 탭으로 전환해 아래 매니페스트를 붙여넣고, 검토한 뒤 앱을 생성합니다.
+
+```yaml
+display_information:
+  name: Multica
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[title]"
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - reactions:write
+      - users:read
+      - commands
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+이 매니페스트는 Multica에 필요한 모든 것을 구성하므로, 직접 손으로 설정할 것이 없습니다:
+
+| 섹션 | 이유 |
+|---|---|
+| `app_home.messages_tab_enabled: true` | 멤버가 봇을 열어 **DM**할 수 있게 합니다. 이것이 없으면 봇에게 직접 메시지를 보낼 수 없습니다. |
+| `bot_user` | `@`로 멘션되고 답변을 게시하는 봇 신원을 생성합니다. |
+| `chat:write` | 에이전트의 답변을 Slack으로 다시 게시합니다. |
+| `reactions:write` | 에이전트가 처리하는 동안 메시지에 👀 반응을 추가하고, 답변하면 제거합니다. 이 스코프가 없으면 표시가 조용히 건너뛰어집니다 — 나머지 기능은 모두 정상 동작합니다. |
+| `app_mentions:read` + `app_mention` 이벤트 | 채널에서 `@`-멘션을 받습니다. |
+| `im:history` + `message.im` | 봇에게 보내는 **DM**을 받습니다(모든 DM 메시지를 읽습니다). |
+| `channels:history` / `groups:history` / `mpim:history` + 대응하는 `message.*` 이벤트 | 공개 채널, 비공개 채널, 그룹 DM의 메시지를 받습니다. 이런 곳에서 봇은 자신을 **@로 멘션한** 메시지에만 반응합니다. |
+| `users:read` | Multica가 두 토큰이 같은 앱에 속하는지 (`bots.info`를 통해) 확인하는 데 필요합니다. |
+| `commands` | `/issue` 슬래시 명령을 활성화하는 bot 스코프입니다(`features.slash_commands`와 짝을 이룹니다). 이것이 없으면 매니페스트를 업데이트하고 재설치해도 명령이 부여되지 않습니다. |
+| `socket_mode_enabled: true` | 봇이 Socket Mode로 밖으로 연결합니다 — **공개 URL / request URL이 필요 없습니다**. |
+| `interactivity.is_enabled: false` | Multica의 안내는 버튼이 아니라 일반 링크라서, interactivity가 필요 없습니다. |
+| `slash_commands`(`/issue`) | `/issue` 슬래시 명령을 등록해, 누구나 메시지 입력창에서 Multica 이슈를 생성할 수 있게 합니다. Socket Mode로 전달되며 요청 URL이 필요 없습니다. |
+
+**OAuth redirect URL은 없습니다.** BYO는 OAuth를 사용하지 않기 때문입니다.
+
+<Callout type="info">
+Slack에서 특정 이름을 쓰고 싶나요? 생성하기 전에 `display_information.name`과 `features.bot_user.display_name`을 (예: 에이전트 이름으로) 변경하거나, 나중에 **App Home**에서 편집하세요. Slack은 봇을 **bot display name**으로 표시하며, 이는 앱 이름과 다를 수 있습니다.
+</Callout>
+
+### 2. 앱 설치하고 Bot token 복사하기
+
+1. 앱의 왼쪽 내비게이션에서 **Install App**(또는 **OAuth & Permissions**)을 엽니다.
+2. **Install to Workspace**를 클릭하고 승인합니다.
+3. **Bot User OAuth Token**을 복사합니다 — `xoxb-`로 시작합니다. 이것이 당신의 **Bot token**입니다.
+
+### 3. App-level token 생성하기
+
+app-level token은 Socket Mode 연결을 인가합니다. 콘솔에서만 생성할 수 있습니다(OAuth의 일부가 아닙니다).
+
+1. **Basic Information → App-Level Tokens**를 열고 **Generate Token and Scopes**를 클릭합니다.
+2. 아무 이름이나 지정합니다.
+3. **Add Scope**를 클릭하고 목록에서 **`connections:write`**를 고릅니다(선택기이므로 — 입력하지 말고 선택하세요).
+4. **Generate**를 클릭한 다음 토큰을 복사합니다 — `xapp-`로 시작합니다. 이것이 당신의 **App-level token**입니다.
+
+### 4. Multica에서 연결하기
+
+1. **Agents → _당신의 에이전트_** → **Integrations** 탭(또는 왼쪽 사이드바의 **Integrations** 섹션)에서 에이전트를 엽니다.
+2. **Connect Slack**을 클릭합니다.
+3. **Bot token**(`xoxb-`)과 **App-level token**(`xapp-`)을 붙여넣은 다음 **Connect**를 클릭합니다.
+4. 에이전트에 **Connected to Slack**이 표시됩니다. 봇은 이제 자체 Socket Mode 연결로 수신 대기합니다.
+
+<Callout type="warning">
+두 토큰은 **같은** Slack 앱에서 와야 하며, 그 앱은 정확히 **하나의** 에이전트에 매핑됩니다. 이미 다른 에이전트나 워크스페이스에 연결된 앱을 연결하는 것은 거부됩니다. 앱을 다른 에이전트로 옮기려면 먼저 연결을 해제하세요. **새** 앱으로 에이전트를 다시 연결하면 그 에이전트의 봇이 그 자리에서 갱신됩니다.
+</Callout>
+
+<Callout type="info">
+**여러 에이전트**에 설정하나요? 에이전트당 전체 과정을 한 번씩 반복하세요 — 각 에이전트가 자체 Slack 앱과 자체 토큰 한 쌍을 가지며, Slack 워크스페이스에 별개의 봇으로 나타납니다.
+</Callout>
+
+## 연동이 하는 일
+
+| 위치 | 동작 |
+|---|---|
+| **Agent → Integrations** | owner와 admin에게는 **Connect Slack**이 보이며, 연결되면 **Connected to Slack** 배지와 **Disconnect** 컨트롤로 바뀝니다. |
+| **봇에게 DM** | 워크스페이스 멤버가 봇에게 직접 메시지를 보냅니다. 그 대화는 에이전트와의 Multica [chat](/chat) 세션이 되며, 모든 DM 메시지를 읽습니다. |
+| **채널에서 `@`-멘션** | 봇을 초대(`/invite @your-bot`)하고 `@`로 멘션하세요. 멘션한 메시지만 읽으며, 봇이 채널 전체를 듣지는 않습니다. 각 @bot **스레드**가 자체 세션입니다. |
+| **`/issue` 슬래시 명령** | `/issue <설명>`을(채널이나 DM에서) 입력하면 에이전트가 당신의 자연어 설명을 잘 정리된 Multica 이슈로 만들어 당신 이름으로 등록합니다. 먼저 본인에게만 접수 확인을 비공개로 답하고, 이슈가 준비되면 Multica 알림을 받습니다 — @ 멘션이 필요 없습니다. |
+| **답변** | 에이전트의 답변은 같은 DM 또는 스레드로 다시 게시됩니다. |
+
+## 봇 사용하기 (멤버)
+
+### 첫 메시지: 계정 연결하기
+
+봇을 처음 `@`로 멘션하거나 DM하면, **계정을 연결하라**는 안내로 답합니다. 링크를 탭하고 Multica에 로그인하면, 당신의 Slack 신원이 Multica 멤버십에 바인딩됩니다 — 바로 이 단계가 에이전트로 하여금 당신을 대신해 행동하게 합니다(예: `/issue`는 당신 이름으로 이슈를 생성합니다). 이 링크는 일회용이며 약 15분 후에 만료됩니다. 새 링크가 필요하면 봇에게 다시 메시지를 보내세요.
+
+**연결은 Slack 워크스페이스당 한 번만 하면 됩니다.** 같은 Multica 워크스페이스가 하나의 Slack 워크스페이스에서 여러 봇을 운영하는 경우(에이전트마다 앱 하나), 첫 봇에서 연결을 마치면 나머지는 그 연결을 자동으로 재사용하므로 다시 안내가 뜨지 않습니다. (다시 연결해야 하는 경우는 *다른* Slack 워크스페이스에 있는 봇이거나, *다른* Multica 워크스페이스에 연결된 봇일 때뿐입니다.)
+
+<Callout type="warning">
+**워크스페이스 멤버**만 봇을 사용할 수 있습니다. 멤버가 아니거나 신원 연결을 건너뛰면 봇은 실행되지 않으며, 메시지는 폐기됩니다(감사 목적으로 기록되며, 내용은 저장하지 않습니다).
+</Callout>
+
+### 대화와 `/issue`
+
+- **채널에서** — 봇은 자동으로 참여하지 않습니다. `/invite @your-bot`을 한 번 실행한 다음 `@your-bot <당신의 메시지>`로 보내세요. 후속 메시지마다 다시 멘션하세요(봇은 자신을 멘션한 메시지만 읽습니다).
+- **DM에서** — Slack 사이드바의 **Apps** 섹션에서 봇을 열고 직접 메시지를 보내세요. 멘션이 필요 없습니다.
+- **이슈 생성** — `/issue` 슬래시 명령을 사용하세요(예: `/issue 로그인 리디렉트가 Safari에서 깨져요`). 자연어로 설명하면 에이전트가 제목과 구조화된 설명을 작성해 이슈를 등록해 줍니다. 채널이나 DM에서 모두 쓸 수 있고(@ 멘션 불필요), 먼저 본인에게만 접수 확인을 비공개로 답하고, 이슈가 생성되면 Multica 알림을 받습니다. 처음 사용하는 사람은 먼저 일회용 계정 연결 링크를 받습니다.
+
+## 관리 및 연결 해제
+
+워크스페이스 전체 관리는 **Settings → Integrations**에 있습니다:
+
+- **Connected bots**는 워크스페이스 내 모든 봇과 각 봇이 바인딩된 에이전트를 나열합니다(모든 멤버에게 보입니다).
+- **Disconnect**는 **owner / admin 전용**입니다. 봇이 Slack 메시지 수신을 멈추고 연결이 해체됩니다. 설치 기록은 감사용으로 유지되며, 이후 다시 연결할 수 있습니다.
+
+## 권한
+
+- **연결 / 연결 해제**에는 워크스페이스 **owner** 또는 **admin**이 필요합니다.
+- **봇과 대화하기**에는 Slack 신원이 연결된 워크스페이스 멤버여야 합니다. 그 외의 사람은 모두 폐기됩니다.
+- 폐기된 메시지의 본문은 절대 저장되지 않으며 — 감사용 폐기 사유만 기록됩니다.
+
+## 자체 호스팅 설정
+
+Multica Cloud에서는 연동이 이미 사용 가능합니다 — 이 섹션은 건너뛰세요.
+
+자체 호스팅의 경우, Slack은 **at-rest 암호화 키를 설정하기 전까지 꺼져 있습니다**. 이 키는 각 앱의 bot + app-level 토큰이 데이터베이스에 닿기 전에 암호화합니다. BYO에는 OAuth client id/secret이 **필요 없고**, 배포 수준의 app token도 **필요 없습니다** — 각 installation은 admin이 붙여넣은 토큰을 사용합니다.
+
+1. 32바이트 키를 생성해 API 서버에 설정합니다:
+
+   ```dotenv
+   MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   예를 들면: `openssl rand -base64 32`.
+
+2. API를 재시작하세요. 키가 설정되기 전까지 **Settings → Integrations**에는 "Slack integration not enabled" 안내가 표시되고, **Connect Slack** 진입점은 숨겨진 채로 유지됩니다.
+
+<Callout type="info">
+키는 정확히 32바이트로 디코딩되어야 하며 — `openssl rand -base64 32`가 이를 충족합니다. 오래 유지되는 시크릿으로 다루세요: 키를 회전하거나 잃으면 이미 저장된 토큰을 복호화할 수 없게 되어, 모든 봇이 다시 연결해야 합니다. "계정을 연결하세요" 링크는 웹 앱 URL(`MULTICA_APP_URL`, 없으면 `FRONTEND_ORIGIN`으로 폴백)에서 만들어집니다. 일반적인 배포에서는 이미 설정되어 있으므로 추가로 구성할 것은 없습니다.
+</Callout>
+
+## 다음
+
+- [Chat 연동](/channels) — channel 엔진, 세션, 권한이 어떻게 동작하는지
+- [에이전트](/agents) · [Chat](/chat) · [이슈](/issues)
+- [환경 변수](/environment-variables) — 전체 자체 호스팅 구성 참조

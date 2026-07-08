@@ -18,13 +18,18 @@ const {
   mockSetQueryData: vi.fn(),
 }));
 
-const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
+const makeUser = (
+  overrides: Partial<{
+    onboarded_at: string | null;
+    onboarding_questionnaire: Record<string, unknown>;
+  }> = {},
+) => ({
   id: "user-1",
   name: "Test",
   email: "test@multica.ai",
   avatar_url: null,
   onboarded_at: null,
-  onboarding_questionnaire: {},
+  onboarding_questionnaire: { source: ["search"] },
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   ...overrides,
@@ -73,6 +78,15 @@ import CallbackPage from "./page";
 describe("CallbackPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the source-backfill dismiss counter so a test that writes
+    // it doesn't leak state into the next test (and the next test
+    // doesn't inherit a cap-reached state from a previous run).
+    for (let i = window.localStorage.length - 1; i >= 0; i--) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith("multica.source_backfill.dismiss.")) {
+        window.localStorage.removeItem(k);
+      }
+    }
     // Snapshot keys before deleting — forEach + delete skips entries because
     // the iteration index advances while the underlying list shrinks.
     Array.from(mockSearchParams.keys()).forEach((k) =>
@@ -134,6 +148,7 @@ describe("CallbackPage", () => {
         settings: {},
         repos: [],
         issue_prefix: "ACME",
+        avatar_url: null,
         created_at: "",
         updated_at: "",
       },
@@ -179,6 +194,134 @@ describe("CallbackPage", () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("redirects to CLI callback with token when state contains valid cli_callback", async () => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockGoogleLogin = mockedApi.googleLogin as ReturnType<typeof vi.fn>;
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      mockSearchParams.set(
+        "state",
+        "cli_callback:http://127.0.0.1:46233/callback,cli_state:abc123",
+      );
+      mockGoogleLogin.mockResolvedValue({ token: "cli-jwt-token" });
+
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(mockGoogleLogin).toHaveBeenCalledWith(
+          "test-code",
+          expect.stringContaining("/auth/callback"),
+        );
+      });
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "http://127.0.0.1:46233/callback?token=cli-jwt-token&state=abc123",
+        );
+      });
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("falls through to normal web flow when state contains invalid cli_callback", async () => {
+    mockSearchParams.set("state", "cli_callback:https://evil.com/callback");
+    mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockListWorkspaces.mockResolvedValue([]);
+    mockListMyInvitations.mockResolvedValue([]);
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      // Normal web flow: loginWithGoogle is called (not googleLogin)
+      expect(mockLoginWithGoogle).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("redirects to CLI callback even when state also contains platform:desktop", async () => {
+    // cli_callback takes precedence over platform:desktop — the CLI flow
+    // is a specific user intent that should not be derailed by desktop flag.
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockGoogleLogin = mockedApi.googleLogin as ReturnType<typeof vi.fn>;
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      mockSearchParams.set(
+        "state",
+        "platform:desktop,cli_callback:http://localhost:12345/callback,cli_state:mystate",
+      );
+      mockGoogleLogin.mockResolvedValue({ token: "mixed-jwt" });
+
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(mockGoogleLogin).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "http://localhost:12345/callback?token=mixed-jwt&state=mystate",
+        );
+      });
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("onboarded users with missing source land in the workspace; the source-backfill modal is mounted there", async () => {
+    // Source attribution backfill is now an in-workspace modal — see
+    // `<SourceBackfillModal />` mounted inside `DashboardLayout`. The
+    // callback page is intentionally agnostic about it.
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({
+        onboarded_at: "2026-01-01T00:00:00Z",
+        onboarding_questionnaire: {},
+      }),
+    );
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
   });
 });

@@ -22,6 +22,16 @@ export interface IssueReaction {
   created_at: string;
 }
 
+/**
+ * Per-issue metadata is a flat KV map agents use to record pipeline state
+ * (PR number, pipeline_status, waiting_on, ...). Values are primitives only —
+ * string / number / bool — enforced by both the API and the DB. Always
+ * present in responses (empty object when unset) so reads don't need a
+ * nil guard on the parent field.
+ */
+export type IssueMetadataValue = string | number | boolean;
+export type IssueMetadata = Record<string, IssueMetadataValue>;
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -38,7 +48,16 @@ export interface Issue {
   parent_issue_id: string | null;
   project_id: string | null;
   position: number;
+  // Ordered barrier group among sibling sub-issues (null = unstaged). The
+  // parent assignee is notified/woken only when every sub-issue in a stage
+  // finishes; see server/internal/handler/issue_child_done.go.
+  stage: number | null;
+  // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
+  // helpers in @multica/core/issues/date to format/compare — never `new Date()`
+  // + local formatting, which shifts the day by the viewer's offset.
+  start_date: string | null;
   due_date: string | null;
+  metadata: IssueMetadata;
   reactions?: IssueReaction[];
   labels?: Label[];
   created_at: string;

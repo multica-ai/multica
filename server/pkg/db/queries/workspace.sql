@@ -1,6 +1,9 @@
 -- name: ListWorkspaces :many
-SELECT w.* FROM workspace w
-JOIN member m ON m.workspace_id = w.id
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter, w.avatar_url
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
@@ -25,9 +28,17 @@ UPDATE workspace SET
     settings = COALESCE(sqlc.narg('settings'), settings),
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
+    avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListWorkspacesWithRepos :many
+-- Workspaces with a non-empty repo registry, to route a webhook to the repo's
+-- owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
+SELECT id, repos FROM workspace
+WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
+ORDER BY id;
 
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
@@ -35,4 +46,7 @@ WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
+WITH deleted_pending_check_suites AS (
+    DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+)
 DELETE FROM workspace WHERE id = $1;

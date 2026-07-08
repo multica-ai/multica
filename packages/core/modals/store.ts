@@ -12,7 +12,7 @@ type ModalType =
   | "issue-set-parent"
   | "issue-add-child"
   | "issue-delete-confirm"
-  | "issue-backlog-agent-hint"
+  | "issue-run-confirm"
   | null;
 
 interface ModalStore {

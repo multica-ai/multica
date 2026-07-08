@@ -1,25 +1,37 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
-import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
+import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowLeft, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -48,8 +60,9 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 export function SquadDetailPage() {
   const { t } = useT("squads");
@@ -72,10 +85,42 @@ export function SquadDetailPage() {
     enabled: !!workspace?.id && !!squadId,
   });
 
+  // Per-squad working/idle/offline + active-issue snapshot. WS task / agent /
+  // daemon events invalidate this via use-realtime-sync; the staleTime is a
+  // tab-focus safety net. Indexed by member_id so SquadMembersTab can look up
+  // its row in O(1).
+  const { data: memberStatusResp } = useQuery({
+    ...squadMemberStatusOptions(wsId, squadId),
+    enabled: !!workspace?.id && !!squadId,
+  });
+  const memberStatusById = useMemo(() => {
+    const map = new Map<string, SquadMemberStatus>();
+    for (const s of memberStatusResp?.members ?? []) map.set(s.member_id, s);
+    return map;
+  }, [memberStatusResp]);
+
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
+  // Runtimes are only fetched when the Create Agent dialog might open;
+  // gating on isWorkspaceAdmin below means non-admins never trigger the
+  // request. The runtime list mirrors the agents page so the picker
+  // (and the "only my runtimes" filter) behaves identically here.
+  const currentUser = useAuthStore((s) => s.user);
+  const myRole = useMemo(() => {
+    if (!currentUser) return null;
+    return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
+  }, [wsMembers, currentUser]);
+  const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
+
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!wsId && isWorkspaceAdmin,
+  });
+
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -94,13 +139,15 @@ export function SquadDetailPage() {
         role: input.role?.trim() || undefined,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Member added"); },
-    onError: () => toast.error("Failed to add member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to add member"),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (m: SquadMember) => api.removeSquadMember(squadId, { member_type: m.member_type, member_id: m.member_id }),
     onSuccess: () => { refetchMembers(); toast.success("Member removed"); },
-    onError: () => toast.error("Failed to remove member"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to remove member"),
   });
 
   const updateRoleMut = useMutation({
@@ -111,7 +158,8 @@ export function SquadDetailPage() {
         role: input.role,
       }),
     onSuccess: () => { refetchMembers(); toast.success("Role updated"); },
-    onError: () => toast.error("Failed to update role"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update role"),
   });
 
   const setLeaderMut = useMutation({
@@ -122,14 +170,35 @@ export function SquadDetailPage() {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
       toast.success("Leader updated");
     },
-    onError: () => toast.error("Failed to update leader"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to update leader"),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
-    onError: () => toast.error("Failed to archive squad"),
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
   });
+
+  // CreateAgentDialog's onCreate contract: hit POST /api/agents and
+  // return the created agent so the dialog can run its skill follow-up.
+  // We deliberately do NOT navigate to the agent detail page (that's
+  // the agents-page behaviour) — the user clicked Create Agent from
+  // inside this squad, so the dialog will stay open just long enough
+  // to also call addSquadMember (handled by the dialog when squadId
+  // is set), then close the user back to Members where they can
+  // verify the new agent appeared. Cache-update keeps the agents list
+  // fresh for any pickers that read from it.
+  const handleCreateAgent = async (data: CreateAgentRequest): Promise<Agent> => {
+    const agent = await api.createAgent(data);
+    queryClient.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === agent.id);
+      return exists ? current.map((a) => (a.id === agent.id ? agent : a)) : [...current, agent];
+    });
+    queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
+  };
 
   const getEntityName = (type: string, id: string) => {
     if (type === "agent") return agents.find((a: Agent) => a.id === id)?.name ?? id.slice(0, 8);
@@ -137,12 +206,14 @@ export function SquadDetailPage() {
   };
 
   if (!squad) {
-    return <div className="p-6 text-muted-foreground text-sm">Loading...</div>;
+    return <SquadDetailSkeleton />;
   }
 
   const availableAgents = agents.filter((a: Agent) => !a.archived_at && !members.some((m) => m.member_type === "agent" && m.member_id === a.id));
   const availableMembers = wsMembers.filter((m) => !members.some((sm) => sm.member_type === "member" && sm.member_id === m.user_id));
   const isLeader = (m: SquadMember) => m.member_type === "agent" && squad.leader_id === m.member_id;
+  const isArchived = (m: SquadMember) =>
+    m.member_type === "agent" && !!agents.find((a: Agent) => a.id === m.member_id)?.archived_at;
 
   const initials = squad.name
     .split(" ")
@@ -153,24 +224,26 @@ export function SquadDetailPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <AppLink href={p.squads()} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-          </AppLink>
-          <SquadHeaderAvatar squad={squad} initials={initials} />
-          <h1 className="text-sm font-medium">{squad.name}</h1>
-        </div>
-        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
-          <Trash2 className="size-3.5 mr-1" />
-          {t(($) => $.inspector.archive_button)}
-        </Button>
-      </PageHeader>
+      <BreadcrumbHeader
+        segments={[{ href: p.squads(), label: t(($) => $.page.title) }]}
+        leaf={
+          <>
+            <SquadHeaderAvatar squad={squad} initials={initials} />
+            <h1 className="truncate text-sm font-medium text-foreground">{squad.name}</h1>
+          </>
+        }
+        actions={
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
+            <Trash2 className="size-3.5 mr-1" />
+            {t(($) => $.inspector.archive_button)}
+          </Button>
+        }
+      />
 
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
           properties + leader), right pane with tabs (Members | Instructions).
           Mobile collapses to stacked single column. */}
-      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <SquadDetailInspector
           squad={squad}
           memberCount={members.length}
@@ -185,9 +258,12 @@ export function SquadDetailPage() {
         <SquadOverviewPane
           squad={squad}
           members={members}
+          memberStatusById={memberStatusById}
           isLeader={isLeader}
+          isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
+          onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -204,6 +280,88 @@ export function SquadDetailPage() {
           onSubmit={async (input) => { await addMemberMut.mutateAsync(input); }}
         />
       )}
+
+      {/* Squad-scoped create flow: same dialog as the Agents page but
+          with squadId set, so the dialog runs api.addSquadMember after
+          api.createAgent and skips the agent-detail navigation. Only
+          mounted for workspace owner/admin since AddSquadMember is
+          owner/admin-gated server-side; for everyone else the trigger
+          never renders. */}
+      {showCreateAgent && isWorkspaceAdmin && (
+        <CreateAgentDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={wsMembers}
+          currentUserId={currentUser?.id ?? null}
+          squadId={squadId}
+          onClose={() => setShowCreateAgent(false)}
+          onCreate={handleCreateAgent}
+        />
+      )}
+
+      {confirmArchive && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => { if (!v && !deleteMut.isPending) setConfirmArchive(false); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.archive_dialog.title)}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.archive_dialog.description, { name: squad.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteMut.isPending}>
+                {t(($) => $.archive_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deleteMut.mutate()}
+                disabled={deleteMut.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleteMut.isPending
+                  ? t(($) => $.archive_dialog.archiving)
+                  : t(($) => $.archive_dialog.confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </div>
+  );
+}
+
+// Initial-load skeleton — mirrors the two-column layout of the loaded page
+// (left inspector + right tabs panel) so the swap to real content doesn't
+// shift layout. Column widths match the md:/lg: breakpoints used below.
+function SquadDetailSkeleton() {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      <PageHeader className="px-5">
+        <Skeleton className="h-5 w-48" />
+      </PageHeader>
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="flex flex-col gap-4 rounded-lg border p-5">
+          <Skeleton className="h-16 w-16 rounded-lg" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3 w-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-3/4" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 rounded-lg border p-6">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-4/6" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -219,7 +377,7 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
     <ActorAvatarBase
       name={squad.name}
       initials={initials}
-      avatarUrl={squad.avatar_url}
+      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
       size={16}
       className="rounded"
     />
@@ -271,7 +429,7 @@ function SquadAvatarEditor({
           <ActorAvatarBase
             name={squad.name}
             initials={initials}
-            avatarUrl={squad.avatar_url}
+            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
             size={64}
             className="rounded-none"
           />
@@ -450,8 +608,8 @@ function AddMemberDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const query = pickerFilter.trim().toLowerCase();
-  const filteredMembers = availableMembers.filter((m) => m.name.toLowerCase().includes(query));
-  const filteredAgents = availableAgents.filter((a) => a.name.toLowerCase().includes(query));
+  const filteredMembers = availableMembers.filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query));
+  const filteredAgents = availableAgents.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query));
 
   const canSubmit = !!target && !submitting;
 
@@ -659,6 +817,7 @@ function SquadDetailInspector({
   onUpdateDescription: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
+  const timeAgo = useTimeAgo();
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])
@@ -843,9 +1002,12 @@ const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileTex
 function SquadOverviewPane({
   squad,
   members,
+  memberStatusById,
   isLeader,
+  isArchived,
   getEntityName,
   onAddMemberClick,
+  onCreateAgentClick,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -854,9 +1016,15 @@ function SquadOverviewPane({
 }: {
   squad: Squad;
   members: SquadMember[];
+  memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
+  isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
+  // Optional — only passed when the current user can manage the squad
+  // (workspace owner/admin). Hidden otherwise so plain members don't
+  // see a button they can't action.
+  onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -904,12 +1072,15 @@ function SquadOverviewPane({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "members" && (
-          <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
+          <div className="flex h-full flex-col p-4 md:p-6">
             <SquadMembersTab
               members={members}
+              memberStatusById={memberStatusById}
               isLeader={isLeader}
+              isArchived={isArchived}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
+              onCreateAgentClick={onCreateAgentClick}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -918,7 +1089,7 @@ function SquadOverviewPane({
           </div>
         )}
         {activeTab === "instructions" && (
-          <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
+          <div className="flex h-full flex-col p-4 md:p-6">
             <SquadInstructionsTab
               squad={squad}
               onSave={onSaveInstructions}
@@ -950,27 +1121,50 @@ function SquadOverviewPane({
   );
 }
 
+// Visual config for the five squad member status buckets. Mirrors
+// availabilityConfig + workloadConfig in packages/views/agents/presence.ts —
+// same semantic tokens so a status dot here matches the agent page's dot.
+// Unknown / null statuses (human members, server-side enum drift) render as
+// a neutral muted pill; this is the "downgrade, don't crash" defense from
+// CLAUDE.md > API Response Compatibility.
+const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
+  working: "bg-success",
+  idle: "bg-muted-foreground/40",
+  offline: "bg-muted-foreground/40",
+  unstable: "bg-warning",
+  archived: "bg-muted-foreground/40",
+};
+
 // Members tab body — re-uses the existing list/role editing patterns.
 function SquadMembersTab({
   members,
+  memberStatusById,
   isLeader,
+  isArchived,
   getEntityName,
   onAddMemberClick,
+  onCreateAgentClick,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
   setLeaderPending,
 }: {
   members: SquadMember[];
+  memberStatusById: Map<string, SquadMemberStatus>;
   isLeader: (m: SquadMember) => boolean;
+  isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
+  // Hidden for non-admins — see SquadOverviewPane.
+  onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
+  const timeAgo = useTimeAgo();
+  const p = useWorkspacePaths();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -980,59 +1174,167 @@ function SquadMembersTab({
             {t(($) => $.members_tab.section_count, { count: members.length })}
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={onAddMemberClick}>
-          <Plus className="size-3.5 mr-1.5" />
-          {t(($) => $.members_tab.add_member_button)}
-        </Button>
+        <div className="flex items-center gap-2">
+          {onCreateAgentClick && (
+            <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
+              <Plus className="size-3.5 mr-1.5" />
+              {t(($) => $.members_tab.create_agent_button)}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+            <Plus className="size-3.5 mr-1.5" />
+            {t(($) => $.members_tab.add_member_button)}
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2">
-        {members.map((m) => (
-          <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
-            <ActorAvatar actorType={m.member_type} actorId={m.member_id} size={32} showStatusDot />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>
-                <span className="text-xs text-muted-foreground capitalize">{m.member_type}</span>
-                {isLeader(m) && (
-                  <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                    <Crown className="size-3" />
-                    {t(($) => $.members_tab.leader_chip)}
-                  </span>
+        {members.map((m) => {
+          const status = memberStatusById.get(m.member_id);
+          const statusValue = status?.status ?? null;
+          const dotClass =
+            statusValue && statusValue in SQUAD_STATUS_DOT_CLASS
+              ? SQUAD_STATUS_DOT_CLASS[statusValue as keyof typeof SQUAD_STATUS_DOT_CLASS]
+              : null;
+          const statusLabel =
+            statusValue === "working" ? t(($) => $.members_tab.status_working)
+              : statusValue === "idle" ? t(($) => $.members_tab.status_idle)
+              : statusValue === "offline" ? t(($) => $.members_tab.status_offline)
+              : statusValue === "unstable" ? t(($) => $.members_tab.status_unstable)
+              : statusValue === "archived" ? t(($) => $.members_tab.status_archived)
+              : null;
+          const activeIssues = status?.active_issues ?? [];
+          const primaryIssue = activeIssues[0];
+          const extraIssueCount = Math.max(0, activeIssues.length - 1);
+          // Show last_active only when the agent isn't currently working —
+          // a "working" pill already implies the agent is live, and a
+          // "last active 2s ago" line next to it is just noise.
+          const showLastActive =
+            m.member_type === "agent" && statusValue && statusValue !== "working" && status?.last_active_at;
+          return (
+            <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
+              <ActorAvatar
+                actorType={m.member_type}
+                actorId={m.member_id}
+                size={32}
+                showStatusDot
+                enableHoverCard={m.member_type === "agent"}
+                hoverCardVariant="live"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>
+                  <span className="text-xs text-muted-foreground capitalize">{m.member_type}</span>
+                  {isLeader(m) && (
+                    <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                      <Crown className="size-3" />
+                      {t(($) => $.members_tab.leader_chip)}
+                    </span>
+                  )}
+                  {m.member_type === "agent" && statusLabel && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className={`h-1.5 w-1.5 rounded-full ${dotClass ?? "bg-muted-foreground/40"}`} />
+                      {statusLabel}
+                    </span>
+                  )}
+                </div>
+                <RoleEditor
+                  value={m.role ?? ""}
+                  onSave={async (next) => { await onUpdateRole(m, next); }}
+                />
+                {primaryIssue && (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+                    <AppLink
+                      href={p.issueDetail(primaryIssue.issue_id)}
+                      className="inline-flex items-center gap-1 min-w-0 hover:text-foreground transition-colors"
+                    >
+                      <span className="font-mono text-[10px] uppercase shrink-0">{primaryIssue.identifier}</span>
+                      <span className="truncate">{primaryIssue.title}</span>
+                      {primaryIssue.issue_status === "blocked" && (
+                        <span className="shrink-0 inline-flex items-center text-[10px] uppercase tracking-wide text-warning">
+                          {t(($) => $.members_tab.issue_status_blocked)}
+                        </span>
+                      )}
+                    </AppLink>
+                    {extraIssueCount > 0 && (
+                      <span className="shrink-0">
+                        · {t(($) => $.members_tab.active_issue_more, { count: extraIssueCount })}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {showLastActive && (
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {t(($) => $.members_tab.last_active_label, {
+                      time: timeAgo(status!.last_active_at!),
+                    })}
+                  </div>
                 )}
               </div>
-              <RoleEditor
-                value={m.role ?? ""}
-                onSave={async (next) => { await onUpdateRole(m, next); }}
-              />
-            </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {m.member_type === "agent" && !isLeader(m) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-amber-600 h-8 px-2"
-                  title="Make leader"
-                  onClick={() => onSetLeader(m.member_id)}
-                  disabled={setLeaderPending}
-                >
-                  <Crown className="size-3.5" />
-                </Button>
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              {m.member_type === "agent" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <AppLink
+                        href={p.agentDetail(m.member_id)}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                        aria-label={t(($) => $.members_tab.view_agent_tooltip)}
+                      >
+                        <ArrowUpRight className="size-3.5" />
+                      </AppLink>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.view_agent_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-amber-600 h-8 w-8 p-0"
+                        onClick={() => onSetLeader(m.member_id)}
+                        disabled={setLeaderPending}
+                        aria-label={t(($) => $.members_tab.make_leader_tooltip)}
+                      >
+                        <Crown className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.make_leader_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
               )}
               {!isLeader(m) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-                  title="Remove from squad"
-                  onClick={() => onRemoveMember(m)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
+                        onClick={() => onRemoveMember(m)}
+                        aria-label={t(($) => $.members_tab.remove_member_tooltip)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.remove_member_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

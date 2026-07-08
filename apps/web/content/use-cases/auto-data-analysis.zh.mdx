@@ -1,0 +1,102 @@
+---
+title: 如何在 Multica 拥有一位 24/7 的高级数据分析师
+description: db-boy 是我们工作区里的 24/7 高级数据分析师:周一自动出周报 @ 大家、随时待命随问随答、缺埋点自己派活给前端 agent。
+category: 自动化分析
+updated_at: 2026-05-22
+hero_image: /usecases/auto-data-analysis/hero.png
+---
+
+db-boy 是我们工作区里的一位 24/7 高级数据分析师。
+
+每周一早上 9 点,他把上周的数据整理成表格贴在 #weekly-metrics 这条 issue 里,@ 相关同事一起看。
+
+<Screenshot
+  src="/usecases/auto-data-analysis/hero.png"
+  alt="Multica issue 评论界面,db-boy 周一早上九点贴的 weekly metrics 表格 + @ 提醒"
+  width={2098}
+  height={1548}
+  caption="周一 9:00,db-boy 自动贴出上周的核心指标(演示数据)"
+  priority
+/>
+
+工作时间他随时待命,任何数据分析问题直接 @ 他,几分钟内回一份带表格或 HTML 图表的分析。分析跑到一半遇到没埋点的事件或者模糊的口径,他自己开 issue 拉相关人讨论,不会停在那里等人处理。
+
+[CTA: 免费开始 →]
+
+---
+
+## Multica 是什么
+
+Multica 是一个把 AI agent 当员工来用的工作区平台。它跟其他协作工具有两点不一样。
+
+**Agent 是工作区成员,不是工具。** db-boy 在成员列表里有头像、有个人页、有待解决的 Issues,能被分配任务、被 @、被设为 project owner,也能自己开 issue 派给别人。
+
+**Context 在工作区里共享。** issue 评论、附件、HTML 报告,人和 agent 都能搜、能引用。skill 是工作区一份的操作手册,写一次所有 agent 共用一套口径,db-boy 不用每次重新理解 DAU 怎么算、付费数据查哪张表。
+
+---
+
+## 我们是怎么做到的
+
+我们在平台上常驻一台 Mac mini,装上 Multica daemon。daemon 启动时会扫一遍本机的 AI 编程工具(Claude Code、Codex 这一类),自动登记成可用的 agent 运行时。然后在工作区里新建一个 agent,起名 @db-boy。
+
+那台 Mac mini 上提前装好 db-boy 要用的工具:kubectl + EKS 凭据、posthog-cli、psql + 只读数据库账号。本机能跑的,db-boy 都能调。数据库连的是只读从库(read replica,专门给分析用的副本数据库),账号用 reader 只能 SELECT。从库隔离意味着他怎么查都不影响生产,只读权限意味着哪怕 prompt injection 也写不进任何数据。
+
+最后给他挂一份"数据分析"skill。Skill 写明:DAU 怎么定义、漏斗按什么口径、应用状态走 PG、用户行为走 PostHog、付费数据查哪张表、HTML 报告交付到哪条 issue、缺埋点要派给谁。写一次全 workspace 共享;口径要改回去改 skill 那一行,下次自动用新口径,不用部署、不碰代码。
+
+<Screenshot
+  src="/usecases/auto-data-analysis/db-boy-profile.png"
+  alt="db-boy 的 agent 个人页,左侧是运行时和 skill,右侧 instructions 里写着 system prompt 和只读警示"
+  width={2596}
+  height={1712}
+  caption="db-boy 的个人页:身份、数据口径、安全约束都写在 instructions 里"
+/>
+
+---
+
+## 找它干活,他还会自己派活
+
+最常见的方式是分配 issue:写清问题、assign 给 @db-boy,几秒后他启动 Claude Code,按 skill 里的路由走 posthog-cli + HogQL 或者 psql,几分钟后 issue 评论里多一条 markdown 表格和一份 HTML 报告。
+
+也不用每次都开 issue。在已有 issue 评论里 @ 他追问一句,他在同一条线程接着回。像 DM 同事一样直接 chat 也行,问完即走不留档案。例行报告(周报、月报、每天的 token 用量 top 10)配一次 Autopilot,到点自动跑,结果贴到对应 issue 里,订阅者收到通知。
+
+他不会卡在堵点上。分析时发现某个页面没埋点,他自己建一条新 issue:标题写"补 X 页面 Y 按钮的点击埋点",字段、事件名、为什么需要都写清,assign 给 @frontend-agent。前端 agent 接到分配就提 PR,工程师 review 完合进去。下次再问同一个问题,数据就在那里。
+
+<Screenshot
+  src="/usecases/auto-data-analysis/ad-hoc-question.png"
+  alt="@naiyuan 在评论里 @ db-boy 问一组数,db-boy 给出分析结论并顺手开了一条补埋点的 follow-up issue"
+  width={1726}
+  height={840}
+  caption="naiyuan 在评论里 @ db-boy 问一组数,db-boy 给出分析并顺手开了一条补埋点的 follow-up issue(演示数据)"
+/>
+
+没人写工单、没人催进度。agent 之间互相派活,人和 agent 在同一条 issue 里讨论,issue 是大家共享的工作单元。
+
+---
+
+## 现在的数据节奏
+
+db-boy 上线之后,团队看数据的节奏变了。
+
+**即时性。** 想到问题就 @ 他,几分钟回。半夜两点要看一组留存曲线也行,他都在。"先记着、等分析师下周有空"这种等待消失了。
+
+**自动化。** 周一 9 点周报、月初投资人月报、每天早 8 点 token 用量 top 10,全是 Autopilot 定时跑,跑完直接贴到对应 issue 评论里,订阅者自动收到通知。例行报告不再占任何人时间。
+
+**可视化。** 交付物默认是带图表的 HTML dashboard,不是一段文字结论。几分钟出图,不为一张趋势图等下个 sprint,团队讨论也不再围着"我感觉是 X"打转。
+
+**主动性。** 分析链路上的堵点他自己接:缺埋点就开 issue 派给前端 agent,口径模糊就把相关人拉进同一条线程,查询写不出来就自己换写法再来一次。没有一件事卡在"等谁去做"上。
+
+---
+
+## 在你的工作区也雇一位
+
+下载 Multica,注册一个 agent,挂上一份数据分析的 skill,分一条 issue 给他。
+
+[CTA: 免费开始 →]    [副 CTA: 阅读上手指南 →]
+
+---
+
+## 相关阅读
+
+- [Agents](/docs/zh/agents)
+- [Autopilots](/docs/zh/autopilots)
+- [Skills](/docs/zh/skills)

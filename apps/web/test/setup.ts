@@ -11,6 +11,11 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
+// jsdom doesn't implement elementFromPoint; input-otp uses it internally.
+if (typeof document.elementFromPoint !== "function") {
+  document.elementFromPoint = () => null;
+}
+
 // jsdom 29 / Node.js 22+ may not provide a proper Web Storage API.
 // Create a proper localStorage mock if methods are missing.
 if (

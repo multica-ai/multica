@@ -183,22 +183,22 @@ export function StepAgent({
                 />
               ))}
             </div>
+
+            {/* Inline action bar — hint + Create CTA. No skip path:
+                reaching Step 4 means a runtime was picked at Step 3,
+                so creating the agent IS this step. */}
+            <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <span className="mr-auto hidden text-xs text-muted-foreground sm:block">
+                {t(($) => $.step_agent.footer_hint)}
+              </span>
+              <Button size="lg" onClick={handleCreate} disabled={creating}>
+                {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t(($) => $.step_agent.create_action, { name: template.defaultName })}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </main>
-
-        {/* Fixed footer — hint + Create CTA. No skip path: reaching
-            Step 4 means a runtime was picked at Step 3, so creating
-            the agent IS this step. */}
-        <footer className="flex shrink-0 items-center justify-between gap-4 bg-background px-6 py-4 sm:px-10 md:px-14 lg:px-16">
-          <span className="hidden text-xs text-muted-foreground sm:block">
-            {t(($) => $.step_agent.footer_hint)}
-          </span>
-          <Button size="lg" onClick={handleCreate} disabled={creating}>
-            {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-            {t(($) => $.step_agent.create_action, { name: template.defaultName })}
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </footer>
       </div>
 
       {/* Right — About agents side panel, independent scroll */}

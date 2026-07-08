@@ -13,10 +13,10 @@ import { useT } from "../../i18n";
 /**
  * Step 5 — the final onboarding beat.
  *
- * All this step does now is flip `onboarded_at` on the server. The former
- * in-flight bootstrap (welcome issue + Getting Started project + sub-issues)
- * moved out of onboarding entirely: it's a post-landing opt-in dialog
- * (`StarterContentPrompt`) that runs inside the workspace after navigation.
+ * Runtime-skipped finalizer. The runtime-connected path now bootstraps one
+ * default assistant plus one onboarding issue server-side and routes there
+ * directly. This step remains for users who skip runtime connection: it only
+ * flips `onboarded_at` and lands them in the workspace.
  * Two consequences of that move:
  *
  *   1. This step can't fail in user-visible ways any more. `completeOnboarding`

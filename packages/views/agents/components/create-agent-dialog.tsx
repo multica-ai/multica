@@ -22,11 +22,15 @@ import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarPicker } from "./avatar-picker";
 import { useNavigation } from "../../navigation";
 import { api } from "@multica/core/api";
+import { useFeatureEnabled } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type {
   Agent,
+  AgentInvocationTargetInput,
+  AgentPermissionMode,
   AgentTemplateSummary,
   AgentVisibility,
   RuntimeDevice,
@@ -47,6 +51,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { cn } from "@multica/ui/lib/utils";
@@ -119,6 +124,7 @@ export function CreateAgentDialog({
   currentUserId,
   template,
   existingAgentNames,
+  squadId,
   onClose,
   onCreate,
 }: {
@@ -140,6 +146,10 @@ export function CreateAgentDialog({
   // when absent, default names are used verbatim and 409 stays the
   // safety net.
   existingAgentNames?: readonly string[];
+  // When set, every successful create is followed by addSquadMember so the
+  // new agent joins this squad. If the follow-up fails, the agent remains
+  // created and the user can add it manually from the squad Members tab.
+  squadId?: string;
   onClose: () => void;
   // Returns the created Agent so the dialog can run a follow-up
   // setAgentSkills with the IDs the user picked in the form. Pre-skill-
@@ -153,6 +163,7 @@ export function CreateAgentDialog({
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
+  const accessPickerEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
 
   // Duplicate path comes in via the row action with a concrete agent —
   // chooser would be redundant, jump straight to the form.
@@ -169,6 +180,33 @@ export function CreateAgentDialog({
   const [visibility, setVisibility] = useState<AgentVisibility>(
     template?.visibility ?? "workspace",
   );
+  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
+    template?.permission_mode ?? "public_to",
+  );
+  const [workspaceTargetOn, setWorkspaceTargetOn] = useState<boolean>(() => {
+    if (template) {
+      return (template.invocation_targets ?? []).some(
+        (tgt) => tgt.target_type === "workspace",
+      );
+    }
+    return true;
+  });
+  const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (template?.invocation_targets ?? [])
+          .filter((tgt) => tgt.target_type === "member" && tgt.target_id)
+          .map((tgt) => tgt.target_id as string),
+      ),
+  );
+  const templateTeamTargets: AgentInvocationTargetInput[] = (
+    template?.invocation_targets ?? []
+  )
+    .filter((tgt) => tgt.target_type === "team" && tgt.target_id)
+    .map((tgt) => ({
+      target_type: "team" as const,
+      target_id: tgt.target_id as string,
+    }));
   const [model, setModel] = useState(template?.model ?? "");
   // Optional fields exposed through the collapsible sections at the bottom
   // of the form. Each initialises from the duplicate template (if any);
@@ -262,6 +300,31 @@ export function CreateAgentDialog({
   const selectedRuntimeLocked =
     selectedRuntime != null && isRuntimeDisabledForUser(selectedRuntime);
 
+  const attachToSquad = async (agentId: string, displayName: string) => {
+    if (!squadId) return;
+    try {
+      await api.addSquadMember(squadId, {
+        member_type: "agent",
+        member_id: agentId,
+      });
+      if (wsId) {
+        queryClient.invalidateQueries({
+          queryKey: [...workspaceKeys.squads(wsId), squadId, "members"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: [...workspaceKeys.squads(wsId), squadId],
+        });
+      }
+    } catch (err) {
+      toast.warning(
+        t(($) => $.create_dialog.squad_join_failed_toast, {
+          name: displayName,
+          error: err instanceof Error ? err.message : "unknown error",
+        }),
+      );
+    }
+  };
+
   // Transition helpers. Each centralises the form-field initialisation
   // for its target step, so transitions can't leave stale state behind.
 
@@ -318,6 +381,9 @@ export function CreateAgentDialog({
           t(($) => $.create_dialog.template_created_toast, { name: candidate }),
         );
       }
+      if (resp.agent.id && squadId) {
+        await attachToSquad(resp.agent.id, resp.agent.name || candidate);
+      }
       onClose();
       // Land on the new agent's detail page so the user can verify or
       // customise instructions / skills / avatar — matches the navigation
@@ -326,7 +392,7 @@ export function CreateAgentDialog({
       // fallback) we skip the navigation: the agent was created server-
       // side, the list-invalidation above will surface it, and a push
       // to `/agents/` would land on a broken detail page.
-      if (resp.agent.id) {
+      if (resp.agent.id && !squadId) {
         navigation.push(paths.agentDetail(resp.agent.id));
       }
     } catch (err) {
@@ -368,11 +434,30 @@ export function CreateAgentDialog({
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
-        visibility,
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
       };
+      if (accessPickerEnabled) {
+        const invocationTargets: AgentInvocationTargetInput[] = [];
+        if (permissionMode === "public_to") {
+          if (workspaceTargetOn) {
+            invocationTargets.push({ target_type: "workspace" });
+          }
+          for (const id of selectedMemberIds) {
+            invocationTargets.push({ target_type: "member", target_id: id });
+          }
+          for (const tgt of templateTeamTargets) {
+            invocationTargets.push(tgt);
+          }
+        }
+        const collapseToPrivate =
+          permissionMode === "public_to" && invocationTargets.length === 0;
+        data.permission_mode = collapseToPrivate ? "private" : permissionMode;
+        data.invocation_targets = collapseToPrivate ? [] : invocationTargets;
+      } else {
+        data.visibility = visibility;
+      }
       if (template) {
         // Duplicate path: forward the hidden config fields the source
         // agent had so the clone is functional out of the box (env / args
@@ -380,12 +465,6 @@ export function CreateAgentDialog({
         // don't blindly carry template.skills here anymore — the form's
         // selectedSkillIds is the source of truth.
         if (template.custom_args.length) data.custom_args = template.custom_args;
-        if (
-          !template.custom_env_redacted &&
-          Object.keys(template.custom_env).length > 0
-        ) {
-          data.custom_env = template.custom_env;
-        }
         if (template.max_concurrent_tasks) {
           data.max_concurrent_tasks = template.max_concurrent_tasks;
         }
@@ -413,6 +492,9 @@ export function CreateAgentDialog({
             }),
           );
         }
+      }
+      if (createdAgent && squadId) {
+        await attachToSquad(createdAgent.id, createdAgent.name);
       }
       onClose();
     } catch (err) {
@@ -612,45 +694,58 @@ export function CreateAgentDialog({
                   </div>
                 </div>
 
-                <div>
-                  <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
-                  <div className="mt-1.5 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setVisibility("workspace")}
-                      className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                        visibility === "workspace"
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted"
-                      }`}
-                    >
-                      <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="text-left">
-                        <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {VISIBILITY_DESCRIPTION.workspace}
+                {accessPickerEnabled ? (
+                  <AccessSection
+                    permissionMode={permissionMode}
+                    onPermissionModeChange={setPermissionMode}
+                    workspaceTargetOn={workspaceTargetOn}
+                    onWorkspaceTargetChange={setWorkspaceTargetOn}
+                    selectedMemberIds={selectedMemberIds}
+                    onSelectedMemberIdsChange={setSelectedMemberIds}
+                    members={members}
+                    currentUserId={currentUserId}
+                  />
+                ) : (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.visibility_label)}</Label>
+                    <div className="mt-1.5 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVisibility("workspace")}
+                        className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                          visibility === "workspace"
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <div className="text-left">
+                          <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {VISIBILITY_DESCRIPTION.workspace}
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setVisibility("private")}
-                      className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                        visibility === "private"
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted"
-                      }`}
-                    >
-                      <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="text-left">
-                        <div className="font-medium">{VISIBILITY_LABEL.private}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {VISIBILITY_DESCRIPTION.private}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVisibility("private")}
+                        className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                          visibility === "private"
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <div className="text-left">
+                          <div className="font-medium">{VISIBILITY_LABEL.private}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {VISIBILITY_DESCRIPTION.private}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="min-w-0">
                   <div className="flex items-center justify-between">
@@ -845,6 +940,145 @@ export function CreateAgentDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AccessSection({
+  permissionMode,
+  onPermissionModeChange,
+  workspaceTargetOn,
+  onWorkspaceTargetChange,
+  selectedMemberIds,
+  onSelectedMemberIdsChange,
+  members,
+  currentUserId,
+}: {
+  permissionMode: AgentPermissionMode;
+  onPermissionModeChange: (next: AgentPermissionMode) => void;
+  workspaceTargetOn: boolean;
+  onWorkspaceTargetChange: (next: boolean) => void;
+  selectedMemberIds: Set<string>;
+  onSelectedMemberIdsChange: (next: Set<string>) => void;
+  members: MemberWithUser[];
+  currentUserId: string | null;
+}) {
+  const { t } = useT("agents");
+  const isPrivate = permissionMode === "private";
+  const otherMembers = members.filter((m) => m.user_id !== currentUserId);
+  const hasAnyGrant = workspaceTargetOn || selectedMemberIds.size > 0;
+
+  const toggleMember = (userId: string, checked: boolean) => {
+    const next = new Set(selectedMemberIds);
+    if (checked) next.add(userId);
+    else next.delete(userId);
+    onSelectedMemberIdsChange(next);
+  };
+
+  return (
+    <div>
+      <Label className="text-xs text-muted-foreground">
+        {t(($) => $.create_dialog.access.label)}
+      </Label>
+      <div className="mt-1.5 flex gap-2">
+        <button
+          type="button"
+          onClick={() => onPermissionModeChange("private")}
+          className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+            isPrivate
+              ? "border-primary bg-primary/5"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="text-left">
+            <div className="font-medium">
+              {t(($) => $.create_dialog.access.private_title)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.access.private_desc)}
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => onPermissionModeChange("public_to")}
+          className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+            !isPrivate
+              ? "border-primary bg-primary/5"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="text-left">
+            <div className="font-medium">
+              {t(($) => $.create_dialog.access.public_title)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.access.public_desc)}
+            </div>
+          </div>
+        </button>
+      </div>
+
+      {!isPrivate && (
+        <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+          <label className="flex cursor-pointer items-center gap-2 rounded-md py-1 text-sm">
+            <Checkbox
+              checked={workspaceTargetOn}
+              onCheckedChange={(v) => onWorkspaceTargetChange(v === true)}
+              aria-label={t(($) => $.create_dialog.access.public_workspace_option)}
+            />
+            <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">
+              {t(($) => $.create_dialog.access.public_workspace_option)}
+            </span>
+          </label>
+
+          <div className="mt-2 border-t pt-2">
+            <div className="pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {t(($) => $.create_dialog.access.public_members_group)}
+            </div>
+            {otherMembers.length === 0 ? (
+              <div className="py-1 text-xs text-muted-foreground">
+                {t(($) => $.create_dialog.access.public_members_empty)}
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-y-auto">
+                {otherMembers.map((m) => {
+                  const checked = selectedMemberIds.has(m.user_id);
+                  return (
+                    <label
+                      key={m.user_id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-background/60"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) =>
+                          toggleMember(m.user_id, v === true)
+                        }
+                        aria-label={m.name}
+                      />
+                      <ActorAvatar
+                        actorType="member"
+                        actorId={m.user_id}
+                        size={18}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {!hasAnyGrant && (
+            <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              {t(($) => $.create_dialog.access.public_targets_empty_hint)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

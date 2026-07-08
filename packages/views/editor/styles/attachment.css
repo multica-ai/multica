@@ -1,0 +1,74 @@
+/*
+ * Attachment image figure.
+ *
+ * Shared by the editor NodeView and standalone attachment surfaces such as
+ * chat messages, comment attachment lists, and markdown image renderers.
+ * The Attachment component imports this file directly so its visual contract
+ * does not depend on ContentEditor or ReadonlyContent being mounted first.
+ */
+
+.image-figure {
+  position: relative;
+  display: inline-block;
+  margin: 0.75rem 0;
+}
+
+.image-figure[data-clickable="true"] {
+  cursor: zoom-in;
+}
+
+.image-figure.image-selected .image-content {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.image-content {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+}
+
+.image-uploading {
+  opacity: 0.5;
+  animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes rte-upload-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.3; }
+}
+
+.image-toolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 1px;
+  padding: 0.25rem;
+  background: color-mix(in srgb, black 75%, transparent);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+.image-figure:hover .image-toolbar {
+  opacity: 1;
+}
+
+.image-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  color: white;
+  transition: background 0.15s;
+}
+
+.image-toolbar button:hover {
+  background: color-mix(in srgb, white 15%, transparent);
+}

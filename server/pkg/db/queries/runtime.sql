@@ -7,6 +7,24 @@ ORDER BY created_at ASC;
 SELECT * FROM agent_runtime
 WHERE id = $1;
 
+-- name: LockAgentRuntime :one
+-- Acquires a row-level exclusive lock on the runtime row. Used at the
+-- top of the cascade-delete transaction so that:
+--   1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
+--      RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
+--      conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
+--      that would point a new/moved agent at this runtime blocks until
+--      our transaction finishes; and
+--   2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
+--      delete attempt) waits for us to commit.
+-- Combined with ListActiveAgentsByRuntimeForUpdate (which row-locks the
+-- existing active set) this closes the plan-compare → archive race that
+-- was possible at read-committed isolation between the snapshot and the
+-- bulk archive.
+SELECT * FROM agent_runtime
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -15,12 +33,6 @@ WHERE id = $1 AND workspace_id = $2;
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 -- that updated an existing row (false). Analytics reads this to fire
 -- runtime_registered/runtime_ready only on first-time registration.
---
--- @timezone is set on INSERT only. On conflict we deliberately KEEP the
--- existing agent_runtime.timezone — once an operator overrides the tz via
--- the web UI we don't want a daemon reconnect (which sends its own system
--- tz) to silently revert it. Daemons can still set the initial value when
--- they're the first to register a brand-new runtime row.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -31,10 +43,13 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
-    timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now())
-ON CONFLICT (workspace_id, daemon_id, provider)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+-- Built-in runtimes carry no profile_id. The arbiter is the partial unique
+-- index from migration 121 (WHERE profile_id IS NULL); the predicate must be
+-- spelled out so Postgres selects that partial index, not the custom-runtime
+-- one on (workspace_id, daemon_id, profile_id).
+ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
     runtime_mode = EXCLUDED.runtime_mode,
@@ -46,18 +61,39 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
--- name: LockTaskUsageDailyRollup :exec
--- Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which
--- uses the same advisory key in migration 073. This prevents cron from
--- writing old-timezone buckets while PATCH is deleting/rebuilding rows.
-SELECT pg_advisory_xact_lock(4242);
-
--- name: UpdateAgentRuntimeTimezone :one
--- Operator-driven override of the runtime's reporting timezone (MUL-1950).
-UPDATE agent_runtime
-SET timezone = @timezone, updated_at = now()
-WHERE id = @id
-RETURNING *;
+-- name: UpsertAgentRuntimeWithProfile :one
+-- Custom-runtime registration: a daemon resolved a workspace runtime_profile's
+-- command_name on PATH and is registering an instance of it. The arbiter is the
+-- partial unique index from migration 120 (WHERE profile_id IS NOT NULL), so a
+-- single daemon can host the built-in provider AND any number of custom
+-- profiles of the same protocol family. provider stays the protocol family so
+-- task routing (agent.New(provider)) is unchanged; profile_id is the stable
+-- identity. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+INSERT INTO agent_runtime (
+    workspace_id,
+    daemon_id,
+    name,
+    runtime_mode,
+    provider,
+    status,
+    device_info,
+    metadata,
+    owner_id,
+    profile_id,
+    last_seen_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
+DO UPDATE SET
+    name = EXCLUDED.name,
+    runtime_mode = EXCLUDED.runtime_mode,
+    provider = EXCLUDED.provider,
+    status = EXCLUDED.status,
+    device_info = EXCLUDED.device_info,
+    metadata = EXCLUDED.metadata,
+    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    last_seen_at = now(),
+    updated_at = now()
+RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and
@@ -69,53 +105,6 @@ SET visibility = @visibility, updated_at = now()
 WHERE id = @id
 RETURNING *;
 
--- name: DeleteTaskUsageDailyForRuntime :execrows
--- First step of an explicit user timezone edit rebuild. Delete old materialized
--- rows before re-inserting under the runtime's new timezone.
-DELETE FROM task_usage_daily
-WHERE runtime_id = $1;
-
--- name: DeleteTaskUsageDailyDirtyForRuntime :execrows
--- Drop queued dirty keys computed under the old timezone; the ordered rebuild
--- in the same transaction will write the current aggregate instead.
-DELETE FROM task_usage_daily_dirty
-WHERE runtime_id = $1;
-
--- name: InsertTaskUsageDailyForRuntime :execrows
--- Final step of an explicit user timezone edit rebuild. This is intentionally
--- called only for user edits, not by the migration itself: deploys do not
--- backfill history, but a user-driven change must not leave old UTC rows next
--- to newly computed local rows. This scans all history for the edited runtime;
--- timezone edits are owner/admin operations and are expected to be rare.
-INSERT INTO task_usage_daily AS d (
-    bucket_date, workspace_id, runtime_id, provider, model,
-    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-    event_count
-)
-SELECT
-    DATE(tu.created_at AT TIME ZONE rt.timezone) AS bucket_date,
-    a.workspace_id,
-    atq.runtime_id,
-    tu.provider,
-    tu.model,
-    SUM(tu.input_tokens)::bigint       AS input_tokens,
-    SUM(tu.output_tokens)::bigint      AS output_tokens,
-    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
-    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
-    COUNT(*)::bigint                   AS event_count
-  FROM task_usage tu
-  JOIN agent_task_queue atq ON atq.id = tu.task_id
-  JOIN agent            a   ON a.id = atq.agent_id
-  JOIN agent_runtime    rt  ON rt.id = atq.runtime_id
- WHERE atq.runtime_id = $1
- GROUP BY 1, 2, 3, 4, 5
-ON CONFLICT (bucket_date, workspace_id, runtime_id, provider, model) DO UPDATE
-    SET input_tokens       = EXCLUDED.input_tokens,
-        output_tokens      = EXCLUDED.output_tokens,
-        cache_read_tokens  = EXCLUDED.cache_read_tokens,
-        cache_write_tokens = EXCLUDED.cache_write_tokens,
-        event_count        = EXCLUDED.event_count,
-        updated_at         = now();
 
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT
@@ -191,12 +180,14 @@ WHERE status = 'online'
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running tasks as failed when their runtime is offline.
--- This cleans up orphaned tasks after a daemon crash or network partition.
+-- Marks dispatched/running/waiting_local_directory tasks as failed when
+-- their runtime is offline. This cleans up orphaned tasks after a daemon
+-- crash or network partition.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline'
-WHERE status IN ('dispatched', 'running')
+    failure_reason = 'runtime_offline',
+    wait_reason = NULL
+WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
@@ -237,7 +228,7 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running')
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
@@ -246,8 +237,47 @@ DELETE FROM agent_runtime WHERE id = $1;
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 
+-- name: CountActiveSquadsWithArchivedLeadersByRuntime :one
+SELECT count(*)
+FROM squad
+WHERE archived_at IS NULL
+  AND leader_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+  );
+
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
+-- name: PauseAutopilotsByAgentAssignees :exec
+-- Pauses every active autopilot whose agent assignee is in the supplied list.
+-- Called before hard-deleting archived agents on runtime teardown so the rows
+-- do not become dangling (autopilot.assignee_id no longer has an agent FK
+-- since migration 096). Status='paused' makes the breakage visible in the UI
+-- — operators can re-point the autopilot at a live agent or delete it —
+-- rather than silently piling skipped runs.
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE status = 'active'
+  AND assignee_type = 'agent'
+  AND assignee_id = ANY(@assignee_ids::uuid[]);
+
+-- name: ListArchivedAgentIDsByRuntime :many
+-- Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
+-- about to be hard-deleted so the runtime teardown can pause autopilots that
+-- still point at them. Returns ids only — the caller only needs the set.
+SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
+-- name: DeleteSquadsByArchivedAgentsOnRuntime :exec
+-- Removes archived squads whose leader_id references an archived agent on the
+-- given runtime. Must run before DeleteArchivedAgentsByRuntime so the RESTRICT
+-- FK on squad.leader_id does not block the agent deletion. Active squads are
+-- handled separately by CountActiveSquadsWithArchivedLeadersByRuntime, which
+-- returns a 409 until the caller archives them or assigns a new leader.
+DELETE FROM squad
+WHERE leader_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+)
+  AND archived_at IS NOT NULL;
 
 -- name: FindLegacyRuntimesByDaemonID :many
 -- Looks up runtime rows keyed on a prior (hostname-derived) daemon_id. Used

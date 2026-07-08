@@ -1,0 +1,186 @@
+---
+title: Slack Bot 連携
+description: Multica エージェントをあなた自身の Slack アプリに接続します——マニフェストからアプリを作成し、インストールして、bot トークンと app-level トークンを貼り付ければ、Slack の中から @ メンションしたり、DM したり、/issue と入力したりできます。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+任意の[エージェント](/agents)を Slack Bot に接続すれば、チームは Slack の中から直接それを使えます——Bot に DM したり、チャンネルで @ メンションしたり、`/issue` と入力してアプリを開かずに [Multica イシュー](/issues)を起票したりできます。
+
+Slack は**自分のアプリを持ち込む（BYO: bring-your-own-app）**モデルを採用しています。ワークスペースの admin が Slack アプリを作成し、自分の Slack ワークスペースにインストールして、そのトークンを Multica に貼り付けます。エージェントごとに**専用の** Slack アプリを持つため、同じ Slack ワークスペース内で複数のエージェントがそれぞれ別個に @ メンションできる異なる Bot を持てます。（これは紐づけがスキャンしてインストールするフローである [Lark](/lark-bot-integration) とは異なります。）
+
+セットアップ全体は以下のとおりで、所要時間は約 5 分です。最終的に、Multica に貼り付ける 2 つのトークンが得られます。
+
+- **Bot トークン** —— `xoxb-` で始まります
+- **App-level トークン** —— `xapp-` で始まります
+
+## Slack アプリをセットアップする
+
+### 1. マニフェストからアプリを作成する
+
+1. [https://api.slack.com/apps](https://api.slack.com/apps) を開き、**Create New App** をクリックします。
+2. **From a manifest** を選びます。
+3. アプリをインストールする Slack ワークスペースを選びます。
+4. **YAML** タブに切り替え、下記のマニフェストを貼り付けて、内容を確認しアプリを作成します。
+
+```yaml
+display_information:
+  name: Multica
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[title]"
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - reactions:write
+      - users:read
+      - commands
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+このマニフェストは Multica が必要とするものをすべて設定するので、手作業で何かを設定する必要はありません。
+
+| セクション | なぜそこにあるか |
+|---|---|
+| `app_home.messages_tab_enabled: true` | メンバーが Bot を開いて **DM** できるようにします。これがないと、Bot に直接メッセージを送れません。 |
+| `bot_user` | @ メンションされ、返信を投稿する Bot のアイデンティティを作成します。 |
+| `chat:write` | エージェントの返信を Slack に投稿し返します。 |
+| `reactions:write` | エージェントの処理中、あなたのメッセージに 👀 リアクションを付け、返信時に外します。このスコープがないとインジケーターは黙ってスキップされます——他の機能はすべて動作します。 |
+| `app_mentions:read` + `app_mention` イベント | チャンネルでの @ メンションを受け取ります。 |
+| `im:history` + `message.im` | Bot への **DM** を受け取ります（すべての DM メッセージが読み取られます）。 |
+| `channels:history` / `groups:history` / `mpim:history` + 対応する `message.*` イベント | パブリックチャンネル、プライベートチャンネル、グループ DM のメッセージを受け取ります。これらの中では、Bot は自分を **@ メンション**したメッセージにのみ反応します。 |
+| `users:read` | Multica が（`bots.info` を介して）あなたの 2 つのトークンが同じアプリのものであることを検証するために必要です。 |
+| `commands` | `/issue` スラッシュコマンドを有効にする bot スコープです（`features.slash_commands` と対になります）。これがないと、マニフェストを更新して再インストールしてもコマンドが付与されません。 |
+| `socket_mode_enabled: true` | Bot は Socket Mode 経由で外向きに接続します——**公開 URL／リクエスト URL は不要**です。 |
+| `interactivity.is_enabled: false` | Multica のプロンプトはボタンではなくプレーンなリンクなので、インタラクティビティは不要です。 |
+| `slash_commands`（`/issue`） | `/issue` スラッシュコマンドを登録し、誰でもメッセージ入力欄から Multica イシューを起票できるようにします。Socket Mode 経由で配信され、リクエスト URL は不要です。 |
+
+**OAuth リダイレクト URL はありません**。BYO は OAuth を使わないからです。
+
+<Callout type="info">
+Slack で特定の名前を表示したいですか？ 作成前に `display_information.name` と `features.bot_user.display_name`（たとえばエージェントの名前に）を変更するか、あとで **App Home** で編集してください。Slack は Bot をその **bot display name** で表示しますが、これはアプリ名と異なる場合があります。
+</Callout>
+
+### 2. アプリをインストールして Bot トークンをコピーする
+
+1. アプリの左ナビで **Install App**（または **OAuth & Permissions**）を開きます。
+2. **Install to Workspace** をクリックして承認します。
+3. **Bot User OAuth Token** をコピーします——`xoxb-` で始まります。これがあなたの **Bot トークン**です。
+
+### 3. App-level トークンを作成する
+
+app-level トークンは Socket Mode 接続を認可します。これはコンソールでしか作成できません（OAuth の一部ではありません）。
+
+1. **Basic Information → App-Level Tokens** を開き、**Generate Token and Scopes** をクリックします。
+2. 任意の名前を付けます。
+3. **Add Scope** をクリックし、リストから **`connections:write`** を選びます（これはピッカーなので、入力せずに選択してください）。
+4. **Generate** をクリックし、トークンをコピーします——`xapp-` で始まります。これがあなたの **App-level トークン**です。
+
+### 4. Multica で接続する
+
+1. **Agents → _あなたのエージェント_** からそのエージェントを開き、**Integrations** タブ（または左サイドバーの **Integrations** 区画）を開きます。
+2. **Connect Slack** をクリックします。
+3. **Bot トークン**（`xoxb-`）と **App-level トークン**（`xapp-`）を貼り付け、**Connect** をクリックします。
+4. エージェントに **Connected to Slack** と表示されます。Bot はこれで、自身の Socket Mode 接続を通じて待ち受けています。
+
+<Callout type="warning">
+2 つのトークンは**同じ** Slack アプリのものでなければならず、そのアプリはちょうど **1 つ**のエージェントに対応します。すでに別のエージェントやワークスペースに接続されているアプリを接続しようとすると拒否されます。アプリを別のエージェントへ移すには、まず切断してください。**新しい**アプリでエージェントを再接続すると、そのエージェントの Bot がその場で更新されます。
+</Callout>
+
+<Callout type="info">
+**複数のエージェント**でこれを設定しますか？ フロー全体をエージェントごとに 1 回ずつ繰り返してください——各エージェントが専用の Slack アプリと専用のトークンのペアを持ち、Slack ワークスペース内で別々の Bot として表示されます。
+</Callout>
+
+## この連携でできること
+
+| 場所 | 動作 |
+|---|---|
+| **エージェント → Integrations** | owner と admin には **Connect Slack** が表示され、接続すると **Connected to Slack** バッジと **Disconnect** コントロールに切り替わります。 |
+| **Bot に DM** | ワークスペースメンバーが Bot に直接メッセージを送ります。会話はそのエージェントとの Multica [chat](/chat) セッションになり、すべての DM メッセージが読み取られます。 |
+| **チャンネルで @ メンション** | Bot を招待し（`/invite @your-bot`）、@ メンションします。読み取られるのはメンションしたメッセージだけで、Bot はチャンネル全体を聞いているわけではありません。各 @bot **スレッド**がそれぞれ独立したセッションになります。 |
+| **`/issue` スラッシュコマンド** | `/issue <説明>`（チャンネルでも DM でも）と入力すると、エージェントがあなたの自然言語の説明を整った Multica イシューに仕立て、あなたの名義で起票します。まず本人にだけ受付の返信をし、イシューが用意できたら Multica の通知が届きます——@ メンションは不要です。 |
+| **返信** | エージェントの回答は、同じ DM またはスレッドに投稿し返されます。 |
+
+## Bot を使う（メンバー）
+
+### 最初のメッセージ：アカウントを紐づける
+
+初めて Bot を @ メンションするか DM すると、Bot は **アカウントを紐づける** プロンプトで返信します。リンクをタップして Multica にサインインすると、あなたの Slack アイデンティティがあなたの Multica メンバーシップに紐づきます——これによって、エージェントがあなたとして振る舞えるようになります（たとえば `/issue` はあなたの名義でイシューを起票します）。このリンクは使い切りで、約 15 分で失効します。新しいものが必要なら、もう一度 Bot にメッセージを送るだけです。
+
+**紐づけは Slack ワークスペースごとに一度だけです。** 同じ Multica ワークスペースが 1 つの Slack ワークスペースで複数の Bot を運用している場合（エージェントごとに 1 つのアプリ）、最初の Bot で紐づけを済ませれば、残りはその紐づけを自動的に再利用し、再びプロンプトは出ません。（再度の紐づけが必要なのは、*別の* Slack ワークスペースにある Bot、または *別の* Multica ワークスペースに接続された Bot だけです。）
+
+<Callout type="warning">
+Bot を使えるのは **ワークスペースのメンバー** だけです。メンバーでない場合や、アイデンティティの紐づけをスキップした場合、Bot は実行されません——あなたのメッセージは破棄されます（内容は保存せず、監査のために記録されます）。
+</Callout>
+
+### 対話と `/issue`
+
+- **チャンネルで** —— Bot は自動では参加しません。一度 `/invite @your-bot` を実行してから、`@your-bot <あなたのメッセージ>` とします。フォローアップのたびに再度メンションしてください（Bot は自分をメンションしたメッセージだけを読みます）。
+- **DM で** —— Slack サイドバーの **Apps** 区画から Bot を開いて直接メッセージを送ります。メンションは不要です。
+- **イシューを起票する** —— `/issue` スラッシュコマンドを使います（例: `/issue ログインのリダイレクトが Safari で壊れている`）。自然言語で説明すれば、エージェントがタイトルと構造化された説明を書いて起票してくれます。チャンネルでも DM でも使え（@ メンション不要）、まず本人にだけ受付の返信をし、イシューが作成されたら Multica の通知が届きます。初回のユーザーには、まずアカウント連携の使い切りリンクが届きます。
+
+## 管理と切断
+
+ワークスペース全体の管理は **Settings → Integrations** にあります。
+
+- **Connected bots** は、ワークスペース内のすべての Bot と、それぞれが紐づくエージェントを一覧表示します（すべてのメンバーから見えます）。
+- **Disconnect** は **owner / admin 専用** です。切断すると Bot は Slack メッセージの受信を停止し、その接続が破棄されます。インストール記録は監査のために保持され、あとで再接続できます。
+
+## 権限
+
+- **接続 / 切断** にはワークスペースの **owner** または **admin** が必要です。
+- **Bot との対話** には、Slack アイデンティティを紐づけたワークスペースメンバーであることが必要です。それ以外の人は一律に破棄されます。
+- 破棄されたメッセージの本文が保存されることはありません——監査のために破棄理由だけが記録されます。
+
+## セルフホストのセットアップ
+
+Multica Cloud では連携はすでに利用可能です——このセクションは飛ばしてください。
+
+セルフホストの場合、Slack は**保存時の暗号化キーを設定するまでオフ**です。このキーは、各アプリの bot トークン + app-level トークンがデータベースに触れる前にそれを暗号化します。BYO には OAuth の client id/secret は**不要**で、デプロイレベルの app トークンも**不要**です——各インストールは admin が貼り付けたトークンを使います。
+
+1. 32 バイトのキーを生成し、API サーバーに設定します。
+
+   ```dotenv
+   MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   たとえば: `openssl rand -base64 32`。
+
+2. API を再起動します。キーを設定するまで、**Settings → Integrations** には「Slack integration not enabled」という通知が表示され、**Connect Slack** のエントリポイントは非表示のままになります。
+
+<Callout type="info">
+キーはちょうど 32 バイトにデコードされなければなりません——`openssl rand -base64 32` はそれを満たします。これは長く使い続けるシークレットとして扱ってください。ローテーションしたり紛失したりすると、すでに保存済みのトークンが復号できなくなり、すべての Bot を再接続せざるを得なくなります。「アカウントを紐づける」リンクは、Web アプリの URL（`MULTICA_APP_URL`、未設定時は `FRONTEND_ORIGIN` にフォールバック）から生成されます。通常のデプロイではこれは既に設定されているため、追加で設定するものはありません。
+</Callout>
+
+## 次に
+
+- [Chat 連携](/channels) — チャンネルエンジン、セッション、認可の仕組み
+- [エージェント](/agents) · [Chat](/chat) · [イシュー](/issues)
+- [環境変数](/environment-variables) — セルフホスト構成の完全なリファレンス

@@ -833,6 +833,60 @@ func TestFetchFromGitHub_BlobURLImportsSpecificSkill(t *testing.T) {
 	}
 }
 
+// --- Raw file auth header host gating ---
+
+// The GitHub token must reach raw.githubusercontent.com (so private-repo
+// SKILL.md / file downloads authenticate) but must never be sent to the
+// non-GitHub hosts (clawhub.ai, skills.sh) that share fetchRawFile.
+func TestNewRawFileRequest_AttachesGitHubTokenOnlyForRawGitHubHost(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+
+	cases := []struct {
+		name     string
+		url      string
+		wantAuth string
+	}{
+		{
+			name:     "raw github host authenticates",
+			url:      "https://raw.githubusercontent.com/acme/private/main/skills/foo/SKILL.md",
+			wantAuth: "Bearer secret-token",
+		},
+		{
+			name:     "clawhub host never receives the token",
+			url:      "https://clawhub.ai/api/skills/foo/file?path=SKILL.md",
+			wantAuth: "",
+		},
+		{
+			name:     "skills.sh host never receives the token",
+			url:      "https://skills.sh/acme/foo/SKILL.md",
+			wantAuth: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := newRawFileRequest(tc.url)
+			if err != nil {
+				t.Fatalf("newRawFileRequest(%q): %v", tc.url, err)
+			}
+			if got := req.Header.Get("Authorization"); got != tc.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", got, tc.wantAuth)
+			}
+		})
+	}
+}
+
+func TestNewRawFileRequest_NoAuthHeaderWhenTokenUnset(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	req, err := newRawFileRequest("https://raw.githubusercontent.com/acme/private/main/SKILL.md")
+	if err != nil {
+		t.Fatalf("newRawFileRequest: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want empty when GITHUB_TOKEN is unset", got)
+	}
+}
+
 // --- Bundle / file size cap tests ---
 
 func TestFetchRawFile_ReturnsErrorOnOversizedFile(t *testing.T) {

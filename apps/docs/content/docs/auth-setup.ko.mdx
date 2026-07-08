@@ -1,0 +1,186 @@
+---
+title: 로그인 및 회원가입 구성
+description: 이메일 + 인증 코드 로그인, Google OAuth, 회원가입 허용 목록, 로컬 테스트 코드를 구성합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica는 두 가지 로그인 방식을 지원합니다. **이메일 + 인증 코드**(기본값)와 **Google OAuth**(선택). 로그인에 성공하면 서버가 30일 수명의 JWT 쿠키를 발급합니다. 이 페이지에서는 각 방식을 구성하는 방법, 누가 회원가입할 수 있는지 제한하는 방법, 그리고 자체 호스팅 배포에서 가장 빠지기 쉬운 함정 하나를 다룹니다.
+
+아래에서 참조하는 환경 변수 목록은 [환경 변수](/environment-variables)를 참고하세요. 토큰 사용법과 수명 주기 세부 사항은 [인증 및 토큰](/auth-tokens)을 참고하세요.
+
+## 이메일 + 인증 코드 로그인의 작동 방식
+
+사용자가 로그인 페이지에서 이메일을 입력합니다 → 서버가 6자리 코드를 보냅니다 → 사용자가 코드를 입력합니다 → 서버가 코드를 검증합니다 → JWT 쿠키가 발급됩니다. 표준 흐름입니다. 두 가지 전송 백엔드가 지원되므로 배포 환경에 맞는 쪽을 선택하세요.
+
+### 옵션 A: Resend (클라우드 / 공용 인터넷 배포에 권장)
+
+1. [Resend](https://resend.com/) 계정을 만들고 도메인을 인증합니다
+2. API 키를 생성합니다
+3. 환경 변수를 설정합니다:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com  # must be a domain verified in Resend
+    ```
+
+4. 서버를 재시작합니다
+
+### 옵션 B: SMTP relay (자체 호스팅 / 온프레미스 배포용)
+
+배포 환경에서 `api.resend.com`에 접근할 수 없거나 이미 내부 메일 relay(Microsoft Exchange, Postfix, 온프레미스 SendGrid 등)가 있는 경우에 사용하세요. 둘 다 설정된 경우 `SMTP_HOST`가 `RESEND_API_KEY`보다 우선합니다. `SMTP_HOST`가 비어 있지 않으면 `RESEND_API_KEY`도 함께 구성되어 있더라도 서버는 항상 SMTP를 통하므로, 인증 및 초대 메일이 내부 네트워크를 벗어나는 일이 결코 없습니다.
+
+SMTP 경로는 대부분의 온프레미스 메일 서버(특히 Microsoft Exchange의 receive connector)가 노출하는 세 가지 relay 모드를 지원합니다:
+
+| 모드 | 포트 | 인증 | TLS |
+|---|---|---|---|
+| 익명 내부 relay | `25` | 없음 — IP / 서브넷으로 제출을 신뢰 | 전송 경로상 없음(내부 세그먼트 전용) |
+| 인증된 제출(submission) | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS, 자동 업그레이드 |
+| 암묵적 TLS (SMTPS) | `465` | 선택 사항(`SMTP_USERNAME` + `SMTP_PASSWORD`) | 연결 시 TLS 핸드셰이크 — 포트 `465`에서 자동 활성화, 비표준 포트에서는 `SMTP_TLS=implicit`로 강제 |
+
+**포트 25의 익명 Exchange relay** — 자격 증명 없이 신뢰된 서브넷에서 오는 메일을 받아들이는 일반적인 "internal SMTP relay" / Exchange 익명 receive connector:
+
+```bash
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+**포트 587의 인증된 제출** — 서비스 계정이 필요한 relay용. 서버가 STARTTLS 지원을 알리면 자동으로 업그레이드됩니다:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**포트 465의 암묵적 TLS(SMTPS)** — SMTPS만 제공하고 STARTTLS를 알리지 않는 제공자(예: Aliyun / Tencent 엔터프라이즈 메일)용. 포트 `465`는 암묵적 TLS를 자동으로 활성화하며, `SMTP_TLS=implicit`(별칭: `smtps`, `ssl`)는 비표준 SMTPS 포트에서 이를 강제합니다:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465                  # implicit TLS auto-enabled on 465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**엄격한 공개 relay(예: Google Workspace `smtp-relay.gmail.com`)** 는 추가로 유효한 EHLO 이름을 요구합니다. 이들은 공개 IP에서 보내는 기본 `localhost` greeting을 거부하며, relay가 연결을 끊습니다 — 이는 greeting 단계가 아니라 이후 명령에서 불투명한 `EOF`(`smtp auth: EOF`)로 나타납니다. relay가 기대하는 FQDN으로 `SMTP_EHLO_NAME`을 설정하세요. 기본값은 머신 호스트명이며, 컨테이너 안에서는 보통 유효한 FQDN이 아닙니다:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+시작 시 서버는 협상된 TLS 모드를 포함하여 선택한 제공자를 출력합니다. 예를 들어 `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` 또는 `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…`(또는 `Resend API` / `DEV mode`)와 같이 표시됩니다. 비밀번호는 절대 로그에 기록되지 않습니다. 재시작 후 SMTP 줄이 보이지 않는다면 `SMTP_HOST`가 프로세스에 도달하지 못한 것이므로, 컨테이너 환경(`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`)을 확인하세요.
+
+**둘 다 설정하지 않으면**: 서버는 오류를 내지 않지만, **전송되어야 했던 모든 이메일이 서버의 stdout에만 기록됩니다**. 로컬 개발에는 편리하지만(로그에서 코드를 복사하면 됩니다), 프로덕션에서는 블랙홀이 됩니다.
+
+## 고정 로컬 테스트 코드
+
+<Callout type="warning">
+**공용으로 접근 가능한 인스턴스에서는 고정 인증 코드를 활성화하지 마세요.**
+
+프로덕션이 아닌 인스턴스가 기본적으로 `888888`을 받아들이던 기존 동작은 제거되었습니다. 명시적으로 구성하지 않는 한 `888888`을 입력하는 것은 다른 잘못된 코드와 동일하게 처리됩니다.
+
+이메일 백엔드를 전혀 구성하지 않은(Resend도 SMTP도 없는) 로컬 개발에서는 서버 로그에 출력되는 생성된 코드를 사용해야 합니다. 결정적인 로컬/사설 자동화가 필요하다면 `MULTICA_DEV_VERIFICATION_CODE`를 `888888` 같은 6자리 값으로 설정하고 `APP_ENV`를 프로덕션이 아닌 값으로 유지하세요:
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+이 단축키는 `APP_ENV=production`일 때 무시됩니다.
+</Callout>
+
+프로덕션 배포에서는 `MULTICA_DEV_VERIFICATION_CODE`를 비워 두고 `APP_ENV=production`으로 설정해야 합니다. `make selfhost` / `docker-compose.selfhost.yml`로 배포하는 경우 `APP_ENV`는 기본적으로 `production`입니다.
+
+## Google OAuth 구성
+
+선택 사항입니다. 구성하지 않으면 이메일 + 인증 코드만 사용할 수 있고, 구성하면 로그인 페이지에 "Google로 로그인" 버튼이 추가됩니다.
+
+1. [Google Cloud Console](https://console.cloud.google.com/)에서 OAuth 2.0 클라이언트를 생성합니다
+2. **승인된 리디렉션 URI**(Authorized redirect URIs)를 Multica 프런트엔드 주소에 `/auth/callback`을 더한 값으로 설정합니다. 예:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. 클라이언트 ID와 클라이언트 secret을 얻은 후 세 개의 환경 변수를 설정합니다:
+
+    ```bash
+    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    ```
+
+4. 서버를 재시작합니다.
+
+**런타임에 적용됨**: 프런트엔드는 `/api/config`를 통해 런타임에 이 설정을 읽습니다. 변경 후 서버를 재시작하면 프런트엔드가 다시 빌드하거나 다시 배포할 필요 없이 새 값을 가져옵니다.
+
+<Callout type="warning">
+**리디렉션 URI는 Google Console과 `GOOGLE_REDIRECT_URI` 양쪽에서 정확히 일치해야 합니다** — 프로토콜(`http` vs `https`), 끝의 슬래시, 포트까지 포함합니다. 조금이라도 일치하지 않으면 Google이 전체 OAuth 흐름을 거부하며, 사용자에게 표시되는 오류는 `redirect_uri_mismatch`입니다.
+</Callout>
+
+## 누가 회원가입할 수 있는지 제한하기
+
+세 개의 환경 변수가 우선순위에 따라 조합됩니다:
+
+<Mermaid chart={`
+graph TD
+    Start[New user first sign-in] --> A{Email in<br/>ALLOWED_EMAILS?}
+    A -- Yes --> Allow[Allow signup]
+    A -- No --> B{Domain in<br/>ALLOWED_EMAIL_DOMAINS?}
+    B -- Yes --> Allow
+    B -- No --> C{Any allowlist<br/>non-empty?}
+    C -- Yes --> Block[Reject]
+    C -- No --> D{ALLOW_SIGNUP<br/>= true?}
+    D -- Yes --> Allow
+    D -- No --> Block
+`} />
+
+**기존 사용자는 언제든 다시 로그인할 수 있습니다** — 회원가입 허용 목록은 **최초 회원가입**에만 적용되며, 돌아오는 사용자는 막지 않습니다.
+
+- **`ALLOWED_EMAILS`** (최고 우선순위) — 명시적 이메일 허용 목록, 쉼표로 구분합니다. **비어 있지 않으면 목록에 있는 이메일만 회원가입할 수 있습니다.**
+- **`ALLOWED_EMAIL_DOMAINS`** — 도메인 허용 목록, 쉼표로 구분합니다(예: `company.io,partner.com`).
+- **`ALLOW_SIGNUP`** — 마스터 스위치, 기본값 `true`. `false`로 설정하면 회원가입이 완전히 비활성화됩니다.
+
+<Callout type="warning">
+**세 계층은 OR가 아니라 AND 의미입니다.** 흔한 잘못된 직관은 `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true`가 "company.io에 더해 다른 모든 사람을 허용"한다는 것입니다. 그렇지 **않습니다**. 어느 계층이든 비어 있지 않은 값이 있으면 **그에 일치하지 않는 이메일은 곧바로 거부되며**, `ALLOW_SIGNUP=true`는 그것을 무효로 만들지 못합니다.
+
+실제로 "모두 허용"하려면 세 변수를 모두 비워 두세요(또는 `ALLOW_SIGNUP=true`를 유지하세요).
+</Callout>
+
+**일반적인 구성**:
+
+| 목표 | 구성 |
+|---|---|
+| 내부 전용, `company.io` 직원만 | `ALLOWED_EMAIL_DOMAINS=company.io` |
+| 내부 + 소수의 외부 협업자 | `ALLOWED_EMAIL_DOMAINS=company.io` + 협업자 주소를 `ALLOWED_EMAILS`에 추가 |
+| 셀프서비스 회원가입을 완전히 비활성화, 초대 전용 | `ALLOW_SIGNUP=false` |
+| 개방형 회원가입(프로덕션에는 권장하지 않음) | 셋 다 비움 |
+
+## 회원가입을 비활성화해도 사람을 초대할 수 있나요?
+
+**이미 Multica 계정이 있는 사람만 가능합니다.** 초대 수락은 회원가입 허용 목록을 확인하지 않습니다. 초대받은 사람이 이미 회원가입한 상태라면(예: 다른 워크스페이스에서), 초대 링크를 클릭하고 로그인하면 수락할 수 있습니다.
+
+**하지만 한 번도 회원가입하지 않은 사람은 초대로 구제할 수 없습니다.** 수락하기 전에 먼저 로그인해야 하고, 로그인의 첫 단계(인증 코드 요청)는 회원가입 허용 목록 검사를 거칩니다. `ALLOW_SIGNUP=false`이거나 그들의 이메일이 `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`에 없으면 **회원가입을 완료할 수 없으며**, 따라서 초대도 수락할 수 없습니다.
+
+아직 회원가입하지 않은 외부 협업자를 초대하려면: 그들의 이메일을 `ALLOWED_EMAILS`에 임시로 추가하고, 그들이 회원가입하고 초대를 수락하기를 기다린 다음 항목을 제거하세요.
+
+초대를 만들고 사용하는 방법은 [멤버 및 역할](/members-roles)을 참고하세요.
+
+## 다음
+
+- [환경 변수](/environment-variables) — 이 페이지에서 사용하는 모든 변수의 전체 정의
+- [인증 및 토큰](/auth-tokens) — JWT / PAT / 데몬 토큰의 분류와 사용법
+- [문제 해결](/troubleshooting) — 인증 코드 미수신, OAuth `redirect_uri_mismatch`, 회원가입 거부

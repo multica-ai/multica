@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useLocale } from "../../i18n";
 
 const INSTALL_CMD =
@@ -62,12 +63,9 @@ function CommandBlock({
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(cmd);
+    if (await copyText(cmd)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // clipboard may be unavailable (insecure context) — silent no-op
     }
   };
 

@@ -1,0 +1,82 @@
+---
+title: 移动 App（iOS）
+description: 在自己的 iPhone 上自助 build 开源版 Multica iOS app —— 暂未上 App Store。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica iOS 客户端开源,跟 web、desktop、后端一起放在[主仓库](https://github.com/multica-ai/multica)里。目前没上 App Store —— 在那之前,想用的人自己从源码 build 一份。首次 build 约 10–20 分钟,之后每次约 2 分钟,连接的是 [multica.ai](https://multica.ai) 同一个后端,所以你现有账号直接能登。
+
+<Callout type="info">
+本页是给**个人使用者**看的。如果你是要开发这个 app,请看仓库里的 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) —— 那里覆盖 dev / staging 变体和完整脚本表。
+</Callout>
+
+## 你需要
+
+- 一台装了 Xcode 的 **Mac**(Xcode 在 App Store 免费下载)。
+- 一个免费的 **Apple ID**,在 Xcode → Settings → Accounts 里加进去。付费的 Apple Developer Program 账号是可选的 —— 只把 7 天签名期延到 1 年,见下方[7 天签名限制](#7-天签名限制)。
+- 一台通过 USB 线连接的 **iPhone**,并打开 [Developer Mode](https://docs.expo.dev/guides/ios-developer-mode/)(设置 → 隐私与安全性 → 开发者模式)。
+- Multica 源码已 clone:
+
+  ```bash
+  git clone https://github.com/multica-ai/multica.git
+  cd multica
+  pnpm install
+  ```
+
+上面任何一项缺失,先走 Expo 的 [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/)(选 **Development build → iOS Device**)—— 它是除仓库拉取外所有环境准备的官方指引。
+
+## Build
+
+一条命令:
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+Xcode 会用你 Apple ID 自动持有的"Personal Team"来签名 —— 这个 team 是你第一次用任何 Apple ID 登 Xcode 时静默建的,所以即使你不记得"什么时候弄过",它都已经在那里了。这是个 **Release build**:不依赖 Metro,启动屏 → app,跟从 App Store 装的体验一样。
+
+首次 build 会下载 CocoaPods + 从源码编译 React Native —— 大约 10–20 分钟。之后 build 会快很多,Xcode 缓存了原生编译产物。
+
+典型路径就这样。签名失败的话见下方[排错](#排错)。
+
+## 7 天签名限制
+
+免费 Apple ID 签的 build 只有 **7 天**有效期。过期后 app 在 iPhone 上拒绝启动,提示 "untrusted developer"。插回 Mac 重跑同一条命令重签即可 —— 数据不会丢,因为数据在后端,不在 app 里。
+
+唯一的延期方式是 **Apple Developer Program 账号**($99/年,在 [developer.apple.com](https://developer.apple.com) 注册)。有了它签名一次有效 1 年(直到续费),还能通过 TestFlight 分发给其他设备。
+
+## 更新
+
+暂时没有自动更新。Multica 代码库前进时,你 pull 然后重 build:
+
+```bash
+git pull
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+后续 build 很快,因为 Xcode 缓存了原生编译产物。
+
+## 为什么还没上 App Store
+
+iOS app 还在快速迭代 —— 团队目前更倾向于"先发再改",而不是 App Store 审核周期。下一步比较可能是 TestFlight 内测,然后才是正式上架。在那之前,上面的自助 build 是 iOS 上用 Multica 的唯一方式。
+
+想第一时间知道 TestFlight 开放的话,watch 一下 [GitHub 仓库](https://github.com/multica-ai/multica)。
+
+## 排错
+
+**"No matching provisioning profiles found"** —— Xcode 拒绝用你的 Apple ID 签默认的 `ai.multica.mobile`。比较罕见,如果有人在 Apple Developer Portal 抢注了这个前缀就会出现。换一个你控制的反向域名(`com.yourname.multica` 就够),export 后重跑:
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+id 本身没意义,Apple 只要求它没被别的 team 抢注就行。
+
+**"无法启动 &lt;app&gt;" / "未受信任的开发者"** —— 要么过了 7 天有效期(重跑 build),要么需要在 iPhone 上手动信任开发者证书:设置 → 通用 → VPN 与设备管理 → 点你的 Apple ID → 信任。
+
+**Build 卡在 `Pod install` 或者编译很久不动** —— 首次 build 就是 10–20 分钟,CocoaPods 要下载依赖、Xcode 要从源码编译 React Native。后续会快很多。
+
+**App 连不上后端** —— 确认 `apps/mobile/.env.production` 没动过(默认值 `EXPO_PUBLIC_API_URL=https://api.multica.ai`)。如果你改过,用 `git checkout apps/mobile/.env.production` 还原。

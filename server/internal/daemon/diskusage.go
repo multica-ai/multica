@@ -55,6 +55,60 @@ type DiskUsageReport struct {
 	TotalArtifactRatio     float64              `json:"total_artifact_ratio"`
 }
 
+// DiskUsageRoot pairs a workspaces root with the profile it was derived from
+// ("" = the default root). ScanDiskUsageRoots scans each one and labels its
+// report with the profile so the cross-root view can attribute footprint back
+// to a profile (e.g. the Desktop app's `desktop-<host>` root).
+type DiskUsageRoot struct {
+	Profile string
+	Root    string
+}
+
+// RootDiskUsage is one root's report inside an AggregateDiskUsageReport.
+type RootDiskUsage struct {
+	Profile string          `json:"profile"`
+	Report  DiskUsageReport `json:"report"`
+}
+
+// AggregateDiskUsageReport is the result of scanning several workspace roots in
+// one pass. Total* fields are the grand totals across every root's full scan
+// (never the post-`--top` truncated view) so the combined footprint stays
+// accurate even when each root's table is trimmed for display.
+type AggregateDiskUsageReport struct {
+	GeneratedAt            time.Time       `json:"generated_at"`
+	ArtifactPatterns       []string        `json:"artifact_patterns"`
+	Roots                  []RootDiskUsage `json:"roots"`
+	TotalTaskCount         int             `json:"total_task_count"`
+	TotalWorkspaceCount    int             `json:"total_workspace_count"`
+	TotalSizeBytes         int64           `json:"total_size_bytes"`
+	TotalArtifactSizeBytes int64           `json:"total_artifact_size_bytes"`
+	TotalArtifactRatio     float64         `json:"total_artifact_ratio"`
+}
+
+// ScanDiskUsageRoots scans every root in order and returns the combined report.
+// It reuses ScanDiskUsage per root — a missing root yields an empty per-root
+// report (not an error), matching the single-root command, so a never-used
+// profile root simply contributes zero. A genuinely unreadable root (e.g. a
+// permission error on the root directory itself) aborts the whole scan.
+func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (AggregateDiskUsageReport, error) {
+	agg := AggregateDiskUsageReport{GeneratedAt: time.Now().UTC()}
+	agg.ArtifactPatterns = sortedKeys(buildPatternSet(artifactPatterns))
+
+	for _, r := range roots {
+		report, err := ScanDiskUsage(r.Root, artifactPatterns)
+		if err != nil {
+			return agg, err
+		}
+		agg.Roots = append(agg.Roots, RootDiskUsage{Profile: r.Profile, Report: report})
+		agg.TotalTaskCount += report.TotalTaskCount
+		agg.TotalWorkspaceCount += report.TotalWorkspaceCount
+		agg.TotalSizeBytes += report.TotalSizeBytes
+		agg.TotalArtifactSizeBytes += report.TotalArtifactSizeBytes
+	}
+	agg.TotalArtifactRatio = ratio(agg.TotalArtifactSizeBytes, agg.TotalSizeBytes)
+	return agg, nil
+}
+
 // DiskUsageKindUnknown is the kind reported for task directories whose
 // .gc_meta.json is missing or unreadable. Mirrors how the GC orphan path
 // treats them — present on disk, but no parent record we can lock onto.

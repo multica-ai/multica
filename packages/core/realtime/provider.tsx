@@ -2,7 +2,7 @@
 
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useState,
   useCallback,
@@ -21,7 +21,7 @@ import {
 import { createLogger } from "../logger";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
-type EventHandler = (payload: unknown, actorId?: string) => void;
+type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
@@ -144,7 +144,7 @@ export function WSProvider({
 }
 
 export function useWS() {
-  const ctx = useContext(WSContext);
+  const ctx = use(WSContext);
   if (!ctx) throw new Error("useWS must be used within WSProvider");
   return ctx;
 }

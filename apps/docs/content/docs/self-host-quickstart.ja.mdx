@@ -1,0 +1,281 @@
+---
+title: セルフホスティングのクイックスタート
+description: Docker で自分のサーバーやマシン上に Multica を実行します（Kubernetes では Helm が利用できます）。所要時間は約10分です。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+このページでは、Docker を使って Multica **サーバー**（バックエンド + フロントエンド + PostgreSQL）を自分のマシンやサーバー上で実行する手順を案内します。完了すると、[ワークスペース](/workspaces)、[イシュー](/issues)、[コメント](/comments)、[エージェント](/agents)の構成を含むデータが、完全にあなたの管理下に置かれます。
+
+エージェントの **実行** は、依然としてローカルで動かす[デーモン](/daemon-runtimes)と、そのマシンにインストールされた [AI コーディングツール](/providers)に依存します — Cloud とまったく同じです。セルフホスティングはサーバー層を置き換えるだけで、実行層を置き換えるわけではありません。
+
+## 前提条件
+
+- **Docker** がインストールされ、`docker compose` を実行できること
+- **Git**（任意ですが、ソースを取得できるので推奨）
+- 常時稼働させられるマシン（ローカル / 内部ネットワーク / クラウドホストのいずれでも可）
+- **デーモンを実行するマシン** に AI コーディングツールが最低1つインストールされていること（サーバーを実行するマシンである必要はなく、開発用ノートパソコンでも構いません）
+
+## 1. プロジェクトを取得してバックエンドを起動する
+
+<Callout type="info">
+**すでに Kubernetes を使っていますか?** Docker をスキップして代わりに Helm チャートを使ってください — 下記の [Kubernetes デプロイ](#kubernetes-deployment-alternative)へ移動し、初回ログインのために [ステップ4](#4-first-login--create-a-workspace)に戻ってきてください。
+</Callout>
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+`make selfhost` は次のことを行います。
+
+1. `.env` がなければ `.env.example` から生成し、**ランダムな JWT_SECRET と Postgres パスワード** を併せて作成します
+2. 公式の Docker イメージ（PostgreSQL、Multica backend、Multica frontend）を取得します
+3. `docker-compose.selfhost.yml` を使ってすべてのサービスを起動します
+4. バックエンドの `/health` エンドポイントが準備できるまで待機します
+
+起動後の継続的なプロダクションプローブには、データベースや migration の問題でチェックが失敗するようにしたい場合は `/readyz` を使ってください。
+
+バックエンドのコンテナは起動時に **データベースの migration を自動で実行します**（`docker/entrypoint.sh` がサーバー起動前に `./migrate up` を実行）— バックエンドのログで migration の出力を確認できます。バージョンアップグレードも同じ方法で処理されます。
+
+<Callout type="info">
+**イメージがまだ公開されていませんか?** `make selfhost` がイメージを取得できない場合、まだリリースされていないバージョンタグにいる可能性があります。安定リリースに切り替えるか、ソースからビルドしてください: `make selfhost-build`。
+</Callout>
+
+起動すると次のようになります。
+
+- **フロントエンド**: [http://localhost:3000](http://localhost:3000)
+- **バックエンド**: [http://localhost:8080](http://localhost:8080)
+
+<Callout type="info">
+**ポートは `127.0.0.1` でのみ待ち受けます。** `docker-compose.selfhost.yml` は公開されるすべてのポートを loopback にバインドします — `ss -tlnp` には `0.0.0.0:8080` は表示されず、設計上、他のマシンからはサービスにアクセスできません。サーバーのシークレットと Postgres の認証情報は、公開インターネット上に置いては絶対にいけません。マシン間アクセスが必要な場合は、TLS を終端するリバースプロキシをスタックの前に置いてください — [ステップ5b — マシン間: リバースプロキシを前に置く](#5b-cross-machine-front-with-a-reverse-proxy)を参照してください。
+</Callout>
+
+## 2. 重要: プロダクションの安全設定を維持する
+
+<Callout type="warning">
+**`docker-compose.selfhost.yml` はデフォルトで `APP_ENV` を `production` に設定し**、`MULTICA_DEV_VERIFICATION_CODE` を空のままにするため、公開インスタンスには固定コードがありません。
+
+`MULTICA_DEV_VERIFICATION_CODE` はローカルまたは非公開のテスト自動化でのみ設定してください。`APP_ENV` が non-production のときに固定コードが有効になっていると、コードをリクエストできる誰もがその固定値でサインインできてしまいます。[認証設定 → 固定のローカルテストコード](/auth-setup#fixed-local-testing-codes)を参照してください。
+
+公開デプロイの前には、`.env` に `APP_ENV=production` が設定され、`MULTICA_DEV_VERIFICATION_CODE` が空であることを必ず確認してください。
+</Callout>
+
+## 3. メールサービスを構成する（任意ですが推奨）
+
+メールを構成しないと、ユーザーはメールで認証コードを受け取れず、サーバーは生成したコードを代わりに stdout に出力します。
+
+2種類の配信バックエンドがサポートされています — ネットワークに合うものを選んでください。
+
+**オプション A — Resend（クラウド / 公開インターネットのデプロイ）:**
+
+1. [Resend](https://resend.com/) にサインアップして API key を取得します
+2. 自分が管理する送信用ドメインを認証します
+3. `.env` に次を設定します。
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com
+    ```
+
+**オプション B — SMTP relay（内部ネットワーク / オンプレミス）:**
+
+デプロイ環境が `api.resend.com` に到達できない場合や、すでに内部メールリレー（Microsoft Exchange、Postfix、オンプレミスの SendGrid など）がある場合に使ってください。両方が設定されている場合は `SMTP_HOST` が Resend より優先されるため、認証メールと招待メールは内部リレーにとどまります。STARTTLS は広告されると自動的にアップグレードされます。ポート `465`（SMTPS / 暗黙的 TLS）は接続直後の TLS ハンドシェイクを自動的に有効化し、`SMTP_TLS=implicit`（別名: `smtps`、`ssl`）は非標準の SMTPS ポートで強制的に有効化します。
+
+**匿名 Exchange 内部リレー（ポート 25）** — ホストが IP で信頼され、認証情報なしで送信する場合:
+
+```bash
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+**認証付き送信（ポート 587、STARTTLS）** — リレーがサービスアカウントを必要とし、STARTTLS が広告されると自動的にアップグレードされる場合:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for private CA / self-signed
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**暗黙的 TLS / SMTPS（ポート 465）** — STARTTLS を広告しないアリババクラウド / テンセントの法人メールなどのプロバイダー向け。ポート `465` は暗黙的 TLS を自動的に有効化するため、ここでは `SMTP_TLS` は省略可能です:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**厳格な公開 relay（例: Google Workspace `smtp-relay.gmail.com`）** が公開 IP からのデフォルトの `localhost` 挨拶を拒否する場合は、`SMTP_EHLO_NAME` を relay が期待する FQDN に設定してください — そうしないと接続が切断され、後続のコマンドで不明瞭な `EOF` として表面化します。デフォルトはコンテナのホスト名で、これは通常は有効な FQDN ではありません。
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+その後、再起動します: `docker compose -f docker-compose.selfhost.yml restart backend`。再起動時、バックエンドはどのプロバイダーを選んだかを出力します（`EmailService: SMTP relay …` / `Resend API` / `DEV mode`）— 認証情報は決してログに残らないため、この行はヘルプを求めるときに共有しても安全です。
+
+追加の認証構成（OAuth、サインアップの許可リスト）と SMTP 変数の完全なリファレンスは、[認証設定](/auth-setup)と[環境変数 → メール](/environment-variables#email-configuration)を参照してください。
+
+## 4. 初回ログイン + ワークスペースの作成
+
+[http://localhost:3000](http://localhost:3000) を開きます。
+
+- メールアドレスを入力します
+- 構成したメールバックエンド（Resend または SMTP relay）から認証コードを受け取ります。どちらも構成していない場合は、サーバーコンテナの stdout からコピーしてください — `[DEV] Verification code` の行を探します
+- non-production の非公開インスタンスで `MULTICA_DEV_VERIFICATION_CODE=888888` を明示的に設定した場合を除き、`888888` を使わないでください
+- ログインして最初のワークスペースを作成します
+
+## 5. CLI を自分のサーバーに向ける
+
+CLI のインストールは [Cloud クイックスタート → 2. CLI をインストールする](/cloud-quickstart#2-install-the-multica-cli) と同じです — Homebrew / スクリプト / PowerShell のいずれかを選んでください。
+
+### 5a. 同じマシン
+
+CLI とサーバーが同じホストで動作している場合、デフォルト値ですでに動作します。
+
+```bash
+multica setup self-host
+```
+
+これにより CLI が `http://localhost:8080`（バックエンド）と `http://localhost:3000`（フロントエンド）を指すようになり、ブラウザログインを案内し、PAT をローカルに保存して、**デーモンを自動的に起動します**。
+
+### 5b. マシン間: リバースプロキシを前に置く
+
+compose スタックは `127.0.0.1` でのみ待ち受けるため、別のマシンにあるデーモンは `http://<server-ip>:8080` に直接接続できません — そして、そうなることを望むべきでもありません。さもなければサーバーのシークレットが公開インターネットから到達可能になってしまうからです。TLS を終端し、`127.0.0.1:8080`（バックエンド）と `127.0.0.1:3000`（フロントエンド）へ転送するリバースプロキシをサーバーに置き、CLI を公開 HTTPS URL に向けてください。
+
+```bash
+multica setup self-host \
+  --server-url https://<your-domain> \
+  --app-url https://<your-domain>
+```
+
+<Callout type="info">
+フラグより環境変数を使いたい場合は、対応するフラグを省略すると `setup self-host` が `MULTICA_SERVER_URL` と `MULTICA_APP_URL` を読み取ります（両方設定した場合はフラグが優先されます）。`MULTICA_SERVER_URL` は[環境変数](/environment-variables)で示される `ws://…/ws` というデーモン形式も受け付け、HTTP ベース URL に正規化します。
+</Callout>
+
+単一のホスト名でフロントエンドとバックエンドの両方を前段に置く（デーモンと Web アプリの両方に必要な WebSocket サポートを含む）最小限の Caddyfile は次のとおりです。
+
+```nginx
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → frontend
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+プロキシを立ち上げたら、サーバーの `.env` に `FRONTEND_ORIGIN=https://multica.example.com` を設定してバックエンドを再起動してください — そうしないと WebSocket の origin チェックがブラウザを拒否します（[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-cant-connect)）。
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) も堅実な選択肢です — ホストにポートを一切公開せずに TLS と公開ホスト名を提供してくれます。Nginx で同等に構成する方法（`app.` / `api.` を別々のホスト名に分離、WebSocket 用の `proxy_set_header Upgrade`）も同じくらいうまく動作します。重要な要件は、TLS の終端と `/ws` での `Upgrade` ヘッダーの転送です。
+
+## 6. エージェントの作成 + 最初のタスクの割り当て
+
+Cloud と同じ流れです — [Cloud クイックスタート → ステップ5-6](/cloud-quickstart#5-create-an-agent)を参照してください。
+
+<span id="7-usage-rollup-no-operator-action-required" />
+
+## 7. 使用量ロールアップ（オペレーターの操作は不要）
+
+<Callout type="info">
+使用量 / ランタイムのダッシュボードは、`rollup_task_usage_hourly()` が埋める派生テーブル `task_usage_hourly` からデータを読み取ります。MUL-2957 以降、バックエンドは DB バックドのスケジューラー経由でこのロールアップをインプロセスで実行するようになり、`pg_cron` は不要になりました。外部 cron / systemd タイマーも推奨セットアップではなくなっています。バンドルされた `pgvector/pgvector:pg17` イメージは変更なしで動作します。
+</Callout>
+
+インプロセススケジューラーは 30 秒おきにティックし、`sys_cron_executions` テーブルを介して 5 分ごとの UTC プランをクレームします。複数のバックエンドレプリカでも安全です — 一意キー `(job_name, scope_kind, scope_id, plan_time)` により、各プランで勝者は 1 つだけです。新規デプロイでは何の設定も不要です。
+
+**互換性 — 既存の `pg_cron` 登録。** 以前 rollup を `pg_cron` ジョブとして登録していた（`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`）場合でも、削除する必要はありません — SQL 関数が内部で advisory lock 4246 を保持するため、アプリのスケジューラーと `pg_cron` が二重書き込みすることはありません。冗長なエントリを削除するには:
+
+```sql
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
+```
+
+**`v0.3.4 → v0.3.5+` からのアップグレード。** 以前のリリースでは、migration 103 を適用する前にオペレーターが手動で `cmd/backfill_task_usage_hourly` を実行する必要があり、そうしないと migration の fail-closed ガードが `migrate up` を中断していました。MUL-2957 以降、これは自動化されました — migrate コマンドが migration 103 を適用する直前に冪等な月単位スライスのバックフィル（advisory lock 4246 の下）を実行してから処理を続行します。忙しい DB では `--sleep-between-slices=2s` で読み取り負荷を絞るためにスタンドアロンの backfill を実行することもできますが、もはや必須ではありません。
+
+完全なリファレンス（運用ノートと Kubernetes デプロイ形態を含む）は、リポジトリの [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) にあります。
+
+## Kubernetes デプロイ（代替手段）
+
+すでに Kubernetes クラスターを運用している場合、リポジトリには `deploy/helm/multica/` に Helm チャートも同梱されています。k8s 用の `make selfhost` に相当します — 同じバックエンドイメージ、フロントエンドイメージ、`pgvector/pgvector:pg17` の Postgres を Deployment / Service / Ingress としてパッケージングし、`values.yaml` からレンダリングされた1つの `ConfigMap` を併せて提供します。k3s + Traefik + `local-path` を基準に作成されており、Ingress コントローラーとデフォルトの `ReadWriteOnce` StorageClass があるあらゆるクラスターで動作するはずです。
+
+このチャートは **シークレット値をテンプレート化しません**。`multica-secrets` という名前の Secret を名前で参照するため、実際の JWT / DB / Resend / Google キーが git や `values.yaml` に置かれる必要はまったくありません。ネームスペースと Secret を kubectl で一度作成してください。
+
+```bash
+kubectl create namespace multica
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+その後、チャートをインストールします。
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+helm install multica deploy/helm/multica -n multica
+```
+
+デフォルト値はホスト名 `multica.dev.lan`（web）と `api.multica.dev.lan`（バックエンド）を想定しています。これらを `/etc/hosts`（またはローカル DNS）に追加し、Ingress に到達可能な任意のノード IP を指すようにしてください。別のホスト名を使うには、`deploy/helm/multica/values.yaml` をコピーして `ingress.frontend.host` / `ingress.backend.host` と、それに対応する `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` を編集し、`-f my-values.yaml` でインストールしてください。
+
+コールドクラスターでは、バックエンドが Postgres を待ち、migration を実行する間、数分間 `Running` 状態だが `Ready` ではないことがあります — startupProbe がこれを吸収するため、ポッドは再起動されないはずです。`Ready` になったら:
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+その後 `http://multica.dev.lan` を開き、上記の [ステップ4 — 初回ログイン](#4-first-login--create-a-workspace)から続けてください。CLI を Ingress のホスト名に向けます。
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+チャートを変更せずに最新のイメージだけを取得するには、`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend` を実行してください。特定の Multica リリースに固定するには、values ファイルで `images.backend.tag` / `images.frontend.tag` を設定して `helm upgrade` を実行してください。`helm -n multica uninstall multica` はワークロードを削除しますが、PVC と Secret は保持します。`kubectl delete namespace multica` はすべてを消去します。
+
+完全なリファレンス — 3つのログインモード、web イメージにビルド時に焼き込まれた `REMOTE_API_URL` に対する `backend` ExternalName の回避策、リソース制限、TLS — は、リポジトリの [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) にあります。
+
+## よくある問題
+
+- **バックエンドが起動しない**: `docker compose -f docker-compose.selfhost.yml logs backend` でコンテナのログを確認してください。たいていは `.env` の不正な `DATABASE_URL` または `JWT_SECRET` が原因です
+- **認証コードが届かない**: メールバックエンドが構成されていない場合（Resend も SMTP もない）→ `docker compose logs backend` で `[DEV] Verification code` を探してください
+- **WebSocket が接続できない**: 公開デプロイでは、`FRONTEND_ORIGIN` を実際のフロントエンドのドメインに必ず設定する必要があります。[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-wont-connect)を参照してください
+- **使用量 / ランタイムのダッシュボードがゼロのまま**: `rollup_task_usage_hourly()` がスケジューリングされていません — 上記の [ステップ7](#7-usage-rollup-no-operator-action-required)と[トラブルシューティング → 使用量ダッシュボードがゼロと表示される](/troubleshooting#usage-dashboard-stays-at-zero)を参照してください
+- **`migrate up` が `refusing to drop legacy daily rollups` で失敗する**: `v0.3.4 → v0.3.5+` のアップグレード経路ガードです。MUL-2957 以降、migrate コマンドは migration 103 を適用する前に自動でバックフィルを実行します — [ステップ7](#7-usage-rollup-no-operator-action-required)を参照してください
+
+## 次のステップ
+
+- [環境変数](/environment-variables) — 完全な env リファレンス
+- [認証設定](/auth-setup) — Resend / OAuth / サインアップ許可リストの詳細
+- [GitHub 連携](/github-integration) — GitHub App を接続して、PR がイシューに自動でリンクされ、マージするとイシューが閉じられるように設定する
+- [トラブルシューティング](/troubleshooting) — うまくいかないときはここから始めてください
+- [デスクトップアプリ](/desktop-app) — `~/.multica/desktop.json` を通じた任意のデスクトップ設定。Web フロントエンド + CLI が依然として最速のセルフホスティング経路です

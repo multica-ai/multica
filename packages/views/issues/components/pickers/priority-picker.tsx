@@ -15,16 +15,26 @@ export function PriorityPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  defaultOpen = false,
 }: {
-  priority: IssuePriority;
+  /**
+   * The currently-selected priority, used to check the matching row. `null`
+   * means "no single current value" (e.g. a batch selection spanning several
+   * priorities) — no row is checked. Single-issue callers always pass a
+   * concrete priority.
+   */
+  priority: IssuePriority | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Open the picker on first mount. Used by progressive-disclosure
+   *  sidebars so a newly-added field immediately enters edit state. */
+  defaultOpen?: boolean;
 }) {
-  const [internalOpen, setInternalOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const { t } = useT("issues");
@@ -37,12 +47,13 @@ export function PriorityPicker({
       align={align}
       triggerRender={triggerRender}
       trigger={
-        customTrigger ?? (
+        customTrigger ??
+        (priority != null ? (
           <>
             <PriorityIcon priority={priority} className="shrink-0" />
             <span className="truncate">{t(($) => $.priority[priority])}</span>
           </>
-        )
+        ) : null)
       }
     >
       {PRIORITY_ORDER.map((p) => {

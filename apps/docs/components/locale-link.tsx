@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {
   createContext,
-  useContext,
+  use,
   type AnchorHTMLAttributes,
   type ReactNode,
 } from "react";
@@ -30,7 +30,7 @@ export function DocsLocaleProvider({
 }
 
 export function useDocsLocale(): Lang {
-  return useContext(DocsLocaleContext);
+  return use(DocsLocaleContext);
 }
 
 // Drop-in replacement for the MDX-rendered `<a>` element. Keeps the same

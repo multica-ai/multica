@@ -12,6 +12,7 @@ import {
   type ChartConfig,
 } from "@multica/ui/components/ui/chart";
 import { formatTokens, type DailyTokenData } from "../../utils";
+import { useT } from "../../../i18n";
 
 // Four-segment stack — input / output / cache read / cache write. Unlike the
 // cost chart, cache reads ARE visible here: a typical day on Claude shows
@@ -32,6 +33,7 @@ export const tokenStackConfig = {
 } satisfies ChartConfig;
 
 export function DailyTokensChart({ data }: { data: DailyTokenData[] }) {
+  const { t } = useT("runtimes");
   // No internal empty-state — same convention as DailyCostChart: the parent
   // decides what to render when there's nothing to show.
   return (
@@ -60,6 +62,22 @@ export function DailyTokensChart({ data }: { data: DailyTokenData[] }) {
                   ? `${formatTokens(value)} ${name}`
                   : `${value} ${name}`
               }
+              footer={(payload) => {
+                const total = payload.reduce(
+                  (sum, item) =>
+                    sum +
+                    (typeof item.value === "number" ? item.value : 0),
+                  0,
+                );
+                return (
+                  <div className="flex items-center justify-between gap-2 font-medium">
+                    <span>{t(($) => $.charts.tooltip_total)}</span>
+                    <span className="font-mono tabular-nums">
+                      {total.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              }}
             />
           }
         />

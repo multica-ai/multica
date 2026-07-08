@@ -98,16 +98,29 @@ export function stripLeadingSeparator(argv) {
  *   - "v0.1.36"                → "0.1.36"
  *   - "v0.1.35-14-gf1415e96"   → "0.1.35-14-gf1415e96"  (semver prerelease)
  *   - "v0.1.35-…-dirty"        → same, dirty suffix preserved
- *   - "f1415e96" (no tag)      → "0.0.0-f1415e96"        (fallback)
+ *   - "f1415e96" (no tag)      → "0.0.0-gf1415e96"       (fallback)
+ *   - "2f24057b" (no tag, hash begins with a digit) → "0.0.0-g2f24057b"
+ *   - "0123456"  (no tag, all-digit hash w/ leading zero) → "0.0.0-g0123456"
  *
  * Leading `v` is stripped so the result is valid semver for package.json.
+ * The fallback matters because a bare commit hash is never valid semver —
+ * even one that happens to start with a digit (e.g. "2f24057b") — and
+ * electron-updater throws on launch if package.json carries such a version.
+ * The hash is prefixed with `g` so the pre-release identifier is always
+ * alphanumeric; a bare all-digit hash with a leading zero (e.g. "0123456")
+ * would otherwise form `0.0.0-0123456`, which is invalid semver.
  */
 export function normalizeGitVersion(raw) {
   if (!raw) return null;
   const stripped = raw.replace(/^v/, "");
-  if (!/^\d/.test(stripped)) {
-    // No reachable tag — `git describe` fell back to just the commit hash.
-    return `0.0.0-${stripped}`;
+  // A real version begins with major.minor.patch. The bare commit hash
+  // that `git describe --always` falls back to (no reachable tag) does not,
+  // so coerce it to a 0.0.0 prerelease rather than passing it through.
+  // Prefix the hash with `g` (mirroring `git describe`'s own `g<hash>`
+  // shorthand) so a hash like "0123456" yields "0.0.0-g0123456" — a single
+  // alphanumeric identifier — instead of the invalid "0.0.0-0123456".
+  if (!/^\d+\.\d+\.\d+/.test(stripped)) {
+    return `0.0.0-g${stripped}`;
   }
   return stripped;
 }

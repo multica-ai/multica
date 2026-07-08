@@ -71,8 +71,12 @@ export function CustomArgsTab({
     try {
       await onSave({ custom_args: currentArgs });
       toast.success(t(($) => $.tab_body.custom_args.saved_toast));
-    } catch {
-      toast.error(t(($) => $.tab_body.custom_args.save_failed_toast));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.tab_body.custom_args.save_failed_toast),
+      );
     } finally {
       setSaving(false);
     }

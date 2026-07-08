@@ -3,9 +3,10 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated = "issue:created"
-	EventIssueUpdated = "issue:updated"
-	EventIssueDeleted = "issue:deleted"
+	EventIssueCreated         = "issue:created"
+	EventIssueUpdated         = "issue:updated"
+	EventIssueDeleted         = "issue:deleted"
+	EventIssueMetadataChanged = "issue_metadata:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -29,13 +30,15 @@ const (
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
-	EventTaskQueued    = "task:queued"    // ∅ → queued (enqueue / retry create)
-	EventTaskDispatch  = "task:dispatch"  // queued → dispatched (daemon claim)
-	EventTaskProgress  = "task:progress"
-	EventTaskCompleted = "task:completed" // running → completed
-	EventTaskFailed    = "task:failed"    // running → failed
-	EventTaskMessage   = "task:message"
-	EventTaskCancelled = "task:cancelled" // * → cancelled
+	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
+	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
+	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
+	EventTaskProgress              = "task:progress"
+	EventTaskCompleted             = "task:completed" // running → completed
+	EventTaskFailed                = "task:failed"    // running → failed
+	EventTaskMessage               = "task:message"
+	EventTaskCancelled             = "task:cancelled" // * → cancelled
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
@@ -77,6 +80,7 @@ const (
 	EventProjectUpdated         = "project:updated"
 	EventProjectDeleted         = "project:deleted"
 	EventProjectResourceCreated = "project_resource:created"
+	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
 	// Label events
@@ -109,10 +113,11 @@ const (
 	EventSquadDeleted = "squad:deleted"
 
 	// Daemon events
-	EventDaemonHeartbeat     = "daemon:heartbeat"
-	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
-	EventDaemonRegister      = "daemon:register"
-	EventDaemonTaskAvailable = "daemon:task_available"
+	EventDaemonHeartbeat              = "daemon:heartbeat"
+	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
+	EventDaemonRegister               = "daemon:register"
+	EventDaemonTaskAvailable          = "daemon:task_available"
+	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
@@ -120,4 +125,21 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+
+	// Lark integration events. `created` covers both first-install
+	// (UNIQUE on (workspace_id, agent_id) means at most one row per
+	// agent) and re-install via UpsertLarkInstallation — front-ends
+	// treat both as a single "installation appeared / refreshed"
+	// notification. `revoked` flips status to 'revoked' without
+	// deleting the row; the audit trail is preserved.
+	EventLarkInstallationCreated = "lark_installation:created"
+	EventLarkInstallationRevoked = "lark_installation:revoked"
+
+	// Slack installation lifecycle (MUL-3666). Same semantics as the Lark
+	// events: `created` covers both first install and OAuth re-install (the
+	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one row
+	// per agent), `revoked` flips status without deleting the row. Front-ends
+	// invalidate the Slack installations query on either.
+	EventSlackInstallationCreated = "slack_installation:created"
+	EventSlackInstallationRevoked = "slack_installation:revoked"
 )

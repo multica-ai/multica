@@ -91,12 +91,129 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("searchIssues", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ issues: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("searchProjects", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ projects: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "roadmap" });
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+  });
+
+  describe("listAutopilots", () => {
+    const baseAutopilot = {
+      id: "ap-1",
+      workspace_id: "ws-1",
+      title: "Daily triage",
+      description: null,
+      assignee_id: "agent-1",
+      status: "active",
+      execution_mode: "run_only",
+      issue_title_template: null,
+      created_by_type: "member",
+      created_by_id: "user-1",
+      last_run_at: null,
+      created_at: "2026-06-01T00:00:00Z",
+      updated_at: "2026-06-01T00:00:00Z",
+    };
+
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ autopilots: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res).toEqual({ autopilots: [], total: 0 });
+    });
+
+    it("accepts an old-server row without assignee_type or derived fields", async () => {
+      // Pre-MUL-2429 servers omit assignee_type; servers older than the
+      // list-derived-fields change omit trigger_kinds/next_run_at/
+      // last_run_status. Both must parse, not fall back.
+      stubFetchJson({ autopilots: [baseAutopilot], total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots).toHaveLength(1);
+      expect(res.autopilots[0]?.assignee_type).toBe("agent");
+      expect(res.autopilots[0]?.trigger_kinds).toBeUndefined();
+      expect(res.autopilots[0]?.last_run_status).toBeUndefined();
+    });
+
+    it("passes derived fields through and tolerates enum drift", async () => {
+      stubFetchJson({
+        autopilots: [
+          {
+            ...baseAutopilot,
+            assignee_type: "squad",
+            trigger_kinds: ["schedule", "some_future_kind"],
+            next_run_at: "2026-06-13T09:00:00Z",
+            last_run_status: "some_future_status",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]?.trigger_kinds).toEqual([
+        "schedule",
+        "some_future_kind",
+      ]);
+      expect(res.autopilots[0]?.next_run_at).toBe("2026-06-13T09:00:00Z");
+      expect(res.autopilots[0]?.last_run_status).toBe("some_future_status");
+    });
+  });
+
+  describe("getConfig", () => {
+    it("drops malformed daemon setup URLs instead of throwing", async () => {
+      stubFetchJson({
+        cdn_domain: "cdn.example.com",
+        allow_signup: true,
+        daemon_server_url: { wrong: "shape" },
+        daemon_app_url: 123,
+        workspace_creation_disabled: false,
+        feature_flags: { composio_mcp_apps: true },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const config = await client.getConfig();
+      expect(config.cdn_domain).toBe("cdn.example.com");
+      expect(config.allow_signup).toBe(true);
+      expect(config.daemon_server_url).toBeUndefined();
+      expect(config.daemon_app_url).toBeUndefined();
+      expect(config.feature_flags?.composio_mcp_apps).toBe(true);
+    });
+  });
+
+  describe("listGroupedIssues", () => {
+    it("falls back to empty groups when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGroupedIssues({ group_by: "assignee" });
+      expect(res).toEqual({ groups: [] });
+    });
+  });
+
   describe("listComments", () => {
     it("returns [] when the response is not an array", async () => {
       stubFetchJson({ wrong: "shape" });
       const client = new ApiClient("https://api.example.test");
       const comments = await client.listComments("issue-1");
       expect(comments).toEqual([]);
+    });
+  });
+
+  describe("previewCommentTriggers", () => {
+    it("returns an empty agent list when the response is malformed", async () => {
+      stubFetchJson({ agents: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const preview = await client.previewCommentTriggers("issue-1", "hello");
+      expect(preview).toEqual({ agents: [] });
     });
   });
 
@@ -186,6 +303,68 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const detail = await client.getAgentTemplate("code-reviewer");
       expect(detail.instructions).toBe("");
+    });
+  });
+
+  describe("listAutopilotDeliveries", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res).toEqual({ deliveries: [], total: 0 });
+    });
+
+    it("falls back to an empty list when `deliveries` is not an array", async () => {
+      stubFetchJson({ deliveries: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res).toEqual({ deliveries: [], total: 0 });
+    });
+
+    it("accepts an unknown future status value rather than dropping the row", async () => {
+      // Server-side enum drift (e.g. new `quarantined` state). The list
+      // must still surface the row; downstream UI code's `default` arm
+      // handles unknown values with a generic visual.
+      stubFetchJson({
+        deliveries: [
+          {
+            id: "d-1",
+            workspace_id: "ws-1",
+            autopilot_id: "ap-1",
+            trigger_id: "t-1",
+            provider: "github",
+            event: "pull_request.opened",
+            dedupe_key: "abc",
+            dedupe_source: "x-github-delivery",
+            signature_status: "valid",
+            status: "quarantined",
+            attempt_count: 1,
+            content_type: "application/json",
+            response_status: 200,
+            autopilot_run_id: null,
+            replayed_from_delivery_id: null,
+            error: null,
+            received_at: "2026-01-01T00:00:00Z",
+            last_attempt_at: "2026-01-01T00:00:00Z",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotDeliveries("ap-1");
+      expect(res.deliveries).toHaveLength(1);
+      expect(res.deliveries[0]?.status).toBe("quarantined");
+    });
+  });
+
+  describe("getAutopilotDelivery", () => {
+    it("falls back to a placeholder carrying the requested id", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      const detail = await client.getAutopilotDelivery("ap-1", "d-1");
+      expect(detail.id).toBe("d-1");
+      expect(detail.autopilot_id).toBe("ap-1");
     });
   });
 

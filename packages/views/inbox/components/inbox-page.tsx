@@ -136,7 +136,12 @@ export function InboxPage() {
   useEffect(() => {
     if (!selectedId || selectedRead) return;
     markReadMutate(selectedId, {
-      onError: () => toast.error(t(($) => $.errors.mark_read_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_read_failed),
+        ),
     });
   }, [selectedId, selectedRead, markReadMutate, t]);
 
@@ -157,21 +162,36 @@ export function InboxPage() {
       setSelectedKey(next ? (next.issue_id ?? next.id) : "");
     }
     archiveMutation.mutate(id, {
-      onError: () => toast.error(t(($) => $.errors.archive_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_failed),
+        ),
     });
   };
 
   // Batch operations
   const handleMarkAllRead = () => {
     markAllReadMutation.mutate(undefined, {
-      onError: () => toast.error(t(($) => $.errors.mark_all_read_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_all_read_failed),
+        ),
     });
   };
 
   const handleArchiveAll = () => {
     setSelectedKey("");
     archiveAllMutation.mutate(undefined, {
-      onError: () => toast.error(t(($) => $.errors.archive_all_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_failed),
+        ),
     });
   };
 
@@ -179,14 +199,24 @@ export function InboxPage() {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey("");
     archiveAllReadMutation.mutate(undefined, {
-      onError: () => toast.error(t(($) => $.errors.archive_all_read_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_read_failed),
+        ),
     });
   };
 
   const handleArchiveCompleted = () => {
     setSelectedKey("");
     archiveCompletedMutation.mutate(undefined, {
-      onError: () => toast.error(t(($) => $.errors.archive_completed_failed)),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_completed_failed),
+        ),
     });
   };
 
