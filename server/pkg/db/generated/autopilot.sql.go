@@ -220,17 +220,29 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id,
+    trigger_summary, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    $5,
+    $6::uuid,
+    $7::jsonb,
+    $8::jsonb
+)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps
 `
 
 type CreateAutopilotTaskParams struct {
-	AgentID        pgtype.UUID `json:"agent_id"`
-	RuntimeID      pgtype.UUID `json:"runtime_id"`
-	Priority       int32       `json:"priority"`
-	AutopilotRunID pgtype.UUID `json:"autopilot_run_id"`
-	TriggerSummary pgtype.Text `json:"trigger_summary"`
+	AgentID              pgtype.UUID `json:"agent_id"`
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
+	Priority             int32       `json:"priority"`
+	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
+	TriggerSummary       pgtype.Text `json:"trigger_summary"`
+	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
+	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
 }
 
 // =====================
@@ -243,6 +255,9 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.Priority,
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
+		arg.OriginatorUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

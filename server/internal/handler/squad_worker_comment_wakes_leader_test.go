@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -355,5 +357,125 @@ func TestCreateComment_WorkerAgentCommentWakesPrivateSquadLeader_MUL4015(t *test
 	if leaderTasksQueued != 1 {
 		t.Fatalf("after worker done: expected 1 queued leader task for private L, got %d — leader→worker→leader loop broken for private leader (MUL-4015)",
 			leaderTasksQueued)
+	}
+}
+
+func TestAutopilotSquadLeaderTaskCarriesOriginatorForPrivateWorkerMention(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+
+	privateAgent := func(name string) string {
+		var agentID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent (
+				workspace_id, name, description, runtime_mode, runtime_config,
+				runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
+				instructions, custom_env, custom_args, mcp_config
+			)
+			VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+			RETURNING id
+		`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID).Scan(&agentID); err != nil {
+			t.Fatalf("create private agent %q: %v", name, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		})
+		return agentID
+	}
+
+	leaderID := privateAgent(fmt.Sprintf("autopilot-originator-leader-%d", suffix))
+	workerID := privateAgent(fmt.Sprintf("autopilot-originator-worker-%d", suffix))
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("autopilot-originator-squad-%d", suffix), leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	var autopilotID string
+	autopilotTitle := fmt.Sprintf("autopilot-originator-%d", suffix)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_type, assignee_id, execution_mode,
+			issue_title_template, created_by_type, created_by_id
+		)
+		VALUES ($1, $2, 'squad', $3, 'create_issue', $4, 'member', $5)
+		RETURNING id
+	`, testWorkspaceID, autopilotTitle, squadID, autopilotTitle, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE autopilot_id = $1`, autopilotID)
+		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	})
+
+	ap, err := testHandler.Queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("load autopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("dispatch autopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var leaderTaskID string
+	var leaderOriginator pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, originator_user_id
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND is_leader_task = TRUE
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, leaderID).Scan(&leaderTaskID, &leaderOriginator); err != nil {
+		t.Fatalf("load leader task: %v", err)
+	}
+	if !leaderOriginator.Valid || uuidToString(leaderOriginator) != testUserID {
+		t.Fatalf("leader task originator = %v (valid=%v), want autopilot creator %s",
+			uuidToString(leaderOriginator), leaderOriginator.Valid, testUserID)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, leaderTaskID); err != nil {
+		t.Fatalf("mark leader task running: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "please handle [@Worker](mention://agent/" + workerID + ")",
+	})
+	r.Header.Set("X-Agent-ID", leaderID)
+	r.Header.Set("X-Task-ID", leaderTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("leader worker mention CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workerTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, workerID).Scan(&workerTasks); err != nil {
+		t.Fatalf("count worker tasks: %v", err)
+	}
+	if workerTasks != 1 {
+		t.Fatalf("expected private worker task after autopilot leader mention, got %d", workerTasks)
 	}
 }

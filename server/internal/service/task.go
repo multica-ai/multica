@@ -280,7 +280,9 @@ func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, c
 // direct issue assignment/creation falls back to the issue's member creator.
 // Agent-created quick-create issues have an explicit origin link back to the
 // quick-create task, so they can inherit that task's originator safely. Other
-// agent/system origins, including autopilot, deliberately remain unattributed.
+// agent/system origins deliberately remain unattributed. Autopilot initial
+// dispatch knows the member creator and passes that originator explicitly
+// instead of asking this fallback to infer it from an agent-created issue.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	if triggerCommentID.Valid {
 		return s.resolveOriginatorFromTriggerComment(ctx, triggerCommentID)
@@ -301,6 +303,13 @@ func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue d
 	default:
 		return pgtype.UUID{}
 	}
+}
+
+func (s *TaskService) effectiveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, originatorOverride pgtype.UUID) pgtype.UUID {
+	if originatorOverride.Valid {
+		return originatorOverride
+	}
+	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -599,6 +608,13 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return s.enqueueIssueTask(ctx, issue, commentID, false, "")
 }
 
+// EnqueueTaskForIssueWithOriginator creates the initial issue task when the
+// caller already knows the trusted human originator. Invalid originator falls
+// back to the normal issue/comment-chain resolution.
+func (s *TaskService) EnqueueTaskForIssueWithOriginator(ctx context.Context, issue db.Issue, originatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithOriginator(ctx, issue, pgtype.UUID{}, false, "", originatorUserID)
+}
+
 // EnqueueTaskForIssueWithHandoff is the assign/promote variant that carries a
 // handoff note into the run's opening context (MUL-3375). The note rides a
 // dedicated task column; the daemon renders it via the assignment-handoff
@@ -653,6 +669,10 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 }
 
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithOriginator(ctx, issue, triggerCommentID, forceFreshSession, handoffNote, pgtype.UUID{})
+}
+
+func (s *TaskService) enqueueIssueTaskWithOriginator(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, originatorOverride pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -672,7 +692,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	originatorUserID := s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+	originatorUserID := s.effectiveOriginatorForIssueTask(ctx, issue, triggerCommentID, originatorOverride)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
@@ -740,6 +760,13 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "")
 }
 
+// EnqueueTaskForSquadLeaderWithOriginator is the initial leader dispatch for
+// callers that already know the trusted human originator. Invalid originator
+// falls back to the normal issue/comment-chain resolution.
+func (s *TaskService) EnqueueTaskForSquadLeaderWithOriginator(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, originatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithOriginator(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, "", originatorUserID)
+}
+
 // EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
 // handoff note into the leader run's opening context (MUL-3375). Empty note
 // behaves exactly like EnqueueTaskForSquadLeader.
@@ -748,6 +775,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithOriginator(ctx, issue, agentID, triggerCommentID, isLeader, squadID, forceFreshSession, handoffNote, pgtype.UUID{})
+}
+
+func (s *TaskService) enqueueMentionTaskWithOriginator(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, originatorOverride pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -762,7 +793,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	originatorUserID := s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+	originatorUserID := s.effectiveOriginatorForIssueTask(ctx, issue, triggerCommentID, originatorOverride)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              agentID,

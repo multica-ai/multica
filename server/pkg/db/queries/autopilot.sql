@@ -332,8 +332,17 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id,
+    trigger_summary, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg(trigger_summary),
+    sqlc.narg(originator_user_id)::uuid,
+    sqlc.narg(runtime_mcp_overlay)::jsonb,
+    sqlc.narg(runtime_connected_apps)::jsonb
+)
 RETURNING *;
 
 -- =====================
