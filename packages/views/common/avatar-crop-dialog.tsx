@@ -1,35 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import Cropper, { type Area, type Point } from "react-easy-crop";
+import { Loader2, Minus, Plus, RotateCw } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Slider } from "@multica/ui/components/ui/slider";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import {
   AVATAR_OUTPUT_SIZE,
   blobToAvatarFile,
-  clampTransform,
-  coverBaseScale,
+  getCroppedAvatarBlob,
   pickOutputType,
-  renderCroppedAvatar,
-  type CropTransform,
+  type PixelCrop,
 } from "./avatar-crop";
 
-/** On-screen crop square side, px. The geometry math uses this exact value. */
-const VIEWPORT = 256;
-const MIN_SCALE = 1;
-const MAX_SCALE = 3;
-const SCALE_STEP = 0.01;
-
-const IDENTITY: CropTransform = { scale: MIN_SCALE, offsetX: 0, offsetY: 0 };
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.1;
 
 export type AvatarCropShape = "circle" | "square";
 
@@ -46,11 +39,14 @@ interface AvatarCropDialogProps {
 }
 
 /**
- * Fixed 1:1 avatar cropper. The crop square is fixed; the image pans and zooms
- * beneath it (the near-universal avatar-editor model — users place their face
- * in the frame, they don't resize the frame). Output is a square
- * {@link AVATAR_OUTPUT_SIZE}px image; the round vs square display mask is only
- * applied at render time, never baked into the pixels.
+ * Avatar cropper. The image pans/zooms/rotates beneath a fixed crop window
+ * (round for people, rounded-square for non-human actors); everything outside
+ * the window is dimmed. Output is a square {@link AVATAR_OUTPUT_SIZE}px image —
+ * the round/square mask is display-only, never baked into the pixels.
+ *
+ * Interaction (drag / zoom / rotate + the dim overlay) is delegated to
+ * react-easy-crop; this component owns the chrome (header, zoom slider, rotate
+ * / reset controls) and the encode/upload handoff.
  */
 export function AvatarCropDialog({
   file,
@@ -61,113 +57,60 @@ export function AvatarCropDialog({
   onCropped,
 }: AvatarCropDialogProps) {
   const { t } = useT("common");
-  const imgRef = useRef<HTMLImageElement>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(MIN_ZOOM);
+  const [rotation, setRotation] = useState(0);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<PixelCrop | null>(
+    null,
+  );
   const [loadError, setLoadError] = useState(false);
-  const [transform, setTransform] = useState<CropTransform>(IDENTITY);
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    ox: number;
-    oy: number;
-  } | null>(null);
 
-  // One object URL per picked file, alive for the dialog's lifetime and used
-  // for both the preview and the drawImage source. Reset the transform so a
-  // new pick starts centered.
+  // One object URL per picked file, alive for the dialog's lifetime; reset the
+  // transform so a new pick starts centered and unrotated.
   useEffect(() => {
     if (!file) {
       setObjectUrl(null);
-      setNatural(null);
-      setLoadError(false);
       return;
     }
     const url = URL.createObjectURL(file);
     setObjectUrl(url);
-    setNatural(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(MIN_ZOOM);
+    setRotation(0);
+    setCroppedAreaPixels(null);
     setLoadError(false);
-    setTransform(IDENTITY);
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  const geometry = natural
-    ? { imageWidth: natural.w, imageHeight: natural.h, viewport: VIEWPORT }
-    : null;
+  const clampZoom = (value: number) =>
+    Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
 
-  const base = natural
-    ? coverBaseScale(natural.w, natural.h, VIEWPORT)
-    : 1;
-  const drawnW = natural ? natural.w * base * transform.scale : VIEWPORT;
-  const drawnH = natural ? natural.h * base * transform.scale : VIEWPORT;
-
-  const applyTransform = (next: CropTransform) => {
-    if (!geometry) {
-      setTransform(next);
-      return;
-    }
-    setTransform(clampTransform({ ...geometry, ...next }));
-  };
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (busy || !natural) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      ox: transform.offsetX,
-      oy: transform.offsetY,
-    };
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    applyTransform({
-      scale: transform.scale,
-      offsetX: drag.ox + (e.clientX - drag.startX),
-      offsetY: drag.oy + (e.clientY - drag.startY),
-    });
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    dragRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // Capture may already be gone (pointercancel); ignore.
-    }
+  const resetTransform = () => {
+    setCrop({ x: 0, y: 0 });
+    setZoom(MIN_ZOOM);
+    setRotation(0);
   };
 
   const handleConfirm = async () => {
-    const image = imgRef.current;
-    if (!image || !natural || !file) return;
+    if (!objectUrl || !croppedAreaPixels || !file) return;
     const { type, quality } = pickOutputType();
     try {
-      const blob = await renderCroppedAvatar(
-        image,
-        {
-          imageWidth: natural.w,
-          imageHeight: natural.h,
-          viewport: VIEWPORT,
-          ...transform,
-        },
-        {
-          output: AVATAR_OUTPUT_SIZE,
-          type,
-          quality,
-          // JPEG has no alpha; give transparent source pixels a white bed
-          // instead of the canvas default black.
-          background: type === "image/jpeg" ? "#ffffff" : undefined,
-        },
-      );
+      const blob = await getCroppedAvatarBlob(objectUrl, croppedAreaPixels, rotation, {
+        output: AVATAR_OUTPUT_SIZE,
+        type,
+        quality,
+        // JPEG has no alpha; give transparent/rotated corners a white bed
+        // instead of the canvas default black.
+        background: type === "image/jpeg" ? "#ffffff" : undefined,
+      });
       onCropped(blobToAvatarFile(blob, file.name, type));
     } catch {
       setLoadError(true);
     }
   };
 
-  const disabled = busy || !natural || loadError;
+  const disabled = busy || !objectUrl || loadError || !croppedAreaPixels;
 
   return (
     <Dialog
@@ -178,99 +121,107 @@ export function AvatarCropDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent showCloseButton={!busy}>
+      <DialogContent showCloseButton={!busy} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t(($) => $.avatar_crop.title)}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className={cn(
-              "relative overflow-hidden bg-muted select-none touch-none",
-              shape === "circle" ? "rounded-full" : "rounded-lg",
-              busy ? "cursor-default" : "cursor-grab active:cursor-grabbing",
-            )}
-            style={{ width: VIEWPORT, height: VIEWPORT }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-          >
-            {objectUrl && !loadError ? (
-              <img
-                ref={imgRef}
-                src={objectUrl}
-                alt=""
-                draggable={false}
-                onLoad={(e) =>
-                  setNatural({
-                    w: e.currentTarget.naturalWidth,
-                    h: e.currentTarget.naturalHeight,
-                  })
+        <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-neutral-900">
+          {objectUrl && !loadError ? (
+            <>
+              <Cropper
+                image={objectUrl}
+                crop={crop}
+                zoom={zoom}
+                rotation={rotation}
+                aspect={1}
+                minZoom={MIN_ZOOM}
+                maxZoom={MAX_ZOOM}
+                cropShape={shape === "circle" ? "round" : "rect"}
+                showGrid={false}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onRotationChange={setRotation}
+                onCropComplete={(_: Area, areaPixels: Area) =>
+                  setCroppedAreaPixels(areaPixels)
                 }
-                onError={() => setLoadError(true)}
-                className="pointer-events-none absolute max-w-none select-none"
-                style={{
-                  width: drawnW,
-                  height: drawnH,
-                  left: (VIEWPORT - drawnW) / 2 + transform.offsetX,
-                  top: (VIEWPORT - drawnH) / 2 + transform.offsetY,
-                }}
               />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                {loadError
-                  ? t(($) => $.avatar_crop.load_failed)
-                  : t(($) => $.avatar_crop.loading)}
-              </div>
-            )}
-          </div>
-
-          <div className="flex w-full max-w-xs items-center gap-3">
-            <span className="text-xs text-muted-foreground shrink-0">
-              {t(($) => $.avatar_crop.zoom)}
-            </span>
-            <Slider
-              value={[transform.scale]}
-              min={MIN_SCALE}
-              max={MAX_SCALE}
-              step={SCALE_STEP}
-              disabled={disabled}
-              onValueChange={(value) =>
-                applyTransform({
-                  scale: (Array.isArray(value) ? value[0] : value) ?? MIN_SCALE,
-                  offsetX: transform.offsetX,
-                  offsetY: transform.offsetY,
-                })
-              }
-              aria-label={t(($) => $.avatar_crop.zoom)}
-            />
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.avatar_crop.hint)}
-          </p>
+              <button
+                type="button"
+                onClick={() => setRotation((r) => (r + 90) % 360)}
+                disabled={busy}
+                aria-label={t(($) => $.avatar_crop.rotate)}
+                className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
+              >
+                <RotateCw className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+              {loadError
+                ? t(($) => $.avatar_crop.load_failed)
+                : t(($) => $.avatar_crop.loading)}
+            </div>
+          )}
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
+            disabled={disabled}
+            aria-label={t(($) => $.avatar_crop.zoom_out)}
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
           >
-            {t(($) => $.avatar_crop.cancel)}
+            <Minus className="h-4 w-4" />
+          </button>
+          <Slider
+            value={[zoom]}
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            step={0.01}
+            disabled={disabled}
+            onValueChange={(value) =>
+              setZoom((Array.isArray(value) ? value[0] : value) ?? MIN_ZOOM)
+            }
+            aria-label={t(($) => $.avatar_crop.zoom)}
+            className="flex-1"
+          />
+          <button
+            type="button"
+            onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+            disabled={disabled}
+            aria-label={t(($) => $.avatar_crop.zoom_in)}
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <Button variant="ghost" onClick={resetTransform} disabled={busy}>
+            {t(($) => $.avatar_crop.reset)}
           </Button>
-          <Button onClick={handleConfirm} disabled={disabled}>
-            {busy ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t(($) => $.avatar_crop.uploading)}
-              </>
-            ) : (
-              t(($) => $.avatar_crop.apply)
-            )}
-          </Button>
-        </DialogFooter>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              {t(($) => $.avatar_crop.cancel)}
+            </Button>
+            <Button onClick={handleConfirm} disabled={disabled}>
+              {busy ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t(($) => $.avatar_crop.uploading)}
+                </>
+              ) : (
+                t(($) => $.avatar_crop.apply)
+              )}
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

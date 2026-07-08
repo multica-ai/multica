@@ -7,9 +7,12 @@
     "failed": "头像上传失败"
   },
   "avatar_crop": {
-    "title": "调整头像",
-    "hint": "拖动可调整位置，滑块用于缩放。",
+    "title": "编辑头像",
     "zoom": "缩放",
+    "zoom_in": "放大",
+    "zoom_out": "缩小",
+    "rotate": "旋转",
+    "reset": "重置",
     "cancel": "取消",
     "apply": "保存",
     "uploading": "上传中…",

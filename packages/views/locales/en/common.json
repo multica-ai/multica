@@ -7,9 +7,12 @@
     "failed": "Failed to upload avatar"
   },
   "avatar_crop": {
-    "title": "Adjust avatar",
-    "hint": "Drag to reposition, use the slider to zoom.",
+    "title": "Edit avatar",
     "zoom": "Zoom",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "rotate": "Rotate",
+    "reset": "Reset",
     "cancel": "Cancel",
     "apply": "Save",
     "uploading": "Uploading…",

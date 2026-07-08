@@ -7,9 +7,12 @@
     "failed": "아바타 업로드에 실패했어요"
   },
   "avatar_crop": {
-    "title": "아바타 조정",
-    "hint": "드래그해 위치를 조정하고 슬라이더로 확대·축소하세요.",
+    "title": "아바타 편집",
     "zoom": "확대/축소",
+    "zoom_in": "확대",
+    "zoom_out": "축소",
+    "rotate": "회전",
+    "reset": "초기화",
     "cancel": "취소",
     "apply": "저장",
     "uploading": "업로드 중…",
