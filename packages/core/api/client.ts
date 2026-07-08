@@ -1815,7 +1815,7 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
-  ): Promise<SendChatMessageResponse> {
+  ): Promise<SendChatMessageResponse | undefined> {
     const body: { content: string; attachment_ids?: string[] } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;

@@ -90,6 +90,7 @@ export default function ChatTab() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const activeSessionIdRef = useRef<string | null>(null);
 
   // Bridge to the chat-sessions formSheet route. Mirror local
   // activeSessionId into the store so the picker can render the current
@@ -102,6 +103,7 @@ export default function ChatTab() {
   const consumeSelect = useChatSessionPickerStore((s) => s.consumeSelect);
   useEffect(() => {
     setStoreActiveSessionId(activeSessionId);
+    activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId, setStoreActiveSessionId]);
 
   // ── Server state ───────────────────────────────────────────────────────
@@ -269,9 +271,23 @@ export default function ChatTab() {
       }
 
       try {
-        const result = await api.sendChatMessage(sessionId, content, {
+        const result: Awaited<ReturnType<typeof api.sendChatMessage>> = await api.sendChatMessage(sessionId, content, {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         });
+        if (!result) {
+          qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+            old ? old.filter((m) => m.id !== optimistic.id) : old,
+          );
+          qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+          qc.setQueryData(chatKeys.sessions(wsId), (old) =>
+            old ? old.filter((s) => s.id !== sessionId) : old,
+          );
+          clearDraft(sessionId);
+          if (activeSessionIdRef.current === sessionId) {
+            setActiveSessionId(null);
+          }
+          return;
+        }
         qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
           task_id: result.task_id,
           status: "queued",

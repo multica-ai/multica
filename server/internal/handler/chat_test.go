@@ -32,6 +32,58 @@ func withChatTestWorkspaceCtx(t *testing.T, req *http.Request) *http.Request {
 	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
 }
 
+func sendChatMessageRequest(t *testing.T, sessionID, content string, attachmentIDs []string) *http.Request {
+	t.Helper()
+	payload := map[string]any{"content": content}
+	if len(attachmentIDs) > 0 {
+		payload["attachment_ids"] = attachmentIDs
+	}
+	req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", payload)
+	req = withURLParam(req, "sessionId", sessionID)
+	return withChatTestWorkspaceCtx(t, req)
+}
+
+func createHandlerTestOpencodeRuntime(t *testing.T) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, visibility, last_seen_at
+		)
+		VALUES ($1, NULL, 'Handler Test OpenCode Runtime', 'cloud', 'opencode', 'online', 'handler test opencode', '{}'::jsonb, $2, 'private', now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create opencode runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func createHandlerTestAgentOnRuntime(t *testing.T, runtimeID, name string) string {
+	t.Helper()
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, name, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent on runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+	return agentID
+}
+
 // TestSendChatMessage_LinksAttachments verifies that attachments uploaded
 // against a chat_session (chat_message_id NULL) are back-filled with the
 // message_id when SendChatMessage receives the matching attachment_ids.
@@ -283,6 +335,93 @@ func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 chat_message rows after rejected send, got %d", count)
+	}
+}
+
+func TestSendChatMessage_ResetShortcutDeletesOpencodeSession(t *testing.T) {
+	runtimeID := createHandlerTestOpencodeRuntime(t)
+	agentID := createHandlerTestAgentOnRuntime(t, runtimeID, "ChatResetOpenCodeAgent")
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := sendChatMessageRequest(t, sessionID, "/new", nil)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("SendChatMessage reset: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var sessionCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&sessionCount); err != nil {
+		t.Fatalf("count chat_session: %v", err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected chat session to be deleted, got %d rows", sessionCount)
+	}
+
+	var messageCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_message WHERE chat_session_id = $1`,
+		sessionID,
+	).Scan(&messageCount); err != nil {
+		t.Fatalf("count chat_message: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected no chat_message rows for reset shortcut, got %d", messageCount)
+	}
+}
+
+func TestSendChatMessage_ResetShortcutKeepsNonOpenCodeSession(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatResetNonOpenCodeAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := sendChatMessageRequest(t, sessionID, "/new", nil)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage non-opencode reset: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var sendResp SendChatMessageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &sendResp); err != nil {
+		t.Fatalf("decode send: %v", err)
+	}
+	if sendResp.MessageID == "" || sendResp.TaskID == "" {
+		t.Fatalf("expected normal send response, got %#v", sendResp)
+	}
+}
+
+func TestSendChatMessage_ResetShortcutWithExtraTextStaysNormal(t *testing.T) {
+	runtimeID := createHandlerTestOpencodeRuntime(t)
+	agentID := createHandlerTestAgentOnRuntime(t, runtimeID, "ChatResetExtraTextAgent")
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := sendChatMessageRequest(t, sessionID, "new 需求", nil)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage extra text: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var sendResp SendChatMessageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &sendResp); err != nil {
+		t.Fatalf("decode send: %v", err)
+	}
+	if sendResp.MessageID == "" || sendResp.TaskID == "" {
+		t.Fatalf("expected normal send response, got %#v", sendResp)
+	}
+
+	var messageCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM chat_message WHERE chat_session_id = $1`,
+		sessionID,
+	).Scan(&messageCount); err != nil {
+		t.Fatalf("count chat_message: %v", err)
+	}
+	if messageCount != 1 {
+		t.Fatalf("expected one persisted chat message, got %d", messageCount)
 	}
 }
 

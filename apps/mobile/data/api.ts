@@ -1040,7 +1040,7 @@ class ApiClient {
     sessionId: string,
     content: string,
     opts?: { attachmentIds?: string[] },
-  ): Promise<SendChatMessageResponse> {
+  ): Promise<SendChatMessageResponse | undefined> {
     // Strict parse — we need task_id + created_at to anchor the optimistic
     // StatusPill. Fallback would silently break the elapsed-time timer.
     //
@@ -1059,6 +1059,9 @@ class ApiClient {
         body: JSON.stringify(body),
       },
     );
+    if (raw === undefined) {
+      return undefined;
+    }
     const parsed = SendChatMessageResponseSchema.safeParse(raw);
     if (!parsed.success) {
       console.error("[api] ← shape mismatch POST /api/chat/sessions/:id/messages", {

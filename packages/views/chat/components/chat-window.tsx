@@ -503,7 +503,7 @@ export function ChatWindow() {
       commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      let result;
+      let result: Awaited<ReturnType<typeof api.sendChatMessage>>;
       try {
         result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
@@ -522,6 +522,24 @@ export function ChatWindow() {
         });
         toast.error(t(($) => $.input.send_failed_toast));
         return false;
+      }
+      if (!result) {
+        apiLogger.info("sendChatMessage.reset", {
+          sessionId,
+          optimisticId: optimistic.id,
+        });
+        stopRequestedBeforeTaskRef.current = false;
+        removeChatMessageFromCaches(qc, sessionId, optimistic.id);
+        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+        qc.setQueryData<ChatSession[]>(
+          chatKeys.sessions(wsId),
+          (old) => old?.filter((s) => s.id !== sessionId),
+        );
+        if (stillOnSourceSession) {
+          setActiveSession(null);
+        }
+        commitInput?.({ clearEditor: stillOnSourceSession });
+        return true;
       }
       apiLogger.info("sendChatMessage.success", {
         sessionId,
