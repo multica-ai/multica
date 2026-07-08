@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // completeTaskViaHandler drives the daemon CompleteTask endpoint for taskID.
@@ -235,4 +238,210 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	if n := pendingTaskCountForAgentIssue(t, issueID, agentA); n != 0 {
 		t.Fatalf("agent A must not enqueue a follow-up for a comment addressed to B, got %d A task(s)", n)
 	}
+}
+
+// handlerWorkspaceMember inserts a fresh user + workspace member and returns
+// the user id (for a second distinct originator).
+func handlerWorkspaceMember(t *testing.T, slug string) string {
+	t.Helper()
+	ctx := context.Background()
+	var userID string
+	email := slug + "-" + time.Now().Format("150405.000000") + "@example.test"
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"Reconcile Test "+slug, email).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+		testWorkspaceID, userID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	return userID
+}
+
+// TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath is the MUL-4195
+// second-round must-fix #1 regression test, driving the FULL handler enqueue
+// path (computeCommentAgentTriggers → enqueueCommentAgentTriggers → merge), not
+// just the SQL. Member A's comment creates a queued task; member B (a different
+// originator) then comments before the run starts. The earlier build returned
+// ErrNoRows from the originator gate and fell through to a fresh enqueue that
+// tripped the one-pending-per-(issue,agent) unique index, silently dropping B's
+// comment. With recompute-on-merge, B's comment folds into the single task:
+// still one task (no drop, no collision), trigger repointed to B, originator
+// re-stamped to B, and A's comment preserved as coalesced.
+func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+	userB := handlerWorkspaceMember(t, "originatorB")
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'diff-originator fixture', 'in_progress', 'none', $2, 'member', 999004, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	insertMemberComment := func(authorID, content string) db.Comment {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+			VALUES ($1, $2, 'member', $3, $4, 'comment') RETURNING id
+		`, issueID, testWorkspaceID, authorID, content).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		c, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(id))
+		if err != nil {
+			t.Fatalf("load comment: %v", err)
+		}
+		return c
+	}
+
+	// A's comment → creates the queued task (originator A).
+	cA := insertMemberComment(testUserID, "first, from A")
+	testHandler.triggerTasksForComment(ctx, issue, cA, nil, "member", testUserID, testUserID, nil)
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+		t.Fatalf("after A's comment expected exactly 1 queued task, got %d", n)
+	}
+
+	// B's comment (different originator) before start → must fold in, NOT drop.
+	cB := insertMemberComment(userB, "second, from B — different user")
+	testHandler.triggerTasksForComment(ctx, issue, cB, nil, "member", userB, userB, nil)
+
+	// Still exactly one task (bounded concurrency, no unique-index collision).
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+		t.Fatalf("after B's comment expected still exactly 1 task (folded in, not dropped/duplicated), got %d", n)
+	}
+	// Trigger repointed to B, originator re-stamped to B, A coalesced.
+	trigger, originator, coalesced := taskTriggerOriginatorCoalesced(t, issueID, agentID)
+	if trigger != uuidToString(cB.ID) {
+		t.Errorf("expected trigger repointed to B's comment %s, got %s", uuidToString(cB.ID), trigger)
+	}
+	if originator != userB {
+		t.Errorf("expected originator re-stamped to B (%s), got %s", userB, originator)
+	}
+	if !containsUUID(coalesced, uuidToString(cA.ID)) {
+		t.Errorf("expected A's comment %s preserved as coalesced, got %v", uuidToString(cA.ID), coalesced)
+	}
+}
+
+// TestCompleteTask_ReconcilesDispatchedWindowComment is the MUL-4195
+// second-round must-fix #2 regression test. A member comment that lands AFTER
+// the claim response was built (after dispatched_at) but BEFORE StartTask
+// (before started_at) must still earn a follow-up. The earlier reconcile
+// anchored on started_at and missed this window; anchoring on dispatched_at
+// catches it.
+func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'dispatched-window fixture', 'in_progress', 'none', $2, 'member', 999005, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: trigger comment: %v", err)
+	}
+
+	// Running task: dispatched 5m ago, started 2m ago. The claim response was
+	// built at dispatch.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, dispatched_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '5 minutes', now() - interval '2 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	// A member comment in the dispatch→start window: after dispatched_at
+	// (5m ago), before started_at (2m ago). A started_at anchor would miss it.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'squeezed in before start', 'comment', now() - interval '3 minutes')
+	`, issueID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("setup: dispatch-window comment: %v", err)
+	}
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+		t.Fatalf("expected exactly 1 follow-up for the dispatch-window comment, got %d", n)
+	}
+}
+
+// taskTriggerOriginatorCoalesced returns (trigger_comment_id, originator_user_id,
+// coalesced_comment_ids) as text for the most recent task of (issue, agent).
+func taskTriggerOriginatorCoalesced(t *testing.T, issueID, agentID string) (string, string, []string) {
+	t.Helper()
+	var trigger, originator string
+	var coalesced []string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COALESCE(trigger_comment_id::text, ''),
+		       COALESCE(originator_user_id::text, ''),
+		       coalesced_comment_ids::text[]
+		  FROM agent_task_queue
+		 WHERE issue_id = $1 AND agent_id = $2
+		 ORDER BY created_at DESC
+		 LIMIT 1
+	`, issueID, agentID).Scan(&trigger, &originator, &coalesced); err != nil {
+		t.Fatalf("read task trigger/originator/coalesced: %v", err)
+	}
+	return trigger, originator, coalesced
+}
+
+func containsUUID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }

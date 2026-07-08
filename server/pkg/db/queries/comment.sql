@@ -329,6 +329,22 @@ WHERE issue_id = @issue_id
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: ListMemberCommentsForIssueSince :many
+-- MUL-4195 completion reconciliation: every MEMBER-authored comment on an issue
+-- created strictly after @since (a run's dispatched_at anchor), oldest first.
+-- The reconcile pass replays each undelivered one through the normal trigger
+-- pipeline so a single coalesced follow-up run covers all of them, guaranteeing
+-- at-least-once processing for deliberate user input that landed after the
+-- completing run's claim response was built. Restricted to author_type =
+-- 'member' to preserve the anti-loop guarantees (agent replies /
+-- acknowledgements / self-triggers never qualify). Ordered ASC so replaying in
+-- order lets later comments coalesce onto the follow-up created by the first.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'member'
+  AND created_at > @since
+ORDER BY created_at ASC, id ASC;
+
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;

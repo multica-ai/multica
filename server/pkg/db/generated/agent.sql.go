@@ -2339,6 +2339,33 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 	return has_active, err
 }
 
+const hasActiveTaskForIssueAndAgent = `-- name: HasActiveTaskForIssueAndAgent :one
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+type HasActiveTaskForIssueAndAgentParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
+// state whose completion will run completion reconciliation — queued,
+// dispatched, running, or waiting_local_directory. Used by the comment enqueue
+// path: when a merge into a pre-claim task fails (the task is already
+// dispatched/running, or a mismatched pre-claim task exists), a fresh queued
+// INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
+// a duplicate run. Instead the caller relies on that active task's completion
+// reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
+// NO active task exists.
+func (q *Queries) HasActiveTaskForIssueAndAgent(ctx context.Context, arg HasActiveTaskForIssueAndAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
@@ -3159,13 +3186,15 @@ SET coalesced_comment_ids = (
         WHERE e IS NOT NULL AND e <> $1::uuid
     ),
     trigger_comment_id = $1::uuid,
-    trigger_summary = COALESCE($2, trigger_summary)
+    trigger_summary = COALESCE($2, trigger_summary),
+    originator_user_id = $3::uuid,
+    runtime_mcp_overlay = $4,
+    runtime_connected_apps = $5
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.issue_id = $3
-      AND t.agent_id = $4
-      AND t.status IN ('queued', 'dispatched', 'waiting_local_directory', 'deferred')
-      AND t.originator_user_id IS NOT DISTINCT FROM $5::uuid
+    WHERE t.issue_id = $6
+      AND t.agent_id = $7
+      AND t.status IN ('queued', 'deferred')
     ORDER BY t.created_at DESC
     LIMIT 1
 )
@@ -3173,11 +3202,13 @@ RETURNING id, coalesced_comment_ids
 `
 
 type MergeCommentIntoPendingTaskParams struct {
-	NewTriggerCommentID pgtype.UUID `json:"new_trigger_comment_id"`
-	NewTriggerSummary   pgtype.Text `json:"new_trigger_summary"`
-	IssueID             pgtype.UUID `json:"issue_id"`
-	AgentID             pgtype.UUID `json:"agent_id"`
-	NewOriginatorUserID pgtype.UUID `json:"new_originator_user_id"`
+	NewTriggerCommentID     pgtype.UUID `json:"new_trigger_comment_id"`
+	NewTriggerSummary       pgtype.Text `json:"new_trigger_summary"`
+	NewOriginatorUserID     pgtype.UUID `json:"new_originator_user_id"`
+	NewRuntimeMcpOverlay    []byte      `json:"new_runtime_mcp_overlay"`
+	NewRuntimeConnectedApps []byte      `json:"new_runtime_connected_apps"`
+	IssueID                 pgtype.UUID `json:"issue_id"`
+	AgentID                 pgtype.UUID `json:"agent_id"`
 }
 
 type MergeCommentIntoPendingTaskRow struct {
@@ -3185,42 +3216,52 @@ type MergeCommentIntoPendingTaskRow struct {
 	CoalescedCommentIds []pgtype.UUID `json:"coalesced_comment_ids"`
 }
 
-// MUL-4195: fold a newly-arrived comment into an existing not-yet-started task
-// for (issue, agent) instead of letting the HasPendingTaskForIssueAndAgent
-// dedup silently DROP it. The task's prior trigger_comment_id becomes a
-// coalesced ("also cover") comment and @new_trigger_comment_id becomes the new
-// trigger, so the injected prompt shows the latest deliberate instruction while
-// the single run is still told to address every folded comment.
+// MUL-4195: fold a newly-arrived comment into an existing task for (issue,
+// agent) that has NOT yet been claimed, instead of letting the
+// HasPendingTaskForIssueAndAgent dedup silently DROP it. The task's prior
+// trigger_comment_id becomes a coalesced ("also cover") comment and
+// @new_trigger_comment_id becomes the new trigger, so the injected prompt shows
+// the latest deliberate instruction while the single run is still told to
+// address every folded comment.
 //
-// Targets the newest task in any NOT-YET-STARTED status (queued, dispatched,
-// waiting_local_directory, deferred). A running task is intentionally excluded:
-// its context is already built, so its new comments are handled by completion
-// reconciliation (GetLatestMemberCommentForIssueSince), not by merging. Returns
-// pgx.ErrNoRows when no such task exists (e.g. it was claimed/started between
-// the dedup check and this call), signalling the caller to enqueue a fresh task
-// so the comment is never lost.
+// Target is restricted to PRE-CLAIM states — 'queued' and 'deferred' — on
+// purpose (MUL-4195 review must-fix #2). A 'dispatched' / 'waiting_local_directory'
+// / 'running' task has already had its claim response (with its
+// coalesced_comment_ids) built and shipped to the daemon; folding a comment in
+// after that point would add it to coalesced_comment_ids WITHOUT the daemon ever
+// seeing it, making an undelivered comment look delivered. Those post-claim
+// comments are handled by completion reconciliation instead, which anchors on
+// dispatched_at and sweeps every member comment the run did not deliver. Because
+// merges only ever touch pre-claim rows, coalesced_comment_ids == the set the
+// run actually received.
 //
-// Originator gate (MUL-4195 review must-fix #1): a merge is only allowed when
-// the pending task's originator_user_id matches the new comment's originator
-// (IS NOT DISTINCT FROM handles the NULL/NULL "both unattributed" case). This
-// is the load-bearing correctness guard for permission + audit attribution:
-// runtime_mcp_overlay / runtime_connected_apps are a pure function of
-// (originator, agent), and the agent is fixed here, so requiring the originator
-// to match keeps the already-stored overlay/connected-apps VALID for the new
-// trigger — no stale connected-app capabilities, no cross-user attribution.
-// When user B comments on a task originated by user A, the originators differ,
-// this subquery matches no row, and the caller enqueues a fresh follow-up task
-// carrying B's own originator/overlay instead of silently reusing A's context.
-// trigger_summary is refreshed to the new trigger comment's snapshot so the
-// task label tracks the latest deliberate instruction (NULL narg preserves the
-// existing summary if the caller can't recompute it).
+// Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
+// runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW
+// trigger comment's originator (computed by the caller). Earlier this only
+// repointed the trigger and kept the old originator's overlay/attribution, so a
+// run answering user B's comment could execute under user A's connected-app
+// capabilities and audit identity. Re-stamping means the single coalescing run
+// carries the latest deliberate instruction's originator and the matching
+// overlay — no cross-user capability bleed, no stale attribution. This also
+// removes the previous originator gate + fresh-enqueue fallback, which could not
+// create a second task anyway (the idx_one_pending_task_per_issue_agent unique
+// index allows only one queued/dispatched task per (issue, agent)) and therefore
+// silently dropped the mismatched-originator comment.
+//
+// Returns pgx.ErrNoRows when no pre-claim task exists (it was claimed/started
+// between the dedup check and this call, or the only task is already
+// dispatched/running). The caller must NOT blindly enqueue a fresh task in that
+// case — a dispatched sibling would trip the unique index — it defers to
+// completion reconciliation unless no active task exists at all.
 func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeCommentIntoPendingTaskParams) (MergeCommentIntoPendingTaskRow, error) {
 	row := q.db.QueryRow(ctx, mergeCommentIntoPendingTask,
 		arg.NewTriggerCommentID,
 		arg.NewTriggerSummary,
+		arg.NewOriginatorUserID,
+		arg.NewRuntimeMcpOverlay,
+		arg.NewRuntimeConnectedApps,
 		arg.IssueID,
 		arg.AgentID,
-		arg.NewOriginatorUserID,
 	)
 	var i MergeCommentIntoPendingTaskRow
 	err := row.Scan(&i.ID, &i.CoalescedCommentIds)

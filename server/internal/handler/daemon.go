@@ -2337,48 +2337,62 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	))
 }
 
-// reconcileCommentsOnCompletion closes the at-least-once gap for comments that
-// arrive during an active run (MUL-4195).
+// reconcileCommentsOnCompletion closes the at-least-once gap for member
+// comments that arrive after a run's claim response was built (MUL-4195).
 //
-// The queued/dispatched merge path (mergeCommentIntoPendingTask) covers input
-// that lands before a run starts, and comments posted while a task is running
-// normally enqueue their own follow-up. But a comment can slip through in one
-// race: it arrives after the daemon has already claimed the task and built its
-// context, gets folded into the (still not-terminal) row, and the run finishes
-// without ever seeing it. This reconcile pass detects any MEMBER comment newer
-// than the run's started_at and, if it routes to THE AGENT THAT JUST RAN,
-// re-runs the standard trigger pipeline scoped to that one agent — which
-// re-uses all existing routing, the per-(issue, agent) dedup, and the merge
-// path, so at most one follow-up run is scheduled.
+// The merge path (mergeCommentIntoPendingTask) folds comments into a task only
+// while it is still PRE-CLAIM (queued/deferred); those all ride the claim
+// response and are genuinely delivered. Once a task is dispatched, its claim
+// response — including its coalesced_comment_ids — is already built and sent, so
+// any member comment created after that is NOT delivered to the run. This pass
+// runs at completion and schedules a bounded follow-up for exactly those
+// undelivered comments.
 //
-// Scoping to task.AgentID is a correctness guard (MUL-4195 review must-fix #2):
-// the reconcile MUST NOT fan the latest member comment back out to every agent
-// it could route to. Consider agent A running while a member posts an
-// `@B` comment: B was already triggered at comment-creation time. If A's
-// completion replayed that comment through the full pipeline it would trigger a
-// SECOND B run. With multiple agents on one issue, every completing task would
-// replay the same latest member comment and re-wake unrelated agents, breaking
-// the bounded-follow-up guarantee. Restricting to the completing agent means
-// each run only ever schedules a follow-up for itself; other agents' own
-// completions (or their creation-time triggers) cover them.
+// Anchor = dispatched_at, NOT started_at (MUL-4195 review must-fix #2). The
+// claim response is built the instant the task transitions queued→dispatched;
+// started_at is only written later by StartTask. A comment landing in the
+// dispatch→start window has created_at < started_at and would be missed by a
+// started_at anchor, but is caught by dispatched_at. Comments merged while the
+// task was queued have created_at < dispatched_at and are correctly excluded
+// (they were delivered), so this never re-fires for already-covered input.
 //
-// Loop safety: only member-authored comments qualify (agent replies,
-// acknowledgements, and self-triggers never do), the follow-up is scoped to a
-// single agent, and it terminates because its own triggering comment predates
-// the follow-up run's started_at, so the next completion finds nothing newer.
+// Scope + loop safety:
+//   - Only MEMBER comments qualify (agent replies / acknowledgements /
+//     self-triggers never do).
+//   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
+//     an `@other-agent` comment is left to that agent's own creation-time
+//     trigger, so a completion never re-wakes an unrelated agent.
+//   - Every undelivered qualifying comment is replayed through the normal
+//     enqueue path in chronological order, so they coalesce into a SINGLE
+//     follow-up task (the first enqueues it, the rest merge in). Bounded to one
+//     run, and terminating: the follow-up's own dispatched_at is later than all
+//     of these comments, so its completion finds nothing older.
 func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
-	if task == nil || !task.TriggerCommentID.Valid || !task.IssueID.Valid || !task.StartedAt.Valid || !task.AgentID.Valid {
+	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid {
 		return
 	}
-	latest, err := h.Queries.GetLatestMemberCommentForIssueSince(ctx, db.GetLatestMemberCommentForIssueSinceParams{
+	// dispatched_at is the moment the claim response was built; fall back to
+	// started_at / created_at defensively for rows that somehow lack it.
+	anchor := task.DispatchedAt
+	if !anchor.Valid {
+		anchor = task.StartedAt
+	}
+	if !anchor.Valid {
+		anchor = task.CreatedAt
+	}
+	if !anchor.Valid {
+		return
+	}
+	comments, err := h.Queries.ListMemberCommentsForIssueSince(ctx, db.ListMemberCommentsForIssueSinceParams{
 		IssueID: task.IssueID,
-		Since:   task.StartedAt,
+		Since:   anchor,
 	})
 	if err != nil {
-		if !isNotFound(err) {
-			slog.Warn("reconcile comments on completion: load latest member comment failed",
-				"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
-		}
+		slog.Warn("reconcile comments on completion: list member comments failed",
+			"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
+		return
+	}
+	if len(comments) == 0 {
 		return
 	}
 	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
@@ -2387,41 +2401,49 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"issue_id", uuidToString(task.IssueID), "error", err)
 		return
 	}
-	var parentComment *db.Comment
-	if latest.ParentID.Valid {
-		if parent, err := h.Queries.GetComment(ctx, latest.ParentID); err == nil {
-			parentComment = &parent
+	agentID := uuidToString(task.AgentID)
+	scheduled := 0
+	for i := range comments {
+		c := comments[i]
+		if isNoteComment(c.Content) {
+			continue
 		}
-	}
-	// Members are their own originator. Compute the triggers this comment would
-	// produce, then keep ONLY the agent that just completed — never the full
-	// fan-out (see the must-fix #2 rationale above). If the latest member
-	// comment does not route to this agent (e.g. it @-mentions a different
-	// agent that was already triggered at creation time) there is nothing for
-	// this completion to do.
-	actorID := uuidToString(latest.AuthorID)
-	if isNoteComment(latest.Content) {
-		return
-	}
-	triggers := h.computeCommentAgentTriggers(ctx, issue, latest.Content, parentComment, "member", actorID, commentTriggerComputeOptions{
-		ExcludeTriggerCommentID: latest.ID,
-		OriginatorUserID:        actorID,
-	})
-	scoped := make([]commentAgentTrigger, 0, 1)
-	for _, trigger := range triggers {
-		if uuidToString(trigger.Agent.ID) == uuidToString(task.AgentID) {
-			scoped = append(scoped, trigger)
+		var parentComment *db.Comment
+		if c.ParentID.Valid {
+			if parent, err := h.Queries.GetComment(ctx, c.ParentID); err == nil {
+				parentComment = &parent
+			}
 		}
+		// Members are their own originator. Compute what this comment would
+		// trigger, then keep ONLY the agent that just completed — never the
+		// full fan-out (that would re-wake unrelated `@other-agent` targets).
+		actorID := uuidToString(c.AuthorID)
+		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, "member", actorID, commentTriggerComputeOptions{
+			ExcludeTriggerCommentID: c.ID,
+			OriginatorUserID:        actorID,
+		})
+		scoped := make([]commentAgentTrigger, 0, 1)
+		for _, trigger := range triggers {
+			if uuidToString(trigger.Agent.ID) == agentID {
+				scoped = append(scoped, trigger)
+			}
+		}
+		if len(scoped) == 0 {
+			continue
+		}
+		// The first qualifying comment enqueues the follow-up task; later ones
+		// find it AlreadyPending and merge in, so all undelivered comments end
+		// up covered by a single bounded run.
+		h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)
+		scheduled++
 	}
-	if len(scoped) == 0 {
-		return
+	if scheduled > 0 {
+		slog.Info("reconcile comments on completion: scheduled follow-up",
+			"issue_id", uuidToString(task.IssueID),
+			"completed_task_id", uuidToString(task.ID),
+			"agent_id", agentID,
+			"undelivered_member_comments", scheduled)
 	}
-	slog.Info("reconcile comments on completion: scheduling follow-up",
-		"issue_id", uuidToString(task.IssueID),
-		"completed_task_id", uuidToString(task.ID),
-		"agent_id", uuidToString(task.AgentID),
-		"followup_comment_id", uuidToString(latest.ID))
-	h.enqueueCommentAgentTriggers(ctx, issue, latest.ID, scoped)
 }
 
 // buildCoalescedCommentData loads the full detail of each comment that was

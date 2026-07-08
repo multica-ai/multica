@@ -731,35 +731,43 @@ WHERE issue_id = @issue_id
   );
 
 -- name: MergeCommentIntoPendingTask :one
--- MUL-4195: fold a newly-arrived comment into an existing not-yet-started task
--- for (issue, agent) instead of letting the HasPendingTaskForIssueAndAgent
--- dedup silently DROP it. The task's prior trigger_comment_id becomes a
--- coalesced ("also cover") comment and @new_trigger_comment_id becomes the new
--- trigger, so the injected prompt shows the latest deliberate instruction while
--- the single run is still told to address every folded comment.
+-- MUL-4195: fold a newly-arrived comment into an existing task for (issue,
+-- agent) that has NOT yet been claimed, instead of letting the
+-- HasPendingTaskForIssueAndAgent dedup silently DROP it. The task's prior
+-- trigger_comment_id becomes a coalesced ("also cover") comment and
+-- @new_trigger_comment_id becomes the new trigger, so the injected prompt shows
+-- the latest deliberate instruction while the single run is still told to
+-- address every folded comment.
 --
--- Targets the newest task in any NOT-YET-STARTED status (queued, dispatched,
--- waiting_local_directory, deferred). A running task is intentionally excluded:
--- its context is already built, so its new comments are handled by completion
--- reconciliation (GetLatestMemberCommentForIssueSince), not by merging. Returns
--- pgx.ErrNoRows when no such task exists (e.g. it was claimed/started between
--- the dedup check and this call), signalling the caller to enqueue a fresh task
--- so the comment is never lost.
+-- Target is restricted to PRE-CLAIM states — 'queued' and 'deferred' — on
+-- purpose (MUL-4195 review must-fix #2). A 'dispatched' / 'waiting_local_directory'
+-- / 'running' task has already had its claim response (with its
+-- coalesced_comment_ids) built and shipped to the daemon; folding a comment in
+-- after that point would add it to coalesced_comment_ids WITHOUT the daemon ever
+-- seeing it, making an undelivered comment look delivered. Those post-claim
+-- comments are handled by completion reconciliation instead, which anchors on
+-- dispatched_at and sweeps every member comment the run did not deliver. Because
+-- merges only ever touch pre-claim rows, coalesced_comment_ids == the set the
+-- run actually received.
 --
--- Originator gate (MUL-4195 review must-fix #1): a merge is only allowed when
--- the pending task's originator_user_id matches the new comment's originator
--- (IS NOT DISTINCT FROM handles the NULL/NULL "both unattributed" case). This
--- is the load-bearing correctness guard for permission + audit attribution:
--- runtime_mcp_overlay / runtime_connected_apps are a pure function of
--- (originator, agent), and the agent is fixed here, so requiring the originator
--- to match keeps the already-stored overlay/connected-apps VALID for the new
--- trigger — no stale connected-app capabilities, no cross-user attribution.
--- When user B comments on a task originated by user A, the originators differ,
--- this subquery matches no row, and the caller enqueues a fresh follow-up task
--- carrying B's own originator/overlay instead of silently reusing A's context.
--- trigger_summary is refreshed to the new trigger comment's snapshot so the
--- task label tracks the latest deliberate instruction (NULL narg preserves the
--- existing summary if the caller can't recompute it).
+-- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
+-- runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW
+-- trigger comment's originator (computed by the caller). Earlier this only
+-- repointed the trigger and kept the old originator's overlay/attribution, so a
+-- run answering user B's comment could execute under user A's connected-app
+-- capabilities and audit identity. Re-stamping means the single coalescing run
+-- carries the latest deliberate instruction's originator and the matching
+-- overlay — no cross-user capability bleed, no stale attribution. This also
+-- removes the previous originator gate + fresh-enqueue fallback, which could not
+-- create a second task anyway (the idx_one_pending_task_per_issue_agent unique
+-- index allows only one queued/dispatched task per (issue, agent)) and therefore
+-- silently dropped the mismatched-originator comment.
+--
+-- Returns pgx.ErrNoRows when no pre-claim task exists (it was claimed/started
+-- between the dedup check and this call, or the only task is already
+-- dispatched/running). The caller must NOT blindly enqueue a fresh task in that
+-- case — a dispatched sibling would trip the unique index — it defers to
+-- completion reconciliation unless no active task exists at all.
 UPDATE agent_task_queue
 SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
@@ -767,17 +775,33 @@ SET coalesced_comment_ids = (
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
-    trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary)
+    trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
+    originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
+    runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
+    runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.status IN ('queued', 'dispatched', 'waiting_local_directory', 'deferred')
-      AND t.originator_user_id IS NOT DISTINCT FROM sqlc.narg('new_originator_user_id')::uuid
+      AND t.status IN ('queued', 'deferred')
     ORDER BY t.created_at DESC
     LIMIT 1
 )
 RETURNING id, coalesced_comment_ids;
+
+-- name: HasActiveTaskForIssueAndAgent :one
+-- MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
+-- state whose completion will run completion reconciliation — queued,
+-- dispatched, running, or waiting_local_directory. Used by the comment enqueue
+-- path: when a merge into a pre-claim task fails (the task is already
+-- dispatched/running, or a mismatched pre-claim task exists), a fresh queued
+-- INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
+-- a duplicate run. Instead the caller relies on that active task's completion
+-- reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
+-- NO active task exists.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
 -- name: GetLatestTaskRoleForIssueAndAgent :one
 -- Returns the role markers from the agent's most recent task on this issue.

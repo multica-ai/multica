@@ -179,15 +179,21 @@ func pgUUIDToText(u pgtype.UUID) string {
 	return s
 }
 
-// TestMergeCommentIntoPendingTask_OriginatorGate is the MUL-4195 review
-// must-fix #1 regression test. A pending task carries its originator's
-// runtime_mcp_overlay / runtime_connected_apps and audit attribution. Folding a
-// DIFFERENT member's comment into it would make the run answer B's instruction
-// under A's connected-app capabilities and audit identity — a permission /
-// attribution bug. The merge query must therefore only fold a comment into a
-// pending task whose originator matches; a mismatch returns pgx.ErrNoRows so the
-// caller enqueues a fresh follow-up carrying the correct context.
-func TestMergeCommentIntoPendingTask_OriginatorGate(t *testing.T) {
+// TestMergeCommentIntoPendingTask_RecomputesOriginatorAndSkipsDispatched is the
+// MUL-4195 second-round regression test for the merge query. It pins two
+// properties:
+//
+//   - Recompute-on-merge (review must-fix #1): folding a DIFFERENT member's
+//     comment into a queued task re-stamps originator_user_id (and would
+//     re-stamp the overlay) to the new comment's originator, so the single
+//     coalescing run carries the latest instruction's identity instead of the
+//     original user's — and the comment is never dropped. The earlier gate
+//     returned ErrNoRows here, which then hit the one-pending-per-(issue,agent)
+//     unique index on the fresh-enqueue fallback and silently lost the comment.
+//   - Pre-claim-only target (review must-fix #2): a DISPATCHED task is never a
+//     merge target (its claim response is already built), so merging returns
+//     ErrNoRows and the comment is left to completion reconciliation.
+func TestMergeCommentIntoPendingTask_RecomputesOriginatorAndSkipsDispatched(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -195,7 +201,7 @@ func TestMergeCommentIntoPendingTask_OriginatorGate(t *testing.T) {
 	queries := db.New(testPool)
 
 	agentID := getAgentID(t)
-	issueID := createIssueAssignedToAgent(t, "Originator gate test", agentID)
+	issueID := createIssueAssignedToAgent(t, "Merge recompute test", agentID)
 	clearTasks(t, issueID) // drop the assignment task so we start clean
 	t.Cleanup(func() {
 		clearTasks(t, issueID)
@@ -207,11 +213,14 @@ func TestMergeCommentIntoPendingTask_OriginatorGate(t *testing.T) {
 	cidA := insertCommentAt(t, issueID, "member", testUserID, "first, from originator A", now.Add(-2*time.Minute))
 	cidB := insertCommentAt(t, issueID, "member", testUserID, "second, folds in", now.Add(-1*time.Minute))
 
-	// Seed a queued task originated by testUserID and triggered by cidA.
+	// A second member to act as a DIFFERENT originator.
+	otherUserID := createWorkspaceMember(t, "merge-recompute-other")
+
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
+	// Seed a queued task originated by testUserID and triggered by cidA.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, originator_user_id)
 		VALUES ($1, $2, $3, $4, 'queued', 0, $5)
@@ -221,44 +230,81 @@ func TestMergeCommentIntoPendingTask_OriginatorGate(t *testing.T) {
 
 	pgIssue := toPgUUID(t, issueID)
 	pgAgent := toPgUUID(t, agentID)
-	pgCidB := toPgUUID(t, cidB)
-	summary := pgtype.Text{String: "second, folds in", Valid: true}
 
-	// A DIFFERENT originator must NOT merge: the gate blocks it, so the caller
-	// falls back to a fresh follow-up instead of reusing A's overlay/attribution.
-	differentOriginator := toPgUUID(t, "000000ff-0000-0000-0000-0000000000ff")
+	// A DIFFERENT originator (userB) now MERGES (no gate): trigger repointed to
+	// cidB, originator re-stamped to userB, cidA preserved as coalesced.
 	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:             pgIssue,
 		AgentID:             pgAgent,
-		NewTriggerCommentID: pgCidB,
-		NewOriginatorUserID: differentOriginator,
-		NewTriggerSummary:   summary,
-	}); err != pgx.ErrNoRows {
-		t.Fatalf("expected pgx.ErrNoRows when the new comment's originator differs, got %v", err)
-	}
-	// The pending task is untouched: trigger still cidA, nothing coalesced.
-	if got := latestTriggerCommentID(t, issueID); got != cidA {
-		t.Errorf("mismatched-originator merge must leave the trigger at %s, got %s", cidA, got)
-	}
-	if ids := coalescedCommentIDs(t, issueID); len(ids) != 0 {
-		t.Errorf("mismatched-originator merge must not coalesce anything, got %v", ids)
-	}
-
-	// The SAME originator merges as before: trigger repointed to cidB, cidA
-	// preserved as a coalesced comment.
-	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             pgIssue,
-		AgentID:             pgAgent,
-		NewTriggerCommentID: pgCidB,
-		NewOriginatorUserID: toPgUUID(t, testUserID),
-		NewTriggerSummary:   summary,
+		NewTriggerCommentID: toPgUUID(t, cidB),
+		NewOriginatorUserID: toPgUUID(t, otherUserID),
+		NewTriggerSummary:   pgtype.Text{String: "second, folds in", Valid: true},
 	}); err != nil {
-		t.Fatalf("same-originator merge should succeed, got %v", err)
+		t.Fatalf("recompute merge should succeed for a different originator, got %v", err)
 	}
 	if got := latestTriggerCommentID(t, issueID); got != cidB {
-		t.Errorf("same-originator merge must repoint the trigger to %s, got %s", cidB, got)
+		t.Errorf("merge must repoint the trigger to %s, got %s", cidB, got)
 	}
 	if ids := coalescedCommentIDs(t, issueID); !containsID(ids, cidA) {
-		t.Errorf("same-originator merge must preserve %s as coalesced, got %v", cidA, ids)
+		t.Errorf("merge must preserve %s as coalesced, got %v", cidA, ids)
 	}
+	if got := taskOriginator(t, issueID, agentID); got != otherUserID {
+		t.Errorf("merge must re-stamp originator to the new comment's originator %s, got %s", otherUserID, got)
+	}
+
+	// Now flip the task to 'dispatched' and confirm a further comment is NOT a
+	// merge target — its claim response is already built, so merging would
+	// falsely mark an undelivered comment as delivered (must-fix #2).
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("flip task to dispatched: %v", err)
+	}
+	cidC := insertCommentAt(t, issueID, "member", testUserID, "third, arrives after dispatch", now)
+	if _, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:             pgIssue,
+		AgentID:             pgAgent,
+		NewTriggerCommentID: toPgUUID(t, cidC),
+		NewOriginatorUserID: toPgUUID(t, testUserID),
+		NewTriggerSummary:   pgtype.Text{String: "third", Valid: true},
+	}); err != pgx.ErrNoRows {
+		t.Fatalf("merge into a dispatched task must return pgx.ErrNoRows, got %v", err)
+	}
+}
+
+// createWorkspaceMember inserts a fresh user + workspace member and returns the
+// user id, for tests that need a second distinct originator.
+func createWorkspaceMember(t *testing.T, slug string) string {
+	t.Helper()
+	ctx := context.Background()
+	var userID string
+	email := slug + "-" + time.Now().Format("150405.000000") + "@example.test"
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"Merge Test "+slug, email).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+		testWorkspaceID, userID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	return userID
+}
+
+// taskOriginator returns originator_user_id (as text) of the most recent task
+// for (issue, agent).
+func taskOriginator(t *testing.T, issueID, agentID string) string {
+	t.Helper()
+	var originator string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COALESCE(originator_user_id::text, '')
+		  FROM agent_task_queue
+		 WHERE issue_id = $1 AND agent_id = $2
+		 ORDER BY created_at DESC
+		 LIMIT 1
+	`, issueID, agentID).Scan(&originator); err != nil {
+		t.Fatalf("read task originator: %v", err)
+	}
+	return originator
 }

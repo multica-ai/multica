@@ -1399,18 +1399,49 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		if trigger.AlreadyPending {
 			// MUL-4195: a queued/dispatched task for this (issue, agent)
 			// already exists. Historically we DROPPED the comment here, losing
-			// the user's follow-up instruction. Instead fold it into that
-			// not-yet-started task so a single run still covers every comment.
-			// mergeCommentIntoPendingTask returns false only when the pending
-			// task vanished (was claimed/started) between the dedup check and
-			// now — in that race we fall through and enqueue a fresh task so the
-			// comment is never silently lost.
+			// the user's follow-up instruction. Instead try to fold it into a
+			// not-yet-claimed (queued/deferred) task so a single run still
+			// covers every comment, re-stamping the run's originator/overlay to
+			// the new comment (mergeCommentIntoPendingTask).
 			if h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID) {
+				continue
+			}
+			// The merge found no pre-claim task to fold into: the existing task
+			// is already dispatched/running (its claim response is built), or a
+			// mismatched pre-claim row was just claimed. We must NOT enqueue a
+			// fresh queued task in that case — a dispatched sibling would trip
+			// the idx_one_pending_task_per_issue_agent unique index (dropping
+			// the comment again) and even where the index allows it we'd risk a
+			// duplicate concurrent run. When an active task exists, its
+			// completion reconcile (reconcileCommentsOnCompletion) is what
+			// guarantees this comment earns a bounded follow-up. Only when NO
+			// active task exists is a fresh enqueue both safe and necessary.
+			if h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID) {
 				continue
 			}
 		}
 		h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay)
 	}
+}
+
+// hasActiveTaskForIssueAndAgent reports whether the (issue, agent) pair has any
+// non-terminal task whose completion will drive completion reconciliation. Used
+// by the comment enqueue path to decide, after a merge miss, between deferring
+// to reconcile (an active task exists) and enqueuing a fresh follow-up (none
+// does). Fail-closed: on a DB error we return true so the caller does NOT
+// enqueue a possibly-colliding duplicate — worst case the comment is caught by
+// reconcile rather than double-run.
+func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		slog.Warn("has active task for issue+agent check failed",
+			"issue_id", uuidToString(issueID), "agent_id", uuidToString(agentID), "error", err)
+		return true
+	}
+	return active
 }
 
 // mergeCommentIntoPendingTask folds a newly-arrived comment into an existing
@@ -1422,33 +1453,43 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // fresh task and the deliberate comment is never lost.
 //
 // The merge is GATED on the originator being unchanged (MUL-4195 review
-// must-fix #1): the pending task carries its originator's runtime_mcp_overlay /
-// runtime_connected_apps and audit attribution, which are only valid for that
-// originator. If a different member's comment folded into it, the run would
-// respond to the new instruction under the old user's connected-app
-// capabilities and audit identity — a permission/attribution bug. We compute
-// the new comment's top-of-chain originator and pass it as a gate; when it does
-// not match the pending task's originator the query matches no row (ErrNoRows)
-// and the caller enqueues a fresh follow-up carrying the correct context. The
-// gate is safe because the overlay/connected-apps are a pure function of
-// (originator, agent) and the agent is fixed, so a matching originator
-// guarantees the stored overlay still applies. trigger_summary is refreshed to
-// the new trigger comment so the task label tracks the latest instruction.
+// mergeCommentIntoPendingTask folds a newly-arrived comment into an existing
+// NOT-YET-CLAIMED (queued/deferred) task for (issue, agent) instead of dropping
+// it (MUL-4195). Returns true when the comment was handled (merged, or a
+// non-fatal DB error we deliberately do not turn into a duplicate). Returns
+// false only when no pre-claim task exists to merge into (pgx.ErrNoRows) — the
+// existing task is already dispatched/running, or was just claimed — in which
+// case the caller decides between deferring to completion reconcile and a fresh
+// enqueue.
+//
+// Recompute-on-merge (MUL-4195 review must-fix #1): the run's
+// originator_user_id, runtime_mcp_overlay and runtime_connected_apps are
+// re-stamped to the NEW trigger comment's originator, and trigger_summary is
+// refreshed. This is what lets a different member's comment safely fold into a
+// task another member created: the single coalescing run then carries the
+// latest instruction's originator and the matching connected-app overlay,
+// instead of answering the new comment under the original user's capabilities
+// and audit identity. It also replaces the earlier originator gate + fresh
+// fallback, which could not create a second pending task anyway (the
+// one-pending-per-(issue,agent) unique index) and so silently dropped the
+// mismatched-originator comment.
 func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
+	originator := h.TaskService.ResolveOriginatorFromTriggerComment(ctx, newTriggerCommentID)
+	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, originator, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             issue.ID,
-		AgentID:             trigger.Agent.ID,
-		NewTriggerCommentID: newTriggerCommentID,
-		NewOriginatorUserID: h.TaskService.ResolveOriginatorFromTriggerComment(ctx, newTriggerCommentID),
-		NewTriggerSummary:   h.TaskService.BuildCommentTriggerSummary(ctx, newTriggerCommentID),
+		IssueID:                 issue.ID,
+		AgentID:                 trigger.Agent.ID,
+		NewTriggerCommentID:     newTriggerCommentID,
+		NewOriginatorUserID:     originator,
+		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, newTriggerCommentID),
+		NewRuntimeMcpOverlay:    overlay,
+		NewRuntimeConnectedApps: connectedApps,
 	})
 	if err != nil {
 		if isNotFound(err) {
-			// No pending task with a matching originator is left: either it was
-			// claimed/started between the dedup check and now, or the only
-			// pending task belongs to a different originator. Either way the
-			// caller must enqueue a fresh task so the comment is never lost and
-			// carries the correct originator/overlay.
+			// No pre-claim (queued/deferred) task to merge into. The caller
+			// defers to completion reconcile when an active task exists, or
+			// enqueues fresh when none does.
 			return false
 		}
 		// Unknown error: the pending task most likely still exists, so do NOT
