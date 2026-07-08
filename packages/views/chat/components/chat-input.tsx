@@ -75,6 +75,10 @@ interface ChatInputProps {
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
    *  archived-session copy stays untouched. */
   noAgent?: boolean;
+  /** True when `disabled` is because the bound agent was archived (retired),
+   *  as opposed to the session itself being archived — swaps the placeholder
+   *  copy so the read-only reason reads accurately. */
+  agentArchived?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
@@ -92,6 +96,7 @@ export function ChatInput({
   isRunning,
   disabled,
   noAgent,
+  agentArchived,
   agentName,
   leftAdornment,
   contextItems,
@@ -320,7 +325,9 @@ export function ChatInput({
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
-      ? t(($) => $.input.placeholder_archived)
+      ? agentArchived
+        ? t(($) => $.input.placeholder_archived_agent)
+        : t(($) => $.input.placeholder_archived)
       : agentName
         ? t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);

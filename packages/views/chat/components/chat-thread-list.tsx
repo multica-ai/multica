@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Loader2, Pin, PinOff, Square, Trash2 } from "lucide-react";
+import { Archive, Clock, Loader2, Pin, PinOff, Square, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
@@ -145,8 +145,12 @@ export function ChatThreadList({
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
+    // A retired agent can't take new work — the conversation is read-only.
+    // We keep the row (history stays reachable) but mark it and suppress the
+    // live "typing…/waiting" indicators, which can never apply here.
+    const agentArchived = !!agent?.archived_at;
     const pendingTask = pendingTaskBySessionId.get(session.id);
-    const isRunning = !!pendingTask;
+    const isRunning = !!pendingTask && !agentArchived;
     // Only "offline" (definitively long-offline) downgrades typing → waiting.
     // Unknown/loading presence keeps the optimistic "typing…" so we never
     // suppress it just because presence data hasn't landed yet.
@@ -218,7 +222,17 @@ export function ChatThreadList({
         {/* Thin ring keeps photo + fallback avatars reading as the same circle
             (the fallback's faint bg otherwise looks smaller). */}
         {agent ? (
-          <ActorAvatar actorType="agent" actorId={agent.id} size={36} enableHoverCard className="ring-1 ring-inset ring-border" />
+          <ActorAvatar
+            actorType="agent"
+            actorId={agent.id}
+            size={36}
+            enableHoverCard
+            className={cn(
+              "ring-1 ring-inset ring-border",
+              // Retired agent: desaturate + dim so the row reads as inactive.
+              agentArchived && "opacity-50 grayscale",
+            )}
+          />
         ) : (
           <span className="size-9 shrink-0" />
         )}
@@ -235,6 +249,12 @@ export function ChatThreadList({
             <span className={cn("min-w-0 flex-1 truncate text-sm", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
               {titleText}
             </span>
+            {agentArchived && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground">
+                <Archive className="size-2.5" />
+                {t(($) => $.list.archived)}
+              </span>
+            )}
             <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{timeText}</span>
           </div>
 

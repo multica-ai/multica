@@ -255,8 +255,23 @@ export function useChatController(opts?: { isActive?: boolean }) {
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
 
-  // Resolve selected agent: stored preference → first available
+  // The agent bound to the OPEN session, resolved from the full agent list
+  // (archived included, since agentListOptions passes include_archived). An
+  // archived agent is filtered out of `availableAgents`, so resolving the
+  // active agent only from that list would make an archived-agent session
+  // silently render some *other* available agent — wrong avatar/name/presence
+  // in the header, and a send that targets the wrong agent. Binding to the
+  // session's real agent keeps the conversation honest; the archived state
+  // then makes it read-only (see isAgentArchived).
+  const sessionAgent = currentSession
+    ? agents.find((a) => a.id === currentSession.agent_id) ?? null
+    : null;
+  const isAgentArchived = !!sessionAgent?.archived_at;
+
+  // Resolve selected agent: open session's agent → stored preference → first
+  // available. New chats have no session, so they fall through to the picker.
   const activeAgent =
+    sessionAgent ??
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
@@ -402,6 +417,16 @@ export function useChatController(opts?: { isActive?: boolean }) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
       }
+      // Read-only conversation: the agent is retired and can no longer pick up
+      // work, so refuse to enqueue a task that would sit orphaned forever. The
+      // input is disabled in this state; this is the belt-and-braces guard.
+      if (isAgentArchived) {
+        apiLogger.warn("sendChatMessage skipped: agent is archived", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
 
       const finalContent = content;
       const isNewSession = !activeSessionId;
@@ -513,6 +538,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeSessionId,
       selectedAgentId,
       activeAgent,
+      isAgentArchived,
       ensureSession,
       cancelChatTask,
       qc,
@@ -594,6 +620,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     selectedAgentId,
     currentSession,
     isSessionArchived,
+    isAgentArchived,
     activeAgent,
     noAgent,
     availability,

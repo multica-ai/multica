@@ -12,6 +12,7 @@
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
+    "placeholder_archived_agent": "This agent has been archived",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
@@ -105,6 +106,7 @@
     "plan_next": "Plan what to work on next"
   },
   "no_agent_banner": "You need an agent to start chatting.",
+  "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
   "offline_banner": {
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
@@ -141,7 +143,8 @@
     "waiting": "Waiting for reply",
     "pin": "Pin",
     "unpin": "Unpin",
-    "pinned": "Pinned"
+    "pinned": "Pinned",
+    "archived": "Archived"
   },
   "header": {
     "view_profile": "View agent profile",

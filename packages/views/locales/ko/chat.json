@@ -11,6 +11,7 @@
   "input": {
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
+    "placeholder_archived_agent": "보관된 에이전트입니다",
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
@@ -102,6 +103,7 @@
     "plan_next": "다음에 할 일을 계획해 줘"
   },
   "no_agent_banner": "채팅을 시작하려면 에이전트가 필요합니다.",
+  "archived_agent_banner": "{{name}}은(는) 보관되었습니다. 이 대화는 읽기 전용입니다.",
   "offline_banner": {
     "fallback_name": "에이전트",
     "unstable": "{{name}}의 연결이 불안정합니다. 답변이 지연될 수 있습니다.",
@@ -138,7 +140,8 @@
     "waiting": "답장 대기 중",
     "pin": "고정",
     "unpin": "고정 해제",
-    "pinned": "고정됨"
+    "pinned": "고정됨",
+    "archived": "보관됨"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",

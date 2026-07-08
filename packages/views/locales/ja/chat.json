@@ -11,6 +11,7 @@
   "input": {
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
+    "placeholder_archived_agent": "このエージェントはアーカイブされています",
     "placeholder_named": "{{name}} にメッセージ…",
     "placeholder_default": "メッセージを入力…",
     "send_tooltip": "送信",
@@ -102,6 +103,7 @@
     "plan_next": "次に取り組むことを計画して"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
+  "archived_agent_banner": "{{name}} はアーカイブされました。この会話は読み取り専用です。",
   "offline_banner": {
     "fallback_name": "エージェント",
     "unstable": "{{name}} の接続が不安定です。返信が遅れる場合があります。",
@@ -138,7 +140,8 @@
     "waiting": "返信待ち",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
-    "pinned": "ピン留め済み"
+    "pinned": "ピン留め済み",
+    "archived": "アーカイブ済み"
   },
   "header": {
     "view_profile": "Agent のプロフィール",
