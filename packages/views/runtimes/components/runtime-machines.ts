@@ -151,6 +151,7 @@ export function filterRuntimeMachines(
       machine.daemonId,
       machine.providerNames.join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      machine.runtimes.map((runtime) => runtime.custom_name ?? "").join(" "),
     ]
       .filter(Boolean)
       .join(" ")
@@ -268,10 +269,28 @@ function runtimeDeviceName(runtime: AgentRuntime): string | null {
   return raw.split(" · ")[0]?.trim() || null;
 }
 
+// The custom name shared by every runtime on a machine (MUL-4217). A
+// machine-level rename writes the same custom_name to all runtimes on the
+// daemon, so a name shared by all of them is the machine's label. A one-off
+// per-runtime rename (not shared) is deliberately ignored here so it can't
+// masquerade as the whole machine's name.
+export function sharedCustomName(runtimes: AgentRuntime[]): string | null {
+  if (runtimes.length === 0) return null;
+  const names = runtimes.map((r) => r.custom_name?.trim() ?? "");
+  const first = names[0];
+  if (!first) return null;
+  return names.every((n) => n === first) ? first : null;
+}
+
 function machineTitle(
   runtimes: AgentRuntime[],
   options: { isCurrent: boolean; localMachineName?: string | null },
 ): string {
+  // An explicit user-set machine name wins over everything, including the
+  // OS-reported local machine name.
+  const shared = sharedCustomName(runtimes);
+  if (shared) return shared;
+
   if (options.isCurrent && options.localMachineName) {
     return options.localMachineName;
   }

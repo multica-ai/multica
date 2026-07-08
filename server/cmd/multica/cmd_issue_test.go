@@ -2479,3 +2479,557 @@ func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
 		t.Fatalf("expected valid values error, got: %v", err)
 	}
 }
+
+func newIssueUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("description-stdin", false, "")
+	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	cmd.Flags().String("assignee", "", "")
+	cmd.Flags().String("assignee-id", "", "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("start-date", "", "")
+	cmd.Flags().String("due-date", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().Float64("position", 0, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newIssueListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	cmd.Flags().String("assignee", "", "")
+	cmd.Flags().String("assignee-id", "", "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().String("sort", "", "")
+	cmd.Flags().String("direction", "", "")
+	return cmd
+}
+
+func newIssueReorderTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "reorder"}
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().String("after", "", "")
+	cmd.Flags().Bool("top", false, "")
+	cmd.Flags().Bool("bottom", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueUpdateSendsPosition(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "status": "todo",
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "status": "todo", "priority": "none",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("position", "7.5")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["position"]; got != float64(7.5) {
+		t.Fatalf("position = %#v, want 7.5 in request body", got)
+	}
+}
+
+func TestRunIssueListSendsSortAndDirection(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		gotQuery = r.URL.Query()
+		json.NewEncoder(w).Encode(map[string]any{"issues": []any{}, "total": 0})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("sort", "created_at")
+	_ = cmd.Flags().Set("direction", "DESC")
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := gotQuery.Get("sort"); got != "created_at" {
+		t.Fatalf("sort query = %q, want created_at", got)
+	}
+	if got := gotQuery.Get("direction"); got != "desc" {
+		t.Fatalf("direction query = %q, want desc (lower-cased)", got)
+	}
+}
+
+func TestRunIssueListRejectsInvalidSortAndDirection(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("sort", "nonsense")
+	if err := runIssueList(cmd, nil); err == nil {
+		t.Fatal("runIssueList: expected error for invalid --sort")
+	} else if !strings.Contains(err.Error(), "invalid --sort") {
+		t.Fatalf("error = %q, want it to mention invalid --sort", err)
+	}
+
+	cmd = newIssueListTestCmd()
+	_ = cmd.Flags().Set("direction", "sideways")
+	if err := runIssueList(cmd, nil); err == nil {
+		t.Fatal("runIssueList: expected error for invalid --direction")
+	} else if !strings.Contains(err.Error(), "invalid --direction") {
+		t.Fatalf("error = %q, want it to mention invalid --direction", err)
+	}
+}
+
+// TestRunIssueListRejectsDirectionWithoutDirectionalSort guards that passing a
+// valid --direction while the sort is the default/position (which the server
+// always sorts ascending) is rejected up front, rather than silently dropping
+// the flag — a passed-but-ignored flag is a footgun, especially in scripts.
+func TestRunIssueListRejectsDirectionWithoutDirectionalSort(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name string
+		sort string
+	}{
+		{"direction without sort", ""},
+		{"direction with explicit position sort", "position"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueListTestCmd()
+			if tc.sort != "" {
+				_ = cmd.Flags().Set("sort", tc.sort)
+			}
+			_ = cmd.Flags().Set("direction", "desc")
+			err := runIssueList(cmd, nil)
+			if err == nil {
+				t.Fatal("runIssueList: expected error for --direction on position/default sort")
+			}
+			if !strings.Contains(err.Error(), "--direction requires --sort") {
+				t.Fatalf("error = %q, want it to explain --direction requires a directional --sort", err)
+			}
+			// The message should name a concrete directional column to guide the fix.
+			if !strings.Contains(err.Error(), "created_at") {
+				t.Fatalf("error = %q, want it to list the valid directional sort columns", err)
+			}
+		})
+	}
+}
+
+func TestComputeReorderPosition(t *testing.T) {
+	positions := map[string]float64{"a": 10, "b": 20, "x": 99}
+	tests := []struct {
+		name     string
+		ids      []string
+		active   string
+		fallback float64
+		want     float64
+	}{
+		{"single item keeps position", []string{"x"}, "x", 42, 42},
+		{"absent active keeps position", []string{"a", "b"}, "x", 7, 7},
+		{"top is one below the next", []string{"x", "a", "b"}, "x", 99, 9},
+		{"bottom is one above the prev", []string{"a", "b", "x"}, "x", 99, 21},
+		{"interior is the midpoint", []string{"a", "x", "b"}, "x", 99, 15},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := computeReorderPosition(tc.ids, tc.active, positions, tc.fallback)
+			if got != tc.want {
+				t.Fatalf("computeReorderPosition = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunIssueReorderRejectsModeCount(t *testing.T) {
+	t.Run("zero modes", func(t *testing.T) {
+		cmd := newIssueReorderTestCmd()
+		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
+			t.Fatal("expected error when no mode flag is set")
+		}
+	})
+	t.Run("two modes", func(t *testing.T) {
+		cmd := newIssueReorderTestCmd()
+		_ = cmd.Flags().Set("top", "true")
+		_ = cmd.Flags().Set("bottom", "true")
+		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
+			t.Fatal("expected error when two mode flags are set")
+		}
+	})
+}
+
+// reorderTestServer serves a fixed three-issue "todo" column (positions
+// 1/9/20) plus single-issue lookups by key and id, capturing the position of
+// any PUT so a test can assert where the issue landed.
+func reorderTestServer(t *testing.T, gotPosition *float64) *httptest.Server {
+	t.Helper()
+	issue := func(id, key, status string, pos float64) map[string]any {
+		return map[string]any{"id": id, "identifier": key, "status": status, "position": pos}
+	}
+	a := issue("a-id", "MUL-1", "todo", 1)
+	b := issue("b-id", "MUL-2", "todo", 9)
+	target := issue("t-id", "MUL-9", "todo", 20)
+	c := issue("c-id", "MUL-3", "in_progress", 4)
+	byRef := map[string]map[string]any{
+		"MUL-1": a, "a-id": a,
+		"MUL-2": b, "b-id": b,
+		"MUL-9": target, "t-id": target,
+		"MUL-3": c, "c-id": c,
+	}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
+			// The column query only ever asks for "todo" in these tests.
+			json.NewEncoder(w).Encode(map[string]any{
+				"issues": []any{a, b, target},
+				"total":  3,
+			})
+			return
+		}
+		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
+		found, ok := byRef[ref]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			json.NewEncoder(w).Encode(found)
+		case http.MethodPut:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			if p, ok := body["position"].(float64); ok && gotPosition != nil {
+				*gotPosition = p
+			}
+			merged := map[string]any{}
+			for k, v := range found {
+				merged[k] = v
+			}
+			if p, ok := body["position"]; ok {
+				merged["position"] = p
+			}
+			json.NewEncoder(w).Encode(merged)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestRunIssueReorderComputesPosition(t *testing.T) {
+	tests := []struct {
+		name string
+		flag string
+		val  string
+		want float64
+	}{
+		{"top of column", "top", "true", 0},            // pos(a) - 1 = 0
+		{"bottom of column", "bottom", "true", 10},     // pos(b) + 1 = 10
+		{"before another issue", "before", "MUL-2", 5}, // midpoint(a=1, b=9)
+		{"after another issue", "after", "MUL-2", 10},  // moves below b (the bottom)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPosition float64 = -1
+			srv := reorderTestServer(t, &gotPosition)
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueReorderTestCmd()
+			_ = cmd.Flags().Set(tc.flag, tc.val)
+			if err := runIssueReorder(cmd, []string{"MUL-9"}); err != nil {
+				t.Fatalf("runIssueReorder: %v", err)
+			}
+			if gotPosition != tc.want {
+				t.Fatalf("PUT position = %v, want %v", gotPosition, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunIssueReorderRejectsCrossColumnTarget(t *testing.T) {
+	srv := reorderTestServer(t, nil)
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueReorderTestCmd()
+	_ = cmd.Flags().Set("before", "MUL-3") // MUL-3 lives in the in_progress column
+	err := runIssueReorder(cmd, []string{"MUL-9"})
+	if err == nil {
+		t.Fatal("expected error when the --before target is in another column")
+	}
+	if !strings.Contains(err.Error(), "in_progress") || !strings.Contains(err.Error(), "todo") {
+		t.Fatalf("error = %q, want it to name both columns", err)
+	}
+}
+
+func mkIssue(id, key, status string, pos float64) map[string]any {
+	return map[string]any{"id": id, "identifier": key, "status": status, "position": pos}
+}
+
+func TestFetchIssueColumnPaginates(t *testing.T) {
+	all := []map[string]any{
+		mkIssue("i1", "MUL-1", "todo", 1),
+		mkIssue("i2", "MUL-2", "todo", 2),
+		mkIssue("i3", "MUL-3", "todo", 3),
+	}
+	var pageRequests int
+	var sawProject string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		pageRequests++
+		sawProject = r.URL.Query().Get("project_id")
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		// Force pagination by serving two issues at a time regardless of the
+		// requested limit, so the loop's offset/total termination is exercised.
+		page := []any{}
+		for i := offset; i < offset+2 && i < len(all); i++ {
+			page = append(page, all[i])
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issues": page, "total": len(all)})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	client, err := newAPIClient(&cobra.Command{Use: "x"})
+	if err != nil {
+		t.Fatalf("newAPIClient: %v", err)
+	}
+	got, err := fetchIssueColumn(context.Background(), client, "ws-1", "proj-1", "todo")
+	if err != nil {
+		t.Fatalf("fetchIssueColumn: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d issues, want 3 (pagination should accumulate all pages)", len(got))
+	}
+	if pageRequests < 2 {
+		t.Fatalf("page requests = %d, want >= 2 (loop should paginate)", pageRequests)
+	}
+	if sawProject != "proj-1" {
+		t.Fatalf("project_id query = %q, want proj-1 (column should be project-scoped)", sawProject)
+	}
+	for i, want := range []string{"i1", "i2", "i3"} {
+		if got := strVal(got[i], "id"); got != want {
+			t.Fatalf("ordered[%d] = %q, want %q (ascending position order preserved)", i, got, want)
+		}
+	}
+}
+
+func TestRunIssueReorderNoOpSkipsPut(t *testing.T) {
+	// Column order by position: a(0), target(5), b(10). Asking for the target
+	// to go --before b computes (0+10)/2 = 5, which it already holds, so the
+	// command should short-circuit without issuing a PUT.
+	a := mkIssue("a-id", "MUL-1", "todo", 0)
+	b := mkIssue("b-id", "MUL-2", "todo", 10)
+	target := mkIssue("t-id", "MUL-9", "todo", 5)
+	byRef := map[string]map[string]any{
+		"MUL-1": a, "a-id": a,
+		"MUL-2": b, "b-id": b,
+		"MUL-9": target, "t-id": target,
+	}
+	putCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{"issues": []any{a, target, b}, "total": 3})
+			return
+		}
+		if r.Method == http.MethodPut {
+			putCalled = true
+			http.NotFound(w, r)
+			return
+		}
+		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
+		if found, ok := byRef[ref]; ok {
+			json.NewEncoder(w).Encode(found)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueReorderTestCmd()
+	_ = cmd.Flags().Set("before", "MUL-2")
+	if err := runIssueReorder(cmd, []string{"MUL-9"}); err != nil {
+		t.Fatalf("runIssueReorder: %v", err)
+	}
+	if putCalled {
+		t.Fatal("expected no PUT when the issue is already in the requested position")
+	}
+}
+
+func TestRunIssueReorderSingleItemColumnValidatesTarget(t *testing.T) {
+	// The "todo" column holds only the issue being moved; MUL-3 lives in a
+	// different column. A relative move must still validate its target rather
+	// than reporting a successful no-op (regression guard for the single-item
+	// fast path running before target resolution).
+	target := mkIssue("t-id", "MUL-9", "todo", 5)
+	other := mkIssue("c-id", "MUL-3", "in_progress", 2)
+	byRef := map[string]map[string]any{
+		"MUL-9": target, "t-id": target,
+		"MUL-3": other, "c-id": other,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{"issues": []any{target}, "total": 1})
+			return
+		}
+		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
+		if found, ok := byRef[ref]; ok {
+			json.NewEncoder(w).Encode(found)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	t.Run("cross-column target errors", func(t *testing.T) {
+		cmd := newIssueReorderTestCmd()
+		_ = cmd.Flags().Set("after", "MUL-3")
+		err := runIssueReorder(cmd, []string{"MUL-9"})
+		if err == nil {
+			t.Fatal("expected an error, not a silent no-op")
+		}
+		if !strings.Contains(err.Error(), "in_progress") {
+			t.Fatalf("error = %q, want it to name the target's column", err)
+		}
+	})
+
+	t.Run("self target errors", func(t *testing.T) {
+		cmd := newIssueReorderTestCmd()
+		_ = cmd.Flags().Set("before", "MUL-9")
+		err := runIssueReorder(cmd, []string{"MUL-9"})
+		if err == nil {
+			t.Fatal("expected an error when targeting itself")
+		}
+		if !strings.Contains(err.Error(), "itself") {
+			t.Fatalf("error = %q, want it to mention self-reference", err)
+		}
+	})
+}
+
+func TestRunIssueReorderOnlyIssueInColumnIsNoOp(t *testing.T) {
+	// A --top/--bottom move on a single-issue column has nowhere to go, so it
+	// short-circuits without a PUT instead of rewriting the position.
+	target := mkIssue("t-id", "MUL-9", "todo", 5)
+	putCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/issues" && r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{"issues": []any{target}, "total": 1})
+			return
+		}
+		if r.Method == http.MethodPut {
+			putCalled = true
+			http.NotFound(w, r)
+			return
+		}
+		ref, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/issues/"))
+		if ref == "MUL-9" || ref == "t-id" {
+			json.NewEncoder(w).Encode(target)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueReorderTestCmd()
+	_ = cmd.Flags().Set("top", "true")
+	if err := runIssueReorder(cmd, []string{"MUL-9"}); err != nil {
+		t.Fatalf("runIssueReorder: %v", err)
+	}
+	if putCalled {
+		t.Fatal("expected no PUT when the issue is alone in its column")
+	}
+}
+
+func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
+	// position 0 is a real, meaningful value, so an update that does not pass
+	// --position must not send "position" at all (Flags().Changed guard).
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "title": "Renamed"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("title", "Renamed")
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if _, present := body["position"]; present {
+		t.Fatalf("position must be absent from the body when --position is not passed, got %#v", body["position"])
+	}
+}

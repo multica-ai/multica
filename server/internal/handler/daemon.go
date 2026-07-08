@@ -269,6 +269,70 @@ func normalizeProvider(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// inheritMachineCustomName gives a freshly-inserted runtime the machine's
+// shared custom name (MUL-4217) when the machine is already named, so adding a
+// provider — or recording a failed custom-runtime profile — on a named machine
+// doesn't leave a custom_name = NULL row that makes the machine title revert to
+// its hostname. Both the normal runtime path and the failed-profile path write
+// daemon_id-scoped rows that show up in the machine grouping, so both call this.
+//
+// Only fresh inserts with no name of their own and a daemon_id participate;
+// existing rows keep whatever they already have. A lookup/update error is
+// non-fatal — registration must still succeed — so the input row is returned
+// unchanged on any failure.
+func (h *Handler) inheritMachineCustomName(ctx context.Context, rt db.AgentRuntime, inserted bool) db.AgentRuntime {
+	if !inserted || rt.CustomName.Valid || !rt.DaemonID.Valid {
+		return rt
+	}
+	names, err := h.Queries.ListDaemonCustomNames(ctx, db.ListDaemonCustomNamesParams{
+		WorkspaceID: rt.WorkspaceID,
+		DaemonID:    rt.DaemonID,
+		ExcludeID:   rt.ID,
+	})
+	if err != nil {
+		return rt
+	}
+	shared, ok := sharedDaemonCustomName(names)
+	if !ok {
+		return rt
+	}
+	updated, err := h.Queries.UpdateAgentRuntimeCustomName(ctx, db.UpdateAgentRuntimeCustomNameParams{
+		CustomName: pgtype.Text{String: shared, Valid: true},
+		ID:         rt.ID,
+	})
+	if err != nil {
+		return rt
+	}
+	return updated
+}
+
+// sharedDaemonCustomName returns the machine-level name shared by all of a
+// daemon's runtimes — the same rule the frontend's sharedCustomName applies:
+// every runtime must carry the identical non-empty custom_name. Returns
+// ("", false) when the set is empty, any runtime is unnamed, or the names
+// disagree (i.e. there is no single machine name to inherit).
+func sharedDaemonCustomName(names []pgtype.Text) (string, bool) {
+	if len(names) == 0 {
+		return "", false
+	}
+	var first string
+	for i, n := range names {
+		if !n.Valid {
+			return "", false
+		}
+		v := strings.TrimSpace(n.String)
+		if v == "" {
+			return "", false
+		}
+		if i == 0 {
+			first = v
+		} else if v != first {
+			return "", false
+		}
+	}
+	return first, true
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -409,6 +473,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    prow.WorkspaceID,
 				DaemonID:       prow.DaemonID,
 				Name:           prow.Name,
+				CustomName:     prow.CustomName,
 				RuntimeMode:    prow.RuntimeMode,
 				Provider:       prow.Provider,
 				Status:         prow.Status,
@@ -453,6 +518,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    row.WorkspaceID,
 				DaemonID:       row.DaemonID,
 				Name:           row.Name,
+				CustomName:     row.CustomName,
 				RuntimeMode:    row.RuntimeMode,
 				Provider:       row.Provider,
 				Status:         row.Status,
@@ -467,6 +533,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				ProfileID:      row.ProfileID,
 			}
 		}
+
+		// A brand-new runtime on an already-named machine inherits the machine's
+		// shared custom name so the machine title stays stable as providers come
+		// and go (MUL-4217). Shared with the failed-profile path below.
+		registered = h.inheritMachineCustomName(r.Context(), registered, inserted)
 
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
@@ -546,7 +617,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"runtime_profile_failure_reason":     reason,
 			"command_name":                       commandName,
 		})
-		if _, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+		prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
 			WorkspaceID: wsUUID,
 			DaemonID:    strToText(req.DaemonID),
 			Name:        name,
@@ -557,11 +628,21 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			Metadata:    metadata,
 			OwnerID:     ownerID,
 			ProfileID:   profileUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			slog.Warn("failed to record runtime profile registration failure",
 				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,
 				"profile_id", profileID, "error", err)
+			continue
 		}
+		// Keep the failed-profile row consistent with the machine's name so it
+		// doesn't drag the machine title back to the hostname (MUL-4217).
+		h.inheritMachineCustomName(r.Context(), db.AgentRuntime{
+			ID:          prow.ID,
+			WorkspaceID: prow.WorkspaceID,
+			DaemonID:    prow.DaemonID,
+			CustomName:  prow.CustomName,
+		}, prow.Inserted)
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))

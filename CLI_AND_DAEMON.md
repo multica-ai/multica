@@ -336,9 +336,13 @@ multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 multica issue list --full-id
 multica issue list --limit 20 --output json
+multica issue list --status todo --sort position       # board order (the default)
+multica issue list --sort created_at --direction desc  # newest first
 ```
 
 Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+
+Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, or `priority`.
 
 Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
 
@@ -367,7 +371,23 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 
 ```bash
 multica issue update <id> --title "New title" --priority urgent
+multica issue update <id> --position 4.5
 ```
+
+`--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+
+### Reorder Issue
+
+Move an issue within its current status column. The new ordering value is computed the same way the board's drag-and-drop computes it, so the CLI and UI agree on where the issue lands.
+
+```bash
+multica issue reorder <id> --top              # top of its status column
+multica issue reorder <id> --bottom           # bottom of its status column
+multica issue reorder <id> --before <other>   # directly above another issue in the same column
+multica issue reorder <id> --after  <other>   # directly below another issue in the same column
+```
+
+Pick exactly one of `--top`, `--bottom`, `--before`, or `--after`. Reorder stays inside the issue's current column, so `--before` / `--after` must name an issue in that same column. To move an issue to a different column, change its status first with `issue status`, then reorder within the new column.
 
 ### Assign Issue
 

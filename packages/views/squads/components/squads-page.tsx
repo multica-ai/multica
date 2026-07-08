@@ -874,6 +874,16 @@ export function SquadsPage() {
     return sorted;
   }, [scopeRows, filters, sortField, sortDirection]);
 
+  // Reserve the row-actions (kebab) track when the current user can manage at
+  // least one visible squad. Workspace admins manage all squads; a regular
+  // member manages the squads they created (MUL-4223).
+  const canManageAnyRow = useMemo(
+    () =>
+      isWorkspaceAdmin ||
+      (!!currentUser && rows.some((s) => s.creator_id === currentUser.id)),
+    [isWorkspaceAdmin, rows, currentUser],
+  );
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeader className="justify-between px-5">
@@ -940,7 +950,7 @@ export function SquadsPage() {
             <ListGrid
               className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
               style={{
-                ...columnTrackVars(isColVisible, isWorkspaceAdmin),
+                ...columnTrackVars(isColVisible, canManageAnyRow),
                 paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
               }}
             >
@@ -994,7 +1004,8 @@ export function SquadsPage() {
                       <ListGridCell className="hidden px-0 @2xl:flex" />
                     )}
                     <ListGridCell className="justify-end px-0">
-                      {isWorkspaceAdmin ? (
+                      {isWorkspaceAdmin ||
+                      (!!currentUser && squad.creator_id === currentUser.id) ? (
                         <SquadRowActions squad={squad} />
                       ) : null}
                     </ListGridCell>

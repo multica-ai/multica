@@ -844,18 +844,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 
-				// Lark integration. Listing is member-visible (same
-				// rationale as GitHub: the Integrations tab must
-				// render for non-admins so they see "wired up by whom").
-				// Install / revoke require admin to prevent a non-admin
-				// from binding a Bot to a workspace agent or yanking
-				// an installation out from under one.
+				// Lark integration. Every endpoint here only requires
+				// workspace membership at the router; the real authorization
+				// is per-agent and enforced inside each handler via
+				// canManageAgent (agent owner OR workspace owner/admin), so an
+				// agent's owner can bind/manage their own agent's Bot without
+				// being a workspace admin (MUL-4213). The router can't make
+				// that call itself: begin identifies the agent by an
+				// `agent_id` query param and revoke by an installation id,
+				// neither of which is a URL param the role middleware sees.
+				//   - Listing stays member-visible (same rationale as GitHub:
+				//     the Integrations tab must render for non-admins so they
+				//     see "wired up by whom").
+				//   - Begin / status / revoke each load the target agent and
+				//     run canManageAgent (status gates on the session
+				//     initiator or an admin) before doing anything.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
-				})
-				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns

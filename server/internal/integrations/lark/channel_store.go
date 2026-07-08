@@ -315,23 +315,6 @@ func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, c
 	return chatSessionBindingFromRow(row), nil
 }
 
-func (s *ChannelStore) CreateLarkChatSessionBinding(ctx context.Context, arg CreateChatSessionBindingParams) (ChatSessionBinding, error) {
-	row, err := s.Queries.CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
-		ChatSessionID:  arg.ChatSessionID,
-		InstallationID: arg.InstallationID,
-		ChannelType:    channelTypeFeishu,
-		ChannelChatID:  arg.ChannelChatID,
-		ChatType:       arg.ChatType,
-		// Feishu's channel_chat_id is the real chat id, so the key alone routes
-		// outbound; config stays the empty object (the column is NOT NULL).
-		Config: []byte("{}"),
-	})
-	if err != nil {
-		return ChatSessionBinding{}, err
-	}
-	return chatSessionBindingFromRow(row), nil
-}
-
 func (s *ChannelStore) UpdateLarkChatSessionBindingReplyTarget(ctx context.Context, arg UpdateChatSessionBindingReplyTargetParams) error {
 	return s.Queries.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
 		ChatSessionID: arg.ChatSessionID,

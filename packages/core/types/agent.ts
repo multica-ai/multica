@@ -58,6 +58,13 @@ export interface RuntimeDevice {
   workspace_id: string;
   daemon_id: string | null;
   name: string;
+  /**
+   * Optional user-set display name override (MUL-4217). Overrides `name` for
+   * display; the daemon never writes it, so it survives heartbeats. Older
+   * backends omit the field — consumers must treat missing / empty as "use
+   * name" (see runtimeDisplayName).
+   */
+  custom_name?: string | null;
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
