@@ -9,6 +9,20 @@ vi.mock("@multica/core/config", () => ({
     selector({ cdnDomain: "" }),
 }));
 
+vi.mock("../i18n", () => ({
+  useT: () => ({
+    t: (sel: (s: Record<string, Record<string, string>>) => string) =>
+      sel({
+        image: {
+          download: "Download",
+        },
+        attachment: {
+          preview: "Preview",
+        },
+      }),
+  }),
+}));
+
 vi.mock("../issues/components/issue-mention-card", () => ({
   IssueMentionCard: ({ issueId }: { issueId: string }) => (
     <span data-testid="issue-mention-card">{issueId}</span>

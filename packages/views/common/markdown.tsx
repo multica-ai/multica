@@ -21,6 +21,8 @@ import {
   Attachment as AttachmentRenderer,
   AttachmentDownloadProvider,
 } from "../editor";
+import { useT } from "../i18n";
+
 
 export type { RenderMode };
 
@@ -141,6 +143,7 @@ interface ArtifactCardProps {
 }
 
 function ArtifactCard({ identifier, type, title, content }: ArtifactCardProps) {
+  const { t } = useT("editor");
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
   const handleDownload = () => {
@@ -189,14 +192,14 @@ function ArtifactCard({ identifier, type, title, content }: ArtifactCardProps) {
           className="h-8 gap-1.5 px-3 text-xs font-medium hover:bg-accent/80 transition-colors"
         >
           <Eye className="size-3.5" />
-          Preview
+          {t(($) => $.attachment.preview)}
         </Button>
         <Button
           variant="ghost"
           size="icon"
           onClick={handleDownload}
           className="size-8 text-muted-foreground hover:bg-accent/80 hover:text-foreground transition-all duration-200"
-          title="Download File"
+          title={t(($) => $.image.download)}
         >
           <Download className="size-4" />
         </Button>
