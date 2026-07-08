@@ -136,7 +136,7 @@ export function ChatPage() {
 
   // The conversation pane: message list / skeleton / empty above a persistent
   // banner + input. Identical composition to the floating window's body, so a
-  // brand-new chat (no active session) still shows the starter prompts + input.
+  // brand-new chat (no active session) shows the agent-aware empty state + input.
   // No compose-box agent selector — the agent is fixed when the chat starts.
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0">
@@ -157,10 +157,7 @@ export function ChatPage() {
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
         />
       ) : (
-        <EmptyState
-          agent={c.activeAgent}
-          onPickPrompt={(text) => c.handleSend(text)}
-        />
+        <EmptyState agent={c.activeAgent} />
       )}
 
       {c.noAgent ? (
