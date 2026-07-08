@@ -84,6 +84,7 @@
   "row_actions": {
     "cancel_all_tasks": "すべてのタスクをキャンセル",
     "duplicate": "複製",
+    "deploy_to_workspace": "ワークスペースにデプロイ",
     "restore": "復元",
     "archive": "アーカイブ",
     "agent_archived_toast": "エージェントをアーカイブしました",

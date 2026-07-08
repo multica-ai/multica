@@ -407,28 +407,27 @@ function DetailHeader({
       }
       actions={
         !isArchived ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" />}
-            >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem onClick={onDeploy}>
-                <Send className="h-3.5 w-3.5" />
-                Deploy to workspace
-              </DropdownMenuItem>
-              {canArchive && (
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={onArchive}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t(($) => $.detail.more_archive)}
-              </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <>
+            <Button size="sm" variant="outline" onClick={onDeploy} className="px-2 sm:px-2.5">
+              <Send className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">Deploy to workspace</span>
+            </Button>
+            {canArchive && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="ghost" size="icon-sm" />}
+                >
+                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuItem variant="destructive" onClick={onArchive}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {t(($) => $.detail.more_archive)}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </>
         ) : null
       }
     />

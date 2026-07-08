@@ -96,6 +96,7 @@
   "row_actions": {
     "cancel_all_tasks": "Cancel all tasks",
     "duplicate": "Duplicate",
+    "deploy_to_workspace": "Deploy to workspace",
     "restore": "Restore",
     "archive": "Archive",
     "agent_archived_toast": "Agent archived",

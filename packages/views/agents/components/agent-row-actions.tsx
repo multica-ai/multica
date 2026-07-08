@@ -6,6 +6,7 @@ import {
   Copy,
   MoreHorizontal,
   RotateCcw,
+  Send,
   Square,
   Trash2,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { DeployAgentModal } from "./deploy-agent-modal";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -72,6 +74,7 @@ export function AgentRowActions({
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
 
   const isArchived = !!agent.archived_at;
   const runningCount = presence?.runningCount ?? 0;
@@ -83,10 +86,11 @@ export function AgentRowActions({
   // branches.
   const showStop = canManage && !isArchived && hasActiveWork;
   const showDuplicate = !isArchived; // any workspace member can duplicate
+  const showDeploy = !isArchived; // any workspace member can deploy
   const showArchive = canManage && !isArchived;
   const showRestore = canManage && isArchived;
 
-  const hasAnyAction = showStop || showDuplicate || showArchive || showRestore;
+  const hasAnyAction = showStop || showDuplicate || showDeploy || showArchive || showRestore;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -159,6 +163,12 @@ export function AgentRowActions({
               {t(($) => $.row_actions.duplicate)}
             </DropdownMenuItem>
           )}
+          {showDeploy && (
+            <DropdownMenuItem onClick={() => setDeployOpen(true)}>
+              <Send className="h-3.5 w-3.5" />
+              {t(($) => $.row_actions.deploy_to_workspace)}
+            </DropdownMenuItem>
+          )}
           {showRestore && (
             <DropdownMenuItem onClick={handleRestore}>
               <RotateCcw className="h-3.5 w-3.5" />
@@ -212,6 +222,15 @@ export function AgentRowActions({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      )}
+
+      {deployOpen && (
+        <DeployAgentModal
+          agent={agent}
+          currentWorkspaceId={wsId}
+          open={deployOpen}
+          onOpenChange={setDeployOpen}
+        />
       )}
 
       {confirmArchive && (

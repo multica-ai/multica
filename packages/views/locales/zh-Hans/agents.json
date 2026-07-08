@@ -92,6 +92,7 @@
   "row_actions": {
     "cancel_all_tasks": "取消全部 task",
     "duplicate": "复制",
+    "deploy_to_workspace": "部署到工作空间",
     "restore": "恢复",
     "archive": "归档",
     "agent_archived_toast": "已归档智能体",
