@@ -1,5 +1,10 @@
 {
   "preferences": {
+    "chat": {
+      "title": "聊天",
+      "floating_label": "悬浮聊天窗",
+      "floating_hint": "在每个页面右下角显示悬浮聊天按钮。关闭后，聊天只在其独立标签页中可用。"
+    },
     "theme": {
       "title": "主题",
       "light": "浅色",

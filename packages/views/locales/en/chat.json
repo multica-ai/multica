@@ -70,6 +70,7 @@
     }
   },
   "window": {
+    "open_full_tooltip": "Open full page",
     "new_chat_tooltip": "New chat",
     "restore_tooltip": "Restore",
     "expand_tooltip": "Expand",

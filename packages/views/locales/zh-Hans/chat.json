@@ -67,6 +67,7 @@
     }
   },
   "window": {
+    "open_full_tooltip": "打开完整页面",
     "new_chat_tooltip": "新对话",
     "restore_tooltip": "还原",
     "expand_tooltip": "展开",

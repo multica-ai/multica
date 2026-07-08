@@ -67,6 +67,7 @@
     }
   },
   "window": {
+    "open_full_tooltip": "전체 페이지 열기",
     "new_chat_tooltip": "새 채팅",
     "restore_tooltip": "복원",
     "expand_tooltip": "펼치기",

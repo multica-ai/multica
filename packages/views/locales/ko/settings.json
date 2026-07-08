@@ -1,5 +1,10 @@
 {
   "preferences": {
+    "chat": {
+      "title": "채팅",
+      "floating_label": "플로팅 채팅 창",
+      "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 끄면 채팅은 전용 탭에서만 사용할 수 있습니다."
+    },
     "theme": {
       "title": "테마",
       "light": "라이트",

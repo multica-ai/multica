@@ -95,3 +95,36 @@ describe("chat store — draft attachments", () => {
     expect(store.getState().inputDraftAttachments["draft-1"]).toBeUndefined();
   });
 });
+
+describe("chat store — floating window preference", () => {
+  it("defaults ON when no preference is stored", () => {
+    const store = createChatStore({ storage: memStorage() });
+    expect(store.getState().floatingChatEnabled).toBe(true);
+  });
+
+  it("honours an explicit stored 'false' preference", () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:floatingChatEnabled", "false");
+    const store = createChatStore({ storage });
+    expect(store.getState().floatingChatEnabled).toBe(false);
+  });
+
+  it("persists the choice and collapses an open overlay when disabled", () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:isOpen", "true");
+    const store = createChatStore({ storage });
+    expect(store.getState().isOpen).toBe(true);
+
+    store.getState().setFloatingChatEnabled(false);
+    expect(store.getState().floatingChatEnabled).toBe(false);
+    expect(store.getState().isOpen).toBe(false);
+    expect(storage.getItem("multica:chat:floatingChatEnabled")).toBe("false");
+
+    // A fresh store rehydrates the persisted preference.
+    const reopened = createChatStore({ storage });
+    expect(reopened.getState().floatingChatEnabled).toBe(false);
+
+    store.getState().setFloatingChatEnabled(true);
+    expect(store.getState().floatingChatEnabled).toBe(true);
+  });
+});

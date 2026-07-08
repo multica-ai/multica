@@ -1,5 +1,10 @@
 {
   "preferences": {
+    "chat": {
+      "title": "Chat",
+      "floating_label": "Floating chat window",
+      "floating_hint": "Show the floating chat button in the corner of every page. When off, Chat is available only in its tab."
+    },
     "theme": {
       "title": "Theme",
       "light": "Light",

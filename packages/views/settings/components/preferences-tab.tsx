@@ -9,8 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
+import { useChatStore } from "@multica/core/chat";
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
@@ -241,8 +243,39 @@ export function PreferencesTab() {
         </div>
       </section>
 
+      <ChatSection />
+
       <TimezoneSection />
     </div>
+  );
+}
+
+/**
+ * Chat preferences. Currently just the floating-window toggle: when off, the
+ * FAB / overlay never mount and Chat is reachable only from its tab. The
+ * preference is a persisted client setting (`floatingChatEnabled`), so it
+ * applies immediately without a round-trip.
+ */
+function ChatSection() {
+  const { t } = useT("settings");
+  const enabled = useChatStore((s) => s.floatingChatEnabled);
+  const setEnabled = useChatStore((s) => s.setFloatingChatEnabled);
+
+  return (
+    <section className="space-y-4">
+      <h2 className="text-sm font-semibold">{t(($) => $.preferences.chat.title)}</h2>
+      <label className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5 pr-4">
+          <p className="text-sm font-medium">
+            {t(($) => $.preferences.chat.floating_label)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.preferences.chat.floating_hint)}
+          </p>
+        </div>
+        <Switch checked={enabled} onCheckedChange={setEnabled} />
+      </label>
+    </section>
   );
 }
 
