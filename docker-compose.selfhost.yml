@@ -21,6 +21,7 @@ name: multica
 services:
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/kiyors/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: always
     networks:
       - dokploy-network
     labels:
@@ -107,6 +108,7 @@ services:
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/kiyors/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: always
     depends_on:
       - backend
     networks:
