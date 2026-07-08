@@ -1399,16 +1399,16 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		if trigger.AlreadyPending {
 			// MUL-4195: a queued/dispatched task for this (issue, agent)
 			// already exists. Historically we DROPPED the comment here, losing
-			// the user's follow-up instruction. Instead try to fold it into a
-			// not-yet-claimed (queued/deferred) task so a single run still
-			// covers every comment, re-stamping the run's originator/overlay to
-			// the new comment (mergeCommentIntoPendingTask).
+			// the user's follow-up instruction. Instead try to fold it into the
+			// queued (not-yet-claimed) task so a single run still covers every
+			// comment, re-stamping the run's originator/overlay to the new
+			// comment (mergeCommentIntoPendingTask).
 			if h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID) {
 				continue
 			}
-			// The merge found no pre-claim task to fold into: the existing task
-			// is already dispatched/running (its claim response is built), or a
-			// mismatched pre-claim row was just claimed. We must NOT enqueue a
+			// The merge found no queued task to fold into: the existing task
+			// is already dispatched/running (its claim response is built), or
+			// the queued row was just claimed. We must NOT enqueue a
 			// fresh queued task in that case — a dispatched sibling would trip
 			// the idx_one_pending_task_per_issue_agent unique index (dropping
 			// the comment again) and even where the index allows it we'd risk a
@@ -1453,11 +1453,11 @@ func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, ag
 // fresh task and the deliberate comment is never lost.
 //
 // The merge is GATED on the originator being unchanged (MUL-4195 review
-// mergeCommentIntoPendingTask folds a newly-arrived comment into an existing
-// NOT-YET-CLAIMED (queued/deferred) task for (issue, agent) instead of dropping
-// it (MUL-4195). Returns true when the comment was handled (merged, or a
+// mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
+// QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
+// (MUL-4195). Returns true when the comment was handled (merged, or a
 // non-fatal DB error we deliberately do not turn into a duplicate). Returns
-// false only when no pre-claim task exists to merge into (pgx.ErrNoRows) — the
+// false only when no queued task exists to merge into (pgx.ErrNoRows) — the
 // existing task is already dispatched/running, or was just claimed — in which
 // case the caller decides between deferring to completion reconcile and a fresh
 // enqueue.

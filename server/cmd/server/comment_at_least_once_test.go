@@ -308,3 +308,103 @@ func taskOriginator(t *testing.T, issueID, agentID string) string {
 	}
 	return originator
 }
+
+// TestMergeCommentIntoPendingTask_TargetsQueuedNotDeferred is the MUL-4195
+// round-4 regression test. When a `(issue, agent)` pair has BOTH an older
+// queued task (the run about to be claimed) and a newer deferred
+// assignee-fallback task, a new comment's merge must land on the QUEUED task —
+// the one that will actually run next — not the newer deferred fallback. An
+// earlier `status IN ('queued','deferred') ORDER BY created_at DESC` target
+// picked the deferred row, so the comment missed the imminent run and the
+// deferred fallback could later promote into a duplicate. The merge now matches
+// `status = 'queued'` only; the deferred row is left to its own escalation
+// lifecycle.
+func TestMergeCommentIntoPendingTask_TargetsQueuedNotDeferred(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Merge target queued-vs-deferred test", agentID)
+	clearTasks(t, issueID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	now := time.Now()
+	cidQueued := insertCommentAt(t, issueID, "member", testUserID, "queued task trigger", now.Add(-3*time.Minute))
+	cidDeferred := insertCommentAt(t, issueID, "member", testUserID, "deferred fallback trigger", now.Add(-2*time.Minute))
+	cidNew := insertCommentAt(t, issueID, "member", testUserID, "new comment, must fold into queued", now.Add(-1*time.Minute))
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	// Older queued task (the imminent run) ...
+	var queuedTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at)
+		VALUES ($1, $2, $3, $4, 'queued', 0, now() - interval '3 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, cidQueued).Scan(&queuedTaskID); err != nil {
+		t.Fatalf("seed queued task: %v", err)
+	}
+	// ... and a NEWER deferred assignee-fallback task for the same (issue, agent).
+	var deferredTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, fire_at)
+		VALUES ($1, $2, $3, $4, 'deferred', 0, now() - interval '2 minutes', now() + interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, cidDeferred).Scan(&deferredTaskID); err != nil {
+		t.Fatalf("seed deferred task: %v", err)
+	}
+
+	row, err := queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:             toPgUUID(t, issueID),
+		AgentID:             toPgUUID(t, agentID),
+		NewTriggerCommentID: toPgUUID(t, cidNew),
+		NewOriginatorUserID: toPgUUID(t, testUserID),
+		NewTriggerSummary:   pgtype.Text{String: "new comment", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("merge should target the queued task, got %v", err)
+	}
+	// The merge must have hit the QUEUED task, not the deferred one.
+	if got := pgUUIDToText(row.ID); got != queuedTaskID {
+		t.Fatalf("merge must target the queued task %s, got %s", queuedTaskID, got)
+	}
+
+	// Queued task: trigger repointed to the new comment, old trigger coalesced.
+	var queuedTrigger string
+	var queuedCoalesced []string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_comment_id::text, coalesced_comment_ids::text[] FROM agent_task_queue WHERE id = $1
+	`, queuedTaskID).Scan(&queuedTrigger, &queuedCoalesced); err != nil {
+		t.Fatalf("read queued task: %v", err)
+	}
+	if queuedTrigger != cidNew {
+		t.Errorf("queued task trigger must be repointed to %s, got %s", cidNew, queuedTrigger)
+	}
+	if !containsID(queuedCoalesced, cidQueued) {
+		t.Errorf("queued task must coalesce its old trigger %s, got %v", cidQueued, queuedCoalesced)
+	}
+
+	// Deferred fallback must be UNTOUCHED (still its own trigger, still deferred).
+	var deferredTrigger, deferredStatus string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_comment_id::text, status FROM agent_task_queue WHERE id = $1
+	`, deferredTaskID).Scan(&deferredTrigger, &deferredStatus); err != nil {
+		t.Fatalf("read deferred task: %v", err)
+	}
+	if deferredTrigger != cidDeferred {
+		t.Errorf("deferred fallback trigger must be untouched (%s), got %s", cidDeferred, deferredTrigger)
+	}
+	if deferredStatus != "deferred" {
+		t.Errorf("deferred fallback status must stay 'deferred', got %s", deferredStatus)
+	}
+}

@@ -739,16 +739,22 @@ WHERE issue_id = @issue_id
 -- the latest deliberate instruction while the single run is still told to
 -- address every folded comment.
 --
--- Target is restricted to PRE-CLAIM states — 'queued' and 'deferred' — on
--- purpose (MUL-4195 review must-fix #2). A 'dispatched' / 'waiting_local_directory'
--- / 'running' task has already had its claim response (with its
--- coalesced_comment_ids) built and shipped to the daemon; folding a comment in
--- after that point would add it to coalesced_comment_ids WITHOUT the daemon ever
--- seeing it, making an undelivered comment look delivered. Those post-claim
--- comments are handled by completion reconciliation instead, which anchors on
--- dispatched_at and sweeps every member comment the run did not deliver. Because
--- merges only ever touch pre-claim rows, coalesced_comment_ids == the set the
--- run actually received.
+-- Target is restricted to the single 'queued' task on purpose (MUL-4195 review
+-- rounds 2–4). This merge is only reached when HasPendingTaskForIssueAndAgent
+-- matched a 'queued'/'dispatched' task, and 'dispatched' is deliberately NOT a
+-- target: a dispatched / waiting_local_directory / running task has already had
+-- its claim response (with its coalesced_comment_ids) built and shipped, so
+-- folding a comment in afterward would mark an undelivered comment as delivered;
+-- those are handled by completion reconciliation instead. 'deferred' is also NOT
+-- a target: a deferred row is an assignee-fallback escalation with its own
+-- fire_at/promotion lifecycle, and it never sets AlreadyPending
+-- (HasPendingTaskForIssueAndAgent only looks at queued/dispatched). If a newer
+-- deferred fallback and an older queued task coexisted, a status-IN target would
+-- pick the deferred one by created_at and steal the coalescing target away from
+-- the queued run that is actually about to be claimed — so we match ONLY the
+-- queued row (the idx_one_pending_task_per_issue_agent unique index guarantees
+-- at most one). Because merges only ever touch that pre-claim queued row,
+-- coalesced_comment_ids == the set the run actually received.
 --
 -- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
 -- runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW
@@ -763,7 +769,7 @@ WHERE issue_id = @issue_id
 -- index allows only one queued/dispatched task per (issue, agent)) and therefore
 -- silently dropped the mismatched-originator comment.
 --
--- Returns pgx.ErrNoRows when no pre-claim task exists (it was claimed/started
+-- Returns pgx.ErrNoRows when no queued task exists (it was claimed/started
 -- between the dedup check and this call, or the only task is already
 -- dispatched/running). The caller must NOT blindly enqueue a fresh task in that
 -- case — a dispatched sibling would trip the unique index — it defers to
@@ -783,7 +789,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.status IN ('queued', 'deferred')
+      AND t.status = 'queued'
     ORDER BY t.created_at DESC
     LIMIT 1
 )
