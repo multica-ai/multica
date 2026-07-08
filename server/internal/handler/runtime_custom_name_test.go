@@ -217,3 +217,54 @@ func TestDaemonRegister_NewRuntimeInheritsMachineName(t *testing.T) {
 		t.Fatalf("persisted custom_name = %v, want inherited \"Bohan MacBook\"", persisted)
 	}
 }
+
+// TestDaemonRegister_FailedProfileInheritsMachineName guards the same-class
+// gap Elon flagged on re-review: the failed-custom-profile branch also writes a
+// daemon_id-scoped agent_runtime row, so it must inherit the machine name too —
+// otherwise enabling a custom runtime that can't resolve on a named machine
+// lands a custom_name=NULL row and drags the machine title back to the hostname.
+func TestDaemonRegister_FailedProfileInheritsMachineName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	const daemonID = "custom-name-register-failed-profile"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+	})
+
+	// A named machine: register a normal runtime, then name the whole machine.
+	first := registerRuntimeOnDaemon(t, daemonID, "claude")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET custom_name = 'Bohan MacBook' WHERE id = $1`, first["id"].(string)); err != nil {
+		t.Fatalf("name machine: %v", err)
+	}
+
+	// A custom runtime profile fails to resolve on this machine.
+	profileID := insertRuntimeProfileFixture(t, ctx, "Custom Codex", "codex", "missing-codex")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "host",
+		"failed_profiles": []map[string]any{
+			{"profile_id": profileID, "command_name": "missing-codex", "reason": "command not found on PATH"},
+		},
+	}, testWorkspaceID, daemonID)
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("register failed profile: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The failed-profile row must have inherited the machine name.
+	var name *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT custom_name FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND profile_id = $3
+	`, testWorkspaceID, daemonID, profileID).Scan(&name); err != nil {
+		t.Fatalf("read failed-profile custom_name: %v", err)
+	}
+	if name == nil || *name != "Bohan MacBook" {
+		t.Fatalf("failed-profile custom_name = %v, want inherited \"Bohan MacBook\"", name)
+	}
+}
