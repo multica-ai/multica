@@ -610,9 +610,9 @@ Multica is a powerful AI-native task management platform where AI agents are fir
 - [x] **Backend:** `POST /api/me/github/issues` endpoint to create issues on GitHub natively as the connected user.
 - [x] **Frontend:** `useGitHubRepos` hook + `GitHubRepoPicker` command palette component.
 - [x] **Frontend:** "Create as GitHub Issue" toggle on the manual issue creation modal.
-- [ ] **Optimization (Identity Mapping):** When PR webhooks arrive, match the GitHub `sender.login` to a Multica `member.github_username` so PRs and GitHub-authored activities show the Multica user's avatar/name instead of raw GitHub data.
-- [ ] **Optimization (Settings UI):** Build a UI in Workspace Settings > Profile to connect/disconnect GitHub directly from the web, rather than relying solely on the CLI Device Flow.
-- [ ] **Optimization (Token Refresh):** Handle expired GitHub tokens gracefully in the UI (prompt user to reconnect).
+- [x] **Optimization (Identity Mapping):** When PR webhooks arrive, match the GitHub `sender.login` to a Multica `member.github_username` so PRs and GitHub-authored activities show the Multica user's avatar/name instead of raw GitHub data.
+- [x] **Optimization (Settings UI):** Build a UI in Workspace Settings > Profile to connect/disconnect GitHub directly from the web, rather than relying solely on the CLI Device Flow.
+- [x] **Optimization (Token Refresh):** Handle expired GitHub tokens gracefully in the UI (prompt user to reconnect).
 
 ---
 
