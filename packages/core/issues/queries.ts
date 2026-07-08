@@ -131,8 +131,18 @@ export type AssigneeGroupedIssuesFilter = Omit<
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
 
-/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+/**
+ * Statuses fetched and paginated into the list/board cache. `cancelled` is
+ * included so cancelled issues always live in the cache (and rebucket
+ * correctly when an issue is cancelled); the surface hides them by default and
+ * only renders a Cancelled section when the status filter explicitly selects
+ * it. `BOARD_STATUSES` stays the default *visible* column set — this constant
+ * governs fetch/cache membership, not what the board shows.
+ */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = [
+  ...BOARD_STATUSES,
+  "cancelled",
+];
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
