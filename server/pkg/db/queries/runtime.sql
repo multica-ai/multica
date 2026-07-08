@@ -130,6 +130,19 @@ WHERE workspace_id = @workspace_id
   AND (@owner_id::uuid IS NULL OR owner_id = @owner_id)
 RETURNING *;
 
+-- name: ListDaemonCustomNames :many
+-- Lists the custom_name of every OTHER runtime on (workspace_id, daemon_id)
+-- (MUL-4217). @exclude_id drops the just-registered row. The caller derives
+-- the machine-level name in Go — the same "all runtimes share one non-null
+-- name" rule the frontend applies in sharedCustomName — so a freshly-added
+-- runtime on an already-named machine can inherit that name and keep the
+-- machine's display name stable. A daemon hosts only a handful of runtimes
+-- (one per provider), so this is a tiny read.
+SELECT custom_name FROM agent_runtime
+WHERE workspace_id = @workspace_id
+  AND daemon_id = @daemon_id
+  AND id <> @exclude_id;
+
 
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT

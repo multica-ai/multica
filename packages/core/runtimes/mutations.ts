@@ -55,7 +55,8 @@ export function useUpdateRuntime(wsId: string) {
       runtimeId: string;
       patch: {
         visibility?: "private" | "public";
-        custom_name?: string | null;
+        // Empty string clears the custom name; omit to leave unchanged.
+        custom_name?: string;
         apply_to_machine?: boolean;
       };
     }) => api.updateRuntime(runtimeId, patch),

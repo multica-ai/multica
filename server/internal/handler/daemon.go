@@ -269,6 +269,33 @@ func normalizeProvider(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// sharedDaemonCustomName returns the machine-level name shared by all of a
+// daemon's runtimes — the same rule the frontend's sharedCustomName applies:
+// every runtime must carry the identical non-empty custom_name. Returns
+// ("", false) when the set is empty, any runtime is unnamed, or the names
+// disagree (i.e. there is no single machine name to inherit).
+func sharedDaemonCustomName(names []pgtype.Text) (string, bool) {
+	if len(names) == 0 {
+		return "", false
+	}
+	var first string
+	for i, n := range names {
+		if !n.Valid {
+			return "", false
+		}
+		v := strings.TrimSpace(n.String)
+		if v == "" {
+			return "", false
+		}
+		if i == 0 {
+			first = v
+		} else if v != first {
+			return "", false
+		}
+	}
+	return first, true
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -409,6 +436,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    prow.WorkspaceID,
 				DaemonID:       prow.DaemonID,
 				Name:           prow.Name,
+				CustomName:     prow.CustomName,
 				RuntimeMode:    prow.RuntimeMode,
 				Provider:       prow.Provider,
 				Status:         prow.Status,
@@ -453,6 +481,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    row.WorkspaceID,
 				DaemonID:       row.DaemonID,
 				Name:           row.Name,
+				CustomName:     row.CustomName,
 				RuntimeMode:    row.RuntimeMode,
 				Provider:       row.Provider,
 				Status:         row.Status,
@@ -465,6 +494,31 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				LegacyDaemonID: row.LegacyDaemonID,
 				Visibility:     row.Visibility,
 				ProfileID:      row.ProfileID,
+			}
+		}
+
+		// A machine can carry a stable custom name: apply_to_machine renames
+		// every runtime currently on the daemon (MUL-4217). A brand-new runtime
+		// registering on an already-named machine would otherwise arrive with
+		// custom_name = NULL and make the machine's display name look "lost"
+		// (the title needs every runtime on the machine to share one name). So on
+		// a fresh insert that has no name of its own, inherit the machine's
+		// shared name. Existing rows keep whatever they already have, and a
+		// failed lookup is non-fatal — registration must still succeed.
+		if inserted && !registered.CustomName.Valid && registered.DaemonID.Valid {
+			if names, nerr := h.Queries.ListDaemonCustomNames(r.Context(), db.ListDaemonCustomNamesParams{
+				WorkspaceID: registered.WorkspaceID,
+				DaemonID:    registered.DaemonID,
+				ExcludeID:   registered.ID,
+			}); nerr == nil {
+				if shared, ok := sharedDaemonCustomName(names); ok {
+					if updated, uerr := h.Queries.UpdateAgentRuntimeCustomName(r.Context(), db.UpdateAgentRuntimeCustomNameParams{
+						CustomName: pgtype.Text{String: shared, Valid: true},
+						ID:         registered.ID,
+					}); uerr == nil {
+						registered = updated
+					}
+				}
 			}
 		}
 

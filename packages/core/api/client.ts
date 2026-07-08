@@ -1154,8 +1154,12 @@ export class ApiClient {
     runtimeId: string,
     patch: {
       visibility?: "private" | "public";
-      /** Custom display name; empty string clears it. See MUL-4217. */
-      custom_name?: string | null;
+      /**
+       * Custom display name. Pass an empty string to clear it (the server
+       * reverts to the default name). Omit to leave it unchanged — a JSON
+       * `null` is treated as "unchanged", not "clear". See MUL-4217.
+       */
+      custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
     },

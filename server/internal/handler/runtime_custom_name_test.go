@@ -124,3 +124,96 @@ func TestUpdateAgentRuntime_CustomNameMachineFanout(t *testing.T) {
 		}
 	}
 }
+
+// registerRuntimeOnDaemon registers a single built-in runtime for a daemon via
+// the daemon-token path and returns the first runtime object from the response.
+func registerRuntimeOnDaemon(t *testing.T, daemonID, provider string) map[string]any {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "host",
+		"runtimes": []map[string]any{
+			{"name": provider + " (host)", "type": provider, "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, daemonID)
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("register %s: expected 200, got %d: %s", provider, w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) == 0 {
+		t.Fatalf("register %s: no runtimes in response: %v", provider, resp)
+	}
+	return runtimes[0].(map[string]any)
+}
+
+// TestDaemonRegister_PreservesCustomNameInResponse guards Elon's finding that
+// the register handler reconstructed the response row by hand and dropped
+// custom_name, so a re-registering (heartbeat/reconnect) runtime that already
+// had a custom name came back as custom_name: null — inconsistent with
+// list/get/update.
+func TestDaemonRegister_PreservesCustomNameInResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	const daemonID = "custom-name-register-preserve"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+	})
+
+	first := registerRuntimeOnDaemon(t, daemonID, "claude")
+	runtimeID := first["id"].(string)
+
+	// Simulate a rename, then re-register (the upsert preserves custom_name).
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET custom_name = 'Prod Box' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("set custom_name: %v", err)
+	}
+
+	again := registerRuntimeOnDaemon(t, daemonID, "claude")
+	if again["custom_name"] != "Prod Box" {
+		t.Fatalf("register response custom_name = %v, want \"Prod Box\" (must not be dropped)", again["custom_name"])
+	}
+}
+
+// TestDaemonRegister_NewRuntimeInheritsMachineName guards Elon's finding that a
+// machine's custom name looked "lost" once a new provider registered on it:
+// the new runtime landed with custom_name = null. It should instead inherit
+// the machine's shared name so the machine title stays stable.
+func TestDaemonRegister_NewRuntimeInheritsMachineName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	const daemonID = "custom-name-register-inherit"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+	})
+
+	// Provider A registers, then the whole machine is named.
+	first := registerRuntimeOnDaemon(t, daemonID, "claude")
+	idA := first["id"].(string)
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET custom_name = 'Bohan MacBook' WHERE id = $1`, idA); err != nil {
+		t.Fatalf("name machine: %v", err)
+	}
+
+	// A brand-new provider on the same machine must inherit the machine name —
+	// both in the response and persisted.
+	second := registerRuntimeOnDaemon(t, daemonID, "codex")
+	if second["custom_name"] != "Bohan MacBook" {
+		t.Fatalf("new runtime response custom_name = %v, want inherited \"Bohan MacBook\"", second["custom_name"])
+	}
+	var persisted *string
+	if err := testPool.QueryRow(ctx, `SELECT custom_name FROM agent_runtime WHERE id = $1`, second["id"].(string)).Scan(&persisted); err != nil {
+		t.Fatalf("read persisted custom_name: %v", err)
+	}
+	if persisted == nil || *persisted != "Bohan MacBook" {
+		t.Fatalf("persisted custom_name = %v, want inherited \"Bohan MacBook\"", persisted)
+	}
+}

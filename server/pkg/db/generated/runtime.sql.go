@@ -562,6 +562,46 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 	return items, nil
 }
 
+const listDaemonCustomNames = `-- name: ListDaemonCustomNames :many
+SELECT custom_name FROM agent_runtime
+WHERE workspace_id = $1
+  AND daemon_id = $2
+  AND id <> $3
+`
+
+type ListDaemonCustomNamesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+	ExcludeID   pgtype.UUID `json:"exclude_id"`
+}
+
+// Lists the custom_name of every OTHER runtime on (workspace_id, daemon_id)
+// (MUL-4217). @exclude_id drops the just-registered row. The caller derives
+// the machine-level name in Go — the same "all runtimes share one non-null
+// name" rule the frontend applies in sharedCustomName — so a freshly-added
+// runtime on an already-named machine can inherit that name and keep the
+// machine's display name stable. A daemon hosts only a handful of runtimes
+// (one per provider), so this is a tiny read.
+func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCustomNamesParams) ([]pgtype.Text, error) {
+	rows, err := q.db.Query(ctx, listDaemonCustomNames, arg.WorkspaceID, arg.DaemonID, arg.ExcludeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.Text{}
+	for rows.Next() {
+		var custom_name pgtype.Text
+		if err := rows.Scan(&custom_name); err != nil {
+			return nil, err
+		}
+		items = append(items, custom_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE id = $1
