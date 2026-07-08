@@ -56,6 +56,30 @@ export function deriveChatTitle(content: string): string {
   if (cleaned.length <= CHAT_TITLE_MAX) return cleaned;
   return cleaned.slice(0, CHAT_TITLE_MAX - 1).trimEnd() + "…";
 }
+
+// True when a session has an in-flight optimistic write — an `optimistic-`
+// message or a pending task in the cache. That is the signal of a just-created
+// (or actively-sending) session still awaiting server confirmation, before the
+// sessions-list refetch includes it. Deliberately NOT "has cached messages": a
+// session deleted elsewhere can still have real cached history, which must not
+// exempt it from the stale-session self-heal.
+export function hasOptimisticInFlight(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+): boolean {
+  const pending = qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId));
+  if (pending?.task_id) return true;
+  const flat = qc.getQueryData<ChatMessage[]>(chatKeys.messages(sessionId));
+  if (flat?.some((m) => m.id.startsWith("optimistic-"))) return true;
+  const paged = qc.getQueryData<InfiniteData<ChatMessagesPage>>(
+    chatKeys.messagesPage(sessionId),
+  );
+  return Boolean(
+    paged?.pages.some((page) =>
+      page.messages.some((m) => m.id.startsWith("optimistic-")),
+    ),
+  );
+}
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
 function appendChatMessageToLatestPageCache(
@@ -262,7 +286,19 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
     async (titleSeed: string): Promise<string | null> => {
-      if (activeSessionId) return activeSessionId;
+      // Trust the current session id only when it's real: present in the
+      // loaded list, or a just-created one still awaiting the list refetch
+      // (has an optimistic write). A dangling id (deleted / no access) must not
+      // be treated as an existing session — fall through and create a fresh one
+      // so the message lands somewhere instead of POSTing into a 404.
+      if (
+        activeSessionId &&
+        (!sessionsLoaded ||
+          sessions.some((s) => s.id === activeSessionId) ||
+          hasOptimisticInFlight(qc, activeSessionId))
+      ) {
+        return activeSessionId;
+      }
       if (!activeAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
@@ -280,8 +316,23 @@ export function useChatController(opts?: { isActive?: boolean }) {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, activeAgent, createSession],
+    [activeSessionId, activeAgent, createSession, sessions, sessionsLoaded, qc],
   );
+
+  // Self-heal a dangling `activeSessionId`. Once the sessions list has loaded
+  // and it isn't in the list — with no in-flight optimistic write exempting a
+  // just-created session — the id was deleted, lost access, or never existed
+  // (a stale `?session=` deep link, or a persisted floating-window selection).
+  // Clearing it stops BOTH surfaces (the tab and the floating window) from
+  // rendering an editable empty chat whose send would POST into a nonexistent
+  // session. Lives in the shared controller so every surface self-heals.
+  useEffect(() => {
+    if (!activeSessionId || !sessionsLoaded) return;
+    if (sessions.some((s) => s.id === activeSessionId)) return;
+    if (hasOptimisticInFlight(qc, activeSessionId)) return;
+    uiLogger.info("clearing dangling activeSessionId", { sessionId: activeSessionId });
+    setActiveSession(null);
+  }, [activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
 
   const handleUploadFile = useCallback(
     async (file: File) => {
@@ -539,7 +590,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     agents,
     availableAgents,
     sessions,
-    sessionsLoaded,
     activeSessionId,
     selectedAgentId,
     currentSession,

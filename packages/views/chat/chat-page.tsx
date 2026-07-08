@@ -61,30 +61,6 @@ export function ChatPage() {
     if (c.activeSessionId) setComposingNew(false);
   }, [c.activeSessionId]);
 
-  // Self-heal stale deep links. A `?session=` can point at a session that was
-  // deleted, belongs to someone else, or never existed. Once the sessions list
-  // has loaded and that id isn't in it — and nothing is in flight for it (not a
-  // brand-new compose, no optimistic messages / pending task, not still
-  // loading) — the selection is dangling. Clear it so we show the neutral
-  // "pick a conversation" prompt instead of an editable empty chat whose send
-  // would POST into a nonexistent session. A freshly-created session is exempt:
-  // it always has an optimistic message + pending task (hasMessages), so it is
-  // never mistaken for stale during the brief window before the list refetches.
-  useEffect(() => {
-    if (!c.activeSessionId || composingNew) return;
-    if (!c.sessionsLoaded || c.currentSession) return;
-    if (c.showSkeleton || c.hasMessages) return;
-    c.setActiveSession(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- primitive signals only
-  }, [
-    c.activeSessionId,
-    composingNew,
-    c.sessionsLoaded,
-    c.currentSession,
-    c.showSkeleton,
-    c.hasMessages,
-  ]);
-
   // Two-way sync between the URL (`?session=`) and the chat store's
   // activeSessionId. Both effects read the LIVE store value via
   // `useChatStore.getState()` rather than the render-captured `c.activeSessionId`.
