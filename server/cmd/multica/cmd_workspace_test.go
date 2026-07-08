@@ -25,6 +25,158 @@ func newWorkspaceSwitchTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newWorkspaceCreateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("slug", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("description-stdin", false, "")
+	cmd.Flags().String("context", "", "")
+	cmd.Flags().Bool("context-stdin", false, "")
+	cmd.Flags().String("issue-prefix", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunWorkspaceCreatePostsWorkspaceAndDoesNotSwitchDefault(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("X-Workspace-ID") != "" {
+			t.Fatalf("X-Workspace-ID = %q, want empty for workspace creation", r.Header.Get("X-Workspace-ID"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":           "33333333-3333-3333-3333-333333333333",
+			"name":         "Growth Team",
+			"slug":         "growth-team",
+			"description":  "Handles GTM work",
+			"context":      "Launch notes",
+			"issue_prefix": "GRO",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "existing-workspace")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspaceID: "existing-workspace"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cmd := newWorkspaceCreateTestCmd()
+	for name, value := range map[string]string{
+		"name":         "Growth Team",
+		"slug":         "growth-team",
+		"description":  `Handles\nGTM work`,
+		"context":      "Launch notes",
+		"issue-prefix": "GRO",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceCreate(cmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceCreate: %v", err)
+	}
+
+	if gotBody["name"] != "Growth Team" {
+		t.Errorf("name = %v, want Growth Team", gotBody["name"])
+	}
+	if gotBody["slug"] != "growth-team" {
+		t.Errorf("slug = %v, want growth-team", gotBody["slug"])
+	}
+	if gotBody["description"] != "Handles\nGTM work" {
+		t.Errorf("description = %q, want decoded newline", gotBody["description"])
+	}
+	if gotBody["context"] != "Launch notes" {
+		t.Errorf("context = %v, want Launch notes", gotBody["context"])
+	}
+	if gotBody["issue_prefix"] != "GRO" {
+		t.Errorf("issue_prefix = %v, want GRO", gotBody["issue_prefix"])
+	}
+
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if printed["id"] != "33333333-3333-3333-3333-333333333333" {
+		t.Errorf("printed id = %v, want created workspace id", printed["id"])
+	}
+
+	cfg, err := cli.LoadCLIConfig()
+	if err != nil {
+		t.Fatalf("LoadCLIConfig: %v", err)
+	}
+	if cfg.WorkspaceID != "existing-workspace" {
+		t.Errorf("workspace_id = %q, want existing-workspace (create must not auto-switch)", cfg.WorkspaceID)
+	}
+}
+
+func TestRunWorkspaceCreateRequiresName(t *testing.T) {
+	cmd := newWorkspaceCreateTestCmd()
+	err := runWorkspaceCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("expected missing --name error")
+	}
+	if !strings.Contains(err.Error(), "--name is required") {
+		t.Fatalf("error = %q, want --name is required", err)
+	}
+}
+
+func TestRunWorkspaceCreatePrintsTable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":          "44444444-4444-4444-4444-444444444444",
+			"name":        "Support Team",
+			"slug":        "support-team",
+			"description": "A workspace for support operations",
+			"context":     "Customer support workflows",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newWorkspaceCreateTestCmd()
+	_ = cmd.Flags().Set("name", "Support Team")
+	_ = cmd.Flags().Set("output", "table")
+
+	out, err := captureStdout(t, func() error {
+		return runWorkspaceCreate(cmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runWorkspaceCreate: %v", err)
+	}
+
+	for _, want := range []string{"ID", "NAME", "SLUG", "Support Team", "support-team"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunWorkspaceSwitch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/workspaces" {
