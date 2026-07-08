@@ -227,6 +227,114 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	return resp.Task, w.Body.String()
 }
 
+// claimChatIntroForTest claims the next task for a runtime and returns the
+// claimed task id plus its chat_intro flag (false when the field is absent, as
+// it is omitempty).
+func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "chat-intro-review")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID        string `json:"id"`
+			ChatIntro bool   `json:"chat_intro"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected a claimable task, got none: %s", w.Body.String())
+	}
+	return resp.Task.ID, resp.Task.ChatIntro, w.Body.String()
+}
+
+// TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies pins the MUL-4259
+// fix: an is_agent_intro session drives the self-introduction prompt only on
+// its first, message-less turn. Once the creator has replied, later turns on
+// the same (still is_agent_intro) session must claim with chat_intro=false so
+// the agent answers instead of repeating its introduction.
+func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Chat intro gate runtime")
+	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Chat intro gate agent")
+	// Allow more than one in-flight task so the second claim isn't blocked by
+	// the first (which stays 'dispatched') on the concurrency limit.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise max_concurrent_tasks: %v", err)
+	}
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, runtime_id, is_agent_intro)
+		VALUES ($1, $2, $3, '👋 intro', 'active', $4, true)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&sessionID); err != nil {
+		t.Fatalf("insert intro chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	seedQueuedChatTask := func() string {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
+			VALUES ($1, $2, 'queued', 0, $3)
+			RETURNING id
+		`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+			t.Fatalf("seed queued chat task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		return taskID
+	}
+
+	// First turn: no user message yet → the server-driven intro run.
+	introTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body := claimChatIntroForTest(t, runtimeID)
+	if claimedID != introTaskID {
+		t.Fatalf("claimed task id = %s, want intro task %s: %s", claimedID, introTaskID, body)
+	}
+	if !chatIntro {
+		t.Fatalf("expected chat_intro=true for the message-less intro turn: %s", body)
+	}
+
+	// The intro run finishes. Chat tasks serialize on chat_session_id, so the
+	// next turn only becomes claimable once this one leaves an in-flight state.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID); err != nil {
+		t.Fatalf("complete intro task: %v", err)
+	}
+
+	// The creator replies: persist a user message on the same session.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'thanks! can you help me with X?')
+	`, sessionID); err != nil {
+		t.Fatalf("insert user reply: %v", err)
+	}
+
+	// Second turn on the same is_agent_intro session must NOT re-introduce.
+	followupTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body = claimChatIntroForTest(t, runtimeID)
+	if claimedID != followupTaskID {
+		t.Fatalf("claimed task id = %s, want follow-up task %s: %s", claimedID, followupTaskID, body)
+	}
+	if chatIntro {
+		t.Fatalf("expected chat_intro=false once the creator has replied: %s", body)
+	}
+}
+
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

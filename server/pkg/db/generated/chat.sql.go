@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const chatSessionHasUserMessage = `-- name: ChatSessionHasUserMessage :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE chat_session_id = $1 AND role = 'user'
+) AS has_user_message
+`
+
+// Reports whether a session has any human (role='user') message yet. Used to
+// scope the is_agent_intro self-introduction prompt to the very first,
+// server-driven turn: an intro session starts with zero user messages, so the
+// opening run gets the "introduce yourself" prompt. Once the creator replies,
+// later turns in the same session must fall back to the normal reply prompt
+// instead of repeating the introduction every turn (MUL-4259).
+func (q *Queries) ChatSessionHasUserMessage(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, chatSessionHasUserMessage, chatSessionID)
+	var has_user_message bool
+	err := row.Scan(&has_user_message)
+	return has_user_message, err
+}
+
 const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6)

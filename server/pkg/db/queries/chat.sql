@@ -251,3 +251,15 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ChatSessionHasUserMessage :one
+-- Reports whether a session has any human (role='user') message yet. Used to
+-- scope the is_agent_intro self-introduction prompt to the very first,
+-- server-driven turn: an intro session starts with zero user messages, so the
+-- opening run gets the "introduce yourself" prompt. Once the creator replies,
+-- later turns in the same session must fall back to the normal reply prompt
+-- instead of repeating the introduction every turn (MUL-4259).
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE chat_session_id = $1 AND role = 'user'
+) AS has_user_message;
