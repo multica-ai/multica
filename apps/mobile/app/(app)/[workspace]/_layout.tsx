@@ -111,6 +111,7 @@ export default function WorkspaceLayout() {
   const { t: tIssues } = useTranslation("issues");
   const { t: tProjects } = useTranslation("projects");
   const { t: tSettings } = useTranslation("settings");
+  const { t: tSkills } = useTranslation("skills");
   const { t: tWorkspace } = useTranslation("workspace");
   const { t: tChat } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
@@ -325,6 +326,13 @@ export default function WorkspaceLayout() {
           name="more/pins"
           options={{
             title: tWorkspace("pins.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/skills"
+          options={{
+            title: tSkills("list.header_title"),
             headerBackTitle: tCommon("nav.back"),
           }}
         />

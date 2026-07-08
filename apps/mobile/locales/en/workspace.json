@@ -38,7 +38,8 @@
     "nav": {
       "pinned": "Pinned",
       "issues": "Issues",
-      "projects": "Projects"
+      "projects": "Projects",
+      "skills": "Skills"
     },
     "account_settings_a11y": "Account settings",
     "switch_workspace_a11y": "Switch workspace",

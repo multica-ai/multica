@@ -38,7 +38,8 @@
     "nav": {
       "pinned": "固定",
       "issues": "issue",
-      "projects": "项目"
+      "projects": "项目",
+      "skills": "skill"
     },
     "account_settings_a11y": "账号设置",
     "switch_workspace_a11y": "切换工作区",
