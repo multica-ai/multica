@@ -93,6 +93,7 @@ const (
 type Message struct {
 	Type      MessageType
 	Content   string         // text content (Text, Error, Log)
+	Final     bool           // CEREBRO-PATCH(codex-final-output-only): Text only; true when content belongs in Result.Output.
 	Tool      string         // tool name (ToolUse, ToolResult)
 	CallID    string         // tool call ID (ToolUse, ToolResult)
 	Input     map[string]any // tool input (ToolUse)
