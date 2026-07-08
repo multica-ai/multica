@@ -9,20 +9,11 @@ import { tmpdir } from "os";
 import { Readable } from "stream";
 
 import { selectPlatformReleaseAssetName } from "./cli-release-asset";
-import { resolveGithubConfig } from "@multica/core/github/config";
+import { githubLatestDownloadBase } from "./github-release-base";
 
 // Desktop prefers the bundled `multica` CLI shipped inside the app for
 // same-repo builds, but it can also repair or bootstrap a managed copy in
 // userData on first launch when the bundled binary is missing or unusable.
-
-function githubLatestDownloadBase(): string {
-  const repo = process.env.MULTICA_GITHUB_REPO?.trim();
-  const branch = process.env.MULTICA_GITHUB_BRANCH?.trim();
-  return resolveGithubConfig({
-    repo: repo || undefined,
-    branch: branch || undefined,
-  }).releasesLatestDownloadUrl;
-}
 
 function binaryName(): string {
   return process.platform === "win32" ? "multica.exe" : "multica";

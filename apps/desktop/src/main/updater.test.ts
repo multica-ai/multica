@@ -13,12 +13,16 @@ const ctx = vi.hoisted(() => ({
   downloadUpdate: vi.fn(),
   quitAndInstall: vi.fn(),
   getVersion: vi.fn(() => "0.3.17"),
+  autoUpdater: null as {
+    allowPrerelease: boolean;
+  } | null,
 }));
 
 vi.mock("electron-updater", () => {
   const autoUpdater = {
     autoDownload: false,
     autoInstallOnAppQuit: false,
+    allowPrerelease: true as boolean,
     channel: undefined as string | undefined,
     on: vi.fn((event: string, handler: Handler) => {
       const handlers = ctx.handlers.get(event) ?? [];
@@ -30,6 +34,7 @@ vi.mock("electron-updater", () => {
     downloadUpdate: ctx.downloadUpdate,
     quitAndInstall: ctx.quitAndInstall,
   };
+  ctx.autoUpdater = autoUpdater;
   return { autoUpdater };
 });
 
@@ -166,5 +171,10 @@ describe("setupAutoUpdater", () => {
     expect(() => emitUpdater("download-progress", { percent: 42 })).toThrow(
       "boom",
     );
+  });
+
+  it("disables allowPrerelease so git-describe local builds can check stable releases", () => {
+    setupAutoUpdater(() => makeWindow().win);
+    expect(ctx.autoUpdater?.allowPrerelease).toBe(false);
   });
 });

@@ -7,6 +7,13 @@ import { app, type BrowserWindow, ipcMain } from "electron";
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// Local/git-describe builds use semver prerelease suffixes (e.g.
+// `0.3.42-1-g7adfd3a9`). electron-updater auto-enables allowPrerelease for
+// those and then looks for a matching GitHub prerelease channel, which fails
+// with "No published versions on GitHub" against our stable release feed.
+// Desktop only ships stable tags — always check the default channel.
+autoUpdater.allowPrerelease = false;
+
 // Windows arm64 ships its own update metadata channel because
 // electron-builder's `latest.yml` is not arch-suffixed on Windows — both
 // arches would otherwise collide on the same file in the GitHub Release.

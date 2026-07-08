@@ -1,14 +1,23 @@
 import { resolve } from "path";
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // Bundle workspace packages into the main-process output. Externalizing
+    // them leaves raw `.ts` sources in node_modules, which Node 22 (Electron 39)
+    // refuses to type-strip at runtime (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING).
+    build: {
+      externalizeDeps: {
+        exclude: ["@multica/core"],
+      },
+    },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    build: {
+      externalizeDeps: true,
+    },
   },
   renderer: {
     server: {

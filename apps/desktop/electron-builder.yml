@@ -15,6 +15,7 @@ protocols:
 asarUnpack:
   - resources/**
 mac:
+  hardenedRuntime: true
   entitlementsInherit: build/entitlements.mac.plist
   target:
     - dmg
