@@ -87,8 +87,14 @@ and detail screens each also query mobile's existing
 used elsewhere) and pass the result through `selectSkillAssignments` to get
 per-skill counts — no new endpoint needed.
 
-Origin badge reuses `readOrigin()` from `packages/views/skills/lib/origin.ts`
-— also a pure function over `Skill`/`SkillSummary`, safe to import.
+Origin badge: mobile's import whitelist is `@multica/core` only (types +
+pure functions) — `packages/views/skills/lib/origin.ts` doesn't qualify
+even though `readOrigin()`/`totalFileCount()` are pure, since they live in
+`packages/views`, not `packages/core`. Mirror, don't import: copy the same
+tiny logic into a new `apps/mobile/lib/skill-origin.ts`, documenting at the
+top that it mirrors `packages/views/skills/lib/origin.ts` (same pattern
+mobile already uses for realtime WS updaters — see mobile CLAUDE.md
+"Mobile-owned updaters").
 
 ### 3. List screen — `more/skills.tsx` (new)
 
