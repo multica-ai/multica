@@ -124,6 +124,50 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	}
 }
 
+// TestSendChatMessage_ArchivedAgent verifies that sending to a session whose
+// agent was archived is rejected with 409 BEFORE any message is persisted.
+// EnqueueChatTask rejects an archived agent, but only after CreateChatMessage;
+// without the handler's preflight a stale client would leave an orphan user
+// message with no task or reply.
+func TestSendChatMessage_ArchivedAgent(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchivedAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	// Archive the agent out from under the (stale) client.
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE agent SET archived_at = now() WHERE id = $1`,
+		agentID,
+	); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	sendReq := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content": "still there?",
+	})
+	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
+	sendW := httptest.NewRecorder()
+	testHandler.SendChatMessage(sendW, sendReq)
+
+	if sendW.Code != http.StatusConflict {
+		t.Fatalf("SendChatMessage to archived agent: expected 409, got %d: %s", sendW.Code, sendW.Body.String())
+	}
+
+	// The rejected send must not have persisted an orphan user message.
+	var count int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM chat_message WHERE chat_session_id = $1`,
+		sessionID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count chat messages: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no chat_message rows after rejected send, got %d", count)
+	}
+}
+
 // TestSendChatMessage_LinksUnattachedAttachments verifies the new compose
 // path: upload creates a workspace-scoped unattached attachment, and chat send
 // binds it to both the session and the user message.

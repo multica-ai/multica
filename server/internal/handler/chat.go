@@ -560,6 +560,26 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Preflight the agent's enqueue preconditions BEFORE persisting the user
+	// message. EnqueueChatTask (below) rejects an archived or runtime-less agent
+	// with an error; without this check a stale client (agent archived in
+	// another tab) would land the user message, then get a 500, leaving an
+	// orphan message with no task or reply. Fail fast with a 4xx and mutate
+	// nothing. See EnqueueChatTask's ErrChatTaskAgentArchived / NoRuntime.
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "chat agent is archived")
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeError(w, http.StatusConflict, "chat agent has no runtime")
+		return
+	}
+
 	// Create the user message first so the daemon can always find it.
 	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
