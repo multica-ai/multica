@@ -134,8 +134,12 @@ func TestRunNoteCommentAddPostsBody(t *testing.T) {
 }
 
 func TestRunNoteCommentAddRequiresBody(t *testing.T) {
+	// Full env (server URL + workspace) so newAPIClient does not os.Exit on a
+	// clean HOME; the empty-body guard must fire before any HTTP call.
+	withNoteTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no request expected; got %s %s", r.Method, r.URL.Path)
+	})
 	cmd := newNoteCommentAddTestCmd()
-	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 	if err := runNoteCommentAdd(cmd, []string{"note-1"}); err == nil {
 		t.Fatal("expected error when --body is empty")
 	}
