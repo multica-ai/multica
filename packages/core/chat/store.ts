@@ -36,6 +36,14 @@ const CHAT_EXPANDED_KEY = "multica:chat:expanded";
  * every subsequent reload.
  */
 const OPEN_KEY = "multica:chat:isOpen";
+/**
+ * Whether the floating chat window (FAB + overlay) is available at all,
+ * persisted globally like OPEN_KEY. This is the Settings → Chat preference:
+ * when off, the FAB/overlay never mount and Chat lives only in its tab.
+ * Missing key = default ON — the floating window is on by default and can
+ * be turned off from the Settings → Chat tab.
+ */
+const FLOATING_KEY = "multica:chat:floatingChatEnabled";
 
 function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
   const raw = storage.getItem(key);
@@ -126,6 +134,8 @@ export interface ChatTimelineItem {
 
 export interface ChatState {
   isOpen: boolean;
+  /** Settings preference: is the floating chat window available at all. */
+  floatingChatEnabled: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
@@ -138,6 +148,7 @@ export interface ChatState {
   isExpanded: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
+  setFloatingChatEnabled: (enabled: boolean) => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
@@ -168,8 +179,14 @@ export function createChatStore(options: ChatStoreOptions) {
   const storedOpen = storage.getItem(OPEN_KEY);
   const initialIsOpen = storedOpen === "true";
 
+  // Default ON: the floating window is enabled unless the user explicitly
+  // turned it off ("false") from the Settings → Chat tab. A missing key
+  // (new user) resolves to enabled.
+  const initialFloatingEnabled = storage.getItem(FLOATING_KEY) !== "false";
+
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
+    floatingChatEnabled: initialFloatingEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
@@ -187,6 +204,14 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.debug("toggle", { to: next });
       storage.setItem(OPEN_KEY, String(next));
       set({ isOpen: next });
+    },
+    setFloatingChatEnabled: (enabled) => {
+      logger.info("setFloatingChatEnabled", { to: enabled });
+      storage.setItem(FLOATING_KEY, String(enabled));
+      // Turning the feature off should also collapse an open overlay so it
+      // does not linger until the next toggle.
+      set(enabled ? { floatingChatEnabled: true } : { floatingChatEnabled: false, isOpen: false });
+      if (!enabled) storage.setItem(OPEN_KEY, "false");
     },
     setActiveSession: (id) => {
       logger.info("setActiveSession", { from: get().activeSessionId, to: id });

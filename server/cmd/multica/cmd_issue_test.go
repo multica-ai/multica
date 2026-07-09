@@ -2518,11 +2518,7 @@ func newIssueListTestCmd() *cobra.Command {
 
 func newIssueReorderTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "reorder"}
-	cmd.Flags().String("before", "", "")
-	cmd.Flags().String("after", "", "")
-	cmd.Flags().Bool("top", false, "")
-	cmd.Flags().Bool("bottom", false, "")
-	cmd.Flags().String("output", "json", "")
+	registerIssueReorderFlags(cmd)
 	return cmd
 }
 
@@ -2677,21 +2673,89 @@ func TestComputeReorderPosition(t *testing.T) {
 	}
 }
 
-func TestRunIssueReorderRejectsModeCount(t *testing.T) {
-	t.Run("zero modes", func(t *testing.T) {
+// TestIssueReorderTargetFlagGroup drives the command through Execute so the real
+// cobra flag group (registerIssueReorderFlags) validates the "exactly one
+// target" rule — zero targets, two bool targets, and --before+--after are all
+// rejected before RunE. A stub RunE that errors proves validation happens first.
+// The assertions match on cobra's canonical flag-group error strings, so they
+// are coupled to cobra's wording (pinned at v1.10.2 in server/go.mod).
+func TestIssueReorderTargetFlagGroup(t *testing.T) {
+	newCmd := func() *cobra.Command {
 		cmd := newIssueReorderTestCmd()
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when no mode flag is set")
+		cmd.Args = exactArgs(1)
+		cmd.RunE = func(*cobra.Command, []string) error {
+			return fmt.Errorf("RunE ran despite an invalid target flag group")
+		}
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd
+	}
+
+	t.Run("no target flag", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when no target flag is set")
+		}
+		if !strings.Contains(err.Error(), "at least one of the flags in the group") {
+			t.Fatalf("want cobra one-required error, got: %v", err)
 		}
 	})
-	t.Run("two modes", func(t *testing.T) {
-		cmd := newIssueReorderTestCmd()
-		_ = cmd.Flags().Set("top", "true")
-		_ = cmd.Flags().Set("bottom", "true")
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when two mode flags are set")
+
+	t.Run("two bool targets", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--top", "--bottom"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --top and --bottom are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
 		}
 	})
+
+	t.Run("before and after together", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--before", "MUL-2", "--after", "MUL-3"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --before and --after are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
+		}
+	})
+}
+
+// TestRunIssueReorderRejectsNoOpTargetValues covers the cases the flag group
+// cannot: cobra keys off flag presence (Changed), not value, so an
+// explicitly-passed but empty --before/--after or an explicit --top=false /
+// --bottom=false satisfies the group yet selects no real target. runIssueReorder
+// rejects each up front rather than falling through to a confusing downstream
+// error.
+func TestRunIssueReorderRejectsNoOpTargetValues(t *testing.T) {
+	cases := []struct{ flag, value string }{
+		{"before", ""},
+		{"after", ""},
+		{"top", "false"},
+		{"bottom", "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.flag, func(t *testing.T) {
+			cmd := newIssueReorderTestCmd()
+			if err := cmd.Flags().Set(tc.flag, tc.value); err != nil {
+				t.Fatalf("set --%s=%q: %v", tc.flag, tc.value, err)
+			}
+			err := runIssueReorder(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected an error when --%s is passed %q", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), "--"+tc.flag) {
+				t.Fatalf("want error naming --%s, got: %v", tc.flag, err)
+			}
+		})
+	}
 }
 
 // reorderTestServer serves a fixed three-issue "todo" column (positions

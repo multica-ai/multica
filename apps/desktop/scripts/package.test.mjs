@@ -1,7 +1,12 @@
-import { delimiter, resolve } from "node:path";
-import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
+import { afterEach, describe, it, expect } from "vitest";
 import {
   builderArgsForTarget,
+  deriveVersion,
+  DESCRIBE_ARGS,
   envWithLocalBins,
   normalizeGitVersion,
   parsePackageArgs,
@@ -76,6 +81,75 @@ describe("normalizeGitVersion", () => {
     // identifier, which is always valid.
     expect(normalizeGitVersion("0123456")).toBe("0.0.0-g0123456");
     expect(normalizeGitVersion("04567")).toBe("0.0.0-g04567");
+  });
+});
+
+describe("DESCRIBE_ARGS", () => {
+  it("passes the match pattern as one bare argv token, never a shell-quoted string", () => {
+    // The Windows regression this locks down: the pattern used to be embedded
+    // in a shell command string as `--match 'v[0-9]*'`. cmd.exe does not strip
+    // POSIX single quotes, so git received them literally and matched no tag,
+    // collapsing the Desktop version to the 0.0.0-g<hash> fallback. As a
+    // standalone argv element with no surrounding quotes the pattern is
+    // shell-independent.
+    expect(DESCRIBE_ARGS).toContain("v[0-9]*");
+    for (const arg of DESCRIBE_ARGS) {
+      expect(arg).not.toContain("'");
+      expect(arg).not.toContain('"');
+    }
+  });
+});
+
+describe("deriveVersion (real git describe)", () => {
+  // These exercise the actual `git describe` invocation — not just the
+  // normalizeGitVersion string transform — because the bug that shipped a
+  // `0.0.0-…` Windows Desktop build lived in HOW git was called, not in the
+  // string handling. package.mjs now runs git with an argv array (no shell),
+  // so the `v[0-9]*` match pattern reaches git as a literal argument
+  // identically on every platform.
+  const repos = [];
+
+  function initRepo() {
+    const dir = mkdtempSync(join(tmpdir(), "multica-desktop-ver-"));
+    repos.push(dir);
+    const run = (...args) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf-8" });
+    run("init", "-q");
+    run("config", "user.email", "test@multica.ai");
+    run("config", "user.name", "test");
+    run("config", "commit.gpgsign", "false");
+    run("commit", "-q", "--allow-empty", "-m", "root");
+    return { dir, run };
+  }
+
+  afterEach(() => {
+    while (repos.length) rmSync(repos.pop(), { recursive: true, force: true });
+  });
+
+  it("resolves a clean semver tag to its bare version", () => {
+    const { dir, run } = initRepo();
+    run("tag", "v1.4.2");
+    expect(deriveVersion(dir)).toBe("1.4.2");
+  });
+
+  it("selects the semver tag even when a nearer non-semver tag exists", () => {
+    // A release-train tag like `release_iteration/…` sitting closer to HEAD
+    // must not become the version. With the match pattern correctly reaching
+    // git, describe skips it and reports the real vX.Y.Z tag. If the pattern
+    // were mangled (e.g. quotes leaking through a shell) git would match
+    // nothing and the version would collapse to `0.0.0-…`.
+    const { dir, run } = initRepo();
+    run("tag", "v1.4.2");
+    run("commit", "-q", "--allow-empty", "-m", "sprint");
+    run("tag", "release_iteration/Sprint_0705");
+    const version = deriveVersion(dir);
+    expect(version).toMatch(/^1\.4\.2-1-g[0-9a-f]+$/);
+    expect(version).not.toMatch(/^0\.0\.0/);
+  });
+
+  it("falls back to 0.0.0-g<hash> when no semver tag is reachable", () => {
+    const { dir } = initRepo();
+    expect(deriveVersion(dir)).toMatch(/^0\.0\.0-g[0-9a-f]+$/);
   });
 });
 

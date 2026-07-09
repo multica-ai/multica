@@ -1710,6 +1710,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// An is_agent_intro session carries no user message: the agent opens
+			// the conversation by introducing itself. Flag it so the daemon builds
+			// a self-introduction prompt rather than a "reply to their message"
+			// prompt (MUL-4230). The is_agent_intro column stays true for the
+			// session's whole life, so gate the intro prompt on the session still
+			// having zero human messages — otherwise every follow-up turn after the
+			// creator replies would re-run the "introduce yourself" prompt and the
+			// agent keeps repeating the same introduction (MUL-4259).
+			if cs.IsAgentIntro {
+				if hasUser, herr := h.Queries.ChatSessionHasUserMessage(r.Context(), cs.ID); herr != nil {
+					slog.Warn("chat intro gate: has-user-message check failed",
+						"chat_session_id", uuidToString(cs.ID), "error", herr)
+				} else {
+					resp.ChatIntro = !hasUser
+				}
+			}
 			// Flag a channel-backed session so the daemon makes the agent aware
 			// it is operating inside Slack — read this conversation's history
 			// from the channel via `multica chat history` / `multica chat thread`,

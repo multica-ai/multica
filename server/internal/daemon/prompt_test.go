@@ -309,6 +309,28 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	})
 }
 
+func TestBuildChatPromptAgentIntro(t *testing.T) {
+	// The proactive self-introduction chat (MUL-4230) has no user message: the
+	// prompt must tell the agent to open the conversation itself, and must NOT
+	// carry the generic "respond to their message" framing or an empty
+	// "User message:" section that would confuse the agent.
+	out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatIntro: true})
+	for _, want := range []string{
+		"You were just created",
+		"you are opening the conversation",
+		"introduce yourself",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("intro prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"Respond to their message", "User message:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("intro prompt should not contain %q\n--- output ---\n%s", unwanted, out)
+		}
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{

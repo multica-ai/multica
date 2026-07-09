@@ -305,19 +305,30 @@ type ChatMessage struct {
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
 }
 
-type ChatSession struct {
+type ChatPinnedAgent struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
-	CreatorID   pgtype.UUID        `json:"creator_id"`
-	Title       string             `json:"title"`
-	SessionID   pgtype.Text        `json:"session_id"`
-	WorkDir     pgtype.Text        `json:"work_dir"`
-	Status      string             `json:"status"`
+	Position    float64            `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	UnreadSince pgtype.Timestamptz `json:"unread_since"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+}
+
+type ChatSession struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	CreatorID    pgtype.UUID        `json:"creator_id"`
+	Title        string             `json:"title"`
+	SessionID    pgtype.Text        `json:"session_id"`
+	WorkDir      pgtype.Text        `json:"work_dir"`
+	Status       string             `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	RuntimeID    pgtype.UUID        `json:"runtime_id"`
+	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
+	IsAgentIntro bool               `json:"is_agent_intro"`
+	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
 }
 
 type Comment struct {

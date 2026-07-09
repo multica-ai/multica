@@ -7,6 +7,14 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 const mockFocus = vi.hoisted(() => vi.fn());
 const mockSetContent = vi.hoisted(() => vi.fn());
 const mockSetTextSelection = vi.hoisted(() => vi.fn());
+const mockDispatch = vi.hoisted(() => vi.fn());
+const emptyTr = vi.hoisted(() => ({ __emptyTransaction: true }));
+// Captures the options ContentEditor hands to createEditorExtensions on its
+// most recent render — lets the placeholder tests assert the getter it wires
+// into the Placeholder extension reads the live value.
+const capturedExtOptions = vi.hoisted<{
+  current: { placeholder?: string | (() => string) } | undefined;
+}>(() => ({ current: undefined }));
 const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
@@ -31,7 +39,12 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("./extensions", () => ({
-  createEditorExtensions: () => [],
+  createEditorExtensions: (options: {
+    placeholder?: string | (() => string);
+  }) => {
+    capturedExtOptions.current = options;
+    return [];
+  },
 }));
 
 vi.mock("./extensions/file-upload", () => ({
@@ -93,7 +106,11 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        view: { dispatch: mockDispatch },
         state: {
+          get tr() {
+            return emptyTr;
+          },
           doc: {
             content: { size: 0 },
             descendants: (cb: (node: { attrs: { uploading?: boolean } }) => boolean | void) => {
@@ -132,6 +149,7 @@ describe("ContentEditor", () => {
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
+    capturedExtOptions.current = undefined;
   });
 
   afterEach(() => {
@@ -367,6 +385,41 @@ describe("ContentEditor", () => {
     unmount();
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the live placeholder getter and repaints when the placeholder prop changes", () => {
+    // Repro for MUL-4276: Tiptap's Placeholder snapshots a *string* option at
+    // mount, so switching between an archived and an active chat session under
+    // the SAME agent (no editor remount) left the input frozen on the archived
+    // copy. The fix wires a *getter* over a live ref into the extension and, on
+    // change, dispatches an empty transaction to force a decoration recompute.
+    const { rerender } = render(
+      <ContentEditor placeholder="This session is archived" />,
+    );
+    // What reaches the Placeholder extension is a getter, not a static string.
+    const getter = capturedExtOptions.current?.placeholder;
+    expect(typeof getter).toBe("function");
+    expect((getter as () => string)()).toBe("This session is archived");
+
+    mockDispatch.mockClear();
+
+    rerender(<ContentEditor placeholder="Message agent…" />);
+
+    // Same getter identity now returns the new text (reads the live ref)…
+    expect((getter as () => string)()).toBe("Message agent…");
+    // …and a repaint was nudged so the mounted decoration re-reads it.
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith(emptyTr);
+  });
+
+  it("does not repaint when the placeholder prop is unchanged", () => {
+    const { rerender } = render(<ContentEditor placeholder="Message agent…" />);
+
+    mockDispatch.mockClear();
+
+    rerender(<ContentEditor placeholder="Message agent…" />);
+
+    expect(mockDispatch).not.toHaveBeenCalled();
   });
 });
 

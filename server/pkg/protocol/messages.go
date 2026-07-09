@@ -122,7 +122,13 @@ type ChatSessionDeletedPayload struct {
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
-	UpdatedAt     string `json:"updated_at"`
+	// Pinned is set only by the pin/unpin path; nil on a plain rename so a
+	// receiver leaves the existing pin state untouched.
+	Pinned *bool `json:"pinned,omitempty"`
+	// Status is set only by the archive/unarchive path ("active"/"archived");
+	// nil on rename/pin so a receiver leaves the existing status untouched.
+	Status    *string `json:"status,omitempty"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket

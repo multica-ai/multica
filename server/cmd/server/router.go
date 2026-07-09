@@ -1244,6 +1244,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Patch("/", h.UpdateChatSession)
+					r.Patch("/pin", h.SetChatSessionPinned)
+					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
@@ -1254,6 +1256,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+
+			// Quick-agent bar: per-user pinned agents for one-tap new chats.
+			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)
+			r.Post("/api/chat/pinned-agents", h.PinChatAgent)
+			r.Delete("/api/chat/pinned-agents/{agentId}", h.UnpinChatAgent)
 
 			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
 			// resolves to its own chat session; no session/channel id is passed, so
