@@ -2013,8 +2013,14 @@ func TestHermesExecuteFailsClosedOnMalformedMcpConfig(t *testing.T) {
 // tests don't need to thread one through; session/prompt returns
 // end_turn so Execute completes cleanly.
 func fakeACPRecordingScript(recordPath, sessionID, caps string) string {
+	// recordPath is single-quoted: on Windows it's an absolute path with
+	// backslashes (e.g. C:\Users\...\frames.jsonl), and an unquoted sh
+	// assignment strips backslash-letter sequences during word expansion,
+	// silently mangling the path into garbage (e.g. "C:Usersframes.jsonl")
+	// that the script then happily creates while findRecordedFrame reads
+	// the real, correct path and finds nothing there.
 	return `#!/bin/sh
-RECORD_PATH=` + recordPath + `
+RECORD_PATH='` + recordPath + `'
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$RECORD_PATH"
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
