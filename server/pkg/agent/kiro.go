@@ -45,17 +45,25 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
 	}
 
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	hardenedMcpConfig, mcpTempCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("kiro: harden mcp_config: %w", err)
+	}
+	context.AfterFunc(runCtx, mcpTempCleanup)
+
 	// Translate the agent's mcp_config (Claude-style object of objects)
 	// into the array shape ACP `session/new` and `session/load` expect.
 	// Fail closed on malformed JSON so the launch surfaces the real error
 	// instead of silently dropping all MCP servers.
-	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	mcpServers, err := buildACPMcpServers(hardenedMcpConfig, b.cfg.Logger)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("kiro: invalid mcp_config: %w", err)
 	}
-
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
 
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
