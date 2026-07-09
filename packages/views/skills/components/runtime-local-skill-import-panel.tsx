@@ -513,6 +513,11 @@ export function RuntimeLocalSkillImportPanel({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
 
+  // Adaptive UI branch: 'summary' for 1-2 skills, 'search' for 3+ (R11, R12).
+  // Locked on first data arrival; mid-dialog polling does NOT re-evaluate.
+  const [branch, setBranch] = useState<"summary" | "search">("search");
+  const [branchLocked, setBranchLocked] = useState(false);
+
   const importing = bulkState.phase === "importing";
   const resolvingConflicts = bulkState.phase === "resolving";
   const busy = importing || resolvingConflicts;
@@ -527,6 +532,8 @@ export function RuntimeLocalSkillImportPanel({
     setConflictResolutions({});
     setEditName("");
     setEditDescription("");
+    setBranch("search");
+    setBranchLocked(false);
   }, [selectedRuntimeId]);
 
   const selectedRuntime = localRuntimes.find((r) => r.id === selectedRuntimeId);
@@ -540,6 +547,27 @@ export function RuntimeLocalSkillImportPanel({
     () => skillsQuery.data?.skills ?? [],
     [skillsQuery.data],
   );
+
+  // Lock the branch on first data arrival after loading succeeds. Subsequent
+  // polling updates to runtimeSkills.length are ignored until the runtime
+  // changes (R11: "must not interrupt the user's current interaction").
+  useEffect(() => {
+    if (
+      !branchLocked &&
+      !skillsQuery.isLoading &&
+      !skillsQuery.error &&
+      skillsQuery.data?.supported
+    ) {
+      setBranch(runtimeSkills.length <= 2 ? "summary" : "search");
+      setBranchLocked(true);
+    }
+  }, [
+    branchLocked,
+    skillsQuery.isLoading,
+    skillsQuery.error,
+    skillsQuery.data?.supported,
+    runtimeSkills.length,
+  ]);
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
   const singleSelectedSkill =
@@ -1009,8 +1037,17 @@ export function RuntimeLocalSkillImportPanel({
         </div>
       );
     }
+
+    // Branch dispatch (R11, R12): locked on first data arrival.
+    // - 'summary' branch (1-2 skills): U2 will replace this block with an
+    //   expand-on-demand summary card grouped by `root`.
+    // - 'search' branch (3+ skills): U3 will replace this block with an
+    //   inline `Command` + root grouping + keyboard navigation.
+    // For now, both branches fall through to the existing list rendering as a
+    // placeholder. The data-branch attribute lets U6 tests assert the branch
+    // computed correctly before U2/U3 land their branch-specific UI.
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" data-branch={branch}>
         {/* Select all header */}
         <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
           <input
