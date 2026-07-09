@@ -276,6 +276,51 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+WHERE issue_id = $1
+  AND author_type = 'member'
+  AND created_at > $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLatestMemberCommentForIssueSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// MUL-4195 completion reconciliation: the newest MEMBER-authored comment on an
+// issue created strictly after @since (a run's started_at). Used when a task
+// completes to detect deliberate user input that landed while the agent was
+// busy — or that was merged into the running task after its context was
+// already built — so a single follow-up run can be scheduled for it. Restricted
+// to author_type = 'member' on purpose: only human input earns the guaranteed
+// follow-up, which preserves the existing anti-loop guarantees (agent replies,
+// acknowledgements, and self-triggers never qualify). Returns pgx.ErrNoRows
+// when nothing newer exists, i.e. the run already covered the latest input.
+func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg GetLatestMemberCommentForIssueSinceParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestMemberCommentForIssueSince, arg.IssueID, arg.Since)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
@@ -601,6 +646,80 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 			&i.ResolvedByID,
 			&i.ThreadRootID,
 			&i.ThreadLastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+WHERE issue_id = $1
+  AND author_type IN ('member', 'agent')
+  AND created_at > $2
+ORDER BY created_at ASC, id ASC
+`
+
+type ListReconcilableCommentsForIssueSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
+// comment on an issue created strictly after @since (the completing run's
+// created_at anchor), oldest first. The reconcile pass replays each undelivered
+// one through the normal trigger pipeline so a single coalesced follow-up run
+// covers all of them, guaranteeing at-least-once processing for input that
+// landed after the completing run's claim response was built.
+//
+// Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
+// That left a gap — an explicit agent→agent @mention (agent A comments
+// `@agent B`) that landed while B already had a DISPATCHED task was dropped by
+// the create-time enqueue path (merge only folds into a QUEUED task, so a
+// dispatched target hits the merge-miss + active-task continue) and then never
+// compensated here, because agent-authored comments were excluded. We now also
+// return 'agent' comments so those explicit mentions can be replayed.
+//
+// This does NOT reopen the anti-loop guarantees the member-only filter was
+// protecting. The reconcile pass runs each returned comment through
+// computeCommentAgentTriggers under its OWN author_type, and for an agent author
+// it then keeps ONLY explicit @agent/@squad mention triggers
+// (keepExplicitMentionTriggers) — the assigned-squad-leader fallback and all
+// other conversational routing are dropped, so a plain agent reply /
+// acknowledgement yields nothing regardless of issue assignment. The reconcile
+// pass further keeps only triggers routing to the agent that just completed, so
+// an agent comment can never fan out to an unrelated agent. Ordered ASC so
+// replaying in order lets later comments coalesce onto the follow-up created by
+// the first.
+func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg ListReconcilableCommentsForIssueSinceParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince, arg.IssueID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
 		); err != nil {
 			return nil, err
 		}

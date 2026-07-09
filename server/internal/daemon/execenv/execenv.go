@@ -196,6 +196,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
 
+	// Self-heal the root-level daemon marker on every task start so a marker
+	// removed while the daemon runs is restored before the agent spawns. The
+	// per-workdir marker written below only covers cwds inside the workdir;
+	// the root marker keeps the CLI fail-closed guard active for subprocesses
+	// that lose all MULTICA_* env vars AND escape above the workdir. Non-fatal:
+	// without it the workdir marker still protects the common case.
+	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
+	}
+
 	// Remove existing env if present (defensive — task IDs are unique).
 	if _, err := os.Stat(envRoot); err == nil {
 		if err := os.RemoveAll(envRoot); err != nil {
@@ -295,10 +305,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	// WorkspacesRoot is the daemon-owned root under which all task envs live.
+	// Passed on reuse so the root-level fail-closed marker is self-healed here
+	// too — a marker removed while the daemon runs is restored before a reused
+	// task spawns, not only on the fresh-Prepare path.
+	WorkspacesRoot string
+	WorkDir        string
+	Provider       string
+	CodexVersion   string // only used when Provider == "codex"
+	OpenclawBin    string // only used when Provider == "openclaw"; empty = PATH lookup
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -321,6 +336,17 @@ type ReuseParams struct {
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
+	}
+
+	// Self-heal the root-level daemon marker on the reuse path too, so a marker
+	// removed while the daemon runs is restored before a reused task spawns —
+	// otherwise reuse could run without the fail-closed guard until the next
+	// fresh Prepare. Non-fatal: the per-workdir marker still protects the common
+	// case, and an empty WorkspacesRoot (legacy callers) simply skips this.
+	if params.WorkspacesRoot != "" {
+		if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+			logger.Warn("execenv: workspaces root marker not written on reuse; fail-closed guard limited to the task workdir", "error", err)
+		}
 	}
 
 	rootDir := filepath.Dir(params.WorkDir)

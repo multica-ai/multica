@@ -34,7 +34,7 @@ import { toast } from "sonner";
 
 import { useNavigation } from "../navigation";
 import { ActorAvatar } from "../common/actor-avatar";
-import { AvatarPicker } from "../agents/components/avatar-picker";
+import { AvatarUploadControl } from "../common/avatar-upload-control";
 import { CharCounter } from "../agents/components/char-counter";
 import {
   PickerEmpty,
@@ -157,7 +157,14 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
             {/* Identity row mirrors CreateAgentDialog so the two creates read
                 as siblings — avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              <AvatarUploadControl
+                variant="squad"
+                value={avatarUrl}
+                name={name}
+                size={64}
+                onUploaded={setAvatarUrl}
+                onClear={() => setAvatarUrl(null)}
+              />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">

@@ -42,7 +42,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
-import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -445,7 +445,7 @@ export function SwimLaneView({
   issues,
   unfilteredIssues,
   activeFilters: activeFiltersProp,
-  visibleStatuses = BOARD_STATUSES,
+  visibleStatuses = ALL_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
@@ -552,8 +552,11 @@ export function SwimLaneView({
     [myIssuesScope, myIssuesFilter],
   );
 
+  // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
+  // marked visible, so columns — including `cancelled`, ordered last — render
+  // in lifecycle order.
   const sortedStatuses = useMemo(
-    () => BOARD_STATUSES.filter((s) => visibleStatuses.includes(s)),
+    () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 

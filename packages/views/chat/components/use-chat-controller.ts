@@ -241,6 +241,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const handleRestoreDraftConsumed = useCallback(() => {
     setRestoreDraftRequest(null);
   }, []);
+  // Nonce handed to ChatInput to pull focus into the compose box when a new
+  // chat starts. Bumped by handleNewChat / handleStartNewChat only, so
+  // selecting an existing chat or a deep link never steals focus.
+  const [focusInputRequest, setFocusInputRequest] = useState(0);
+  const requestInputFocus = useCallback(
+    () => setFocusInputRequest((n) => n + 1),
+    [],
+  );
 
   const currentSession = activeSessionId
     ? sessions.find((s) => s.id === activeSessionId)
@@ -575,7 +583,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
       previousPendingTask: pendingTaskId,
     });
     setActiveSession(null);
-  }, [activeSessionId, pendingTaskId, setActiveSession]);
+    requestInputFocus();
+  }, [activeSessionId, pendingTaskId, setActiveSession, requestInputFocus]);
 
   // Start a fresh chat bound to a chosen agent. Unlike handleSelectAgent this
   // does not no-op when the agent is unchanged — "new chat" always clears the
@@ -589,8 +598,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
       });
       setSelectedAgentId(agent.id);
       setActiveSession(null);
+      requestInputFocus();
     },
-    [activeSessionId, setSelectedAgentId, setActiveSession],
+    [activeSessionId, setSelectedAgentId, setActiveSession, requestInputFocus],
   );
 
   const handleSelectSession = useCallback(
@@ -667,6 +677,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     // draft restore
     restoreDraftRequest,
     handleRestoreDraftConsumed,
+    // compose-box focus nonce (bumped on new chat)
+    focusInputRequest,
     // actions
     handleSend,
     handleStop,

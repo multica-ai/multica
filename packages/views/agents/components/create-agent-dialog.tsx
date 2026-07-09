@@ -7,7 +7,7 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
-import { AvatarPicker } from "./avatar-picker";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -326,7 +326,14 @@ export function CreateAgentDialog({
                 same shape as detail-page header so the affordance is
                 instantly familiar. */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              <AvatarUploadControl
+                variant="agent"
+                value={avatarUrl}
+                name={name}
+                size={64}
+                onUploaded={setAvatarUrl}
+                onClear={() => setAvatarUrl(null)}
+              />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>

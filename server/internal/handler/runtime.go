@@ -20,10 +20,10 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	DaemonID     *string `json:"daemon_id"`
-	Name         string  `json:"name"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	DaemonID    *string `json:"daemon_id"`
+	Name        string  `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.
@@ -760,6 +760,18 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
 		return
 	}
+	// Same app-layer cleanup for channel installations: channel_* has no
+	// workspace/agent FK (MUL-3515 §4), so an archived agent's bot installations
+	// would otherwise survive the hard-delete as orphans and keep occupying their
+	// (channel_type, app_id) routing slots, making those bots un-rebindable (#4810).
+	if err := qtx.DeleteChannelInstallationsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
+		return
+	}
+	if err := qtx.DeleteChatPinnedAgentsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
@@ -1002,6 +1014,18 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	//    (ON DELETE RESTRICT) no longer keeps the runtime alive.
 	if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
+		return
+	}
+	// Same app-layer cleanup for channel installations: channel_* has no
+	// workspace/agent FK (MUL-3515 §4), so an archived agent's bot installations
+	// would otherwise survive the hard-delete as orphans and keep occupying their
+	// (channel_type, app_id) routing slots, making those bots un-rebindable (#4810).
+	if err := qtx.DeleteChannelInstallationsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
+		return
+	}
+	if err := qtx.DeleteChatPinnedAgentsByArchivedRuntimeAgents(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
 		return
 	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
