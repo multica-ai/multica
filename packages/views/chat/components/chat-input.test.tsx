@@ -41,7 +41,7 @@ const editorProps = vi.hoisted(() => ({
 }));
 // Records imperative editor calls so tests can assert whether a commit
 // scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
-const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0 }));
+const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0, focused: 0 }));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -78,7 +78,9 @@ vi.mock("../../editor", () => ({
       blur: () => {
         editorState.blurred += 1;
       },
-      focus: () => {},
+      focus: () => {
+        editorState.focused += 1;
+      },
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
         try {
@@ -150,6 +152,7 @@ beforeEach(() => {
   editorProps.last = null;
   editorState.cleared = 0;
   editorState.blurred = 0;
+  editorState.focused = 0;
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
@@ -201,6 +204,39 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   );
   return { onSend, onUploadFile };
 }
+
+describe("ChatInput focusRequest", () => {
+  it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
+    const { rerender } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={0} />
+      </I18nProvider>,
+    );
+    // The inert initial value must not steal focus (e.g. a plain deep-link open).
+    expect(editorState.focused).toBe(0);
+
+    // Starting a new chat bumps the nonce — the compose box grabs focus.
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={1} />
+      </I18nProvider>,
+    );
+    expect(editorState.focused).toBe(1);
+
+    // Each subsequent new chat re-focuses.
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={2} />
+      </I18nProvider>,
+    );
+    expect(editorState.focused).toBe(2);
+  });
+
+  it("does not focus on mount when focusRequest is undefined or 0", () => {
+    renderInput();
+    expect(editorState.focused).toBe(0);
+  });
+});
 
 describe("ChatInput @ context wiring", () => {
   it("configures chat @ with current/recent issue/project context", () => {
