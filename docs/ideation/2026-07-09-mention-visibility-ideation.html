@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideation: Mention 成员可视化提升</title>
+<style>
+  :root {
+    --background: #fafafa;
+    --foreground: #1a1a1a;
+    --muted: #f0f0f0;
+    --muted-fg: #737373;
+    --border: #e5e5e5;
+    --card: #ffffff;
+    --primary: #1a1a1a;
+    --brand: #2563eb;
+    --brand-soft: #dbeafe;
+    --success: #16a34a;
+    --success-soft: #dcfce7;
+    --destructive: #dc2626;
+    --destructive-soft: #fee2e2;
+    --warning: #d97706;
+    --warning-soft: #fef3c7;
+    --info: #0284c7;
+    --info-soft: #e0f2fe;
+    --radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #0a0a0a;
+      --foreground: #fafafa;
+      --muted: #262626;
+      --muted-fg: #a3a3a3;
+      --border: #333;
+      --card: #171717;
+      --primary: #fafafa;
+      --brand: #3b82f6;
+      --brand-soft: #1e3a5f;
+      --success: #22c55e;
+      --success-soft: #14532d;
+      --destructive: #ef4444;
+      --destructive-soft: #450a0a;
+      --warning: #f59e0b;
+      --warning-soft: #451a03;
+      --info: #0ea5e9;
+      --info-soft: #0c4a6e;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--background);
+    color: var(--foreground);
+    line-height: 1.6;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+  /* Header */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1.3;
+    margin-bottom: 12px;
+    letter-spacing: -0.02em;
+  }
+  .meta {
+    font-size: 13px;
+    color: var(--muted-fg);
+    margin-bottom: 32px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .meta span { white-space: nowrap; }
+  /* Sections */
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  p { margin-bottom: 12px; max-width: 70ch; }
+  /* Grounding */
+  .grounding-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 640px) { .grounding-grid { grid-template-columns: 1fr; } }
+  .grounding-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 13px;
+  }
+  .grounding-card .label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    margin-bottom: 6px;
+  }
+  .grounding-card code {
+    font-family: "Geist Mono", "SF Mono", monospace;
+    font-size: 12px;
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  /* Axes */
+  .axis-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    list-style: none;
+  }
+  .axis-tag {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--muted);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+  }
+  /* Jump list */
+  .jump-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .jump-list a {
+    font-size: 13px;
+    color: var(--foreground);
+    text-decoration: none;
+    padding: 4px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .jump-list a:hover { color: var(--brand); }
+  .jump-list .rank {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted-fg);
+    min-width: 18px;
+  }
+  .jump-list .conf {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted-fg);
+  }
+  /* Idea cards */
+  .idea-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .idea-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .idea-rank {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted-fg);
+    min-width: 24px;
+  }
+  .idea-title {
+    font-size: 16px;
+    font-weight: 500;
+    flex: 1;
+  }
+  .idea-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge-axis { background: var(--info-soft); color: var(--info); }
+  .badge-conf-high { background: var(--success-soft); color: var(--success); }
+  .badge-conf-med { background: var(--warning-soft); color: var(--warning); }
+  .badge-conf-low { background: var(--muted); color: var(--muted-fg); }
+  .badge-cx-sm { background: var(--success-soft); color: var(--success); }
+  .badge-cx-med { background: var(--warning-soft); color: var(--warning); }
+  .badge-cx-lg { background: var(--destructive-soft); color: var(--destructive); }
+  .idea-body { font-size: 14px; line-height: 1.65; }
+  .idea-body p { margin-bottom: 10px; }
+  .field-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    margin-bottom: 4px;
+    margin-top: 14px;
+  }
+  .field-label:first-child { margin-top: 0; }
+  .basis-tag {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    background: var(--muted);
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-right: 4px;
+  }
+  /* Visual mock */
+  .mock-container {
+    margin: 16px 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .mock-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    padding: 8px 12px;
+    background: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .mock-body {
+    padding: 16px;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+  /* Mention styles for mock */
+  .mention-old {
+    color: var(--brand);
+    font-weight: 600;
+  }
+  .mention-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px 0 4px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    vertical-align: middle;
+    margin: 0 2px;
+  }
+  .mention-chip-member {
+    background: var(--muted);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+  }
+  .mention-chip-agent {
+    background: var(--brand-soft);
+    color: var(--brand);
+    border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  }
+  .mention-chip-squad {
+    background: var(--info-soft);
+    color: var(--info);
+    border: 1px solid color-mix(in srgb, var(--info) 20%, transparent);
+  }
+  .mention-chip-all {
+    background: var(--warning-soft);
+    color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+  }
+  .mention-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .avatar-member { background: var(--muted); color: var(--muted-fg); }
+  .avatar-agent { background: var(--brand); color: white; }
+  .avatar-squad { background: var(--info); color: white; border-radius: 4px; }
+  .avatar-all { background: var(--warning); color: white; }
+  .issue-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 500;
+    vertical-align: middle;
+    margin: 0 2px;
+    background: var(--card);
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0;
+  }
+  .status-open { background: var(--success); }
+  .status-closed { background: var(--muted-fg); }
+  /* Flash animation mock */
+  .flash-sequence {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+  }
+  .flash-step {
+    font-size: 11px;
+    color: var(--muted-fg);
+    text-align: center;
+    flex: 1;
+  }
+  .flash-step .step-visual {
+    margin-bottom: 4px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .flash-arrow {
+    color: var(--muted-fg);
+    font-size: 16px;
+    padding-top: 0;
+  }
+  .mention-flash {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px 0 4px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--brand-soft);
+    color: var(--brand);
+    border: 1px solid var(--brand);
+    animation: none;
+  }
+  .mention-flash-glow {
+    background: color-mix(in srgb, var(--brand) 30%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--brand) 25%, transparent);
+  }
+  /* Rejection table */
+  .rejection-table {
+    width: 100%;
+    font-size: 13px;
+    border-collapse: collapse;
+  }
+  .rejection-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .rejection-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .rejection-table tr:last-child td { border-bottom: none; }
+  .rejection-table .reason { color: var(--muted-fg); }
+  /* Composition footer */
+  .composition-signal {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted-fg);
+  }
+  .composition-signal code {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  /* Callout */
+  .callout {
+    background: var(--muted);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 13px;
+    margin: 16px 0;
+  }
+  .callout-title {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    margin-bottom: 6px;
+  }
+  /* Downsides list */
+  .downsides { color: var(--muted-fg); font-size: 13px; }
+  /* Comparison */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin: 16px 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .comparison-col {
+    padding: 16px;
+  }
+  .comparison-col:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .comparison-label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-fg);
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- Header -->
+<div class="eyebrow">Ideation Artifact</div>
+<h1>Mention 成员可视化提升</h1>
+<div class="meta">
+  <span>2026-07-09</span>
+  <span>mode: repo-grounded</span>
+  <span>37 raw → 7 survivors</span>
+</div>
+
+<!-- Grounding Context -->
+<section id="grounding">
+<h2>Grounding Context</h2>
+
+<div class="grounding-grid">
+  <div class="grounding-card">
+    <div class="label">当前状态</div>
+    <p>成员/智能体/小队 mention 渲染为纯文本 <code>.mention</code> 类（<code>color: var(--primary); font-weight: 600</code>）。而 Issue 和 Project mention 已有丰富的 chip 组件（<code>IssueChip</code>、<code>ProjectChip</code>），带边框、图标、标识符。</p>
+  </div>
+  <div class="grounding-card">
+    <div class="label">核心矛盾</div>
+    <p>autocomplete 有头像 + 类型 badge，hover card 有完整信息——但内联渲染时全部被丢弃。用户在选中时看到丰富预览，渲染后却变成普通加粗文字。</p>
+  </div>
+  <div class="grounding-card">
+    <div class="label">已有能力</div>
+    <p><code>ActorAvatar</code> 已按类型区分（squad=Users 图标方形、agent=Bot 图标、member=首字母圆形）。<code>data-mention-type</code> 已在 DOM 上。<code>MentionHoverCard</code> 已存在但未绑定到成员 mention。</p>
+  </div>
+  <div class="grounding-card">
+    <div class="label">行业共识</div>
+    <p>Slack / Discord / Asana / Notion / Jira 全部使用背景 pill/chip 渲染 mention。Jira/Confluence 嵌入头像缩略图。最强信号 = 背景 pill + @ 前缀 + hover 交互。</p>
+  </div>
+</div>
+
+<div class="comparison">
+  <div class="comparison-col">
+    <div class="comparison-label">当前：渲染后</div>
+    <div class="mock-body">
+      这个任务分配给了 <span class="mention-old">@张三</span> 并关联到 <span class="issue-chip"><span class="status-dot status-open"></span>#123 修复登录</span>，同时通知了 <span class="mention-old">@ReviewerBot</span> 和 <span class="mention-old">@设计组</span>。
+    </div>
+  </div>
+  <div class="comparison-col">
+    <div class="comparison-label">改进方向：芯片化</div>
+    <div class="mock-body">
+      这个任务分配给了 <span class="mention-chip mention-chip-member"><span class="mention-avatar avatar-member">张</span>@张三</span> 并关联到 <span class="issue-chip"><span class="status-dot status-open"></span>#123 修复登录</span>，同时通知了 <span class="mention-chip mention-chip-agent"><span class="mention-avatar avatar-agent">⚙</span>@ReviewerBot</span> 和 <span class="mention-chip mention-chip-squad"><span class="mention-avatar avatar-squad">◆</span>@设计组</span>。
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- Topic Axes -->
+<section id="axes">
+<h2>Topic Axes</h2>
+<ul class="axis-list">
+  <li class="axis-tag">mention-visual-form · 视觉形态</li>
+  <li class="axis-tag">actor-type-distinction · 类型区分</li>
+  <li class="axis-tag">mention-interaction-feedback · 交互反馈</li>
+  <li class="axis-tag">inline-text-flow · 文本排版</li>
+  <li class="axis-tag">mention-creation-feedback · 创建确认</li>
+</ul>
+</section>
+
+<!-- Ranked Ideas -->
+<section id="ranked-ideas">
+<h2>Ranked Ideas</h2>
+
+<nav class="jump-list">
+  <a href="#idea1"><span class="rank">1.</span> Mention Avatar Chip + 类型着色 <span class="conf">High · Large</span></a>
+  <a href="#idea2"><span class="rank">2.</span> 插入闪光动画 <span class="conf">High · Small</span></a>
+  <a href="#idea3"><span class="rank">3.</span> 通用 Hover 交互 <span class="conf">High · Small</span></a>
+  <a href="#idea4"><span class="rank">4.</span> 上下文信息 Pill <span class="conf">Medium · Medium</span></a>
+  <a href="#idea5"><span class="rank">5.</span> 未识别 Mention 错误态 <span class="conf">Medium · Medium</span></a>
+  <a href="#idea6"><span class="rank">6.</span> 渐进式展开 Mention <span class="conf">Medium · Medium</span></a>
+  <a href="#idea7"><span class="rank">7.</span> 纯头像圆形 Mention <span class="conf">Low · Small</span></a>
+</nav>
+
+<!-- Idea 1 -->
+<article class="idea-card" id="idea1">
+<div class="idea-header">
+  <span class="idea-rank">1.</span>
+  <span class="idea-title">Mention Avatar Chip + 类型着色</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">visual-form + type</span>
+    <span class="badge badge-conf-high">High Confidence</span>
+    <span class="badge badge-cx-lg">Large Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>将成员/智能体/小队 mention 从纯文本升级为与 <code>IssueChip</code>/<code>ProjectChip</code> 同级的 chip 组件：圆角 pill 容器 + 14-16px <code>ActorAvatar</code> + 名称。按 <code>data-mention-type</code> 分配不同背景着色：成员用中性色（<code>bg-muted</code>），智能体用品牌色（<code>bg-brand/10</code>），小队用信息色（<code>bg-info/10</code>），@all 用警告色（<code>bg-warning/10</code>）。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">视觉示意</div>
+    <div class="mock-body">
+      <div style="margin-bottom: 12px;">
+        <strong>成员：</strong><span class="mention-chip mention-chip-member"><span class="mention-avatar avatar-member">张</span>@张三</span>
+        &nbsp;
+        <strong>智能体：</strong><span class="mention-chip mention-chip-agent"><span class="mention-avatar avatar-agent">⚙</span>@ReviewerBot</span>
+        &nbsp;
+        <strong>小队：</strong><span class="mention-chip mention-chip-squad"><span class="mention-avatar avatar-squad">◆</span>@设计组</span>
+        &nbsp;
+        <strong>@all：</strong><span class="mention-chip mention-chip-all"><span class="mention-avatar avatar-all">⊕</span>@all</span>
+      </div>
+      <div>
+        <strong>与 IssueChip 对比：</strong>
+        <span class="mention-chip mention-chip-agent"><span class="mention-avatar avatar-agent">⚙</span>@ReviewerBot</span>
+        <span class="issue-chip"><span class="status-dot status-open"></span>#456 实现缓存</span>
+        <span class="issue-chip"><span class="status-dot status-closed"></span>#123 修复登录</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> <code>IssueChip</code> 使用 <code>rounded-md border mx-0.5 px-2 py-0.5 text-xs</code> + <code>hover:bg-accent transition-colors</code>；<code>ActorAvatar</code> 已按类型区分（squad=方形 Users 图标、agent=圆形 Bot 图标、member=首字母）；<code>data-mention-type</code> 已在 DOM 上；移动端 <code>ActorAvatar</code> 已使用 <code>bg-brand/15</code> 标识智能体。</p>
+  <p><span class="basis-tag">external:</span> Slack、Discord、Jira、Confluence、Notion 全部使用背景 pill 渲染 mention；Jira/Confluence 嵌入头像缩略图。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>当前 mention 系统的核心矛盾是：Issues 和 Projects（相对少用）有丰富的视觉表现，而成员/智能体（最常用）只有纯文本。这种倒置让最重要的实体看起来最不重要。Avatar chip 将 mention 升级到与 Issue/Project chip 同级，同时复用已有的 <code>ActorAvatar</code> 类型区分能力——这是最高杠杆的改动。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">改动范围较大：需要新建 <code>ActorMentionChip</code> 组件，修改 <code>MentionView</code> 和 <code>ReadonlyContent</code> 的渲染逻辑，更新 <code>prose.css</code>。14px avatar 在密集文本中可能显得拥挤。需要同时在 web 和 desktop 验证。但 IssueChip 已证明 22px 高度在 1.625 行高内可正常工作。</p>
+</div>
+</article>
+
+<!-- Idea 2 -->
+<article class="idea-card" id="idea2">
+<div class="idea-header">
+  <span class="idea-rank">2.</span>
+  <span class="idea-title">插入闪光动画</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">creation-feedback</span>
+    <span class="badge badge-conf-high">High Confidence</span>
+    <span class="badge badge-cx-sm">Small Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>当 mention 从 autocomplete 插入后，对新渲染的 mention 节点施加一个 150-200ms 的背景色过渡动画：从 <code>bg-brand/20</code> 渐变到最终背景色。这个短暂的"闪光"直接桥接了 autocomplete 的丰富预览和渲染后的稳定态，为用户提供"系统识别成功了"的即时确认。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">动画序列</div>
+    <div class="mock-body">
+      <div class="flash-sequence">
+        <div class="flash-step">
+          <div class="step-visual">
+            <span class="mention-flash mention-flash-glow"><span class="mention-avatar avatar-agent">⚙</span>@Bot</span>
+          </div>
+          <div>0ms · 插入瞬间</div>
+          <div style="font-size:10px;color:var(--muted-fg)">高亮 + 发光</div>
+        </div>
+        <div class="flash-arrow">→</div>
+        <div class="flash-step">
+          <div class="step-visual">
+            <span class="mention-flash" style="background: color-mix(in srgb, var(--brand) 15%, transparent);"><span class="mention-avatar avatar-agent">⚙</span>@Bot</span>
+          </div>
+          <div>~100ms · 过渡中</div>
+          <div style="font-size:10px;color:var(--muted-fg)">渐变消退</div>
+        </div>
+        <div class="flash-arrow">→</div>
+        <div class="flash-step">
+          <div class="step-visual">
+            <span class="mention-chip mention-chip-agent"><span class="mention-avatar avatar-agent">⚙</span>@Bot</span>
+          </div>
+          <div>200ms · 稳定态</div>
+          <div style="font-size:10px;color:var(--muted-fg)">最终 chip</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> Tiptap mention command 插入节点 + 尾部空格后 <code>collapseToEnd()</code>，无任何视觉确认；autocomplete 有完整的头像+badge 预览，插入后瞬间降级为纯文本；<code>transition-colors</code> 已是 chip 的标准交互模式（150ms ease-out 符合 DESIGN.md §8.2）。</p>
+  <p><span class="basis-tag">external:</span> 游戏 UX 中的"拾取确认"反馈——在复杂视觉环境中通过短暂动画确认状态变化。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>直接回答用户的核心诉求："能不能更显式地让我知道正确使用了 mention 语法"。闪光动画在不改变最终渲染形态的前提下，创造了一个可感知的 before/after 时刻。它是所有方案中成本最低但最直接的"确认信号"。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">需要检测"新插入"与"已有"mention 的区别（可通过 Tiptap 事务或 CSS <code>animation</code> on first render 实现）。在长评论中频繁 mention 时，多个闪光可能显得杂乱。但动画持续时间短（150ms），且只在创建瞬间触发，不影响已有内容的阅读体验。</p>
+</div>
+</article>
+
+<!-- Idea 3 -->
+<article class="idea-card" id="idea3">
+<div class="idea-header">
+  <span class="idea-rank">3.</span>
+  <span class="idea-title">通用 Hover 交互</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">interaction-feedback</span>
+    <span class="badge badge-conf-high">High Confidence</span>
+    <span class="badge badge-cx-sm">Small Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>为所有成员/智能体/小队 mention 接入 hover 交互反馈：<code>cursor-pointer</code> + <code>hover:bg-muted</code>（符合 DESIGN.md §5.2 的 hover 模式）。同时接入已有的 <code>MentionHoverCard</code>——hover 时显示 ActorAvatar + 全名 + 角色，与 Issue/Project mention 的交互体验对齐。可选增加 <code>active:scale-95</code> 的 pressed 反馈（但 DESIGN.md 反对 scale，建议用 <code>active:translate-y-px</code> 代替）。</p>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> 当前成员 mention 的 hover 反馈为零：<code>cursor-default</code>、无 hover 背景变化、无点击动作。而 IssueChip/ProjectChip 有完整的 <code>hover:bg-accent transition-colors cursor-pointer</code>。<code>MentionHoverCard</code> 组件已存在但未绑定到内联 mention。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>用户"不确定 mention 是否正确"的另一个维度是交互层面：如果 hover 一个 mention 没有任何反应，它在感知上就是"死的"文字。接入 hover 交互后，用户 hover 时看到头像+角色信息弹出——这就是"mention 是活的"的直接证明。改动量极小：CSS 一行 + <code>MentionHoverCard</code> 包裹。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides"><code>MentionHoverCard</code> 可能需要适配 chip 形态的 mention（当前设计针对文本 mention）。在密集 mention 场景下频繁弹出 hover card 可能干扰阅读。但 hover card 本身有延迟（dwell time），且只在鼠标停留时触发。</p>
+</div>
+</article>
+
+<!-- Idea 4 -->
+<article class="idea-card" id="idea4">
+<div class="idea-header">
+  <span class="idea-rank">4.</span>
+  <span class="idea-title">上下文信息 Pill</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">actor-type-distinction</span>
+    <span class="badge badge-conf-med">Medium Confidence</span>
+    <span class="badge badge-cx-med">Medium Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>在 mention chip 中嵌入实时状态信息：成员 mention 显示 6px 在线状态点（绿色=在线、灰色=离线，复用 <code>ActorAvatar</code> 的 <code>showStatusDot</code> 模式）；智能体 mention 显示运行状态图标（active/idle）；小队 mention 显示成员计数后缀（如 <code>·5</code>）；@all 显示当前工作空间成员数。Mention 从静态名称标签变为一个迷你仪表盘。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">视觉示意</div>
+    <div class="mock-body">
+      <span class="mention-chip mention-chip-member" style="gap:5px"><span class="mention-avatar avatar-member">张</span>@张三<span style="width:6px;height:6px;border-radius:999px;background:var(--success);display:inline-block"></span></span>
+      &nbsp;
+      <span class="mention-chip mention-chip-member" style="gap:5px"><span class="mention-avatar avatar-member">李</span>@李四<span style="width:6px;height:6px;border-radius:999px;background:var(--muted-fg);display:inline-block"></span></span>
+      &nbsp;
+      <span class="mention-chip mention-chip-agent" style="gap:5px"><span class="mention-avatar avatar-agent">⚙</span>@Bot<span style="width:6px;height:6px;border-radius:999px;background:var(--success);display:inline-block"></span></span>
+      &nbsp;
+      <span class="mention-chip mention-chip-squad"><span class="mention-avatar avatar-squad">◆</span>@设计组<span style="font-size:11px;color:var(--muted-fg);margin-left:2px">·5</span></span>
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> <code>ActorAvatar</code> 在 suggestion list 中已使用 <code>showStatusDot</code> 属性；<code>IssueChip</code> 已建立了 inline chip 反映实体当前状态的模式（StatusIcon 显示 open/closed）。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>这让 mention 从"引用"变为"感知"——看到 @张三 旁边有绿点，你知道他在线、会很快看到消息。对于智能体，运行状态指示器让用户知道"这个 AI 正在工作"。这直接强化了 Multica 的核心差异化：agents as first-class assignees。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">状态数据可能过时（autocomplete 查询和渲染之间的时间差）。多个 mention 各自查询状态可能增加 React Query 订阅开销。状态点在高密度文本中可能显得杂乱。建议将状态点设为可选增强（通过 prop 控制），默认关闭，在关键场景（如 issue sidebar 的 assignee 列表）开启。</p>
+</div>
+</article>
+
+<!-- Idea 5 -->
+<article class="idea-card" id="idea5">
+<div class="idea-header">
+  <span class="idea-rank">5.</span>
+  <span class="idea-title">未识别 Mention 错误态</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">creation-feedback + visual-form</span>
+    <span class="badge badge-conf-med">Medium Confidence</span>
+    <span class="badge badge-cx-med">Medium Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>反转思路：不在"正确"时做文章，而在"错误"时给出明确信号。当用户输入了 <code>@某某</code> 但 autocomplete 未匹配到任何结果时，该文本自动变为红色下划线 + 感叹号图标（类似拼写检查错误），<code>aria-label="未识别的 mention"</code>。匹配成功的 mention 正常渲染。用户的不确定性被转移到"什么情况下是错的"——没有红色标记就是正确的。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">视觉示意</div>
+    <div class="mock-body">
+      <div style="margin-bottom: 8px">
+        <strong>成功：</strong>请 <span class="mention-chip mention-chip-member"><span class="mention-avatar avatar-member">张</span>@张三</span> 审核这个 PR
+      </div>
+      <div>
+        <strong>失败：</strong>请 <span style="color:var(--destructive);text-decoration:underline wavy;border-bottom-color:var(--destructive)">@张小五</span><span style="color:var(--destructive);font-size:12px;margin-left:2px">⚠</span> 审核这个 PR
+      </div>
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> Autocomplete 已有 "No matches" 空状态（<code>$.mention.no_results</code>）；Badge 组件已有 <code>destructive</code> variant（<code>bg-destructive/10 text-destructive</code>）；DESIGN.md §5.7 定义了 <code>aria-invalid:border-destructive</code> 错误模式。</p>
+  <p><span class="basis-tag">reasoned:</span> 拼写检查是用户已有的心智模型——红色下划线 = 有问题。利用已有心智模型比创造新视觉语言更有效。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>这是对"怎么让 mention 更显眼"问题的反向解答。与其让正确 mention 更显眼，不如让错误 mention 更显眼——用户看到没有红色标记就知道"系统识别了"。这个思路成本低、效果明确，且与 DESIGN.md 的错误状态规范完全对齐。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">需要区分"用户正在输入 @query"（autocomplete 还在搜索）和"输入完毕后未匹配"（确认错误）。Tiptap 的 mention 逻辑只在选中 suggestion 时创建 mention node，纯文本 <code>@某某</code> 不会自动变成 mention——需要额外的 plugin 检测未匹配模式。</p>
+</div>
+</article>
+
+<!-- Idea 6 -->
+<article class="idea-card" id="idea6">
+<div class="idea-header">
+  <span class="idea-rank">6.</span>
+  <span class="idea-title">渐进式展开 Mention</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">inline-text-flow + visual-form</span>
+    <span class="badge badge-conf-med">Medium Confidence</span>
+    <span class="badge badge-cx-med">Medium Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>保持默认渲染态轻量（带背景色的 <code>@name</code> 文本，不加 avatar），通过 CSS <code>:hover</code> 过渡在 hover 时展开显示 avatar + 类型图标——全部在同一个 DOM 元素内用 CSS transitions 实现。mention 在"阅读模式"下保持紧凑不干扰文本流，在"探索模式"下展开为完整 chip。这解决了"chip 太拥挤"和"纯文本不明显"之间的矛盾。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">视觉示意</div>
+    <div class="mock-body">
+      <div style="margin-bottom: 12px">
+        <div class="comparison-label">默认态（紧凑）</div>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:999px;background:var(--muted);font-size:13px;font-weight:500;color:var(--foreground);margin:0 2px;vertical-align:middle">@张三</span>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:999px;background:var(--brand-soft);font-size:13px;font-weight:500;color:var(--brand);margin:0 2px;vertical-align:middle">@Bot</span>
+      </div>
+      <div>
+        <div class="comparison-label">Hover 态（展开）</div>
+        <span class="mention-chip mention-chip-member"><span class="mention-avatar avatar-member">张</span>@张三</span>
+        <span class="mention-chip mention-chip-agent"><span class="mention-avatar avatar-agent">⚙</span>@Bot</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">direct:</span> DESIGN.md §5.2 定义了 hover 状态为"我注意到你了"，视觉变化应该轻微、即时；<code>data-mention-type</code> 已在 DOM 上，CSS 可以针对不同类型设置不同 hover 颜色；<code>transition-colors</code> 是 DESIGN.md 推荐的首选 transition（150ms）。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>这个方案在"mention 需要更显眼"和"mention 不应该占太多空间"之间找到了平衡点。默认态通过背景色提供基础的"这不是普通文字"信号，hover 态通过展开 avatar 提供完整的身份确认。适合 comment 密集的场景（如 issue 讨论串），其中阅读效率优先。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">hover 展开在触摸设备上不可用（移动端需要 tap）。CSS-only 展开需要 avatar 在默认态也存在于 DOM 但宽度为 0（<code>overflow: hidden; width: 0</code>），过渡到 <code>width: 16px</code>——但 <code>width</code> transition 性能不如 <code>transform</code>。可以用 <code>max-width</code> 或 <code>margin</code> 替代。</p>
+</div>
+</article>
+
+<!-- Idea 7 -->
+<article class="idea-card" id="idea7">
+<div class="idea-header">
+  <span class="idea-rank">7.</span>
+  <span class="idea-title">纯头像圆形 Mention</span>
+  <div class="idea-badges">
+    <span class="badge badge-axis">visual-form</span>
+    <span class="badge badge-conf-low">Low Confidence</span>
+    <span class="badge badge-cx-sm">Small Scope</span>
+  </div>
+</div>
+<div class="idea-body">
+  <div class="field-label">描述</div>
+  <p>极端约束翻转：完全移除名称文本。Mention 变为一个 16px 的 <code>ActorAvatar</code> 圆形（成员=首字母、智能体=Bot 图标、小队=Users 图标方形）。全名仅在 hover card 中显示。这让 mention 成为文本中最小的内联元素——比 IssueChip 还小——但因为形状打破了排版节奏，它反而比任何文字处理都更显眼。</p>
+
+  <div class="mock-container">
+    <div class="mock-label">视觉示意</div>
+    <div class="mock-body">
+      任务分配给了
+      <span class="mention-avatar avatar-member" style="width:18px;height:18px;display:inline-flex;vertical-align:middle;margin:0 3px;cursor:pointer;font-size:10px">张</span>
+      并通知了
+      <span class="mention-avatar avatar-agent" style="width:18px;height:18px;display:inline-flex;vertical-align:middle;margin:0 3px;cursor:pointer">⚙</span>
+      和
+      <span class="mention-avatar avatar-squad" style="width:18px;height:18px;border-radius:4px;display:inline-flex;vertical-align:middle;margin:0 3px;cursor:pointer">◆</span>
+      。
+    </div>
+  </div>
+
+  <div class="field-label">Basis</div>
+  <p><span class="basis-tag">reasoned:</span> <code>ActorAvatar</code> 已能在任意尺寸下渲染不同视觉（fontSize 按 <code>size * 0.45</code> 缩放）；<code>MentionHoverCard</code> 已在 hover 时提供全名+角色；<code>mention://</code> URL 保留完整语义信息。</p>
+
+  <div class="field-label">Rationale</div>
+  <p>最大胆的方案。通过让 mention "不再是文字"来解决"mention 融入文字流导致不明显"的问题。圆形头像在文字排版中是天然的视觉中断点——眼睛会自动注意到它。对于 agent-heavy 的工作流（Multica 的核心场景），一个 Bot 图标比 "@ReviewerBot" 文字更容易扫视识别。</p>
+
+  <div class="field-label">Downsides</div>
+  <p class="downsides">可读性风险：在 5+ mentions 的长评论中，纯头像难以快速扫读（需要逐个 hover 才知道是谁）。不兼容无头像的成员（首字母可能在某些文化中不够直观）。这是一个值得探索的方向但不建议作为默认方案——可以作为"紧凑模式"供用户选择。</p>
+</div>
+</article>
+
+</section>
+
+<!-- Rejection Summary -->
+<section id="rejections">
+<h2>Rejection Summary</h2>
+
+<table class="rejection-table">
+<thead>
+<tr>
+  <th style="width:35%">被合并/拒绝的想法</th>
+  <th>拒绝理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td>Insertion Flash ×5（来自 4 个 frame 的重复提案）</td>
+  <td class="reason">与 #2 重复，合并为一个最强版本</td>
+</tr>
+<tr>
+  <td>Hover Card 全量接入 / Tactile Mention / Semantic Link Cursor / Proximity Halo / Lightweight Tooltip / Progressive Bloom（6 个交互方案）</td>
+  <td class="reason">与 #3 重复或为其子集，合并为通用 Hover 交互方案</td>
+</tr>
+<tr>
+  <td>Type-Tinted Background ×3 / Lanyard Color Edge / Type Sentinel Badges（5 个类型着色方案）</td>
+  <td class="reason">与 #1 合并为类型着色子维度</td>
+</tr>
+<tr>
+  <td>Shape Family（交通标志类比）/ Triple Encoding（药品类比）/ @all Broadcast Banner</td>
+  <td class="reason">有趣但为 #1 的变体，在 #1 的类型着色中已涵盖</td>
+</tr>
+<tr>
+  <td>Agent 呼吸状态点 / Contextually Rich Pills</td>
+  <td class="reason">合并为 #4（上下文信息 Pill）</td>
+</tr>
+<tr>
+  <td>Remove @ prefix / Avatar-Only Inline Circle</td>
+  <td class="reason">Remove @ 与 #1 chip 方案冲突（chip 内保留 @）；Avatar-only 保留为 #7 探索方案</td>
+</tr>
+<tr>
+  <td>Smart Truncation + Tooltip</td>
+  <td class="reason">次要 polish，不直接解决"不够显眼"的核心问题</td>
+</tr>
+<tr>
+  <td>MentionRenderer 统一组件</td>
+  <td class="reason">架构改进而非视觉改进，更适合作为 brainstorm follow-up</td>
+</tr>
+<tr>
+  <td>Temporal Living Mentions（生命周期状态）</td>
+  <td class="reason">Scope overrun——扩展到了社交状态追踪，超出前端视觉渲染范围</td>
+</tr>
+<tr>
+  <td>@all Broadcast Banner（海事信号旗类比）</td>
+  <td class="reason">只影响一种 mention 类型，更适合作为 #1 的变体实现</td>
+</tr>
+<tr>
+  <td>Autocomplete-to-Render Continuity（乐谱类比）</td>
+  <td class="reason">设计理念而非具体方案，其核心思路已被 #1 和 #2 吸收</td>
+</tr>
+<tr>
+  <td>Hover-Expand Type Avatar Pill</td>
+  <td class="reason">与 #6（渐进式展开）重复，#6 更通用</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<footer class="composition-signal">
+  Composed 2026-07-09 by ce-ideate · focus: <code>mention 成员（智能体与人类）在前端页面的视觉表现提升</code>
+</footer>
+
+</div>
+</body>
+</html>
