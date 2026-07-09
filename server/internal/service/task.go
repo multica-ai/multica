@@ -319,8 +319,10 @@ func (s *TaskService) attributionFromTriggerComment(ctx context.Context, comment
 // resolveOriginatorForIssueTask returns the top-of-chain human for issue-backed
 // dispatches. Comment-triggered runs keep the existing comment-chain semantics;
 // direct issue assignment/creation falls back to the issue's member creator.
-// Agent-created quick-create issues have an explicit origin link back to the
-// quick-create task, so they can inherit that task's originator safely. Other
+// Agent-created issues that carry an explicit task-origin link — quick_create
+// (daemon quick-create flow) or agent_create (an agent's ordinary `issue
+// create`, MUL-4305) — inherit that origin task's originator, since origin_id
+// points at the agent_task_queue row that created the issue. Other
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource).UserID
@@ -343,13 +345,16 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		CreatorType: issue.CreatorType,
 		CreatorID:   issue.CreatorID,
 	}
-	// Member-created issues resolve without a DB read. Only the quick-create
-	// origin inheritance needs to load the origin task, and only when the DB is
-	// wired (nil Queries keeps unit-test setups safe and yields unattributed).
+	// Member-created issues resolve without a DB read. Only origin-linked
+	// agent-created issues (quick_create, agent_create) need to load the origin
+	// task to inherit its human, and only when the DB is wired (nil Queries keeps
+	// unit-test setups safe and yields unattributed). Both origin types stamp
+	// origin_id with the agent_task_queue row that created the issue, so the
+	// top-of-chain human is that task's originator_user_id (MUL-4305).
 	if !(issue.CreatorType == "member" && issue.CreatorID.Valid) &&
 		s != nil && s.Queries != nil && issue.OriginType.Valid && issue.OriginID.Valid &&
-		issue.OriginType.String == "quick_create" {
-		facts.OriginType = "quick_create"
+		(issue.OriginType.String == "quick_create" || issue.OriginType.String == "agent_create") {
+		facts.OriginType = issue.OriginType.String
 		facts.OriginTaskID = issue.OriginID
 		if task, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
 			facts.OriginOriginator = task.OriginatorUserID
@@ -367,6 +372,17 @@ func attributionCreateParams(attr attribution.Result) (source pgtype.Text, deleg
 	evidenceKind = pgtype.Text{String: string(attr.EvidenceKind), Valid: attr.EvidenceKind != ""}
 	evidenceRef = attr.EvidenceRefID
 	return
+}
+
+// OriginatorForIssueTask exposes resolveOriginatorForIssueTask to callers
+// outside the service package (the squad-leader access gate in the handler
+// layer) so the gate judges the top-of-chain human with the exact same
+// resolution the enqueue path persists on the task row. Without a shared entry
+// point the gate saw an empty originator for agent-triggered assigns and denied
+// private leaders that the write path would have attributed correctly
+// (MUL-4305).
+func (s *TaskService) OriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
+	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {

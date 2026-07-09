@@ -8,9 +8,9 @@
 //
 //   - It owns the SDK client construction (base URL + API key + retry/timeout
 //     defaults) so callers never touch option.RequestOption directly.
-//   - It exposes both the raw Chat Completions surface (Chat / ChatStream),
-//     used by the OpenAI-compatible HTTP proxy handlers, and a convenience
-//     GenerateText helper for simple internal one-shot completions.
+//   - It exposes both the raw Chat Completions surface (Chat / ChatStream)
+//     and a convenience GenerateText helper, used by server-internal callers
+//     for simple one-shot completions (e.g. chat title generation).
 //   - The default model is configurable; when a request omits the model we
 //     fall back to it, and when it too is empty we fall back to a sane
 //     built-in default so a misconfigured deployment still returns a clear
@@ -44,9 +44,10 @@ const FallbackModel = "gpt-4o-mini"
 const defaultRequestTimeout = 60 * time.Second
 
 // ErrNotConfigured is returned by Chat/ChatStream/GenerateText when the client
-// was constructed without any credentials or base URL. Callers (e.g. the HTTP
-// handlers) should translate this into a 503 so a misconfigured self-hosted
-// deployment surfaces a clear error instead of dialing OpenAI with no key.
+// was constructed without any credentials or base URL. Internal callers should
+// treat this as a disabled-LLM signal and fall back gracefully (e.g. chat
+// title generation keeps the original title) so a misconfigured self-hosted
+// deployment never dials OpenAI with no key.
 var ErrNotConfigured = errors.New("llm: no API key or base URL configured")
 
 // Config holds the tunables for the LLM layer. All fields are optional; an

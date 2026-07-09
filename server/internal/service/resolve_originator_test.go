@@ -308,6 +308,58 @@ func TestResolveOriginatorForIssueTask_QuickCreateIssueInheritsParentTask(t *tes
 	}
 }
 
+// TestResolveOriginatorForIssueTask_AgentCreateIssueInheritsParentTask covers
+// the MUL-4305 fix: an agent that creates an issue through the ordinary
+// `issue create` path gets origin_type='agent_create' + origin_id=<acting
+// task>. The issue creator is the agent, but the top-of-chain human lives on
+// that acting task and must be inherited so downstream assignment /
+// squad-leader runs (and the A2A mentions they emit) keep the originator.
+func TestResolveOriginatorForIssueTask_AgentCreateIssueInheritsParentTask(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	svc := &TaskService{Queries: db.New(pool)}
+	issue := db.Issue{
+		CreatorType: "agent",
+		OriginType:  pgtype.Text{String: "agent_create", Valid: true},
+		OriginID:    parentTaskID,
+	}
+
+	got := svc.resolveOriginatorForIssueTask(context.Background(), issue, pgtype.UUID{})
+	if !got.Valid {
+		t.Fatalf("expected agent_create issue to inherit originator, got invalid")
+	}
+	if got.Bytes != userID.Bytes {
+		t.Errorf("originator = %s, want %s", util.UUIDToString(got), util.UUIDToString(userID))
+	}
+}
+
+// TestOriginatorForIssueTask_MatchesResolverForAgentCreate pins the gate/enqueue
+// consistency guarantee from MUL-4305: the exported OriginatorForIssueTask
+// (used by the squad-leader access gate) must return the SAME human the
+// unexported resolver persists on the task row. If these drift, an
+// agent-created issue could be attributed correctly on the task row yet denied
+// by a gate that computed a different (empty) originator.
+func TestOriginatorForIssueTask_MatchesResolverForAgentCreate(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	svc := &TaskService{Queries: db.New(pool)}
+	issue := db.Issue{
+		CreatorType: "agent",
+		OriginType:  pgtype.Text{String: "agent_create", Valid: true},
+		OriginID:    parentTaskID,
+	}
+
+	gate := svc.OriginatorForIssueTask(context.Background(), issue, pgtype.UUID{})
+	write := svc.resolveOriginatorForIssueTask(context.Background(), issue, pgtype.UUID{})
+	if gate.Bytes != write.Bytes || gate.Valid != write.Valid {
+		t.Fatalf("gate originator %s != write originator %s",
+			util.UUIDToString(gate), util.UUIDToString(write))
+	}
+	if !gate.Valid || gate.Bytes != userID.Bytes {
+		t.Errorf("gate originator = %s, want %s", util.UUIDToString(gate), util.UUIDToString(userID))
+	}
+}
+
 // TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow guards the race
 // where the daemon could poll-claim a newly inserted queued task while the old
 // post-insert overlay updater was still making the outbound Composio session

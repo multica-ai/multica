@@ -2452,8 +2452,20 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // a delivered one.
 //
 // Scope + loop safety:
-//   - Only MEMBER comments qualify (agent replies / acknowledgements /
-//     self-triggers never do).
+//   - MEMBER comments qualify as before, with their full routing. AGENT comments
+//     now also qualify, but ONLY through an explicit @agent/@squad mention
+//     (keepExplicitMentionTriggers). Every non-mention agent route — the
+//     assigned-squad-leader fallback, thread-parent / conversation continuation
+//     — is intentionally excluded, so a plain agent reply / acknowledgement
+//     earns no follow-up here regardless of issue assignment. That is the
+//     anti-loop boundary the old member-only filter protected.
+//     This closes MUL-4304: an explicit agent→agent @mention that landed while
+//     the target already had a DISPATCHED task is dropped by the create-time
+//     enqueue path — merge only folds a comment into a QUEUED task, so a
+//     dispatched target hits the merge-miss + active-task `continue` and is
+//     deferred here — and was then never replayed because agent comments were
+//     excluded. (A target with only a RUNNING/queued task does not hit that
+//     drop: queued merges in, running-only takes the normal fresh-enqueue path.)
 //   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
 //     an `@other-agent` comment is left to that agent's own creation-time
 //     trigger, so a completion never re-wakes an unrelated agent.
@@ -2467,12 +2479,12 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
 	}
-	comments, err := h.Queries.ListMemberCommentsForIssueSince(ctx, db.ListMemberCommentsForIssueSinceParams{
+	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
 		IssueID: task.IssueID,
 		Since:   task.CreatedAt,
 	})
 	if err != nil {
-		slog.Warn("reconcile comments on completion: list member comments failed",
+		slog.Warn("reconcile comments on completion: list comments failed",
 			"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
 		return
 	}
@@ -2515,14 +2527,37 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				parentComment = &parent
 			}
 		}
-		// Members are their own originator. Compute what this comment would
-		// trigger, then keep ONLY the agent that just completed — never the
-		// full fan-out (that would re-wake unrelated `@other-agent` targets).
+		// Compute what this comment would trigger, then keep ONLY the agent
+		// that just completed — never the full fan-out (that would re-wake
+		// unrelated `@other-agent` targets).
+		//
+		// The comment is routed under its OWN author_type. A member is its own
+		// originator. For an agent author, the originator is the human at the
+		// top of that agent's trigger chain (resolved from the comment's source
+		// task); canInvokeAgent judges an agent→agent (A2A) mention by that
+		// originator, not the immediate agent principal (MUL-3963).
+		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
-		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, "member", actorID, commentTriggerComputeOptions{
+		originatorUserID := actorID
+		if actorType != "member" {
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, c.ID))
+		}
+		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
-			OriginatorUserID:        actorID,
+			OriginatorUserID:        originatorUserID,
 		})
+		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
+		// computeCommentAgentTriggers can also return the assigned-squad-leader
+		// fallback (Source = issue-assignee) for a plain worker-agent reply on a
+		// squad-assigned issue; that conversational routing is intentionally NOT
+		// replayed here. Restricting to the explicit-mention sources keeps the
+		// invariant unconditional — a plain agent reply / acknowledgement earns
+		// no follow-up regardless of issue assignment — which is the anti-loop
+		// boundary the old member-only filter protected (MUL-4304). Member
+		// comments are unaffected: they keep their full routing.
+		if actorType != "member" {
+			triggers = keepExplicitMentionTriggers(triggers)
+		}
 		scoped := make([]commentAgentTrigger, 0, 1)
 		for _, trigger := range triggers {
 			if uuidToString(trigger.Agent.ID) == agentID {
@@ -2543,8 +2578,30 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"issue_id", uuidToString(task.IssueID),
 			"completed_task_id", uuidToString(task.ID),
 			"agent_id", agentID,
-			"undelivered_member_comments", scheduled)
+			"undelivered_comments", scheduled)
 	}
+}
+
+// keepExplicitMentionTriggers filters a computed trigger set down to the ones
+// produced by an EXPLICIT @agent / @squad mention (MUL-4304). It is applied to
+// agent-authored comments during completion reconcile so that only a
+// deliberately-targeted mention earns a replay — the assigned-squad-leader
+// fallback, thread-parent / conversation continuation, and issue-assignee
+// routing (all non-mention sources) are intentionally excluded, so a plain
+// agent reply or acknowledgement never earns a follow-up here. Member comments
+// are never passed through this filter; they keep their full routing.
+func keepExplicitMentionTriggers(triggers []commentAgentTrigger) []commentAgentTrigger {
+	if len(triggers) == 0 {
+		return triggers
+	}
+	filtered := make([]commentAgentTrigger, 0, len(triggers))
+	for _, trigger := range triggers {
+		switch trigger.Source {
+		case commentTriggerSourceMentionAgent, commentTriggerSourceMentionSquadLeader:
+			filtered = append(filtered, trigger)
+		}
+	}
+	return filtered
 }
 
 // buildCoalescedCommentData loads the full detail of each comment that was

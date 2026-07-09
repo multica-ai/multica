@@ -305,6 +305,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const queryClient = useQueryClient();
 
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // With `immediatelyRender: false` the Tiptap instance is created after
+    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
+    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
+    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    const focusOnReadyRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -337,6 +342,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // repair it so the mounted editor has a real cursor in the list.
         repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        if (focusOnReadyRef.current) {
+          focusOnReadyRef.current = false;
+          ed.commands.focus("end");
+        }
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -519,7 +528,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         editor?.commands.clearContent();
       },
       focus: () => {
-        editor?.commands.focus();
+        if (editor) editor.commands.focus();
+        // Editor not mounted yet — defer the focus to `onCreate`.
+        else focusOnReadyRef.current = true;
       },
       blur: () => {
         editor?.commands.blur();

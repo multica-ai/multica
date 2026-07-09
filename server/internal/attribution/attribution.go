@@ -188,7 +188,7 @@ type DirectFacts struct {
 	CreatorID   pgtype.UUID
 
 	// OriginType/OriginTaskID describe an agent-created issue's provenance
-	// (e.g. "quick_create"); OriginOriginator is that origin task's
+	// ("quick_create" or "agent_create"); OriginOriginator is that origin task's
 	// originator_user_id, loaded by the caller. Empty OriginType means none.
 	OriginType       string
 	OriginTaskID     pgtype.UUID
@@ -206,7 +206,7 @@ func ClassifyDirect(f DirectFacts) Result {
 		}
 	}
 	switch f.OriginType {
-	case "quick_create":
+	case "quick_create", "agent_create":
 		r := Result{
 			DelegatedFromTaskID: f.OriginTaskID,
 			EvidenceKind:        EvidenceIssueAssignment,

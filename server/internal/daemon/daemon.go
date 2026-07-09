@@ -757,6 +757,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"launched_by", d.cfg.LaunchedBy,
 	)
 
+	// Mark the daemon-owned workspaces tree before any task runs. A sandbox
+	// fault can strip every MULTICA_* env var from an agent subprocess; the
+	// per-workdir marker then only protects cwds inside the workdir, and a
+	// subprocess that escaped to the workdir's parent would fall back to the
+	// user's config PAT. The root marker makes the CLI fail closed anywhere
+	// under the tree. Non-fatal: Prepare re-ensures it per task.
+	if err := execenv.EnsureWorkspacesRootMarker(d.cfg.WorkspacesRoot); err != nil {
+		d.logger.Warn("workspaces root marker not written; CLI fail-closed guard limited to task workdirs", "error", err)
+	}
+
 	// Load auth token from CLI config.
 	if err := d.resolveAuth(); err != nil {
 		return err
@@ -3592,6 +3602,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
 			WorkDir:         task.PriorWorkDir,
 			Provider:        provider,
 			CodexVersion:    codexVersion,
