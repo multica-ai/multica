@@ -229,6 +229,91 @@ func TestFeishuMediaResolver_AttachesImageMediaRef(t *testing.T) {
 	}
 }
 
+func TestFeishuMediaResolver_AttachesPostEmbeddedImageMediaRef(t *testing.T) {
+	sender := &fakeSender{downloaded: DownloadedResource{
+		Data:        []byte{4, 5, 6},
+		ContentType: "image/png",
+		Filename:    "post-image.png",
+		SizeBytes:   3,
+	}}
+	storage := &fakeMediaStorage{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, newDiscardLogger())
+	rawPost := `{"content":[[{"tag":"img","image_key":"img_post_key"}],[{"tag":"text","text":"识别一下图片"}]]}`
+	lm := InboundMessage{
+		EventID:      "evt-post-image",
+		AppID:        "cli_app",
+		ChatID:       "oc_dm",
+		ChatType:     ChatTypeP2P,
+		MessageID:    "om_post_image",
+		SenderOpenID: "ou_user",
+		MessageType:  "post",
+		Body:         flattenPostContent(rawPost),
+		Content:      rawPost,
+	}
+	got := resolver.ResolveMedia(context.Background(), engine.ResolvedInstallation{
+		WorkspaceID: uuidFromString(t, "11111111-1111-1111-1111-111111111111"),
+		Platform:    Installation{AppID: "cli_app", Region: "feishu"},
+	}, engine.ResolvedIdentity{}, uuidFromString(t, "22222222-2222-2222-2222-222222222222"), channelMessageFromLark(lm))
+	if got.Text != "[Image]\n识别一下图片" {
+		t.Fatalf("message text = %q, want post placeholder plus text", got.Text)
+	}
+	if len(sender.downloadCalls) != 1 {
+		t.Fatalf("download calls = %d, want 1", len(sender.downloadCalls))
+	}
+	call := sender.downloadCalls[0]
+	if call.MessageID != "om_post_image" || call.FileKey != "img_post_key" || call.Type != "image" {
+		t.Fatalf("download params wrong: %+v", call)
+	}
+	if len(storage.uploads) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(storage.uploads))
+	}
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("media refs = %+v, want 1", got.MediaRefs)
+	}
+	ref := got.MediaRefs[0]
+	if ref.Type != channel.MsgTypeImage || ref.Filename != "post-image.png" || ref.MimeType != "image/png" ||
+		ref.SizeBytes != 3 || ref.StorageURL == "" || ref.StorageKey == "" {
+		t.Fatalf("post image ref wrong: %+v", ref)
+	}
+}
+
+func TestFeishuMediaResolver_AttachesPostEmbeddedVideoMediaRef(t *testing.T) {
+	sender := &fakeSender{downloaded: DownloadedResource{
+		Data:        []byte("mp4"),
+		ContentType: "video/mp4",
+		Filename:    "demo.mp4",
+		SizeBytes:   3,
+	}}
+	storage := &fakeMediaStorage{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, newDiscardLogger())
+	rawPost := `{"content":[[{"tag":"text","text":"看一下视频"},{"tag":"media","file_key":"file_post_key","file_name":"demo.mp4"}]]}`
+	lm := InboundMessage{
+		EventID:      "evt-post-video",
+		AppID:        "cli_app",
+		ChatID:       "oc_dm",
+		ChatType:     ChatTypeP2P,
+		MessageID:    "om_post_video",
+		SenderOpenID: "ou_user",
+		MessageType:  "post",
+		Body:         flattenPostContent(rawPost),
+		Content:      rawPost,
+	}
+	got := resolver.ResolveMedia(context.Background(), engine.ResolvedInstallation{
+		WorkspaceID: uuidFromString(t, "11111111-1111-1111-1111-111111111111"),
+		Platform:    Installation{AppID: "cli_app", Region: "feishu"},
+	}, engine.ResolvedIdentity{}, uuidFromString(t, "22222222-2222-2222-2222-222222222222"), channelMessageFromLark(lm))
+	if len(sender.downloadCalls) != 1 {
+		t.Fatalf("download calls = %d, want 1", len(sender.downloadCalls))
+	}
+	call := sender.downloadCalls[0]
+	if call.MessageID != "om_post_video" || call.FileKey != "file_post_key" || call.Type != "file" {
+		t.Fatalf("download params wrong: %+v", call)
+	}
+	if len(got.MediaRefs) != 1 || got.MediaRefs[0].Type != channel.MsgTypeVideo || got.MediaRefs[0].Filename != "demo.mp4" {
+		t.Fatalf("post video ref wrong: %+v", got.MediaRefs)
+	}
+}
+
 func TestFeishuMediaResolver_AttachesVideoMediaRef(t *testing.T) {
 	sender := &fakeSender{downloaded: DownloadedResource{
 		Data:        []byte("mp4"),

@@ -212,6 +212,8 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 			sizeBytes: sizeBytes,
 			messageID: lm.MessageID,
 		}}
+	case "post":
+		return mediaResourcesFromPost(lm)
 	case "media", "video":
 		if payload.FileKey == "" {
 			return nil
@@ -228,6 +230,48 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 	default:
 		return nil
 	}
+}
+
+func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
+	if lm.Content == "" {
+		return nil
+	}
+	var doc larkPostContent
+	if err := json.Unmarshal([]byte(lm.Content), &doc); err != nil {
+		return nil
+	}
+	var out []larkMediaResource
+	for _, para := range doc.Content {
+		for _, span := range para {
+			switch span.Tag {
+			case "img":
+				if span.ImageKey == "" {
+					continue
+				}
+				out = append(out, larkMediaResource{
+					key:       span.ImageKey,
+					kind:      channel.MsgTypeImage,
+					fetchType: "image",
+					filename:  firstNonEmpty(span.FileName, span.Name),
+					mimeType:  span.MimeType,
+					messageID: lm.MessageID,
+				})
+			case "media":
+				if span.FileKey == "" {
+					continue
+				}
+				out = append(out, larkMediaResource{
+					key:       span.FileKey,
+					kind:      channel.MsgTypeVideo,
+					fetchType: "file",
+					filename:  firstNonEmpty(span.FileName, span.Name),
+					mimeType:  span.MimeType,
+					messageID: lm.MessageID,
+				})
+			}
+		}
+	}
+	return out
 }
 
 func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResourceStream, contentType string) string {
