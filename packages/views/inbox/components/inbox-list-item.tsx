@@ -51,7 +51,7 @@ export function InboxListItem({
       <ActorAvatar
         actorType={item.actor_type ?? item.recipient_type}
         actorId={item.actor_id ?? item.recipient_id}
-        size={32}
+        size="lg"
         enableHoverCard
       />
       <div className="min-w-0 flex-1">

@@ -70,7 +70,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
           initials={initials}
           avatarUrl={squad.avatar_url}
           isSquad
-          size={40}
+          size="xl"
           className="rounded-md"
         />
         <div className="min-w-0 flex-1">
@@ -164,7 +164,7 @@ function MembersList({
               <ActorAvatar
                 actorType={m.member_type}
                 actorId={m.member_id}
-                size={20}
+                size="sm"
                 showStatusDot={m.member_type === "agent"}
                 className="shrink-0"
               />

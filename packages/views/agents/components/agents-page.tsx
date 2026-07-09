@@ -342,7 +342,7 @@ function NameCell({ row }: { row: AgentListRow }) {
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
-        size={32}
+        size="lg"
         className={`shrink-0 rounded-md ${isArchived ? "opacity-50 grayscale" : ""}`}
         showStatusDot
       />
@@ -434,7 +434,7 @@ function OwnerCell({ row }: { row: AgentListRow }) {
   }
   return (
     <ListGridCell className="hidden gap-1.5 @2xl:flex">
-      <ActorAvatar actorType="member" actorId={agent.owner_id} size={18} />
+      <ActorAvatar actorType="member" actorId={agent.owner_id} size="sm" />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {owner?.name ?? agent.owner_id.slice(0, 8)}
       </span>

@@ -186,7 +186,7 @@ export function AgentDetailInspector({
               <ActorAvatar
                 actorType="member"
                 actorId={owner.user_id}
-                size={14}
+                size="xs"
               />
               <span className="truncate">{owner.name}</span>
             </span>
@@ -306,7 +306,7 @@ function AvatarEditor({
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
-          size={56}
+          size="2xl"
           className="rounded-none"
         />
       </div>
@@ -341,7 +341,7 @@ function AvatarEditor({
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
-          size={56}
+          size="2xl"
           className="rounded-none"
         />
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">

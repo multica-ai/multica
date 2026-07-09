@@ -148,7 +148,7 @@ function SquadAvatar({ squad }: { squad: Squad }) {
         name={squad.name}
         initials={initials}
         avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-        size={32}
+        size="lg"
         className="shrink-0 rounded-md"
       />
     );
@@ -191,7 +191,7 @@ function LeaderCell({
 }) {
   return (
     <ListGridCell className="gap-1.5">
-      <ActorAvatar actorType="agent" actorId={leaderId} size={18} />
+      <ActorAvatar actorType="agent" actorId={leaderId} size="sm" />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {leader?.name ?? leaderId.slice(0, 8)}
       </span>
@@ -225,7 +225,7 @@ function MembersCell({ squad }: { squad: Squad }) {
             <ActorAvatar
               actorType={m.member_type}
               actorId={m.member_id}
-              size={22}
+              size="md"
               enableHoverCard={m.member_type === "agent"}
             />
           </span>
@@ -599,7 +599,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.leaders.includes(o.id)} />
-                  <ActorAvatar actorType="agent" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="agent" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -622,7 +622,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.creators.includes(o.id)} />
-                  <ActorAvatar actorType="member" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="member" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -986,7 +986,7 @@ export function SquadsPage() {
                         <ActorAvatar
                           actorType="member"
                           actorId={squad.creator_id}
-                          size={18}
+                          size="sm"
                         />
                         <span className="min-w-0 truncate text-xs text-muted-foreground">
                           {membersById.get(squad.creator_id)?.name ??

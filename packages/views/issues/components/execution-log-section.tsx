@@ -447,7 +447,7 @@ function RowShell({
         <ActorAvatar
           actorType="agent"
           actorId={task.agent_id}
-          size={20}
+          size="sm"
           enableHoverCard
         />
       ) : (
