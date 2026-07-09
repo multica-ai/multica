@@ -170,7 +170,8 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -186,7 +187,11 @@ VALUES (
     END,
     sqlc.narg(originator_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -253,12 +258,20 @@ WHERE id = $1 AND issue_id IS NULL;
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+-- A system retry is NOT a new attribution event (MUL-4302 §5): it inherits the
+-- parent's accountable human, source label, delegation lineage, rule version,
+-- and trigger evidence UNCHANGED, and records retry_of_task_id = p.id so retry
+-- and manual rerun stay separable in reporting. parent_task_id keeps its
+-- existing meaning for the retry/resume machinery; retry_of_task_id is the
+-- attribution-facing lineage column.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id,
+    trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -271,7 +284,9 @@ SELECT
     p.squad_id,
     p.originator_user_id,
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    p.originator_source, p.delegated_from_task_id, p.rule_version_id,
+    p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

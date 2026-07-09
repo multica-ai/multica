@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -272,35 +273,47 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 // A nil receiver / nil Queries falls through to invalid so unit-test
 // setups that don't wire a DB stay safe.
 func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
-	if s == nil || s.Queries == nil {
-		return pgtype.UUID{}
-	}
-	if !commentID.Valid {
-		return pgtype.UUID{}
+	// The originator VALUE is independent of the agent-authored source label, so
+	// any label works here; comment_source is passed only as a placeholder.
+	return s.attributionFromTriggerComment(ctx, commentID, attribution.SourceCommentSource).UserID
+}
+
+// attributionFromTriggerComment resolves the full attribution (accountable
+// human + provenance label + delegation lineage + evidence) for a
+// comment-triggered run. It performs the DB reads and hands the gathered facts
+// to the pure attribution.ClassifyComment rules so the classification stays
+// side-effect-free and unit-tested. The returned UserID is byte-identical to
+// the pre-MUL-4302 originator resolution, so authorization behavior (Composio
+// overlay, canInvokeAgent A2A gate) is unchanged.
+//
+// agentAuthoredSource selects the label for an agent-authored trigger comment:
+// attribution.SourceCommentSource for the issue-assignee-reacting path,
+// attribution.SourceDelegation for an explicit mention / thread-parent /
+// squad-leader path.
+func (s *TaskService) attributionFromTriggerComment(ctx context.Context, commentID pgtype.UUID, agentAuthoredSource attribution.Source) attribution.Result {
+	if s == nil || s.Queries == nil || !commentID.Valid {
+		return attribution.Result{Source: attribution.SourceUnattributed}
 	}
 	comment, err := s.Queries.GetComment(ctx, commentID)
 	if err != nil {
-		return pgtype.UUID{}
+		return attribution.Result{Source: attribution.SourceUnattributed}
 	}
-	switch comment.AuthorType {
-	case "member":
-		return comment.AuthorID
-	case "agent":
-		// Inherit from the agent's own triggering task. comment.source_task_id
-		// is set by every agent comment-write path (see migration 120), so a
-		// NULL here means either the comment predates that migration or it
-		// was authored out-of-band — both fall through to "no overlay".
-		if !comment.SourceTaskID.Valid {
-			return pgtype.UUID{}
-		}
-		parent, err := s.Queries.GetAgentTask(ctx, comment.SourceTaskID)
-		if err != nil {
-			return pgtype.UUID{}
-		}
-		return parent.OriginatorUserID
-	default:
-		return pgtype.UUID{}
+	facts := attribution.CommentFacts{
+		CommentID:  commentID,
+		AuthorType: comment.AuthorType,
+		AuthorID:   comment.AuthorID,
 	}
+	// For an agent-authored comment, walk comment.source_task_id → parent task →
+	// parent.originator_user_id (set by every agent comment-write path since
+	// migration 120). A NULL/missing source task leaves ParentOriginator
+	// invalid, which ClassifyComment maps to unattributed.
+	if comment.AuthorType == "agent" && comment.SourceTaskID.Valid {
+		facts.SourceTaskID = comment.SourceTaskID
+		if parent, err := s.Queries.GetAgentTask(ctx, comment.SourceTaskID); err == nil {
+			facts.ParentOriginator = parent.OriginatorUserID
+		}
+	}
+	return attribution.ClassifyComment(facts, agentAuthoredSource)
 }
 
 // resolveOriginatorForIssueTask returns the top-of-chain human for issue-backed
@@ -310,25 +323,50 @@ func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, c
 // quick-create task, so they can inherit that task's originator safely. Other
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
+	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource).UserID
+}
+
+// attributionForIssueTask resolves the full attribution for an issue-backed
+// enqueue. Comment-triggered runs keep the comment-chain semantics; direct
+// assignment/creation falls back to the issue's member creator; agent-created
+// quick-create issues inherit the origin task's human as a delegation. The
+// accountable-human value is byte-identical to resolveOriginatorForIssueTask,
+// which now delegates here — so there is a single source of truth and
+// authorization is unaffected. agentAuthoredSource labels the agent-authored
+// trigger comment case (see attributionFromTriggerComment).
+func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, agentAuthoredSource attribution.Source) attribution.Result {
 	if triggerCommentID.Valid {
-		return s.resolveOriginatorFromTriggerComment(ctx, triggerCommentID)
+		return s.attributionFromTriggerComment(ctx, triggerCommentID, agentAuthoredSource)
 	}
-	if issue.CreatorType == "member" && issue.CreatorID.Valid {
-		return issue.CreatorID
+	facts := attribution.DirectFacts{
+		IssueID:     issue.ID,
+		CreatorType: issue.CreatorType,
+		CreatorID:   issue.CreatorID,
 	}
-	if s == nil || s.Queries == nil || !issue.OriginType.Valid || !issue.OriginID.Valid {
-		return pgtype.UUID{}
-	}
-	switch issue.OriginType.String {
-	case "quick_create":
-		task, err := s.Queries.GetAgentTask(ctx, issue.OriginID)
-		if err != nil {
-			return pgtype.UUID{}
+	// Member-created issues resolve without a DB read. Only the quick-create
+	// origin inheritance needs to load the origin task, and only when the DB is
+	// wired (nil Queries keeps unit-test setups safe and yields unattributed).
+	if !(issue.CreatorType == "member" && issue.CreatorID.Valid) &&
+		s != nil && s.Queries != nil && issue.OriginType.Valid && issue.OriginID.Valid &&
+		issue.OriginType.String == "quick_create" {
+		facts.OriginType = "quick_create"
+		facts.OriginTaskID = issue.OriginID
+		if task, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
+			facts.OriginOriginator = task.OriginatorUserID
 		}
-		return task.OriginatorUserID
-	default:
-		return pgtype.UUID{}
 	}
+	return attribution.ClassifyDirect(facts)
+}
+
+// attributionCreateParams maps a resolved attribution onto the CreateAgentTask
+// provenance columns. originator_source is always stamped (never NULL for a new
+// row); delegation lineage and evidence are stamped only when present.
+func attributionCreateParams(attr attribution.Result) (source pgtype.Text, delegatedFrom pgtype.UUID, evidenceKind pgtype.Text, evidenceRef pgtype.UUID) {
+	source = pgtype.Text{String: attr.Source.String(), Valid: true}
+	delegatedFrom = attr.DelegatedFromTaskID
+	evidenceKind = pgtype.Text{String: string(attr.EvidenceKind), Valid: attr.EvidenceKind != ""}
+	evidenceRef = attr.EvidenceRefID
+	return
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -700,8 +738,15 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	originatorUserID := s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+	// The issue assignee reacting to an agent-authored comment is a
+	// comment_source attribution (a special case of delegation); a member
+	// comment or direct member assignment is direct_human. attr.UserID is the
+	// same value the pre-MUL-4302 resolver produced, so overlay/authorization
+	// are unchanged; the extra fields are audit provenance.
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource)
+	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
 		RuntimeID:            agent.RuntimeID,
@@ -714,6 +759,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		OriginatorUserID:     originatorUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		DelegatedFromTaskID:  attrDelegatedFrom,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -790,8 +839,14 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	originatorUserID := s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+	// An explicit mention / thread-parent / squad-leader hop from an
+	// agent-authored comment is a delegation (the parent task's human is
+	// copied); a member mention is direct_human. attr.UserID matches the
+	// pre-MUL-4302 value, so authorization is unchanged.
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation)
+	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
@@ -806,6 +861,10 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		OriginatorUserID:     originatorUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		DelegatedFromTaskID:  attrDelegatedFrom,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
