@@ -32,7 +32,9 @@
     "creator_row": "作成者 · リード",
     "name_required": "名前が必要です",
     "members_entry": "メンバー",
-    "member_count": "{{count}} 人選択"
+    "member_count": "{{count}} 人選択",
+    "section_basics": "基本情報",
+    "member_count_solo": "あなたのみ"
   },
   "form": {
     "name": "名前",
@@ -40,14 +42,15 @@
     "key": "識別子",
     "key_hint": "この Space の issue 番号に使われます（例: ENG-123）。1〜7 文字の大文字英数字、先頭は英字。",
     "key_reserved": "NEW は予約済みの識別子です。別の識別子を選んでください。",
-  "key_start_letter": "識別子は英字で始める必要があります。",
+    "key_start_letter": "識別子は英字で始める必要があります。",
     "key_rename_confirm_title": "識別子を変更しますか？",
     "key_rename_confirm_body": "この Space には {{count}} 件の issue があります。識別子は {{oldKey}}-N から {{newKey}}-N に変わります。既存の {{oldKey}}-N リンクは引き続き解決されます。",
     "icon": "アイコン",
     "members": "メンバー",
     "members_placeholder": "メンバーを追加…",
     "members_selected": "{{count}} 人を選択済み",
-    "icon_name": "アイコンと名前"
+    "icon_name": "アイコンと名前",
+    "key_hint_short": "この Space の issue 番号に使われます（例: ENG-123）。"
   },
   "picker": {
     "placeholder": "Space",

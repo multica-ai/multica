@@ -32,7 +32,9 @@
     "creator_row": "创建人 · 负责人",
     "name_required": "需要填写名称",
     "members_entry": "成员",
-    "member_count": "已选 {{count}} 人"
+    "member_count": "已选 {{count}} 人",
+    "section_basics": "基础信息",
+    "member_count_solo": "只有你"
   },
   "form": {
     "name": "名称",
@@ -40,14 +42,15 @@
     "key": "标识符",
     "key_hint": "用于该空间的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
     "key_reserved": "NEW 是保留标识符，请换一个。",
-  "key_start_letter": "标识符必须以字母开头。",
+    "key_start_letter": "标识符必须以字母开头。",
     "key_rename_confirm_title": "更改标识符？",
     "key_rename_confirm_body": "该空间有 {{count}} 个 issue，其标识符会从 {{oldKey}}-N 变为 {{newKey}}-N。原有的 {{oldKey}}-N 链接仍可正常解析。",
     "icon": "图标",
     "members": "成员",
     "members_placeholder": "添加同事…",
     "members_selected": "已选 {{count}} 位同事",
-    "icon_name": "图标与名称"
+    "icon_name": "图标与名称",
+    "key_hint_short": "用于该空间的 issue 编号，例如 ENG-123。"
   },
   "picker": {
     "placeholder": "空间",

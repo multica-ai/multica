@@ -32,7 +32,9 @@
     "creator_row": "Creator · Lead",
     "name_required": "Name is required",
     "members_entry": "Members",
-    "member_count": "{{count}} selected"
+    "member_count": "{{count}} selected",
+    "section_basics": "Basic information",
+    "member_count_solo": "Just you"
   },
   "form": {
     "name": "Name",
@@ -40,14 +42,15 @@
     "key": "Identifier",
     "key_hint": "Numbers this space’s issues — e.g. ENG-123. 1-7 uppercase letters or numbers, starting with a letter.",
     "key_reserved": "NEW is a reserved identifier — pick another one.",
-  "key_start_letter": "The identifier must start with a letter.",
+    "key_start_letter": "The identifier must start with a letter.",
     "key_rename_confirm_title": "Change identifier?",
     "key_rename_confirm_body": "This space has {{count}} issue(s). Their identifiers change from {{oldKey}}-N to {{newKey}}-N. Existing {{oldKey}}-N links keep resolving.",
     "icon": "Icon",
     "members": "Members",
     "members_placeholder": "Add spacemates…",
     "members_selected": "{{count}} spacemates selected",
-    "icon_name": "Icon & name"
+    "icon_name": "Icon & name",
+    "key_hint_short": "Used to number this space’s issues (e.g. ENG-123)."
   },
   "picker": {
     "placeholder": "Space",
