@@ -780,14 +780,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 
-		// OpenAI-compatible LLM endpoints (MUL-4238). User-scoped (auth-only,
-		// no workspace context needed): the basic LLM layer is a shared
-		// utility, not a per-workspace resource. Both accept the standard
-		// OpenAI chat-completions request body; model is taken from the request
-		// with a configured default fallback. Return 503 when the LLM layer is
-		// unconfigured (no MULTICA_LLM_API_KEY / MULTICA_LLM_BASE_URL).
-		r.Post("/api/llm/v1/chat/completions", h.LLMChatCompletions)
-		r.Post("/api/llm/v1/chat/completions/stream", h.LLMChatCompletionsStream)
+		// Note (MUL-4309): the generic OpenAI-compatible passthrough endpoints
+		// (POST /api/llm/v1/chat/completions[/stream]) were intentionally
+		// removed. Exposing a general LLM proxy backed by the deployment's own
+		// key let any logged-in user run arbitrary completions on our dime.
+		// LLM access is now server-internal only (see pkg/llm); anything the
+		// web/client needs must go through a purpose-built business endpoint
+		// that fixes the prompt/model server-side (e.g. chat title generation).
 
 		// Attachment download — user-scoped (auth-only), NOT
 		// workspace-scoped. The handler self-resolves the workspace

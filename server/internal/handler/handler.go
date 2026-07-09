@@ -96,9 +96,11 @@ type Config struct {
 	// can frame API-hosted PDFs without allowing arbitrary third-party frames.
 	AttachmentFrameAncestors []string
 	// LLM* configure the basic LLM API layer (MUL-4238). They back the
-	// OpenAI-compatible chat-completions endpoints and any internal one-shot
-	// LLM helpers. When both LLMAPIKey and LLMBaseURL are empty the layer is
-	// disabled and the endpoints return 503.
+	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
+	// The generic OpenAI-compatible passthrough endpoints were removed in
+	// MUL-4309; LLM access is internal-only now. When both LLMAPIKey and
+	// LLMBaseURL are empty the layer is disabled and callers fall back
+	// silently (see maybeGenerateChatTitleAsync).
 	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
