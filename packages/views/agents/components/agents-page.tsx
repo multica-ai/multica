@@ -627,7 +627,7 @@ function LoadingSkeleton() {
         <ListGridRow key={i} className="h-16 hover:bg-transparent">
           <span aria-hidden="true" className="hidden @2xl:inline" />
           <ListGridCell className="gap-3">
-            <Skeleton className="size-8 rounded-md" />
+            <Skeleton className="size-8 rounded-full" />
             <div className="min-w-0 flex-1 space-y-1.5">
               <Skeleton className="h-3.5 w-32 max-w-full" />
               <Skeleton className="h-3 w-48 max-w-full" />
