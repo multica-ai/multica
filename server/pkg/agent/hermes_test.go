@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1350,6 +1351,123 @@ while IFS= read -r line; do
   esac
 done
 `
+}
+
+func fakeHermesACPTempEnvScript() string {
+	return `#!/bin/sh
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_temp"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestHermesBackendUsesShortPrivateTempDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Hermes uses a TCP code-execution transport on Windows")
+	}
+	t.Parallel()
+
+	longTempDir := filepath.Join(t.TempDir(), strings.Repeat("deep-path-", 12))
+	if err := os.MkdirAll(longTempDir, 0o700); err != nil {
+		t.Fatalf("create long temp dir: %v", err)
+	}
+	const socketName = "hermes_rpc_0123456789abcdef0123456789abcdef.sock"
+	if socketPath := filepath.Join(longTempDir, socketName); len(socketPath) <= 107 {
+		t.Fatalf("test setup: socket path length = %d, want > 107: %q", len(socketPath), socketPath)
+	}
+
+	capturePath := filepath.Join(t.TempDir(), "temp-env.txt")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPTempEnvScript()))
+
+	backend, err := New("hermes", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"CAPTURE_FILE": capturePath,
+			"TMPDIR":       longTempDir,
+			"TMP":          longTempDir,
+			"TEMP":         longTempDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	raw, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("read captured temp env: %v", err)
+	}
+	captured := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		captured[key] = value
+	}
+	shortTempDir := captured["TMPDIR"]
+	if shortTempDir == "" {
+		t.Fatal("TMPDIR was empty")
+	}
+	if shortTempDir == longTempDir {
+		t.Fatalf("TMPDIR was not shortened: %q", shortTempDir)
+	}
+	for _, key := range []string{"TMP", "TEMP"} {
+		if captured[key] != shortTempDir {
+			t.Fatalf("%s = %q, want %q", key, captured[key], shortTempDir)
+		}
+	}
+	if socketPath := filepath.Join(shortTempDir, socketName); len(socketPath) > 107 {
+		t.Fatalf("short temp dir still produces an overlong socket path (%d bytes): %q", len(socketPath), socketPath)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, statErr := os.Stat(shortTempDir)
+		if os.IsNotExist(statErr) {
+			break
+		}
+		if statErr != nil {
+			t.Fatalf("stat short temp dir: %v", statErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("short temp dir was not cleaned up: %q", shortTempDir)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestHermesBackendAttributesUsageToACPDefaultModel(t *testing.T) {

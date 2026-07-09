@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,23 @@ var hermesBlockedArgs = map[string]blockedArgMode{
 // the Codex-specific JSON-RPC methods.
 type hermesBackend struct {
 	cfg Config
+}
+
+func withHermesTempDir(env []string, tempDir string) []string {
+	filtered := make([]string, 0, len(env)+3)
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "TMPDIR", "TMP", "TEMP":
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return append(filtered,
+		"TMPDIR="+tempDir,
+		"TMP="+tempDir,
+		"TEMP="+tempDir,
+	)
 }
 
 func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -74,11 +92,6 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		b.cfg.Logger.Debug("hermes ignoring ExecOptions.SystemPrompt; using cwd-scoped context files", "cwd", opts.Cwd)
 	}
 
-	env := buildEnv(b.cfg.Env)
-	// Enable yolo mode so Hermes auto-approves all tool executions.
-	env = append(env, "HERMES_YOLO_MODE=1")
-	cmd.Env = env
-
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -113,7 +126,31 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("hermes stderr pipe: %w", err)
 	}
 
+	env := buildEnv(b.cfg.Env)
+	cleanupTempDir := func() {}
+	if runtime.GOOS != "windows" {
+		// Hermes execute_code binds an AF_UNIX RPC socket beneath Python's
+		// tempfile.gettempdir(). Multica's task-private TMPDIR can exceed the
+		// sockaddr_un path limit before Hermes appends its socket filename, so
+		// give only the Hermes child a short, private directory for its lifetime.
+		shortTempDir, err := os.MkdirTemp("/tmp", "multica-hermes-")
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("prepare hermes temp dir: %w", err)
+		}
+		env = withHermesTempDir(env, shortTempDir)
+		cleanupTempDir = func() {
+			if err := os.RemoveAll(shortTempDir); err != nil {
+				b.cfg.Logger.Warn("hermes temp dir cleanup failed", "path", shortTempDir, "error", err)
+			}
+		}
+	}
+	// Enable yolo mode so Hermes auto-approves all tool executions.
+	env = append(env, "HERMES_YOLO_MODE=1")
+	cmd.Env = env
+
 	if err := cmd.Start(); err != nil {
+		cleanupTempDir()
 		cancel()
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
@@ -192,6 +229,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer cleanupTempDir()
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
