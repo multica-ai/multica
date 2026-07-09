@@ -53,7 +53,9 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { useTypeLabels } from "./inbox-detail-label";
-import { getInboxDisplayTitle } from "./inbox-display";
+import { getInboxDisplayTitle, getInboxStringDetail } from "./inbox-display";
+import { AgentDraftResult } from "./agent-draft-result";
+import { SkillFindResult } from "./skill-find-result";
 import { useT } from "../../i18n";
 
 export function InboxPage() {
@@ -297,7 +299,7 @@ export function InboxPage() {
         issueId={selected.issue_id}
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
-        highlightCommentId={selected.details?.comment_id ?? undefined}
+        highlightCommentId={getInboxStringDetail(selected, "comment_id") || undefined}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -321,12 +323,22 @@ export function InboxPage() {
           {selected.body}
         </div>
       )}
-      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
+      {selected.type === "quick_create_failed" && getInboxStringDetail(selected, "original_prompt") && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
           <p className="text-xs font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
           </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm">{getInboxStringDetail(selected, "original_prompt")}</p>
+        </div>
+      )}
+      {selected.type === "skill_find_done" && (
+        <div className="mt-4">
+          <SkillFindResult item={selected} />
+        </div>
+      )}
+      {selected.type === "agent_draft_done" && (
+        <div className="mt-4">
+          <AgentDraftResult item={selected} />
         </div>
       )}
       <div className="mt-4 flex gap-2">
@@ -338,8 +350,8 @@ export function InboxPage() {
               // user can recover their input in the full editor instead of
               // retyping. The agent picker hint becomes the assignee
               // candidate (still editable).
-              const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
+              const prompt = getInboxStringDetail(selected, "original_prompt");
+              const agentId = getInboxStringDetail(selected, "agent_id");
               useIssueDraftStore.getState().setDraft({
                 description: prompt,
                 ...(agentId

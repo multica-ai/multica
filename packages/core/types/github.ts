@@ -1,9 +1,11 @@
-export type GitHubPullRequestState = "open" | "closed" | "merged" | "draft";
+export type GitHubKnownPullRequestState = "open" | "closed" | "merged" | "draft";
+export type GitHubPullRequestState = GitHubKnownPullRequestState | (string & {});
 
 /** Aggregated CI status for a PR's current head SHA, computed server-side from
  * the latest check_suite per app. `null` when no completed suite has been seen
  * yet (e.g. PR just opened, or repository has no CI configured). */
-export type GitHubPullRequestChecksConclusion = "passed" | "failed" | "pending";
+export type GitHubKnownPullRequestChecksConclusion = "passed" | "failed" | "pending";
+export type GitHubPullRequestChecksConclusion = GitHubKnownPullRequestChecksConclusion | (string & {});
 
 /** Raw mirror of GitHub's `mergeable_state`. The UI only surfaces `clean` and
  * `dirty`; the other values (`blocked`, `behind`, `unstable`, `unknown`,
@@ -19,7 +21,7 @@ export interface GitHubInstallation {
    * integrations (see `ListGitHubInstallationsResponse.can_manage`). */
   installation_id?: number;
   account_login: string;
-  account_type: "User" | "Organization";
+  account_type: string;
   account_avatar_url: string | null;
   created_at: string;
   /** Display name of the workspace member who connected this installation.

@@ -9,7 +9,8 @@
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
     "list_load_failed_default": "エージェント一覧の取得中に問題が発生しました。",
-    "try_again": "再試行"
+    "try_again": "再試行",
+    "ai_draft": "AI 下書き"
   },
   "scope": {
     "mine": "自分のもの",
@@ -423,8 +424,22 @@
       "cancel_failed_toast": "タスクをキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
-      "queued_prefix": "{{when}} に待機開始"
+      "queued_prefix": "{{when}} に待機開始",
+      "source_ai_task": "AI タスク"
     }
+  },
+  "ai_draft": {
+    "title": "AI でエージェントの下書きを作成",
+    "subtitle": "オンラインのエージェントに、このワークスペース向けのチームメイト構成を依頼します。",
+    "host_agent_label": "ホストエージェント",
+    "host_agent_placeholder": "オンラインのエージェントを選択",
+    "no_agents": "利用可能なオンラインエージェントがありません。先にランタイム連携エージェントを起動してください。",
+    "prompt_label": "このエージェントに何をさせますか？",
+    "prompt_placeholder": "例: React のパフォーマンス、アクセシビリティ、回帰テストを確認するフロントエンドレビューエージェントを作成してください。",
+    "cancel": "キャンセル",
+    "submit": "エージェントの下書きを作成",
+    "toast_queued": "エージェント下書きタスクを開始しました。結果はインボックスに届きます。",
+    "fallback_error": "エージェント下書きタスクを開始できませんでした"
   },
   "char_counter": {
     "over_limit": " · 制限を {{count}} 文字超過"

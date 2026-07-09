@@ -115,6 +115,24 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.getByText("Ready to merge")).toBeInTheDocument();
   });
 
+  it("renders unknown future PR state with the raw state label", async () => {
+    mockPRs = [makePR({ title: "Future state", state: "constructor" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Future state")).toBeInTheDocument();
+    expect(screen.getByText(/constructor/)).toBeInTheDocument();
+  });
+
+  it("ignores unknown checks conclusions instead of rendering a known checks badge", async () => {
+    mockPRs = [makePR({ title: "Future checks", checks_conclusion: "toString" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Future checks")).toBeInTheDocument();
+    expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checks failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checks pending")).not.toBeInTheDocument();
+  });
+
   it("renders Merged status for merged PRs, suppressing conflict/check text", async () => {
     mockPRs = [
       makePR({

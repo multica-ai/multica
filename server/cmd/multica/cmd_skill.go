@@ -63,6 +63,12 @@ var skillImportCmd = &cobra.Command{
 	RunE:  runSkillImport,
 }
 
+var skillFindCmd = &cobra.Command{
+	Use:   "find",
+	Short: "Write AI skill finder results",
+	RunE:  runSkillFind,
+}
+
 var skillSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search for installable skills",
@@ -105,6 +111,7 @@ func init() {
 	skillCmd.AddCommand(skillUpdateCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillFindCmd)
 	skillCmd.AddCommand(skillSearchCmd)
 	skillCmd.AddCommand(skillFilesCmd)
 
@@ -148,6 +155,9 @@ func init() {
 	// skill search
 	skillSearchCmd.Flags().String("output", "json", "Output format: table or json")
 
+	// skill find
+	skillFindCmd.Flags().String("output-results", "", "Structured recommendation JSON to return to the AI task")
+
 	// skill files list
 	skillFilesListCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -157,6 +167,15 @@ func init() {
 	skillFilesUpsertCmd.Flags().Bool("content-stdin", false, "Read file content from stdin. Mutually exclusive with --content and --content-file.")
 	skillFilesUpsertCmd.Flags().String("content-file", "", "Read file content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillFilesUpsertCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func runSkillFind(cmd *cobra.Command, _ []string) error {
+	results, _ := cmd.Flags().GetString("output-results")
+	if err := writeStructuredAIResult(results); err != nil {
+		return err
+	}
+	fmt.Println("Skill recommendations captured")
+	return nil
 }
 
 // ---------------------------------------------------------------------------

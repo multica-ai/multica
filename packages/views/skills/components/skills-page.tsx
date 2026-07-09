@@ -10,6 +10,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  Sparkles,
 } from "lucide-react";
 import type {
   Agent,
@@ -55,6 +56,7 @@ import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { readOrigin, type OriginInfo } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
+import { SkillFinderDialog } from "./skill-finder-dialog";
 import {
   useSkillsViewStore,
   DEFAULT_HIDDEN_COLUMNS,
@@ -162,9 +164,11 @@ export interface SkillRow {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onFind,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onFind?: () => void;
 }) {
   const { t } = useT("skills");
   return (
@@ -189,19 +193,38 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      {/* Quiet chrome button (outline, icon-only below md) — primary is
-          reserved for the empty state's single CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_skill)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_skill)}</span>
-      </Button>
+      <div className="flex items-center gap-2">
+        {onFind && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.finder.action)}
+            onClick={onFind}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.finder.action)}
+            </span>
+          </Button>
+        )}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's single CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_skill)}
+          onClick={onCreate}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">
+            {t(($) => $.page.new_skill)}
+          </span>
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -598,6 +621,7 @@ export default function SkillsPage() {
   );
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [finderOpen, setFinderOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -763,7 +787,11 @@ export default function SkillsPage() {
   if (listError) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <PageHeaderBar
+          totalCount={0}
+          onCreate={() => setCreateOpen(true)}
+          onFind={() => setFinderOpen(true)}
+        />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
@@ -813,6 +841,7 @@ export default function SkillsPage() {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
+        onFind={() => setFinderOpen(true)}
       />
 
       {supportingQueryDown && (
@@ -946,6 +975,14 @@ export default function SkillsPage() {
         <CreateSkillDialog
           onClose={() => setCreateOpen(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {finderOpen && (
+        <SkillFinderDialog
+          agents={agents}
+          runtimesById={runtimesById}
+          onClose={() => setFinderOpen(false)}
         />
       )}
     </div>

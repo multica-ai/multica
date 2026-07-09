@@ -42,6 +42,12 @@ var agentCreateCmd = &cobra.Command{
 	RunE:  runAgentCreate,
 }
 
+var agentDraftCmd = &cobra.Command{
+	Use:   "draft",
+	Short: "Record structured AI agent draft output",
+	RunE:  runAgentDraft,
+}
+
 var agentUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update an agent",
@@ -134,6 +140,7 @@ func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentGetCmd)
 	agentCmd.AddCommand(agentCreateCmd)
+	agentCmd.AddCommand(agentDraftCmd)
 	agentCmd.AddCommand(agentUpdateCmd)
 	agentCmd.AddCommand(agentArchiveCmd)
 	agentCmd.AddCommand(agentRestoreCmd)
@@ -177,6 +184,9 @@ func init() {
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent draft
+	agentDraftCmd.Flags().String("output-results", "", "Structured JSON agent draft result for AI task capture")
 
 	// agent update
 	agentUpdateCmd.Flags().String("name", "", "New name")
@@ -240,6 +250,18 @@ func init() {
 	agentEnvSetCmd.Flags().Bool("custom-env-stdin", false, "Read the replacement custom_env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentEnvSetCmd.Flags().String("custom-env-file", "", "Read the replacement custom_env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
+}
+
+func runAgentDraft(cmd *cobra.Command, _ []string) error {
+	outputResults, _ := cmd.Flags().GetString("output-results")
+	if strings.TrimSpace(outputResults) == "" {
+		return fmt.Errorf("--output-results is required")
+	}
+	if err := writeStructuredAIResult(outputResults); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, "Agent draft captured")
+	return nil
 }
 
 // resolveProfile returns the --profile flag value (empty string means default profile).

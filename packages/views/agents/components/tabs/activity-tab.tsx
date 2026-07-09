@@ -394,7 +394,9 @@ function TaskRow({
       ? isTerminalStatus
         ? t(($) => $.tab_body.activity.source_quick_create)
         : t(($) => $.tab_body.activity.source_creating_issue)
-      : task.chat_session_id
+      : task.kind === "ai_task"
+        ? t(($) => $.tab_body.activity.source_ai_task)
+        : task.chat_session_id
         ? t(($) => $.tab_body.activity.source_chat_session)
         : task.autopilot_run_id
           ? t(($) => $.tab_body.activity.source_autopilot_run)

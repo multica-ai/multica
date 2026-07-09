@@ -92,6 +92,9 @@ type Task struct {
 	AutopilotSource          string                `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
 	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
 	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	AITaskType               string                `json:"ai_task_type,omitempty"`                // generic no-parent AI task type, e.g. skill-find
+	AITaskPrompt             string                `json:"ai_task_prompt,omitempty"`              // user's natural-language input for AI tasks
+	AITaskVersion            int                   `json:"ai_task_version,omitempty"`             // AI task context version
 	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote              string                `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
 

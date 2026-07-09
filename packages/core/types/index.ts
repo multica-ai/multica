@@ -19,6 +19,11 @@ export type {
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
   CreateAgentRequest,
+  DraftAgentWithAIRequest,
+  FindSkillsWithAIRequest,
+  AITaskQueuedResponse,
+  SkillFindRecommendation,
+  AgentDraftResult,
   AgentTemplate,
   AgentTemplateSummary,
   AgentTemplateSkillRef,
@@ -111,6 +116,8 @@ export type {
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   GitHubInstallation,
+  GitHubKnownPullRequestChecksConclusion,
+  GitHubKnownPullRequestState,
   GitHubMergeableState,
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,

@@ -9,6 +9,7 @@ import {
   Loader2,
   Lock,
   Plus,
+  Sparkles,
   X,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -76,6 +77,7 @@ import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
+import { AgentDraftDialog } from "./agent-draft-dialog";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import {
@@ -196,9 +198,11 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onDraft,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onDraft?: () => void;
 }) {
   const { t } = useT("agents");
   return (
@@ -223,19 +227,38 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      {/* Quiet chrome button (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_agent)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
-      </Button>
+      <div className="flex items-center gap-2">
+        {onDraft && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.page.ai_draft)}
+            onClick={onDraft}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.page.ai_draft)}
+            </span>
+          </Button>
+        )}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_agent)}
+          onClick={onCreate}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">
+            {t(($) => $.page.new_agent)}
+          </span>
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -829,6 +852,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showAIDraft, setShowAIDraft] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
@@ -1097,6 +1121,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setShowCreate(true)}
+        onDraft={() => setShowAIDraft(true)}
       />
 
       {isLoading ? (
@@ -1244,6 +1269,14 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         rows={selectedRows}
         onClear={() => setSelectedIds(new Set())}
       />
+
+      {showAIDraft && (
+        <AgentDraftDialog
+          agents={agents}
+          runtimesById={runtimesById}
+          onClose={() => setShowAIDraft(false)}
+        />
+      )}
 
       {showCreate && (
         <CreateAgentDialog

@@ -25,7 +25,11 @@
     "empty": "インボックスは空です",
     "original_input": "元の入力",
     "edit_advanced": "詳細フォームで編集",
-    "archive": "アーカイブ"
+    "archive": "アーカイブ",
+    "skill_find_empty": "有効なおすすめは返されませんでした。",
+    "agent_draft_fallback_name": "新規エージェント",
+    "open_agent": "エージェントを開く",
+    "attached_skills": "添付されたスキル"
   },
   "types": {
     "issue_assigned": "割り当て済み",
@@ -45,7 +49,11 @@
     "agent_completed": "エージェントが完了",
     "reaction_added": "リアクションあり",
     "quick_create_done": "エージェントで作成",
-    "quick_create_failed": "エージェントでの作成に失敗"
+    "quick_create_failed": "エージェントでの作成に失敗",
+    "skill_find_done": "スキルのおすすめ",
+    "skill_find_failed": "スキル検索に失敗",
+    "agent_draft_done": "エージェント下書き",
+    "agent_draft_failed": "エージェント下書きに失敗"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",
