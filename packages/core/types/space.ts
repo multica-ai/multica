@@ -3,7 +3,6 @@ export interface Space {
   workspace_id: string;
   name: string;
   key: string;
-  description: string;
   icon: string | null;
   issue_counter: number;
   archived_at: string | null;
@@ -19,7 +18,6 @@ export interface Space {
 export interface CreateSpaceRequest {
   name: string;
   key: string;
-  description?: string;
   icon?: string | null;
   /** Workspace members invited alongside the creator (who joins as lead). */
   member_ids?: string[];
@@ -28,7 +26,6 @@ export interface CreateSpaceRequest {
 export interface UpdateSpaceRequest {
   name?: string;
   key?: string;
-  description?: string;
   icon?: string | null;
 }
 

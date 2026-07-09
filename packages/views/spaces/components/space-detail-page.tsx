@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, FolderKanban, ListTodo, Search, Zap } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { PlainTextField } from "@multica/ui/components/common/plain-text-field";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -48,7 +47,7 @@ import { useT } from "../../i18n";
 /**
  * Space detail — /space/:key, the sidebar space row's landing page. A single
  * narrow column: the identity rendered as page text (icon picker applies on
- * pick, name and description commit on blur — no save buttons), then members
+ * pick, name commits on blur — no save buttons), then members
  * (avatar stack → checkbox config; saving an empty set archives behind a
  * confirm), go-to links, and archive.
  */
@@ -93,9 +92,9 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
 }
 
 /**
- * Icon + name + description rendered as page content. The icon applies on
- * pick; name and description commit on blur (Escape restores) — there is no
- * save button anywhere on this page.
+ * Icon + name rendered as page content. The icon applies on pick; name
+ * commits on blur (Escape restores) — there is no save button anywhere on
+ * this page.
  */
 function Identity({ space }: { space: Space }) {
   const { t } = useT("spaces");
@@ -125,7 +124,7 @@ function Identity({ space }: { space: Space }) {
   const keyStartsWithDigit = /^[0-9]/.test(keyDraft);
   const keyError = keyDraft.length > 0 && !isValidSpaceKey(keyDraft);
 
-  const saveField = async (patch: { name?: string; icon?: string | null; description?: string }) => {
+  const saveField = async (patch: { name?: string; icon?: string | null }) => {
     try {
       await updateSpace.mutateAsync({ id: space.id, ...patch });
       toast.success(t(($) => $.toast_updated));
@@ -215,17 +214,6 @@ function Identity({ space }: { space: Space }) {
           className="h-auto rounded-none border-0 bg-transparent px-0 py-1 !text-2xl font-bold leading-snug tracking-tight shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
       </div>
-      {/* Keyed by the server value so a committed save (or a WS update)
-          re-seeds the field without fighting in-progress typing. */}
-      <PlainTextField
-        key={`${space.id}:${space.description}`}
-        defaultValue={space.description}
-        placeholder={t(($) => $.form.description_placeholder)}
-        aria-label={t(($) => $.form.description)}
-        className="text-sm"
-        limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
-        onCommit={(value) => void saveField({ description: value })}
-      />
       <div className="flex flex-col gap-1 pt-1">
         <Label htmlFor="space-key" className="text-xs font-medium text-muted-foreground">
           {t(($) => $.form.key)}

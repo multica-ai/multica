@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, Search } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { PlainTextField } from "@multica/ui/components/common/plain-text-field";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -48,7 +47,6 @@ export function CreateSpacePage() {
   const [keyTouched, setKeyTouched] = useState(false);
   const [icon, setIcon] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [description, setDescription] = useState("");
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -80,7 +78,6 @@ export function CreateSpacePage() {
       const space = await createSpace.mutateAsync({
         name: name.trim(),
         key,
-        description: description.trim() || undefined,
         icon: icon.trim() || null,
         member_ids: memberIds,
       });
@@ -160,21 +157,6 @@ export function CreateSpacePage() {
             {nameError && (
               <p className="text-xs text-destructive">{t(($) => $.dialog.name_required)}</p>
             )}
-          </div>
-
-          {/* Description */}
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t(($) => $.form.description)}
-            </Label>
-            <PlainTextField
-              defaultValue={description}
-              placeholder={t(($) => $.form.description_placeholder)}
-              aria-label={t(($) => $.form.description)}
-              className="min-h-16 rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring"
-              limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
-              onCommit={setDescription}
-            />
           </div>
 
           {/* Identifier */}

@@ -202,7 +202,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjectSpaces = `-- name: ListProjectSpaces :many
-SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at FROM workspace_space wt
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at FROM workspace_space wt
 JOIN project_space pt ON pt.space_id = wt.id AND pt.workspace_id = wt.workspace_id
 WHERE pt.workspace_id = $1
   AND pt.project_id = $2
@@ -228,7 +228,6 @@ func (q *Queries) ListProjectSpaces(ctx context.Context, arg ListProjectSpacesPa
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,
@@ -248,7 +247,7 @@ func (q *Queries) ListProjectSpaces(ctx context.Context, arg ListProjectSpacesPa
 }
 
 const listProjectSpacesByProjects = `-- name: ListProjectSpacesByProjects :many
-SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
+SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key,
        wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by,
        wt.created_by, wt.created_at, wt.updated_at
 FROM project_space pt
@@ -269,7 +268,6 @@ type ListProjectSpacesByProjectsRow struct {
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
 	Name         string             `json:"name"`
 	Key          string             `json:"key"`
-	Description  string             `json:"description"`
 	Icon         pgtype.Text        `json:"icon"`
 	IssueCounter int32              `json:"issue_counter"`
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
@@ -294,7 +292,6 @@ func (q *Queries) ListProjectSpacesByProjects(ctx context.Context, arg ListProje
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,

@@ -265,7 +265,6 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: ws.ID,
 		Name:        ws.Name,
 		Key:         defaultSpaceKey,
-		Description: pgtype.Text{},
 		// No icon on purpose: the default space renders SpaceIcon's colored
 		// fallback block, which is the designated landing spot for the
 		// planned per-space colors (see SpaceIcon).

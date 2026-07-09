@@ -44,7 +44,7 @@ UPDATE workspace_space SET
 WHERE id = $1
   AND workspace_id = $2
   AND archived_at IS NULL
-RETURNING id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
 `
 
 type ArchiveWorkspaceSpaceParams struct {
@@ -64,7 +64,6 @@ func (q *Queries) ArchiveWorkspaceSpace(ctx context.Context, arg ArchiveWorkspac
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -78,17 +77,16 @@ func (q *Queries) ArchiveWorkspaceSpace(ctx context.Context, arg ArchiveWorkspac
 
 const createWorkspaceSpace = `-- name: CreateWorkspaceSpace :one
 INSERT INTO workspace_space (
-    workspace_id, name, key, description, icon, created_by
+    workspace_id, name, key, icon, created_by
 ) VALUES (
-    $1, $2, $3, COALESCE($4::text, ''), $5::text, $6
-) RETURNING id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+    $1, $2, $3, $4::text, $5
+) RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
 `
 
 type CreateWorkspaceSpaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	Key         string      `json:"key"`
-	Description pgtype.Text `json:"description"`
 	Icon        pgtype.Text `json:"icon"`
 	CreatedBy   pgtype.UUID `json:"created_by"`
 }
@@ -98,7 +96,6 @@ func (q *Queries) CreateWorkspaceSpace(ctx context.Context, arg CreateWorkspaceS
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Key,
-		arg.Description,
 		arg.Icon,
 		arg.CreatedBy,
 	)
@@ -108,7 +105,6 @@ func (q *Queries) CreateWorkspaceSpace(ctx context.Context, arg CreateWorkspaceS
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -121,7 +117,7 @@ func (q *Queries) CreateWorkspaceSpace(ctx context.Context, arg CreateWorkspaceS
 }
 
 const getDefaultWorkspaceSpace = `-- name: GetDefaultWorkspaceSpace :one
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT 1
@@ -139,7 +135,6 @@ func (q *Queries) GetDefaultWorkspaceSpace(ctx context.Context, workspaceID pgty
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -152,7 +147,7 @@ func (q *Queries) GetDefaultWorkspaceSpace(ctx context.Context, workspaceID pgty
 }
 
 const getWorkspaceSpace = `-- name: GetWorkspaceSpace :one
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -169,7 +164,6 @@ func (q *Queries) GetWorkspaceSpace(ctx context.Context, arg GetWorkspaceSpacePa
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -182,7 +176,7 @@ func (q *Queries) GetWorkspaceSpace(ctx context.Context, arg GetWorkspaceSpacePa
 }
 
 const getWorkspaceSpaceByKey = `-- name: GetWorkspaceSpaceByKey :one
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1
   AND lower(key) = lower($2)
 LIMIT 1
@@ -201,7 +195,6 @@ func (q *Queries) GetWorkspaceSpaceByKey(ctx context.Context, arg GetWorkspaceSp
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -261,7 +254,7 @@ func (q *Queries) IncrementSpaceIssueCounter(ctx context.Context, arg IncrementS
 }
 
 const listActiveWorkspaceSpaces = `-- name: ListActiveWorkspaceSpaces :many
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1
   AND archived_at IS NULL
 ORDER BY name ASC, created_at ASC
@@ -281,7 +274,6 @@ func (q *Queries) ListActiveWorkspaceSpaces(ctx context.Context, workspaceID pgt
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,
@@ -301,7 +293,7 @@ func (q *Queries) ListActiveWorkspaceSpaces(ctx context.Context, workspaceID pgt
 }
 
 const listActiveWorkspaceSpacesForUpdate = `-- name: ListActiveWorkspaceSpacesForUpdate :many
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1
   AND archived_at IS NULL
 FOR UPDATE
@@ -325,7 +317,6 @@ func (q *Queries) ListActiveWorkspaceSpacesForUpdate(ctx context.Context, worksp
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,
@@ -441,7 +432,7 @@ func (q *Queries) ListWorkspaceSpaceMembersWithUser(ctx context.Context, arg Lis
 }
 
 const listWorkspaceSpaces = `-- name: ListWorkspaceSpaces :many
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1
 ORDER BY archived_at NULLS FIRST, name ASC, created_at ASC
 `
@@ -460,7 +451,6 @@ func (q *Queries) ListWorkspaceSpaces(ctx context.Context, workspaceID pgtype.UU
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,
@@ -480,7 +470,7 @@ func (q *Queries) ListWorkspaceSpaces(ctx context.Context, workspaceID pgtype.UU
 }
 
 const listWorkspaceSpacesByIDs = `-- name: ListWorkspaceSpacesByIDs :many
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
 `
@@ -504,7 +494,6 @@ func (q *Queries) ListWorkspaceSpacesByIDs(ctx context.Context, arg ListWorkspac
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Key,
-			&i.Description,
 			&i.Icon,
 			&i.IssueCounter,
 			&i.ArchivedAt,
@@ -524,7 +513,7 @@ func (q *Queries) ListWorkspaceSpacesByIDs(ctx context.Context, arg ListWorkspac
 }
 
 const listWorkspaceSpacesForUser = `-- name: ListWorkspaceSpacesForUser :many
-SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at,
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at,
        (m.user_id IS NOT NULL)::boolean AS is_member,
        COALESCE(m.sort_order, 0)::double precision AS member_sort_order
 FROM workspace_space wt
@@ -561,7 +550,6 @@ func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorksp
 			&i.WorkspaceSpace.WorkspaceID,
 			&i.WorkspaceSpace.Name,
 			&i.WorkspaceSpace.Key,
-			&i.WorkspaceSpace.Description,
 			&i.WorkspaceSpace.Icon,
 			&i.WorkspaceSpace.IssueCounter,
 			&i.WorkspaceSpace.ArchivedAt,
@@ -583,7 +571,7 @@ func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorksp
 }
 
 const lockWorkspaceSpaceForKeyUpdate = `-- name: LockWorkspaceSpaceForKeyUpdate :one
-SELECT id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -601,7 +589,6 @@ func (q *Queries) LockWorkspaceSpaceForKeyUpdate(ctx context.Context, arg LockWo
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,
@@ -692,11 +679,10 @@ const updateWorkspaceSpace = `-- name: UpdateWorkspaceSpace :one
 UPDATE workspace_space SET
     name = COALESCE($3, name),
     key = COALESCE($4, key),
-    description = COALESCE($5, description),
-    icon = COALESCE($6, icon),
+    icon = COALESCE($5, icon),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, key, description, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
 `
 
 type UpdateWorkspaceSpaceParams struct {
@@ -704,7 +690,6 @@ type UpdateWorkspaceSpaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        pgtype.Text `json:"name"`
 	Key         pgtype.Text `json:"key"`
-	Description pgtype.Text `json:"description"`
 	Icon        pgtype.Text `json:"icon"`
 }
 
@@ -714,7 +699,6 @@ func (q *Queries) UpdateWorkspaceSpace(ctx context.Context, arg UpdateWorkspaceS
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Key,
-		arg.Description,
 		arg.Icon,
 	)
 	var i WorkspaceSpace
@@ -723,7 +707,6 @@ func (q *Queries) UpdateWorkspaceSpace(ctx context.Context, arg UpdateWorkspaceS
 		&i.WorkspaceID,
 		&i.Name,
 		&i.Key,
-		&i.Description,
 		&i.Icon,
 		&i.IssueCounter,
 		&i.ArchivedAt,

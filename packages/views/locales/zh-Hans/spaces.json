@@ -44,13 +44,10 @@
     "key_rename_confirm_title": "更改标识符？",
     "key_rename_confirm_body": "该空间有 {{count}} 个 issue，其标识符会从 {{oldKey}}-N 变为 {{newKey}}-N。原有的 {{oldKey}}-N 链接仍可正常解析。",
     "icon": "图标",
-    "description": "描述",
-    "description_placeholder": "添加描述…",
     "members": "成员",
     "members_placeholder": "添加同事…",
     "members_selected": "已选 {{count}} 位同事",
-    "icon_name": "图标与名称",
-    "description_limit": "最多 {{max}} 个字符（当前 {{count}}）"
+    "icon_name": "图标与名称"
   },
   "picker": {
     "placeholder": "空间",
