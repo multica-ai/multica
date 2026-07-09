@@ -1,0 +1,2 @@
+ALTER TABLE squad ADD COLUMN archived_at TIMESTAMPTZ;
+ALTER TABLE squad ADD COLUMN archived_by UUID;

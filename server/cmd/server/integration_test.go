@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -70,7 +71,7 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
-	router := NewRouter(pool, hub, bus)
+	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
 	testServer = httptest.NewServer(router)
 
 	// Generate a JWT token directly for the test user
@@ -219,6 +220,56 @@ func TestHealth(t *testing.T) {
 	if result["status"] != "ok" {
 		t.Fatalf("expected status ok, got %s", result["status"])
 	}
+}
+
+func TestReadinessEndpoints(t *testing.T) {
+	for _, path := range []string{"/readyz", "/healthz"} {
+		t.Run(path, func(t *testing.T) {
+			resp, err := http.Get(testServer.URL + path)
+			if err != nil {
+				t.Fatalf("readiness check failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", resp.StatusCode)
+			}
+
+			var result struct {
+				Status string            `json:"status"`
+				Checks map[string]string `json:"checks"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if result.Status != "ok" {
+				t.Fatalf("expected status ok, got %s", result.Status)
+			}
+			if result.Checks["db"] != "ok" {
+				t.Fatalf("expected db check ok, got %s", result.Checks["db"])
+			}
+			if result.Checks["migrations"] != "ok" {
+				t.Fatalf("expected migrations check ok, got %s", result.Checks["migrations"])
+			}
+		})
+	}
+}
+
+func TestConfigRouteIsPublic(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("config request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		CdnDomain string `json:"cdn_domain"`
+	}
+	readJSON(t, resp, &result)
 }
 
 // ---- Auth ----
@@ -671,6 +722,62 @@ func TestWorkspacesThroughRouter(t *testing.T) {
 	}
 }
 
+// TestDeleteWorkspaceRequiresOwner is a defense-in-depth regression test for the
+// permission gate on DELETE /api/workspaces/{id}. It creates a separate workspace
+// in which the integration test user is only an "admin" (not "owner") and asserts
+// that DELETE returns 403, leaving the workspace intact. This guards against both
+// router misconfiguration (missing middleware) and handler regressions.
+func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "integration-tests-delete-403"
+	// Best-effort cleanup from any prior run.
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, "Integration Tests Delete 403", slug, "DeleteWorkspace permission test").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'admin')
+	`, wsID, testUserID); err != nil {
+		t.Fatalf("create admin member: %v", err)
+	}
+
+	req, err := http.NewRequest("DELETE", testServer.URL+"/api/workspaces/"+wsID, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("X-Workspace-ID", wsID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-owner DELETE, got %d", resp.StatusCode)
+	}
+
+	var exists bool
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
+		t.Fatalf("verify workspace: %v", err)
+	}
+	if !exists {
+		t.Fatal("workspace was deleted despite non-owner request")
+	}
+}
+
 // ---- Inbox through full router ----
 
 func TestInboxThroughRouter(t *testing.T) {
@@ -683,6 +790,127 @@ func TestInboxThroughRouter(t *testing.T) {
 	// Inbox may be empty, just verify it returns valid JSON array
 	if items == nil {
 		t.Fatal("expected non-nil inbox items array")
+	}
+}
+
+func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
+	ctx := context.Background()
+
+	// Seed one unread inbox item for the test user in the test workspace.
+	var itemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title)
+		VALUES ($1, 'member', $2, 'issue_assigned', 'Summary fixture')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&itemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, itemID)
+	})
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID {
+			found = true
+			if s.Count < 1 {
+				t.Fatalf("expected unread count >= 1 for test workspace, got %d", s.Count)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected test workspace %s in unread summary, got %+v", testWorkspaceID, summary)
+	}
+
+	// After marking it read, the workspace should drop out of the summary.
+	if _, err := testPool.Exec(ctx, `UPDATE inbox_item SET read = true WHERE id = $1`, itemID); err != nil {
+		t.Fatalf("failed to mark item read: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary (after read): expected 200, got %d", resp.StatusCode)
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("expected no unread for test workspace after read, got count %d", s.Count)
+		}
+	}
+}
+
+// An issue's inbox notifications are deduplicated per issue: opening the issue
+// marks only the NEWEST item read, leaving older siblings unread. The summary
+// must mirror the inbox UI (issue is read when its newest item is read), so a
+// read-newest / unread-older issue must NOT light the switcher dot (MUL-3695).
+func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Dedup fixture', 'member', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to seed issue: %v", err)
+	}
+	// Deleting the issue cascades to its inbox_item rows (FK ON DELETE CASCADE).
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Older sibling stays unread; newer sibling is read (the one "opening the
+	// issue" would have marked read).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, created_at)
+		VALUES
+			($1, 'member', $2, 'new_comment',    'older', $3, false, now() - interval '1 hour'),
+			($1, 'member', $2, 'status_changed', 'newer', $3, true,  now())
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed inbox items: %v", err)
+	}
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("issue whose newest item is read must not count as unread, got count %d", s.Count)
+		}
+	}
+
+	// Now mark the newest item unread again → the issue becomes unread and the
+	// workspace reappears in the summary.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE inbox_item SET read = false WHERE issue_id = $1 AND title = 'newer'
+	`, issueID); err != nil {
+		t.Fatalf("failed to flip newest item unread: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	readJSON(t, resp, &summary)
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count >= 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected workspace in summary once newest item is unread, got %+v", summary)
 	}
 }
 

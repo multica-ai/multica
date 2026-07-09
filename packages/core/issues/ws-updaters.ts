@@ -1,23 +1,40 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
-import type { Issue } from "../types";
-import type { ListIssuesResponse } from "../types";
+import { labelKeys } from "../labels/queries";
+import { projectKeys } from "../projects/queries";
+import {
+  applyIssueChange,
+  invalidateIssueDerivatives,
+  invalidateStaleListKeys,
+} from "./cache-coordinator";
+import {
+  addIssueToBuckets,
+  findIssueLocation,
+  patchIssueInBuckets,
+} from "./cache-helpers";
+import { cleanupDeletedIssueCaches } from "./delete-cache";
+import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
+import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
   qc: QueryClient,
   wsId: string,
   issue: Issue,
 ) {
-  qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
-    if (!old || old.issues.some((i) => i.id === issue.id)) return old;
-    return {
-      ...old,
-      issues: [...old.issues, issue],
-      total: old.total + 1,
-      doneTotal: (old.doneTotal ?? 0) + (issue.status === "done" ? 1 : 0),
-    };
-  });
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  if (issue.project_id) {
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+  }
+  // Refresh every Project Gantt cache that might be observing this issue.
+  // We invalidate the whole prefix rather than the issue's own project
+  // because a fresh issue isn't necessarily scheduled yet; the active Gantt
+  // page (if any) will refetch and pick it up if it qualifies.
+  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   if (issue.parent_issue_id) {
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
@@ -28,44 +45,74 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
+  // assigneeChanged / statusChanged / projectChanged come from the server's
+  // issue:updated flags — authoritative "did this write move a membership
+  // dimension" signals. They feed the coordinator's changed-dims input so a
+  // non-membership change (title / position / priority / label) keeps every
+  // loaded list in place instead of refetching.
+  meta: {
+    assigneeChanged?: boolean;
+    statusChanged?: boolean;
+    projectChanged?: boolean;
+  } = {},
 ) {
-  // Look up the OLD parent before mutating list state, so we can keep
-  // the parent's children cache in sync (powers the sub-issues list
-  // shown on the parent issue page).
-  const listData = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
+  // Look up the OLD parent + cached entity before mutating cache state, so we
+  // can keep the parent's children cache in sync (powers the sub-issues list
+  // shown on the parent issue page) and diff-fallback the change flags.
+  const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+  const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
+  const cachedIssue =
+    detailData ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue : undefined);
   const oldParentId =
-    detailData?.parent_issue_id ??
-    listData?.issues.find((i) => i.id === issue.id)?.parent_issue_id ??
-    null;
+    detailData?.parent_issue_id ?? cachedIssue?.parent_issue_id ?? null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
-  qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
-    if (!old) return old;
-    const prev = old.issues.find((i) => i.id === issue.id);
-    const wasDone = prev?.status === "done";
-    const isDone = issue.status === "done";
-    // Only adjust doneTotal when status field is present and actually changed
-    let doneDelta = 0;
-    if (issue.status !== undefined) {
-      if (!wasDone && isDone) doneDelta = 1;
-      else if (wasDone && !isDone) doneDelta = -1;
-    }
-    return {
-      ...old,
-      issues: old.issues.map((i) =>
-        i.id === issue.id ? { ...i, ...issue } : i,
-      ),
-      doneTotal: (old.doneTotal ?? 0) + doneDelta,
-    };
+  // Prefer the server's flags (authoritative, set on the wire). Fall back to
+  // diffing the payload against the cached copy only when a flag is absent
+  // (older backend): the diff is unreliable once a local optimistic move has
+  // overwritten the cached value, but it still covers remote/agent changes
+  // and keeps a new frontend on an old backend from regressing (MUL-3669 /
+  // #4548). The local move itself is covered by useUpdateIssue's own
+  // coordinator pass, which never depends on these flags.
+  const oldProjectId = detailData?.project_id ?? cachedIssue?.project_id ?? null;
+  const changed = {
+    assignee:
+      meta.assigneeChanged ??
+      (cachedIssue !== undefined &&
+        ((issue.assignee_id !== undefined &&
+          issue.assignee_id !== cachedIssue.assignee_id) ||
+          (issue.assignee_type !== undefined &&
+            issue.assignee_type !== cachedIssue.assignee_type))),
+    project:
+      meta.projectChanged ??
+      (issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId),
+    status:
+      meta.statusChanged ??
+      (cachedIssue !== undefined &&
+        issue.status !== undefined &&
+        issue.status !== cachedIssue.status),
+  };
+
+  // The coordinator applies the same rules table the local mutations use:
+  // surgical patch/rebucket where the card is loaded and still belongs,
+  // surgical remove where the change moved it off a filtered surface, and
+  // stale keys for the drift a patch cannot fix (enter/leave beyond the
+  // loaded window, undecidable membership, off-screen bucket counts). The
+  // server has already committed, so stale keys are flushed immediately.
+  const change = applyIssueChange(qc, wsId, issue.id, issue, {
+    changed,
+    baseIssue: cachedIssue,
   });
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
-    old ? { ...old, ...issue } : old,
-  );
+  invalidateStaleListKeys(qc, change.staleKeys);
+  invalidateIssueDerivatives(qc, wsId, {
+    statusOrProjectChanged:
+      issue.status !== undefined || issue.project_id !== undefined,
+  });
 
   // Invalidate old parent's children (issue was removed from it)
   if (oldParentId) {
@@ -85,7 +132,77 @@ export function onIssueUpdated(
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
+    qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   }
+}
+
+/**
+ * Patch an issue's labels in-place across the list cache, my-issues caches,
+ * the detail cache, and the per-issue label cache. Triggered by the
+ * `issue_labels:changed` WS event after attach/detach so list/board chips
+ * and the issue-detail Properties LabelPicker update without a refetch.
+ *
+ * The byIssue cache backs `LabelPicker`; without patching it, externally
+ * driven label changes (agents, other tabs) leave the picker stale until it
+ * remounts — `staleTime: Infinity` + `refetchOnWindowFocus: false` (see
+ * `query-client.ts`) means focus changes won't recover it.
+ */
+export function onIssueLabelsChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
+  }
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, labels } : old,
+  );
+  qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
+    old ? { ...old, labels } : old,
+  );
+  // Patch the Project Gantt caches in-place: the Gantt view applies
+  // `labelFilters` to the row data, so a stale `labels` array would silently
+  // hide or surface bars after another tab/agent attached or detached a
+  // label. Mutating in place (instead of invalidating) avoids a refetch of
+  // the entire scheduled set on every label toggle.
+  for (const [key, data] of qc.getQueriesData<Issue[]>({
+    queryKey: issueKeys.projectGanttAll(wsId),
+  })) {
+    if (!data) continue;
+    const next = data.map((issue) =>
+      issue.id === issueId ? { ...issue, labels } : issue,
+    );
+    qc.setQueryData<Issue[]>(key, next);
+  }
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+}
+
+/**
+ * Apply a metadata snapshot to the issue detail + list + my-issues caches.
+ * The server emits this whenever a single key is set or deleted, so the
+ * payload is always the FULL post-mutation map — we replace, not merge.
+ *
+ * Used for the read-only metadata strip in issue detail. Updates that arrive
+ * while no view is mounted still keep the caches accurate so the next render
+ * shows the latest state without a refetch.
+ */
+export function onIssueMetadataChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  metadata: IssueMetadata,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
+  }
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, metadata } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(
@@ -93,28 +210,8 @@ export function onIssueDeleted(
   wsId: string,
   issueId: string,
 ) {
-  // Look up the issue before removing it to check for parent_issue_id
-  const listData = qc.getQueryData<ListIssuesResponse>(issueKeys.list(wsId));
-  const deleted = listData?.issues.find((i) => i.id === issueId);
-
-  qc.setQueryData<ListIssuesResponse>(issueKeys.list(wsId), (old) => {
-    if (!old) return old;
-    const del = old.issues.find((i) => i.id === issueId);
-    return {
-      ...old,
-      issues: old.issues.filter((i) => i.id !== issueId),
-      total: old.total - 1,
-      doneTotal: (old.doneTotal ?? 0) - (del?.status === "done" ? 1 : 0),
-    };
-  });
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-  qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.children(wsId, issueId) });
-  if (deleted?.parent_issue_id) {
-    qc.invalidateQueries({ queryKey: issueKeys.children(wsId, deleted.parent_issue_id) });
-    qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
-  }
+  cleanupDeletedIssueCaches(qc, wsId, issueId);
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
 }

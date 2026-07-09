@@ -1,0 +1,280 @@
+---
+title: Self-host quickstart
+description: Run Multica on your own server or machine with Docker (or Helm on Kubernetes). Takes about 10 minutes.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This page walks you through running the Multica **server** (backend + frontend + PostgreSQL) on your own machine or server with Docker. When you're done, your data is fully under your control — including [workspaces](/workspaces), [issues](/issues), [comments](/comments), and [agent](/agents) configuration.
+
+Agent **execution** still relies on the [daemon](/daemon-runtimes) you run locally plus the [AI coding tools](/providers) installed on that machine — exactly like Cloud. Self-host swaps out the server layer, not the execution layer.
+
+## Prerequisites
+
+- **Docker** installed and able to run `docker compose`
+- **Git** (optional, but recommended so you can pull the source)
+- A machine that can stay up (local / internal network / cloud host all work)
+- At least one AI coding tool installed on **the machine running the daemon** (not necessarily the one running the server — your dev laptop works)
+
+## 1. Pull the project and start the backend
+
+<Callout type="info">
+**Already on Kubernetes?** Skip Docker and use the Helm chart instead — jump to [Kubernetes deployment](#kubernetes-deployment-alternative) below, then come back to [Step 4](#4-first-login--create-a-workspace) for first login.
+</Callout>
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+`make selfhost` will:
+
+1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET and Postgres password**
+2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
+3. Bring up every service using `docker-compose.selfhost.yml`
+4. Wait until the backend's `/health` endpoint is ready
+
+For ongoing production probes after startup, use `/readyz` when you want the
+check to fail on database or migration problems.
+
+The backend container **runs database migrations automatically** on startup (`docker/entrypoint.sh` runs `./migrate up` before the server starts) — you'll see the migration output in the backend logs. Version upgrades are handled the same way.
+
+<Callout type="info">
+**Image not published yet?** If `make selfhost` fails to pull images, you may be on an unreleased version tag. Switch to a stable release, or build from source: `make selfhost-build`.
+</Callout>
+
+Once it's up:
+
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Backend**: [http://localhost:8080](http://localhost:8080)
+
+<Callout type="info">
+**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. Secrets and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+</Callout>
+
+## 2. Important: keep production safety on
+
+<Callout type="warning">
+**`docker-compose.selfhost.yml` sets `APP_ENV` to `production` by default** and leaves `MULTICA_DEV_VERIFICATION_CODE` empty, so there is no fixed code on public instances.
+
+Only set `MULTICA_DEV_VERIFICATION_CODE` for local or private test automation. If a fixed code is enabled while `APP_ENV` is non-production, anyone who can request a code can sign in with that fixed value. See [Auth setup → Fixed local testing codes](/auth-setup#fixed-local-testing-codes).
+
+Before any public deployment, make sure `.env` has `APP_ENV=production` and `MULTICA_DEV_VERIFICATION_CODE` is empty.
+</Callout>
+
+## 3. Configure the email service (optional but recommended)
+
+Without email configured, your users can't receive verification codes by email; the server prints generated codes to stdout instead.
+
+Two delivery backends are supported — pick whichever fits your network:
+
+**Option A — Resend (cloud / public-internet deployments):**
+
+1. Sign up at [Resend](https://resend.com/) and get an API key
+2. Verify a sending domain you control
+3. Set these in `.env`:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com
+    ```
+
+**Option B — SMTP relay (internal networks / on-premise):**
+
+Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Microsoft Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set, so verification and invite mail stays on the internal relay. STARTTLS is upgraded automatically when advertised; port `465` (SMTPS / implicit TLS) auto-enables an immediate TLS handshake, and `SMTP_TLS=implicit` (aliases: `smtps`, `ssl`) forces it on a non-standard SMTPS port.
+
+For **anonymous Exchange internal relay (port 25)** — the host is trusted by IP and submits without credentials:
+
+```bash
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+For **authenticated submission (port 587, STARTTLS)** — the relay requires a service account; STARTTLS is upgraded automatically when advertised:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for private CA / self-signed
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+For **implicit TLS / SMTPS (port 465)** — providers like Aliyun / Tencent enterprise mail that don't advertise STARTTLS. Port `465` auto-enables implicit TLS, so `SMTP_TLS` is optional here:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+For **strict public relays (e.g. Google Workspace `smtp-relay.gmail.com`)** that reject the default `localhost` greeting from a public IP, set `SMTP_EHLO_NAME` to the FQDN the relay expects — otherwise the connection is dropped and surfaces as an opaque `EOF` on a later command. It defaults to the container hostname, which is usually not a valid FQDN:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`. On restart, the backend prints which provider it picked and the negotiated TLS mode (`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`) — credentials are never logged, so this line is safe to share when asking for help.
+
+For more auth configuration (OAuth, signup allowlist) and the full SMTP variable reference, see [Auth setup](/auth-setup) and [Environment variables → Email](/environment-variables#email-configuration).
+
+## 4. First login + create a workspace
+
+Open [http://localhost:3000](http://localhost:3000):
+
+- Enter your email
+- Grab the verification code from your configured email backend (Resend or SMTP relay); if neither is configured, copy it from the server container stdout — look for the `[DEV] Verification code` line
+- Do not use `888888` unless you explicitly set `MULTICA_DEV_VERIFICATION_CODE=888888` on a non-production private instance
+- Log in and create your first workspace
+
+## 5. Point the CLI at your own server
+
+The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one.
+
+### 5a. Same machine
+
+If the CLI and the server run on the same host, the defaults already work:
+
+```bash
+multica setup self-host
+```
+
+That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3000` (frontend), takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
+
+### 5b. Cross-machine: front with a reverse proxy
+
+Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since server secrets would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+
+```bash
+multica setup self-host \
+  --server-url https://<your-domain> \
+  --app-url https://<your-domain>
+```
+
+<Callout type="info">
+Prefer environment variables over flags? `setup self-host` reads `MULTICA_SERVER_URL` and `MULTICA_APP_URL` when the matching flag is omitted — a flag still takes precedence over the env var. `MULTICA_SERVER_URL` also accepts the `ws://…/ws` daemon form from [Environment variables](/environment-variables) and normalizes it to the HTTP base.
+</Callout>
+
+A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
+
+```nginx
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Backend API
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → frontend
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` in the server's `.env` and restart the backend — otherwise the WebSocket origin check will reject the browser ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination and forwarding the `Upgrade` header on `/ws`.
+
+## 6. Create an agent + assign your first task
+
+Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
+
+## 7. Usage rollup (no operator action required)
+
+<Callout type="info">
+The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup in-process via the DB-backed scheduler — `pg_cron` is no longer required, and external cron / systemd timers are no longer the recommended setup. The bundled `pgvector/pgvector:pg17` image works without changes.
+</Callout>
+
+The in-process scheduler ticks every 30 seconds and claims a 5-minute UTC plan via the `sys_cron_executions` table. Multiple backend replicas are safe — the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. No setup is needed for new deployments.
+
+**Compatibility — existing `pg_cron` registrations.** If you previously registered the rollup as a `pg_cron` job (`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`), you do not need to remove it — the SQL function holds advisory lock 4246 internally, so the app scheduler and `pg_cron` cannot double-write. To drop the redundant entry:
+
+```sql
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
+```
+
+**Upgrade from `v0.3.4 → v0.3.5+`.** The previous release asked operators to run `cmd/backfill_task_usage_hourly` manually before applying migration 103, otherwise the migration's fail-closed guard would abort `migrate up`. As of MUL-2957 this is automatic: the migrate command runs an idempotent monthly-slice backfill (under advisory lock 4246) immediately before applying migration 103, then continues. You may still run the standalone backfill on a busy DB to throttle read pressure with `--sleep-between-slices=2s`, but it is no longer required.
+
+Full reference — including operations notes and the Kubernetes deployment shape — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+
+## Kubernetes deployment (alternative)
+
+If you already run a Kubernetes cluster, the repo also ships a Helm chart at `deploy/helm/multica/`. It's the equivalent of `make selfhost` for k8s — same backend image, frontend image, and `pgvector/pgvector:pg17` Postgres, packaged as Deployments / Services / Ingresses with one `ConfigMap` rendered from `values.yaml`. Authored against k3s + Traefik + `local-path` and should work on any cluster with an Ingress controller and a default `ReadWriteOnce` StorageClass.
+
+The chart **does not template secret values**. It references a Secret named `multica-secrets` by name, so real JWT / DB / Resend / Google keys never need to live in git or in `values.yaml`. Create the namespace + Secret once with kubectl:
+
+```bash
+kubectl create namespace multica
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+Then install the chart:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+helm install multica deploy/helm/multica -n multica
+```
+
+Defaults assume the hostnames `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Add them to `/etc/hosts` (or local DNS) pointing at any node IP where your Ingress is reachable. To use different hostnames, copy `deploy/helm/multica/values.yaml`, edit `ingress.frontend.host` / `ingress.backend.host` and the matching `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`, then install with `-f my-values.yaml`.
+
+On a cold cluster the backend can stay `Running` but not `Ready` for a few minutes while it waits on Postgres and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once it's `Ready`:
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Then open `http://multica.dev.lan` and continue at [Step 4 — First login](#4-first-login--create-a-workspace) above. Point the CLI at your Ingress hostnames:
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+To pull the latest images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To pin a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
+
+The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
+
+## Common issues
+
+- **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
+- **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
+- **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
+- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
+- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)
+
+## Next steps
+
+- [Environment variables](/environment-variables) — full env reference
+- [Auth setup](/auth-setup) — Resend / OAuth / signup allowlist in detail
+- [GitHub integration](/github-integration) — connect a GitHub App so PRs auto-link to issues and merging closes them
+- [Troubleshooting](/troubleshooting) — start here when things go wrong
+- [Desktop app](/desktop-app) — optional Desktop setup via `~/.multica/desktop.json`; the web frontend + CLI remains the quickest self-host path

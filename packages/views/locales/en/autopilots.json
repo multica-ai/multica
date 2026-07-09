@@ -1,0 +1,415 @@
+{
+  "page": {
+    "title": "Autopilot",
+    "new_autopilot": "New autopilot",
+    "start_blank": "Start from scratch",
+    "table": {
+      "name": "Name",
+      "agent": "Agent",
+      "created_by": "Created by",
+      "mode": "Mode",
+      "status": "Status",
+      "last_run": "Last run",
+      "assignee": "Assignee",
+      "trigger": "Trigger",
+      "next_run": "Next run",
+      "created": "Created"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "No autopilots yet",
+      "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
+    },
+    "scope_all": "All",
+    "no_matches": "No automations match",
+    "retry": "Retry"
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused",
+    "archived": "Archived"
+  },
+  "execution_mode": {
+    "create_issue": "Create Issue",
+    "run_only": "Run Only"
+  },
+  "relative_date": {
+    "today": "Today",
+    "one_day_ago": "1d ago",
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Daily news digest",
+      "summary": "Search and summarize today's news for the team"
+    },
+    "pr_review": {
+      "title": "PR review reminder",
+      "summary": "Flag stale pull requests that need review"
+    },
+    "bug_triage": {
+      "title": "Bug triage",
+      "summary": "Assess and prioritize new bug reports"
+    },
+    "weekly_progress": {
+      "title": "Weekly progress report",
+      "summary": "Compile a weekly summary of team progress"
+    },
+    "dependency_audit": {
+      "title": "Dependency audit",
+      "summary": "Scan for security vulnerabilities and outdated packages"
+    },
+    "documentation_check": {
+      "title": "Documentation check",
+      "summary": "Review recent changes for documentation gaps"
+    }
+  },
+  "detail": {
+    "not_found": "Autopilot not found",
+    "pause_aria": "Pause autopilot",
+    "activate_aria": "Activate autopilot",
+    "edit": "Edit",
+    "run_now": "Run now",
+    "running": "Running...",
+    "toast_triggered": "Autopilot triggered",
+    "toast_trigger_failed": "Failed to trigger autopilot",
+    "section_properties": "Properties",
+    "section_triggers": "Triggers",
+    "section_run_history": "Run History",
+    "section_danger": "Danger Zone",
+    "field_agent": "Agent",
+    "field_created_by": "Created by",
+    "field_output_mode": "Output Mode",
+    "field_project": "Project",
+    "no_project": "No project",
+    "project_unavailable": "Project unavailable",
+    "field_prompt": "Prompt",
+    "field_subscribers": "Subscribers",
+    "field_subscribers_none": "None",
+    "add_trigger": "Add trigger",
+    "no_triggers": "No triggers configured. Add a schedule to run automatically.",
+    "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
+    "delete_button": "Delete autopilot",
+    "toast_deleted": "Autopilot deleted",
+    "toast_delete_failed": "Failed to delete autopilot",
+    "delete_dialog": {
+      "title": "Delete autopilot",
+      "description": "This will permanently delete \"{{title}}\", along with its triggers and run history. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    }
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
+  },
+  "run_status": {
+    "issue_created": "Issue Created",
+    "running": "Running",
+    "skipped": "Skipped",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "run_source": {
+    "schedule": "Schedule",
+    "manual": "Manual",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "Issue linked",
+    "view_log": "View execution log",
+    "skipped_group": {
+      "label": "Skipped",
+      "summary": "{{count}} skipped runs"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook event:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copy",
+    "copied": "Webhook payload copied",
+    "copied_short": "Copied",
+    "copy_failed": "Failed to copy",
+    "truncated_marker": "[truncated — click Copy to get the full payload]"
+  },
+  "trigger_kind": {
+    "schedule": "Schedule",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "Disabled",
+    "deprecated_badge": "Deprecated",
+    "next_label": "Next: {{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "Copy URL",
+    "url_copied": "Webhook URL copied",
+    "url_copy_failed": "Failed to copy",
+    "rotate_url": "Rotate URL",
+    "rotate_confirm_title": "Rotate webhook URL",
+    "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
+    "rotate_confirm_cancel": "Cancel",
+    "rotate_confirm_action": "Rotate URL",
+    "rotate_in_progress": "Rotating...",
+    "toast_rotated": "Webhook URL rotated",
+    "toast_rotate_failed": "Failed to rotate URL",
+    "toast_deleted": "Trigger deleted",
+    "toast_delete_failed": "Failed to delete trigger",
+    "delete_dialog": {
+      "title": "Delete trigger",
+      "description": "This trigger will be removed and the autopilot will stop firing on this schedule. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "deleting": "Deleting..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Webhook Deliveries",
+    "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
+    "row": {
+      "attempts": "{{count}}× attempts",
+      "replay_badge": "Replay"
+    },
+    "status": {
+      "queued": "Queued",
+      "dispatched": "Dispatched",
+      "rejected": "Rejected",
+      "ignored": "Ignored",
+      "failed": "Failed"
+    },
+    "signature": {
+      "not_required": "No signature",
+      "valid": "Signature valid",
+      "invalid": "Signature invalid",
+      "missing": "Signature missing"
+    },
+    "detail": {
+      "title": "Delivery",
+      "received_at": "Received",
+      "last_attempt_at": "Last attempt",
+      "attempt_count": "Attempts",
+      "response_status": "Response",
+      "dedupe_key": "Dedupe key",
+      "dedupe_source": "Dedupe source",
+      "content_type": "Content-Type",
+      "replayed_from": "Replayed from",
+      "error_label": "Error",
+      "raw_body": "Raw body",
+      "selected_headers": "Headers",
+      "response_body": "Response body"
+    },
+    "replay": {
+      "action": "Replay",
+      "in_progress": "Replaying...",
+      "toast_success": "Delivery replayed",
+      "toast_failed": "Replay failed",
+      "disabled_invalid_signature": "Can't replay — signature was invalid",
+      "disabled_rejected": "Can't replay a rejected delivery",
+      "disabled_queued": "Still queued — replay once it settles"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Add Trigger",
+    "type_label": "Type",
+    "type_schedule": "Schedule",
+    "type_webhook": "Webhook",
+    "label_field": "Label (optional)",
+    "label_placeholder": "e.g. Weekday morning",
+    "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
+    "submit": "Add trigger",
+    "submitting": "Adding...",
+    "toast_added_schedule": "Schedule trigger added",
+    "toast_added_webhook": "Webhook trigger added",
+    "toast_add_failed": "Failed to add trigger"
+  },
+  "dialog": {
+    "sr_create": "New Autopilot",
+    "sr_edit": "Edit Autopilot",
+    "header_create": "New autopilot",
+    "header_edit": "Edit autopilot",
+    "subtitle": "A recurring AI task",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "close": "Close",
+    "title_placeholder": "Autopilot name",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Read by the agent on every run",
+    "description_placeholder": "# Goal\nWhat should the agent accomplish?\n\n# Context\nWho is this for? Any constraints?\n\n# Steps\n1. …\n2. …",
+    "auto_run_hint": "Once saved, runs automatically until paused.",
+    "cancel": "Cancel",
+    "create": "Create autopilot",
+    "save": "Save",
+    "creating": "Creating...",
+    "saving": "Saving...",
+    "toast_created": "Autopilot created",
+    "toast_create_partial": "Autopilot created, but schedule failed to save",
+    "toast_create_partial_with_reason": "Autopilot created, but schedule failed to save: {{reason}}",
+    "toast_create_failed": "Failed to create autopilot",
+    "toast_updated": "Autopilot updated",
+    "toast_update_partial": "Autopilot updated, but schedule failed to save",
+    "toast_update_partial_with_reason": "Autopilot updated, but schedule failed to save: {{reason}}",
+    "toast_update_failed": "Failed to update autopilot",
+    "section_agent": "Agent",
+    "section_assignee": "Assignee",
+    "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
+    "section_project": "Project",
+    "no_project": "No project",
+    "section_output_mode": "Output mode",
+    "section_subscribers": "Subscribers",
+    "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
+    "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
+    "subscribers_add": "Add subscriber",
+    "subscribers_search_placeholder": "Search members by name…",
+    "subscribers_no_results": "No matching members",
+    "subscribers_remove_tooltip": "Remove",
+    "section_schedule": "Schedule",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Schedule",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it.",
+    "webhook_help_edit": "This autopilot is fired by webhook. Manage the URL (copy / rotate) on the autopilot's detail page.",
+    "webhook_created_title": "Webhook autopilot ready",
+    "webhook_created_description": "POST any JSON to the URL below and the autopilot will fire. Copy it now — you can also find and rotate it on the autopilot's detail page.",
+    "webhook_created_warning": "Treat this URL like a password. Anyone who has it can trigger the autopilot.",
+    "webhook_created_done": "Done",
+    "event_filter_label": "Event filters",
+    "event_filter_docs_link_label": "Learn how event filters work",
+    "event_filter_event_placeholder": "e.g. workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
+    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
+    "next_run_label": "Next run:",
+    "output_modes": {
+      "create_issue": {
+        "label": "Create issue",
+        "description": "Each run creates a tracked issue"
+      },
+      "run_only": {
+        "label": "Run only",
+        "description": "Silent run, no issue created"
+      }
+    },
+    "frequency_long": {
+      "hourly": "Every hour",
+      "daily": "Every day",
+      "weekdays": "Every weekday",
+      "weekly": "Every week",
+      "custom": "Custom cron"
+    },
+    "days": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "weekdays": "Weekdays",
+      "weekly": "Days",
+      "custom": "Custom"
+    },
+    "days_short": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "cron_label": "Cron Expression",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "minute_label": "Minute",
+    "time_label": "Time",
+    "timezone_label": "Timezone",
+    "days_label": "Days",
+    "summary": {
+      "hourly": "Hourly · :{{min}}",
+      "daily": "Daily {{time}}",
+      "weekdays": "Weekdays {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Custom cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "Runs every hour at :{{min}}",
+      "daily": "Runs daily at {{time}} {{offset}}",
+      "weekdays": "Runs weekdays at {{time}} {{offset}}",
+      "weekly": "Runs every {{days}} at {{time}} {{offset}}",
+      "custom": "Custom schedule: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Filter agents or squads...",
+    "select_agent": "Select agent",
+    "select_assignee": "Select agent or squad",
+    "agents_group": "Agents",
+    "squads_group": "Squads"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Search timezone..."
+  },
+  "toolbar": {
+    "result_count_title": "Matching automations / all automations",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_assignee": "Assignee",
+    "section_mode": "Mode",
+    "section_trigger": "Trigger",
+    "section_creator": "Created by",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns"
+  },
+  "actions": {
+    "row_menu": "Automation actions",
+    "pause": "Pause",
+    "resume": "Resume",
+    "delete": "Delete",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "delete_dialog": {
+      "title": "Delete automation?",
+      "description_one": "This will permanently delete \"{{name}}\" and its run history.",
+      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "warning": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "deleting": "Deleting…"
+    }
+  }
+}

@@ -35,7 +35,8 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1;
+-- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+DELETE FROM project WHERE id = $1 AND workspace_id = $2;
 
 -- name: CountIssuesByProject :one
 SELECT count(*) FROM issue

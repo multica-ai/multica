@@ -1,611 +1,570 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import { useMemo, useRef, useState } from "react";
 import {
-  Sparkles,
-  Plus,
-  Trash2,
-  Save,
   AlertCircle,
+  AlertTriangle,
+  BookOpen,
   Download,
+  HardDrive,
+  Lock,
+  Pencil,
+  Plus,
 } from "lucide-react";
-import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@multica/ui/components/ui/dialog";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
-import { toast } from "sonner";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { api } from "@multica/core/api";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  Agent,
+  AgentRuntime,
+  MemberWithUser,
+  Skill,
+  SkillSummary,
+} from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-
+import { useWorkspacePaths } from "@multica/core/paths";
+import {
+  agentListOptions,
+  memberListOptions,
+  selectSkillAssignments,
+  skillListOptions,
+} from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  LIST_GRID_BOTTOM_CLEARANCE,
+  ListGrid,
+  ListGridBody,
+  ListGridCell,
+  ListGridHeader,
+  ListGridHeaderCell,
+  ListGridRow,
+  type ListGridSortDirection,
+} from "@multica/ui/components/ui/list-grid";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { useNavigation, useRowLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { FileTree } from "./file-tree";
-import { FileViewer } from "./file-viewer";
+import { canEditSkill } from "../hooks/use-can-edit-skill";
+import { readOrigin, type OriginInfo } from "../lib/origin";
+import { CreateSkillDialog } from "./create-skill-dialog";
+import {
+  useSkillsViewStore,
+  DEFAULT_HIDDEN_COLUMNS,
+  type SkillColumnKey,
+  type SkillSortField,
+} from "@multica/core/skills/stores";
+import { SkillListToolbar } from "./skill-list-toolbar";
+import {
+  SkillBatchToolbar,
+  SkillRowActions,
+  type SkillActionsContext,
+} from "./skill-list-actions";
+import { useT, useTimeAgo } from "../../i18n";
+
+// Column template — single source of truth for header, rows, and skeletons.
+// Tracks: [edge 0.75rem] [checkbox 1rem] [name, only fr track]
+// [usedBy] [source] [creator] [updated] [created] [kebab 1.75rem]
+// [edge 0.75rem].
+// Content cells carry a default px-2 from list-grid.tsx
+// (structural columns opt out with px-0), so the narrow edge tracks plus
+// cell padding land content 20px from the container edge. Non-core cells
+// carry `hidden @2xl:flex`. The breakpoint queries the CONTAINER (the page
+// wrapper is the `@container`), not the viewport, so sidebars and split
+// panes are accounted for.
+// Hideable tracks are DETERMINISTIC widths via CSS vars (no max-content):
+// rows are virtualized, so with only the visible slice mounted a
+// content-driven track would resize as different rows scrolled into view.
+// Truncation moved from per-cell max-w caps to the tracks themselves.
+// A user-hidden column zeroes its var (columnTrackVars), collapsing the
+// track exactly like the old max-content placeholder did; the empty
+// placeholder cell stays rendered to keep subgrid auto-placement intact.
+//
+// TWO-ZONE RESPONSIVENESS (replaces the retired per-tier breakpoints):
+// - Container ≥ @2xl (672px): WYSIWYG — every user-enabled column renders.
+//   The grid carries min-width = Σ(enabled tracks + gaps) so when the
+//   enabled set outgrows the container the wrapper scrolls horizontally.
+//   The scrollbar is the escape valve for an over-provisioned column set,
+//   never the default experience; an enabled column must NEVER silently
+//   vanish (that "dead toggle" bug shipped twice).
+// - Container < @2xl (phones, slim split panes): static core set
+//   (name + usedBy), no horizontal scroll, column toggles don't apply.
+const GRID_COLS =
+  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--lgc-usedby)_1.75rem_0.75rem] " +
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--lgc-usedby)_var(--lgc-source)_var(--lgc-creator)_var(--lgc-updated)_var(--lgc-created)_1.75rem_0.75rem]";
+
+// h-12 rows. The virtualizer's fixed-size contract: every row renders at
+// exactly this height, which is what lets it skip per-row measurement.
+const ROW_HEIGHT = 48;
+
+// Single source for hideable column widths: track vars and the grid's
+// min-width derive from the same numbers.
+const COLUMN_WIDTHS: Record<SkillColumnKey, number> = {
+  usedBy: 144,
+  source: 152,
+  creator: 144,
+  updated: 104,
+  created: 104,
+};
+
+// Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
+// 9 gap-x-3 gaps between the wide template's 10 tracks (zero-width tracks
+// still carry gaps).
+const FIXED_TRACKS_WIDTH = 268 + 9 * 12;
+
+function columnTrackVars(
+  isVisible: (key: SkillColumnKey) => boolean,
+): React.CSSProperties {
+  const width = (key: SkillColumnKey) =>
+    isVisible(key) ? `${COLUMN_WIDTHS[key]}px` : "0px";
+  const minWidth =
+    FIXED_TRACKS_WIDTH +
+    (Object.keys(COLUMN_WIDTHS) as SkillColumnKey[]).reduce(
+      (sum, key) => sum + (isVisible(key) ? COLUMN_WIDTHS[key] : 0),
+      0,
+    );
+  return {
+    "--lgc-usedby": width("usedBy"),
+    "--lgc-source": width("source"),
+    "--lgc-creator": width("creator"),
+    "--lgc-updated": width("updated"),
+    "--lgc-created": width("created"),
+    "--lgc-minw": `${minWidth}px`,
+  } as React.CSSProperties;
+}
+
+// Sort/filter/column types and defaults live in the core view store
+// (@multica/core/skills/stores/view-store) so the persisted state and the
+// UI share one definition. Re-exported here for the toolbar's convenience.
+export type SortField = SkillSortField;
+
+export interface SkillRow {
+  skill: SkillSummary;
+  agents: Agent[];
+  creator: MemberWithUser | null;
+  runtime: AgentRuntime | null;
+  originType: OriginInfo["type"];
+  canEdit: boolean;
+}
 
 // ---------------------------------------------------------------------------
-// Create Skill Dialog
+// Page header bar — uses shared PageHeader so the mobile sidebar trigger and
+// h-12 chrome stay consistent with every other dashboard list page.
 // ---------------------------------------------------------------------------
 
-function CreateSkillDialog({
-  onClose,
+function PageHeaderBar({
+  totalCount,
   onCreate,
-  onImport,
 }: {
-  onClose: () => void;
-  onCreate: (data: CreateSkillRequest) => Promise<void>;
-  onImport: (url: string) => Promise<void>;
+  totalCount: number;
+  onCreate: () => void;
 }) {
-  const [tab, setTab] = useState<"create" | "import">("create");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [importUrl, setImportUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [importError, setImportError] = useState("");
-
-  const detectedSource = (() => {
-    const url = importUrl.trim().toLowerCase();
-    if (url.includes("clawhub.ai")) return "clawhub" as const;
-    if (url.includes("skills.sh")) return "skills.sh" as const;
-    return null;
-  })();
-
-  const handleCreate = async () => {
-    if (!name.trim()) return;
-    setLoading(true);
-    try {
-      await onCreate({ name: name.trim(), description: description.trim() });
-      onClose();
-    } catch {
-      setLoading(false);
-    }
-  };
-
-  const handleImport = async () => {
-    if (!importUrl.trim()) return;
-    setLoading(true);
-    setImportError("");
-    try {
-      await onImport(importUrl.trim());
-      onClose();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
-      setLoading(false);
-    }
-  };
-
+  const { t } = useT("skills");
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add Workspace Skill</DialogTitle>
-          <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh. Workspace skills are shared with your team and automatically injected into agent runs.
-          </DialogDescription>
-        </DialogHeader>
-
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "create" | "import")}>
-          <TabsList className="w-full">
-            <TabsTrigger value="create" className="flex-1">
-              <Plus className="mr-1.5 h-3 w-3" />
-              Create
-            </TabsTrigger>
-            <TabsTrigger value="import" className="flex-1">
-              <Download className="mr-1.5 h-3 w-3" />
-              Import
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="create" className="space-y-4 mt-4 min-h-[180px]">
-            <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
-              <Input
-                autoFocus
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Code Review, Bug Triage"
-                className="mt-1"
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
-              <Input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief description of what this skill does"
-                className="mt-1"
-              />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="import" className="space-y-4 mt-4 min-h-[180px]">
-            <div>
-              <Label className="text-xs text-muted-foreground">Skill URL</Label>
-              <Input
-                autoFocus
-                type="text"
-                value={importUrl}
-                onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
-                placeholder="Paste a skill URL..."
-                className="mt-1"
-                onKeyDown={(e) => e.key === "Enter" && handleImport()}
-              />
-            </div>
-
-            {/* Supported sources — highlight on detection */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "clawhub"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">ClawHub</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    clawhub.ai/owner/skill
-                  </div>
-                </div>
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "skills.sh"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">Skills.sh</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    skills.sh/owner/repo/skill
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {importError && (
-              <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                {importError}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          {tab === "create" ? (
-            <Button onClick={handleCreate} disabled={loading || !name.trim()}>
-              {loading ? "Creating..." : "Create"}
-            </Button>
-          ) : (
-            <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
-              {loading ? (
-                detectedSource === "clawhub"
-                  ? "Importing from ClawHub..."
-                  : detectedSource === "skills.sh"
-                    ? "Importing from Skills.sh..."
-                    : "Importing..."
-              ) : (
-                <>
-                  <Download className="mr-1.5 h-3 w-3" />
-                  Import
-                </>
-              )}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Skill List Item
-// ---------------------------------------------------------------------------
-
-function SkillListItem({
-  skill,
-  isSelected,
-  onClick,
-}: {
-  skill: Skill;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
-    >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Sparkles className="h-4 w-4 text-muted-foreground" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{skill.name}</div>
-        {skill.description && (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {skill.description}
-          </div>
+    <PageHeader className="justify-between px-5">
+      <div className="flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-muted-foreground" />
+        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
+        {totalCount > 0 && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            {totalCount}
+          </span>
         )}
-      </div>
-      {(skill.files?.length ?? 0) > 0 && (
-        <Badge variant="secondary">
-          {skill.files.length} file{skill.files.length !== 1 ? "s" : ""}
-        </Badge>
-      )}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers: virtual file list for the tree
-// ---------------------------------------------------------------------------
-
-const SKILL_MD = "SKILL.md";
-
-/** Merge skill.content (as SKILL.md) + skill.files into a single map */
-function buildFileMap(
-  content: string,
-  files: { path: string; content: string }[],
-): Map<string, string> {
-  const map = new Map<string, string>();
-  map.set(SKILL_MD, content);
-  for (const f of files) {
-    if (f.path.trim()) map.set(f.path, f.content);
-  }
-  return map;
-}
-
-// ---------------------------------------------------------------------------
-// Add File Dialog
-// ---------------------------------------------------------------------------
-
-function AddFileDialog({
-  existingPaths,
-  onClose,
-  onAdd,
-}: {
-  existingPaths: string[];
-  onClose: () => void;
-  onAdd: (path: string) => void;
-}) {
-  const [path, setPath] = useState("");
-  const duplicate = existingPaths.includes(path.trim());
-
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-sm" showCloseButton={false}>
-        <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">Add File</DialogTitle>
-          <DialogDescription className="text-xs">
-            Add a supporting file to this skill.
-          </DialogDescription>
-        </DialogHeader>
-        <div>
-          <Label className="text-xs text-muted-foreground">File Path</Label>
-          <Input
-            autoFocus
-            type="text"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="e.g. templates/review.md"
-            className="mt-1 font-mono text-sm"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && path.trim() && !duplicate) {
-                onAdd(path.trim());
-                onClose();
-              }
-            }}
-          />
-          {duplicate && (
-            <p className="mt-1 text-xs text-destructive">File already exists</p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button
-            disabled={!path.trim() || duplicate}
-            onClick={() => { onAdd(path.trim()); onClose(); }}
+        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
+          {t(($) => $.page.tagline)}{" "}
+          <a
+            href="https://multica.ai/docs/skills"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Add
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {t(($) => $.page.learn_more)}
+          </a>
+        </p>
+      </div>
+      {/* Quiet chrome button (outline, icon-only below md) — primary is
+          reserved for the empty state's single CTA. */}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+        aria-label={t(($) => $.page.new_skill)}
+        onClick={onCreate}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        <span className="hidden md:inline">{t(($) => $.page.new_skill)}</span>
+      </Button>
+    </PageHeader>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Skill Detail — file-browser layout
+// Cells
 // ---------------------------------------------------------------------------
 
-function SkillDetail({
-  skill,
-  onUpdate,
-  onDelete,
+// Hover-revealed multi-select checkbox. Same pattern as SkillPickerList:
+// the shadcn Checkbox is presentational only (`pointer-events-none`, so the
+// Base UI button can never swallow the click) and the wrapping <button> owns
+// the toggle. It stops click propagation so toggling never triggers the
+// row's whole-row navigation (see `useRowLink`) — no preventDefault needed,
+// the row is a plain <div>, not an <a>.
+function CheckboxCell({
+  checked,
+  onToggle,
 }: {
-  skill: Skill;
-  onUpdate: (id: string, data: UpdateSkillRequest) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  checked: boolean;
+  onToggle: () => void;
 }) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  const [name, setName] = useState(skill.name);
-  const [description, setDescription] = useState(skill.description);
-  const [content, setContent] = useState(skill.content);
-  const [files, setFiles] = useState<{ path: string; content: string }[]>(
-    (skill.files ?? []).map((f) => ({ path: f.path, content: f.content })),
-  );
-  const [selectedPath, setSelectedPath] = useState(SKILL_MD);
-  const [saving, setSaving] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [showAddFile, setShowAddFile] = useState(false);
-
-  // Sync basic fields from store updates
-  useEffect(() => {
-    setName(skill.name);
-    setDescription(skill.description);
-    setContent(skill.content);
-  }, [skill.id, skill.name, skill.description, skill.content]);
-
-  // Fetch full skill (with files) on selection change
-  useEffect(() => {
-    setSelectedPath(SKILL_MD);
-    setLoadingFiles(true);
-    api.getSkill(skill.id).then((full) => {
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      setFiles((full.files ?? []).map((f) => ({ path: f.path, content: f.content })));
-    }).catch((e) => {
-      toast.error(e instanceof Error ? e.message : "Failed to load skill files");
-    }).finally(() => setLoadingFiles(false));
-  }, [skill.id, qc, wsId]);
-
-  // Build the virtual file map
-  const fileMap = useMemo(() => buildFileMap(content, files), [content, files]);
-  const filePaths = useMemo(() => Array.from(fileMap.keys()), [fileMap]);
-  const selectedContent = fileMap.get(selectedPath) ?? "";
-
-  const isDirty =
-    name !== skill.name ||
-    description !== skill.description ||
-    content !== skill.content ||
-    JSON.stringify(files) !==
-      JSON.stringify((skill.files ?? []).map((f) => ({ path: f.path, content: f.content })));
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onUpdate(skill.id, {
-        name: name.trim(),
-        description: description.trim(),
-        content,
-        files: files.filter((f) => f.path.trim()),
-      });
-    } catch {
-      // toast handled by parent
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleFileContentChange = (newContent: string) => {
-    if (selectedPath === SKILL_MD) {
-      setContent(newContent);
-    } else {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.path === selectedPath ? { ...f, content: newContent } : f,
-        ),
-      );
-    }
-  };
-
-  const handleAddFile = (path: string) => {
-    setFiles((prev) => [...prev, { path, content: "" }]);
-    setSelectedPath(path);
-  };
-
-  const handleDeleteFile = () => {
-    if (selectedPath === SKILL_MD) return;
-    setFiles((prev) => prev.filter((f) => f.path !== selectedPath));
-    setSelectedPath(SKILL_MD);
-  };
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-            <Sparkles className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 flex-1 min-w-0">
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-8 text-sm font-medium"
-              placeholder="Skill name"
-            />
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Description"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 ml-3">
-          {isDirty && (
-            <Button onClick={handleSave} disabled={saving || !name.trim()} size="xs">
-              <Save className="h-3 w-3" />
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          )}
-          <Tooltip>
+    <ListGridCell className="justify-center px-0">
+      <button
+        type="button"
+        aria-pressed={checked}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className={`-m-1.5 flex items-center p-1.5 ${
+          checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
+        }`}
+      >
+        <Checkbox
+          checked={checked}
+          tabIndex={-1}
+          className="pointer-events-none"
+        />
+      </button>
+    </ListGridCell>
+  );
+}
+
+function NameCell({ row }: { row: SkillRow }) {
+  const { t } = useT("skills");
+  const { skill, canEdit } = row;
+  return (
+    <ListGridCell className="gap-1.5">
+      <span className="min-w-0 truncate text-sm font-medium">
+        {skill.name}
+      </span>
+      {!canEdit && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+            }
+          />
+          <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
+        </Tooltip>
+      )}
+    </ListGridCell>
+  );
+}
+
+function UsedByCell({ agents }: { agents: Agent[] }) {
+  const { t } = useT("skills");
+  if (agents.length === 0) {
+    return (
+      <ListGridCell>
+        <span className="text-xs text-muted-foreground/70">
+          {t(($) => $.table.unused)}
+        </span>
+      </ListGridCell>
+    );
+  }
+  const soleAgent = agents.length === 1 ? agents[0] : undefined;
+  if (soleAgent) {
+    const agent = soleAgent;
+    return (
+      <ListGridCell className="gap-1.5">
+        <ActorAvatar
+          name={agent.name}
+          initials={agent.name.slice(0, 2).toUpperCase()}
+          avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
+          isAgent
+          size={22}
+        />
+        <span className="min-w-0 truncate text-xs text-muted-foreground">
+          {agent.name}
+        </span>
+      </ListGridCell>
+    );
+  }
+  const visible = agents.slice(0, 3);
+  const extra = agents.length - visible.length;
+  return (
+    <ListGridCell>
+      <div className="flex items-center -space-x-1.5">
+        {visible.map((a) => (
+          <Tooltip key={a.id}>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                <span className="inline-flex rounded-full ring-2 ring-background">
+                  <ActorAvatar
+                    name={a.name}
+                    initials={a.name.slice(0, 2).toUpperCase()}
+                    avatarUrl={resolvePublicFileUrl(a.avatar_url)}
+                    isAgent
+                    size={22}
+                  />
+                </span>
               }
             />
-            <TooltipContent>Delete skill</TooltipContent>
+            <TooltipContent>{a.name}</TooltipContent>
           </Tooltip>
-        </div>
+        ))}
+        {extra > 0 && (
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background">
+            +{extra}
+          </span>
+        )}
       </div>
+    </ListGridCell>
+  );
+}
 
-      {/* File browser: tree + viewer */}
-      <div className="flex flex-1 min-h-0">
-        {/* File tree */}
-        <div className="w-52 shrink-0 border-r flex flex-col">
-          <div className="flex h-10 items-center justify-between border-b px-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Files
-            </span>
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setShowAddFile(true)}
-                      className="text-muted-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Add file</TooltipContent>
-              </Tooltip>
-              {selectedPath !== SKILL_MD && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={handleDeleteFile}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Delete file</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {loadingFiles ? (
-              <div className="p-3 space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-            ) : (
-              <FileTree
-                filePaths={filePaths}
-                selectedPath={selectedPath}
-                onSelect={setSelectedPath}
-              />
-            )}
-          </div>
-        </div>
+function SourceCell({
+  skill,
+  runtime,
+}: {
+  skill: SkillSummary;
+  runtime: AgentRuntime | null;
+}) {
+  const { t } = useT("skills");
+  const origin = readOrigin(skill);
 
-        {/* File viewer */}
-        <div className="flex-1 min-w-0">
-          {loadingFiles ? (
-            <div className="p-4 space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-4/6" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-          ) : (
-          <FileViewer
-            key={selectedPath}
-            path={selectedPath}
-            content={selectedContent}
-            onChange={handleFileContentChange}
+  let icon = <Pencil className="h-3 w-3 shrink-0" />;
+  let label: string = t(($) => $.table.source_manual);
+  if (origin.type === "runtime_local") {
+    icon = <HardDrive className="h-3 w-3 shrink-0" />;
+    label = runtime
+      ? t(($) => $.table.source_runtime_named, { name: runtime.name })
+      : origin.provider
+        ? t(($) => $.table.source_runtime_provider, {
+            provider: origin.provider,
+          })
+        : t(($) => $.table.source_runtime_unknown);
+  } else if (origin.type === "clawhub") {
+    icon = <Download className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_clawhub);
+  } else if (origin.type === "skills_sh") {
+    icon = <Download className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_skills_sh);
+  } else if (origin.type === "github") {
+    icon = <Download className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_github);
+  }
+
+  return (
+    <ListGridCell className="hidden gap-1.5 text-xs text-muted-foreground @2xl:flex">
+      {icon}
+      <span className="min-w-0 truncate">{label}</span>
+    </ListGridCell>
+  );
+}
+
+function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
+  return (
+    <ListGridCell className="hidden gap-1.5 @2xl:flex">
+      {creator && (
+        <>
+          <ActorAvatar
+            name={creator.name}
+            initials={creator.name.slice(0, 2).toUpperCase()}
+            avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
+            size={22}
           />
-          )}
-        </div>
+          <span className="min-w-0 truncate text-xs text-muted-foreground">
+            {creator.name}
+          </span>
+        </>
+      )}
+    </ListGridCell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useT("skills");
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+        <BookOpen className="h-6 w-6 text-muted-foreground" />
       </div>
-
-      {/* Add file dialog */}
-      {showAddFile && (
-        <AddFileDialog
-          existingPaths={filePaths}
-          onClose={() => setShowAddFile(false)}
-          onAdd={handleAddFile}
-        />
-      )}
-
-      {/* Delete Confirmation */}
-      {confirmDelete && (
-        <Dialog open onOpenChange={(v) => { if (!v) setConfirmDelete(false); }}>
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
-                <AlertCircle className="h-5 w-5 text-destructive" />
-              </div>
-              <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">Delete skill?</DialogTitle>
-                <DialogDescription className="text-xs">
-                  This will permanently delete &quot;{skill.name}&quot; and remove it from all agents.
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setConfirmDelete(false);
-                  onDelete(skill.id);
-                }}
-              >
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
+      <p className="mt-1 max-w-md text-sm text-muted-foreground">
+        {t(($) => $.page.empty.description)}
+      </p>
+      <Button type="button" onClick={onCreate} size="sm" className="mt-5">
+        <Plus className="h-3 w-3" />
+        {t(($) => $.page.new_skill)}
+      </Button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
+
+function SkillListHeader({
+  sortField,
+  sortDirection,
+  onSort,
+  allSelected,
+  someSelected,
+  onToggleAll,
+  isColVisible,
+}: {
+  sortField: SortField;
+  sortDirection: ListGridSortDirection;
+  onSort: (field: SortField) => void;
+  allSelected: boolean;
+  someSelected: boolean;
+  onToggleAll: () => void;
+  isColVisible: (key: SkillColumnKey) => boolean;
+}) {
+  const { t } = useT("skills");
+  const sorted = (field: SortField) =>
+    sortField === field ? sortDirection : false;
+  const anySelected = allSelected || someSelected;
+  return (
+    <ListGridHeader>
+      {/* Tri-state select-all in the checkbox track. Same presentational
+          Checkbox + interactive wrapper pattern as the row cells; revealed
+          on header hover or whenever a selection exists. */}
+      <div className="flex items-center justify-center">
+        <button
+          type="button"
+          aria-pressed={allSelected}
+          onClick={onToggleAll}
+          className={`-m-1.5 flex items-center p-1.5 ${
+            anySelected
+              ? ""
+              : "opacity-0 transition-opacity group-hover/header:opacity-100"
+          }`}
+        >
+          <Checkbox
+            checked={allSelected}
+            indeterminate={someSelected && !allSelected}
+            tabIndex={-1}
+            className="pointer-events-none"
+          />
+        </button>
+      </div>
+      <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
+        {t(($) => $.table.name)}
+      </ListGridHeaderCell>
+      {isColVisible("usedBy") ? (
+        <ListGridHeaderCell
+          sorted={sorted("usedBy")}
+          onSort={() => onSort("usedBy")}
+        >
+          {t(($) => $.table.used_by)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="px-0" />
+      )}
+      {isColVisible("source") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.table.source)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("creator") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.table.created_by)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("updated") ? (
+        <ListGridHeaderCell
+          className="hidden @2xl:flex"
+          sorted={sorted("updated")}
+          onSort={() => onSort("updated")}
+        >
+          {t(($) => $.table.updated)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("created") ? (
+        <ListGridHeaderCell
+          className="hidden @2xl:flex"
+          sorted={sorted("created")}
+          onSort={() => onSort("created")}
+        >
+          {t(($) => $.table.created)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      <span aria-hidden="true" />
+    </ListGridHeader>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <ListGrid
+      className={GRID_COLS}
+      style={columnTrackVars((key) => !DEFAULT_HIDDEN_COLUMNS.includes(key))}
+    >
+      <ListGridHeader>
+        <span aria-hidden="true" />
+        <ListGridHeaderCell>
+          <Skeleton className="h-3 w-12" />
+        </ListGridHeaderCell>
+        <ListGridHeaderCell>
+          <Skeleton className="h-3 w-14" />
+        </ListGridHeaderCell>
+        {/* Source and created are hidden by default — keep their tracks
+            mapped with empty placeholders so the skeleton matches the
+            default layout. */}
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          <Skeleton className="h-3 w-10" />
+        </ListGridHeaderCell>
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          <Skeleton className="h-3 w-12" />
+        </ListGridHeaderCell>
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+        <span aria-hidden="true" />
+      </ListGridHeader>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <ListGridRow key={i} className="hover:bg-transparent">
+          <span aria-hidden="true" />
+          <ListGridCell>
+            <Skeleton className="h-3.5 w-40 max-w-full" />
+          </ListGridCell>
+          <ListGridCell>
+            <Skeleton className="h-5 w-14" />
+          </ListGridCell>
+          <ListGridCell className="hidden px-0 @2xl:flex" />
+          <ListGridCell className="hidden gap-1.5 @2xl:flex">
+            <Skeleton className="size-5 rounded-full" />
+            <Skeleton className="h-3 w-12" />
+          </ListGridCell>
+          <ListGridCell className="hidden @2xl:flex">
+            <Skeleton className="h-3 w-10" />
+          </ListGridCell>
+          <ListGridCell className="hidden px-0 @2xl:flex" />
+          <span aria-hidden="true" />
+        </ListGridRow>
+      ))}
+    </ListGrid>
   );
 }
 
@@ -614,204 +573,381 @@ function SkillDetail({
 // ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
-  const isLoading = useAuthStore((s) => s.isLoading);
-  const qc = useQueryClient();
+  const { t } = useT("skills");
   const wsId = useWorkspaceId();
-  const { data: skills = [] } = useQuery(skillListOptions(wsId));
-  const [selectedId, setSelectedId] = useState<string>("");
-  const [showCreate, setShowCreate] = useState(false);
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_skills_layout",
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  const rowLink = useRowLink();
+  const timeAgo = useTimeAgo();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+
+  const {
+    data: skills = [],
+    isLoading,
+    error: listError,
+    refetch: refetchList,
+  } = useQuery(skillListOptions(wsId));
+  const { data: agents = [], error: agentsError } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], error: membersError } = useQuery(
+    memberListOptions(wsId),
+  );
+  const { data: runtimes = [], error: runtimesError } = useQuery(
+    runtimeListOptions(wsId),
+  );
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [search, setSearch] = useState("");
+
+  // Persisted view preferences (per workspace, per user/device). Header sort
+  // buttons and the toolbar's display panel mutate the SAME store, so both
+  // surfaces always agree. Search and selection stay session-local on
+  // purpose.
+  const sortField = useSkillsViewStore((s) => s.sortField);
+  const sortDirection = useSkillsViewStore((s) => s.sortDirection);
+  const hiddenColumns = useSkillsViewStore((s) => s.hiddenColumns);
+  const filters = useSkillsViewStore((s) => s.filters);
+  const handleSort = useSkillsViewStore((s) => s.toggleSort);
+  const handleSortFieldSelect = useSkillsViewStore((s) => s.setSortField);
+  const setSortDirection = useSkillsViewStore((s) => s.setSortDirection);
+  const toggleColumn = useSkillsViewStore((s) => s.toggleColumn);
+  const toggleFilter = useSkillsViewStore((s) => s.toggleFilter);
+  const clearFilters = useSkillsViewStore((s) => s.clearFilters);
+
+  const isColVisible = (key: SkillColumnKey) => !hiddenColumns.includes(key);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const assignments = useMemo(() => selectSkillAssignments(agents), [agents]);
+
+  const membersById = useMemo(() => {
+    const map = new Map<string, MemberWithUser>();
+    for (const m of members) map.set(m.user_id, m);
+    return map;
+  }, [members]);
+
+  const runtimesById = useMemo(() => {
+    const map = new Map<string, AgentRuntime>();
+    for (const r of runtimes) map.set(r.id, r);
+    return map;
+  }, [runtimes]);
+
+  const myRole =
+    members.find((m: MemberWithUser) => m.user_id === currentUserId)?.role ??
+    null;
+  const isAdmin = myRole === "owner" || myRole === "admin";
+
+  const actionsCtx: SkillActionsContext = {
+    wsId,
+    agents,
+    currentUserId,
+    isAdmin,
+  };
+
+  // Full assembled set — toolbar option lists and counts derive from this.
+  const allRows = useMemo<SkillRow[]>(() => {
+    return skills.map((skill) => {
+      const origin = readOrigin(skill);
+      const runtime =
+        origin.type === "runtime_local" && origin.runtime_id
+          ? runtimesById.get(origin.runtime_id) ?? null
+          : null;
+      return {
+        skill,
+        agents: assignments.get(skill.id) ?? [],
+        creator: skill.created_by
+          ? membersById.get(skill.created_by) ?? null
+          : null,
+        runtime,
+        originType: origin.type,
+        canEdit: canEditSkill(skill, { userId: currentUserId, role: myRole }),
+      };
+    });
+  }, [skills, assignments, membersById, runtimesById, currentUserId, myRole]);
+
+  // Visible rows: name search + filters, then sort.
+  const rows = useMemo<SkillRow[]>(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = allRows.filter((row) => {
+      if (q && !row.skill.name.toLowerCase().includes(q)) return false;
+      if (filters.usage.length > 0) {
+        const usage = row.agents.length > 0 ? "used" : "unused";
+        if (!filters.usage.includes(usage)) return false;
+      }
+      if (
+        filters.origins.length > 0 &&
+        !filters.origins.includes(row.originType)
+      ) {
+        return false;
+      }
+      if (
+        filters.agents.length > 0 &&
+        !row.agents.some((a) => filters.agents.includes(a.id))
+      ) {
+        return false;
+      }
+      if (
+        filters.creators.length > 0 &&
+        (!row.skill.created_by ||
+          !filters.creators.includes(row.skill.created_by))
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const dir = sortDirection === "asc" ? 1 : -1;
+    filtered.sort((a, b) => {
+      if (sortField === "name") {
+        return a.skill.name.localeCompare(b.skill.name) * dir;
+      }
+      if (sortField === "usedBy") {
+        return (
+          (a.agents.length - b.agents.length) * dir ||
+          a.skill.name.localeCompare(b.skill.name)
+        );
+      }
+      if (sortField === "created") {
+        return (
+          (Date.parse(a.skill.created_at) - Date.parse(b.skill.created_at)) *
+          dir
+        );
+      }
+      return (
+        (Date.parse(a.skill.updated_at) - Date.parse(b.skill.updated_at)) * dir
+      );
+    });
+    return filtered;
+  }, [allRows, search, filters, sortField, sortDirection]);
+
+  // Row virtualization — Linear-style: the virtualizer only does the math
+  // (visible index range + offsets); the DOM stays ours. Offsets become
+  // padding on the rows wrapper, so the mounted rows remain direct subgrid
+  // children and column alignment is untouched. Fixed ROW_HEIGHT rows mean
+  // no per-row measurement. The scroll element is the SINGLE outer
+  // scroller (both axes) — see ListGridBody's comment for why the split
+  // scroll structure was retired.
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => listScrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10,
   });
 
-  useEffect(() => {
-    if (skills.length > 0 && !selectedId) {
-      setSelectedId(skills[0]!.id);
-    }
-  }, [skills, selectedId]);
-
-  const handleCreate = async (data: CreateSkillRequest) => {
-    const skill = await api.createSkill(data);
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-    setSelectedId(skill.id);
-    toast.success("Skill created");
+  const handleCreated = (skill: Skill) => {
+    navigation.push(paths.skillDetail(skill.id));
   };
 
-  const handleImport = async (url: string) => {
-    const skill = await api.importSkill({ url });
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-    setSelectedId(skill.id);
-    toast.success("Skill imported");
+  const selectedRows = rows.filter((row) => selectedIds.has(row.skill.id));
+  const allSelected = rows.length > 0 && selectedRows.length === rows.length;
+  const someSelected = selectedRows.length > 0 && !allSelected;
+  const handleToggleAll = () => {
+    setSelectedIds(
+      allSelected ? new Set() : new Set(rows.map((r) => r.skill.id)),
+    );
   };
 
-  const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
-    try {
-      await api.updateSkill(id, data);
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill saved");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save skill");
-      throw e;
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.deleteSkill(id);
-      if (selectedId === id) {
-        const remaining = skills.filter((s) => s.id !== id);
-        setSelectedId(remaining[0]?.id ?? "");
-      }
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill deleted");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete skill");
-    }
-  };
-
-  const selected = skills.find((s) => s.id === selectedId) ?? null;
-
-  if (isLoading) {
+  // --- List request error ---
+  if (listError) {
     return (
-      <div className="flex flex-1 min-h-0">
-        {/* List skeleton */}
-        <div className="w-72 border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-6 w-6 rounded" />
+      <div className="flex flex-1 min-h-0 flex-col">
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <div>
+            <p className="text-sm font-medium">
+              {t(($) => $.page.list_error.title)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {listError instanceof Error
+                ? listError.message
+                : t(($) => $.page.list_error.fallback)}
+            </p>
           </div>
-          <div className="divide-y">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <Skeleton className="h-8 w-8 rounded-lg" />
-                <div className="flex-1 space-y-1.5">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-3 w-40" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Detail skeleton */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex items-center gap-3 border-b px-4 py-3">
-            <Skeleton className="h-8 w-8 rounded-lg" />
-            <Skeleton className="h-8 w-40" />
-            <Skeleton className="h-8 w-56" />
-          </div>
-          <div className="flex flex-1 min-h-0">
-            <div className="w-48 border-r p-3 space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-            <div className="flex-1 p-4 space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-2/3" />
-            </div>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => refetchList()}
+          >
+            {t(($) => $.page.list_error.retry)}
+          </Button>
         </div>
       </div>
     );
   }
 
+  const totalCount = skills.length;
+  const showEmpty = !isLoading && totalCount === 0;
+  const supportingQueryDown =
+    !!agentsError || !!membersError || !!runtimesError;
+
+  // Unmounted rows above/below the visible slice become padding on the
+  // scrolling body, exactly like Linear's --x-paddingTop/Bottom offsets.
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const firstVirtual = virtualItems[0];
+  const lastVirtual = virtualItems[virtualItems.length - 1];
+  const virtualPadding = {
+    top: firstVirtual ? firstVirtual.start : 0,
+    bottom: lastVirtual
+      ? rowVirtualizer.getTotalSize() - lastVirtual.end
+      : 0,
+  };
+
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — skill list */}
-        <div className="overflow-y-auto h-full border-r">
-          <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
-            </Tooltip>
-          </PageHeader>
-          {skills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No workspace skills yet</p>
-              <p className="mt-1 text-xs text-muted-foreground text-center max-w-[280px]">
-                Workspace skills are shared across your team and injected into agent runs. Skills already installed in your local runtime are used automatically.
-              </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
-            </div>
-          )}
+    // relative: positioning anchor for the batch toolbar (page-centered,
+    // not viewport-centered).
+    <div className="relative flex flex-1 min-h-0 flex-col">
+      <PageHeaderBar
+        totalCount={totalCount}
+        onCreate={() => setCreateOpen(true)}
+      />
+
+      {supportingQueryDown && (
+        <div
+          role="status"
+          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-xs text-muted-foreground"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+          <span>{t(($) => $.page.supporting_data_warning)}</span>
         </div>
-      </ResizablePanel>
+      )}
 
-      <ResizableHandle />
-
-      <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — skill detail */}
-        <div className="flex-1 overflow-hidden h-full">
-          {selected ? (
-            <SkillDetail
-              key={selected.id}
-              skill={selected}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
+      {isLoading ? (
+        <div className="flex-1 overflow-y-auto @container">
+          <LoadingSkeleton />
+        </div>
+      ) : showEmpty ? (
+        <div className="flex flex-1 items-center justify-center">
+          <EmptyState onCreate={() => setCreateOpen(true)} />
+        </div>
+      ) : (
+        <>
+          <SkillListToolbar
+            search={search}
+            onSearchChange={setSearch}
+            filters={filters}
+            onToggleFilter={toggleFilter}
+            onClearFilters={clearFilters}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortFieldChange={handleSortFieldSelect}
+            onSortDirectionChange={setSortDirection}
+            hiddenColumns={hiddenColumns}
+            onToggleColumn={toggleColumn}
+            allRows={allRows}
+            visibleCount={rows.length}
+          />
+          <div
+            ref={listScrollRef}
+            className="min-h-0 flex-1 overflow-auto @container"
+          >
+          <ListGrid
+            className={`${GRID_COLS} @2xl:min-w-[var(--lgc-minw)]`}
+            style={columnTrackVars(isColVisible)}
+          >
+            <SkillListHeader
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              allSelected={allSelected}
+              someSelected={someSelected}
+              onToggleAll={handleToggleAll}
+              isColVisible={isColVisible}
             />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-              <Sparkles className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a skill to view details</p>
-              <p className="mt-1 text-xs text-center max-w-[260px]">
-                Workspace skills supplement your local skills and are shared across the team.
-              </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
+            <ListGridBody
+              style={{
+                paddingTop: virtualPadding.top,
+                paddingBottom:
+                  virtualPadding.bottom + LIST_GRID_BOTTOM_CLEARANCE,
+              }}
+            >
+              {rows.length === 0 && (
+                <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+                  {t(($) => $.page.no_matches.title)}
+                </div>
+              )}
+              {virtualItems.map((vi) => {
+                const row = rows[vi.index];
+                if (!row) return null;
+                return (
+              <ListGridRow
+                key={row.skill.id}
+                className={`cursor-pointer ${
+                  selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
+                }`}
+                {...rowLink(paths.skillDetail(row.skill.id))}
               >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          )}
-        </div>
-      </ResizablePanel>
+                <CheckboxCell
+                  checked={selectedIds.has(row.skill.id)}
+                  onToggle={() => toggleSelected(row.skill.id)}
+                />
+                <NameCell row={row} />
+                {isColVisible("usedBy") ? (
+                  <UsedByCell agents={row.agents} />
+                ) : (
+                  <ListGridCell className="px-0" />
+                )}
+                {isColVisible("source") ? (
+                  <SourceCell skill={row.skill} runtime={row.runtime} />
+                ) : (
+                  <ListGridCell className="hidden px-0 @2xl:flex" />
+                )}
+                {isColVisible("creator") ? (
+                  <CreatorCell creator={row.creator} />
+                ) : (
+                  <ListGridCell className="hidden px-0 @2xl:flex" />
+                )}
+                {isColVisible("updated") ? (
+                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                    {timeAgo(row.skill.updated_at)}
+                  </ListGridCell>
+                ) : (
+                  <ListGridCell className="hidden px-0 @2xl:flex" />
+                )}
+                {isColVisible("created") ? (
+                  <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                    {timeAgo(row.skill.created_at)}
+                  </ListGridCell>
+                ) : (
+                  <ListGridCell className="hidden px-0 @2xl:flex" />
+                )}
+                <ListGridCell className="justify-end px-0">
+                  <SkillRowActions row={row} ctx={actionsCtx} />
+                </ListGridCell>
+              </ListGridRow>
+                );
+              })}
+            </ListGridBody>
+          </ListGrid>
+          </div>
+        </>
+      )}
 
-      {showCreate && (
+      <SkillBatchToolbar
+        rows={selectedRows}
+        ctx={actionsCtx}
+        onClear={() => setSelectedIds(new Set())}
+      />
+
+      {createOpen && (
         <CreateSkillDialog
-          onClose={() => setShowCreate(false)}
-          onCreate={handleCreate}
-          onImport={handleImport}
+          onClose={() => setCreateOpen(false)}
+          onCreated={handleCreated}
         />
       )}
-    </ResizablePanelGroup>
+    </div>
   );
 }

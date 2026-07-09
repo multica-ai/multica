@@ -20,7 +20,9 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		// Issues created via handler use IssueResponse; autopilot-created issues
+		// use map[string]any (see service/autopilot.go → issueToMap).
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}
@@ -48,7 +50,7 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}
@@ -103,8 +105,43 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
+		// Platform-authored system comments (MUL-2538 child-done parent notify)
+		// have author_type='system' and a zero UUID author. They must NOT
+		// add a subscriber row: issue_subscriber.user_type is constrained to
+		// ('member','agent'), and a "system" subscriber has no inbox to read
+		// anyway. Skip them at the side-effect boundary so the system event
+		// stays a pure WS broadcast for the timeline.
+		if authorType == "system" {
+			return
+		}
+
 		addSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter")
 	})
+}
+
+// extractIssueFields normalizes an issue payload that may be either a
+// handler.IssueResponse struct (HTTP handler path) or a map[string]any
+// (autopilot service path) into a common shape.
+func extractIssueFields(v any) (handler.IssueResponse, bool) {
+	if issue, ok := v.(handler.IssueResponse); ok {
+		return issue, true
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return handler.IssueResponse{}, false
+	}
+	issue := handler.IssueResponse{}
+	issue.ID, _ = m["id"].(string)
+	issue.WorkspaceID, _ = m["workspace_id"].(string)
+	issue.CreatorType, _ = m["creator_type"].(string)
+	issue.CreatorID, _ = m["creator_id"].(string)
+	issue.AssigneeType, _ = m["assignee_type"].(*string)
+	issue.AssigneeID, _ = m["assignee_id"].(*string)
+	issue.Description, _ = m["description"].(*string)
+	if issue.ID == "" || issue.CreatorID == "" {
+		return handler.IssueResponse{}, false
+	}
+	return issue, true
 }
 
 // addSubscriber adds a user as an issue subscriber and publishes a

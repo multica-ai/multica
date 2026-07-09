@@ -21,50 +21,92 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
-import { paths } from "@multica/core/paths";
+import {
+  resolvePostAuthDestination,
+  useCurrentWorkspace,
+  useHasOnboarded,
+} from "@multica/core/paths";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
+import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { useT } from "../../i18n";
 
 export function WorkspaceTab() {
+  const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
-  const wsId = useWorkspaceId();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // Derive the id from useCurrentWorkspace instead of the throwing
+  // useWorkspaceId: this component can legitimately render while the
+  // workspace is gone from the list cache but the URL slug hasn't changed
+  // yet (post-delete invalidation before navigation completes, or an
+  // external delete of the workspace we're on). The `!workspace` guard
+  // below renders null for that window; a throwing hook would crash first.
+  const wsId = workspace?.id;
+  const { data: members = [], isFetched: membersFetched } = useQuery({
+    ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
   const qc = useQueryClient();
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
+  const hasOnboarded = useHasOnboarded();
 
   /**
-   * After leaving/deleting the current workspace, send the user to a safe URL:
-   * another workspace they still have access to, or /workspaces/new if none
-   * remain. The list is freshly fetched (staleTime: 0) because the cache still
-   * contains the just-removed workspace until the background invalidation
-   * resolves.
+   * Send the user to a safe URL, computed from the current cached workspace
+   * list minus the workspace that's going away.
+   *
+   * Call ordering differs per flow:
+   *   - Delete calls this AFTER the mutation succeeds. The realtime
+   *     `workspace:deleted` handler skips self-initiated deletes (see
+   *     pending-delete.ts), so nothing races this navigation.
+   *   - Leave still calls this BEFORE the mutation fires: `member:removed`
+   *     has no self-initiated marker yet, so if the user were still on the
+   *     workspace's URL when that event arrives, the realtime handler in
+   *     `use-realtime-sync.ts` would trigger a parallel full-page relocate
+   *     that races the mutation's `invalidateQueries` refetch — the loser's
+   *     in-flight fetch gets cancelled, surfacing as an unhandled
+   *     `CancelledError`. Navigating first makes the handler's
+   *     "current === lost workspace" check fail and its relocate no-op.
+   *     Known debt: give leave the same await-then-navigate shape as delete.
    */
-  const navigateAwayFromCurrentWorkspace = async () => {
-    const wsList = await qc.fetchQuery({
-      ...workspaceListOptions(),
-      staleTime: 0,
-    });
-    const remaining = wsList.filter((w) => w.id !== workspace?.id);
-    const next = remaining[0];
-    navigation.push(
-      next ? paths.workspace(next.slug).issues() : paths.newWorkspace(),
-    );
+  const navigateAwayFromCurrentWorkspace = () => {
+    const cachedList =
+      qc.getQueryData<Workspace[]>(workspaceListOptions().queryKey) ?? [];
+    const remaining = cachedList.filter((w) => w.id !== workspace?.id);
+    // Clear the workspace-context singleton BEFORE navigating. Three
+    // downstream consumers read it:
+    //  1. Realtime relocate handlers' "current === lost workspace" check
+    //     (`member:removed` for leave; also a second line of defense for
+    //     delete) — if the singleton still points at the lost workspace
+    //     when the WS event arrives, they fire a parallel full-page
+    //     relocate that races this navigation.
+    //  2. Chrome gating (`{slug && <AppSidebar />}` on desktop) — if the
+    //     singleton lingers, the sidebar stays mounted while the deleted
+    //     workspace is no longer in the list, and `useWorkspaceId` throws.
+    //  3. API client's `X-Workspace-Slug` header — stale header post-
+    //     delete is at best a 404, at worst leaks into the next query.
+    // WorkspaceRouteLayout re-sets the singleton when a new workspace's
+    // route mounts; clearing here is safe — either the next workspace
+    // takes over immediately, or the new-workspace overlay takes over
+    // (which has no workspace context, so null is correct).
+    setCurrentWorkspace(null, null);
+    navigation.push(resolvePostAuthDestination(remaining, hasOnboarded));
   };
 
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -73,18 +115,43 @@ export function WorkspaceTab() {
     variant?: "destructive";
     onConfirm: () => Promise<void>;
   } | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
+  // Mirror the backend invariant (server/internal/handler/workspace.go:569):
+  // a workspace must always have at least one owner, so the sole owner can't
+  // leave. Pre-flight here instead of letting the 400 round-trip become a
+  // confusing toast — disable Leave and tell the user what they need to do.
+  const ownerCount = members.filter((m) => m.role === "owner").length;
+  const isSoleOwner = isOwner && ownerCount <= 1;
+  const isSoleMember = members.length <= 1;
 
+  // Reset form state only when the user switches to a different workspace.
+  // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
+  // when an unrelated mutation — e.g. avatar/logo upload — replaces the
+  // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
-  }, [workspace]);
+    setIssuePrefix(workspace?.issue_prefix ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
+  }, [workspace?.id]);
 
-  const handleSave = async () => {
+  // Letters + digits only, uppercase, capped at 10 chars. The backend
+  // uppercases and trims on its side too — this is purely a UX guardrail
+  // so the value the user sees in the input matches what gets persisted.
+  const normalizePrefix = (raw: string) =>
+    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+
+  const normalizedPrefix = normalizePrefix(issuePrefix);
+  const prefixChanged =
+    !!workspace && normalizedPrefix !== workspace.issue_prefix;
+  const prefixInvalid = normalizedPrefix.length === 0;
+
+  const performSave = async (includePrefix: boolean) => {
     if (!workspace) return;
     setSaving(true);
     try {
@@ -92,31 +159,57 @@ export function WorkspaceTab() {
         name,
         description,
         context,
+        ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      toast.success("Workspace settings saved");
+      // Issue identifiers (`MUL-123`) are computed from `issue_prefix` at
+      // read time, not stored on each issue row. When the prefix changes,
+      // every cached issue's rendered identifier is stale until refetched.
+      // Limit invalidation to the prefix-changed branch so unrelated saves
+      // (name / description / context) stay cheap.
+      if (includePrefix) {
+        qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
+      }
+      toast.success(t(($) => $.workspace.toast_saved));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save workspace settings");
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_save_failed));
     } finally {
       setSaving(false);
     }
   };
 
+  const handleSave = () => {
+    if (!workspace || prefixInvalid) return;
+    if (prefixChanged) {
+      setConfirmAction({
+        title: t(($) => $.workspace.prefix_confirm_title),
+        description: t(($) => $.workspace.prefix_confirm_description, {
+          oldPrefix: workspace.issue_prefix,
+          newPrefix: normalizedPrefix,
+        }),
+        variant: "destructive",
+        onConfirm: () => performSave(true),
+      });
+      return;
+    }
+    void performSave(false);
+  };
+
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
-      title: "Leave workspace",
-      description: `Leave ${workspace.name}? You will lose access until re-invited.`,
+      title: t(($) => $.workspace.leave_confirm_title),
+      description: t(($) => $.workspace.leave_confirm_description, { name: workspace.name }),
       variant: "destructive",
       onConfirm: async () => {
         setActionId("leave");
+        navigateAwayFromCurrentWorkspace();
         try {
           await leaveWorkspace.mutateAsync(workspace.id);
-          await navigateAwayFromCurrentWorkspace();
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to leave workspace");
+          toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_leave_failed));
         } finally {
           setActionId(null);
         }
@@ -124,24 +217,25 @@ export function WorkspaceTab() {
     });
   };
 
-  const handleDeleteWorkspace = () => {
+  const handleConfirmDelete = async () => {
     if (!workspace) return;
-    setConfirmAction({
-      title: "Delete workspace",
-      description: `Delete ${workspace.name}? This cannot be undone. All issues, agents, and data will be permanently removed.`,
-      variant: "destructive",
-      onConfirm: async () => {
-        setActionId("delete-workspace");
-        try {
-          await deleteWorkspace.mutateAsync(workspace.id);
-          await navigateAwayFromCurrentWorkspace();
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to delete workspace");
-        } finally {
-          setActionId(null);
-        }
-      },
-    });
+    setActionId("delete-workspace");
+    // Await the DELETE with the dialog in its loading state, and only
+    // navigate on success (CLAUDE.md: flows that navigate must await the
+    // server; no optimistic removal). The realtime `workspace:deleted`
+    // handler skips self-initiated deletes via the pending-delete registry,
+    // so it can't race this navigation with its own full-page relocate.
+    // On failure the dialog stays open, the cache was never touched, and
+    // the user is exactly where they started.
+    try {
+      await deleteWorkspace.mutateAsync(workspace.id);
+      setDeleteDialogOpen(false);
+      navigateAwayFromCurrentWorkspace();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_delete_failed));
+    } finally {
+      setActionId(null);
+    }
   };
 
   if (!workspace) return null;
@@ -150,12 +244,35 @@ export function WorkspaceTab() {
     <div className="space-y-8">
       {/* Workspace settings */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">General</h2>
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace.section_general)}</h2>
 
         <Card>
           <CardContent className="space-y-3">
+            <div className="flex items-center gap-4">
+              <AvatarUploadControl
+                variant="workspace"
+                value={workspace.avatar_url ?? null}
+                name={workspace.name}
+                size={64}
+                disabled={!canManageWorkspace}
+                ariaLabel={t(($) => $.workspace.change_logo_aria)}
+                onUploaded={async (url) => {
+                  const updated = await api.updateWorkspace(workspace.id, {
+                    avatar_url: url,
+                  });
+                  qc.setQueryData(
+                    workspaceKeys.list(),
+                    (old: Workspace[] | undefined) =>
+                      old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+                  );
+                }}
+              />
+              <div className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.click_logo_hint)}
+              </div>
+            </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>
               <Input
                 type="text"
                 value={name}
@@ -165,99 +282,124 @@ export function WorkspaceTab() {
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.description_label)}</Label>
               <Textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="What does this workspace focus on?"
+                placeholder={t(($) => $.workspace.description_placeholder)}
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Context</Label>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.context_label)}</Label>
               <Textarea
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
                 rows={4}
                 disabled={!canManageWorkspace}
                 className="mt-1 resize-none"
-                placeholder="Background information and context for AI agents working in this workspace"
+                placeholder={t(($) => $.workspace.context_placeholder)}
               />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">Slug</Label>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.slug_label)}</Label>
               <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 {workspace.slug}
               </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.issue_prefix_label)}</Label>
+              <Input
+                type="text"
+                value={issuePrefix}
+                onChange={(e) => setIssuePrefix(normalizePrefix(e.target.value))}
+                disabled={!canManageWorkspace}
+                maxLength={10}
+                className="mt-1 font-mono uppercase"
+                placeholder={workspace.issue_prefix}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(($) => $.workspace.issue_prefix_hint, {
+                  example: `${normalizedPrefix || workspace.issue_prefix}-123`,
+                })}
+              </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={saving || !name.trim() || !canManageWorkspace}
+                disabled={saving || !name.trim() || prefixInvalid || !canManageWorkspace}
               >
                 <Save className="h-3 w-3" />
-                {saving ? "Saving..." : "Save"}
+                {saving ? t(($) => $.workspace.saving) : t(($) => $.workspace.save)}
               </Button>
             </div>
             {!canManageWorkspace && (
               <p className="text-xs text-muted-foreground">
-                Only admins and owners can update workspace settings.
+                {t(($) => $.workspace.manage_hint)}
               </p>
             )}
           </CardContent>
         </Card>
       </section>
 
-      {/* Danger Zone */}
+      {/* Danger Zone — gated on the member query settling so the owner-only
+          Delete button and the sole-owner Leave guidance don't flash in
+          after mount. */}
+      {membersFetched && (
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <LogOut className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Danger Zone</h2>
+          <h2 className="text-sm font-semibold">{t(($) => $.workspace.danger_zone)}</h2>
         </div>
 
         <Card>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-medium">Leave workspace</p>
+                <p className="text-sm font-medium">{t(($) => $.workspace.leave_title)}</p>
                 <p className="text-xs text-muted-foreground">
-                  Remove yourself from this workspace.
+                  {isSoleOwner
+                    ? isSoleMember
+                      ? t(($) => $.workspace.leave_sole_member)
+                      : t(($) => $.workspace.leave_sole_owner)
+                    : t(($) => $.workspace.leave_default)}
                 </p>
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleLeaveWorkspace}
-                disabled={actionId === "leave"}
+                disabled={actionId === "leave" || isSoleOwner}
               >
-                {actionId === "leave" ? "Leaving..." : "Leave workspace"}
+                {actionId === "leave" ? t(($) => $.workspace.leaving) : t(($) => $.workspace.leave_button)}
               </Button>
             </div>
 
             {isOwner && (
               <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-medium text-destructive">Delete workspace</p>
+                  <p className="text-sm font-medium text-destructive">{t(($) => $.workspace.delete_title)}</p>
                   <p className="text-xs text-muted-foreground">
-                    Permanently delete this workspace and its data.
+                    {t(($) => $.workspace.delete_description)}
                   </p>
                 </div>
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={handleDeleteWorkspace}
+                  onClick={() => setDeleteDialogOpen(true)}
                   disabled={actionId === "delete-workspace"}
                 >
-                  {actionId === "delete-workspace" ? "Deleting..." : "Delete workspace"}
+                  {actionId === "delete-workspace" ? t(($) => $.workspace.deleting) : t(($) => $.workspace.delete_button)}
                 </Button>
               </div>
             )}
           </CardContent>
         </Card>
       </section>
+      )}
 
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
         <AlertDialogContent>
@@ -266,7 +408,7 @@ export function WorkspaceTab() {
             <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t(($) => $.workspace.confirm_cancel)}</AlertDialogCancel>
             <AlertDialogAction
               variant={confirmAction?.variant === "destructive" ? "destructive" : "default"}
               onClick={async () => {
@@ -274,11 +416,24 @@ export function WorkspaceTab() {
                 setConfirmAction(null);
               }}
             >
-              Confirm
+              {t(($) => $.workspace.confirm_action)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <DeleteWorkspaceDialog
+        workspaceName={workspace.name}
+        loading={actionId === "delete-workspace"}
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          // Ignore close requests while the delete mutation is in flight
+          // so the user can't accidentally dismiss mid-operation.
+          if (actionId === "delete-workspace" && !open) return;
+          setDeleteDialogOpen(open);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

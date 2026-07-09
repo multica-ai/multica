@@ -17,54 +17,36 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { FileText, Loader2, Download } from "lucide-react";
+import { FILE_CARD_URL_PATTERN } from "@multica/ui/markdown";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
+import { Attachment } from "../attachment";
+
+// Backslash is excluded from the label char class so "\x" runs can only be
+// consumed by \\. — overlapping alternatives backtrack in 2^n ways (ReDoS,
+// GitHub #4881).
+const FILE_CARD_MARKDOWN_RE = new RegExp(
+  `^!file\\[((?:\\\\.|[^\\]\\\\])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
+);
 
 
 // ---------------------------------------------------------------------------
-// Helpers
+// React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// React NodeView
-// ---------------------------------------------------------------------------
-
-function FileCardView({ node }: NodeViewProps) {
+export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
-
-  const openFile = () => {
-    window.open(href, "_blank", "noopener,noreferrer");
-  };
+  const editable = editor?.isEditable ?? false;
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
-      <div
-        className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        contentEditable={false}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {uploading ? (
-          <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm">{uploading ? `Uploading ${filename}` : filename}</p>
-        </div>
-        {!uploading && href && (
-          <button
-            type="button"
-            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              openFile();
-            }}
-          >
-            <Download className="size-3.5" />
-          </button>
-        )}
+      <div contentEditable={false}>
+        <Attachment
+          attachment={{ kind: "url", url: href, filename, uploading }}
+          editable={editable}
+          onDelete={editable ? deleteNode : undefined}
+        />
       </div>
     </NodeViewWrapper>
   );
@@ -137,12 +119,13 @@ export const FileCardExtension = Node.create({
       return src.search(/^!file\[/m);
     },
     tokenize(src: string) {
-      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+      const match = src.match(FILE_CARD_MARKDOWN_RE);
       if (!match) return undefined;
+      const filename = (match[1] ?? "").replace(/\\([[\]\\()])/g, "$1");
       return {
         type: "fileCard",
         raw: match[0],
-        attributes: { filename: match[1], href: match[2] },
+        attributes: { filename, href: match[2] },
       };
     },
   },
@@ -151,7 +134,7 @@ export const FileCardExtension = Node.create({
   },
   renderMarkdown: (node: any) => {
     const { href, filename } = node.attrs || {};
-    return `!file[${filename || "file"}](${href})`;
+    return `!file[${escapeMarkdownLabel(filename || "file")}](${href})`;
   },
 
   addNodeView() {

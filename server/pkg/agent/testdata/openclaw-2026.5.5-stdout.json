@@ -1,0 +1,1070 @@
+{
+  "payloads": [
+    {
+      "text": "hi",
+      "mediaUrl": null
+    }
+  ],
+  "meta": {
+    "durationMs": 6115,
+    "agentMeta": {
+      "sessionId": "4dcd853a-6e6d-45af-977d-092f909a7a99",
+      "sessionFile": "/Users/joey/.openclaw/agents/main/sessions/4dcd853a-6e6d-45af-977d-092f909a7a99.jsonl",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "contextTokens": 1000000,
+      "agentHarnessId": "pi",
+      "usage": {
+        "input": 34620,
+        "output": 6,
+        "cacheWrite": 46482,
+        "total": 81108
+      },
+      "lastCallUsage": {
+        "input": 34620,
+        "output": 6,
+        "cacheRead": 0,
+        "cacheWrite": 46482,
+        "total": 81108
+      },
+      "promptTokens": 81102
+    },
+    "aborted": false,
+    "systemPromptReport": {
+      "source": "run",
+      "generatedAt": 1777999557022,
+      "sessionId": "aa49a251-053c-4a78-b7e4-767a2b5f7930",
+      "sessionKey": "agent:main:main",
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4.7",
+      "workspaceDir": "/Users/joey/dev/red/workspace",
+      "bootstrapMaxChars": 32000,
+      "bootstrapTotalMaxChars": 200000,
+      "bootstrapTruncation": {
+        "warningMode": "once",
+        "warningShown": false,
+        "truncatedFiles": 0,
+        "nearLimitFiles": 0,
+        "totalNearLimit": false
+      },
+      "sandbox": {
+        "mode": "off",
+        "sandboxed": false
+      },
+      "systemPrompt": {
+        "chars": 86163,
+        "projectContextChars": 53602,
+        "nonProjectContextChars": 32561
+      },
+      "injectedWorkspaceFiles": [
+        {
+          "name": "AGENTS.md",
+          "path": "/Users/joey/dev/red/workspace/AGENTS.md",
+          "missing": false,
+          "rawChars": 4245,
+          "injectedChars": 4245,
+          "truncated": false
+        },
+        {
+          "name": "SOUL.md",
+          "path": "/Users/joey/dev/red/workspace/SOUL.md",
+          "missing": false,
+          "rawChars": 6772,
+          "injectedChars": 6772,
+          "truncated": false
+        },
+        {
+          "name": "TOOLS.md",
+          "path": "/Users/joey/dev/red/workspace/TOOLS.md",
+          "missing": false,
+          "rawChars": 13263,
+          "injectedChars": 13263,
+          "truncated": false
+        },
+        {
+          "name": "IDENTITY.md",
+          "path": "/Users/joey/dev/red/workspace/IDENTITY.md",
+          "missing": false,
+          "rawChars": 930,
+          "injectedChars": 930,
+          "truncated": false
+        },
+        {
+          "name": "USER.md",
+          "path": "/Users/joey/dev/red/workspace/USER.md",
+          "missing": false,
+          "rawChars": 4475,
+          "injectedChars": 4475,
+          "truncated": false
+        },
+        {
+          "name": "HEARTBEAT.md",
+          "path": "/Users/joey/dev/red/workspace/HEARTBEAT.md",
+          "missing": false,
+          "rawChars": 1683,
+          "injectedChars": 1683,
+          "truncated": false
+        },
+        {
+          "name": "BOOTSTRAP.md",
+          "path": "/Users/joey/dev/red/workspace/BOOTSTRAP.md",
+          "missing": true,
+          "rawChars": 0,
+          "injectedChars": 0,
+          "truncated": false
+        },
+        {
+          "name": "MEMORY.md",
+          "path": "/Users/joey/dev/red/workspace/MEMORY.md",
+          "missing": false,
+          "rawChars": 23433,
+          "injectedChars": 23433,
+          "truncated": false
+        }
+      ],
+      "skills": {
+        "promptChars": 17880,
+        "entries": [
+          {
+            "name": "1password",
+            "blockChars": 111
+          },
+          {
+            "name": "1password-credentials",
+            "blockChars": 140
+          },
+          {
+            "name": "accessibility",
+            "blockChars": 114
+          },
+          {
+            "name": "acpx",
+            "blockChars": 98
+          },
+          {
+            "name": "agent-browser",
+            "blockChars": 114
+          },
+          {
+            "name": "agent-operations",
+            "blockChars": 130
+          },
+          {
+            "name": "agent-scan",
+            "blockChars": 118
+          },
+          {
+            "name": "agent-slack",
+            "blockChars": 110
+          },
+          {
+            "name": "api-design",
+            "blockChars": 108
+          },
+          {
+            "name": "apple-reminders",
+            "blockChars": 123
+          },
+          {
+            "name": "attio-mcp",
+            "blockChars": 116
+          },
+          {
+            "name": "audiocraft",
+            "blockChars": 118
+          },
+          {
+            "name": "awe-contribution-flow",
+            "blockChars": 132
+          },
+          {
+            "name": "awe-conventions",
+            "blockChars": 120
+          },
+          {
+            "name": "b3d",
+            "blockChars": 104
+          },
+          {
+            "name": "best-practices",
+            "blockChars": 116
+          },
+          {
+            "name": "browser-automation",
+            "blockChars": 134
+          },
+          {
+            "name": "bsa-briefing",
+            "blockChars": 122
+          },
+          {
+            "name": "btw",
+            "blockChars": 94
+          },
+          {
+            "name": "cap-evaluator",
+            "blockChars": 114
+          },
+          {
+            "name": "channel-liveness-canary",
+            "blockChars": 136
+          },
+          {
+            "name": "client-overview-briefing",
+            "blockChars": 146
+          },
+          {
+            "name": "client-transcript-cleaner",
+            "blockChars": 138
+          },
+          {
+            "name": "cloudflare-pages",
+            "blockChars": 130
+          },
+          {
+            "name": "code-optimizer",
+            "blockChars": 116
+          },
+          {
+            "name": "code-review",
+            "blockChars": 120
+          },
+          {
+            "name": "confluence",
+            "blockChars": 118
+          },
+          {
+            "name": "confluence-nango",
+            "blockChars": 130
+          },
+          {
+            "name": "content-gate",
+            "blockChars": 122
+          },
+          {
+            "name": "core-web-vitals",
+            "blockChars": 118
+          },
+          {
+            "name": "create-gsd-extension",
+            "blockChars": 128
+          },
+          {
+            "name": "create-mcp-server",
+            "blockChars": 122
+          },
+          {
+            "name": "create-skill",
+            "blockChars": 112
+          },
+          {
+            "name": "create-workflow",
+            "blockChars": 118
+          },
+          {
+            "name": "creative-ideation",
+            "blockChars": 132
+          },
+          {
+            "name": "credential-audit",
+            "blockChars": 130
+          },
+          {
+            "name": "cron-health-monitor",
+            "blockChars": 128
+          },
+          {
+            "name": "Cross-Platform Skill Management",
+            "blockChars": 145
+          },
+          {
+            "name": "cwm-bootstrapper",
+            "blockChars": 120
+          },
+          {
+            "name": "cwm-synthesizer",
+            "blockChars": 118
+          },
+          {
+            "name": "daily-scan",
+            "blockChars": 108
+          },
+          {
+            "name": "debug-like-expert",
+            "blockChars": 122
+          },
+          {
+            "name": "decompose-into-slices",
+            "blockChars": 130
+          },
+          {
+            "name": "deliverables",
+            "blockChars": 122
+          },
+          {
+            "name": "dependency-upgrade",
+            "blockChars": 124
+          },
+          {
+            "name": "design-an-interface",
+            "blockChars": 126
+          },
+          {
+            "name": "discord",
+            "blockChars": 107
+          },
+          {
+            "name": "docker-desktop-path",
+            "blockChars": 136
+          },
+          {
+            "name": "drop",
+            "blockChars": 106
+          },
+          {
+            "name": "eodr",
+            "blockChars": 106
+          },
+          {
+            "name": "forensics",
+            "blockChars": 106
+          },
+          {
+            "name": "frontend-design",
+            "blockChars": 118
+          },
+          {
+            "name": "gemini",
+            "blockChars": 105
+          },
+          {
+            "name": "gguf",
+            "blockChars": 106
+          },
+          {
+            "name": "gh-issues",
+            "blockChars": 111
+          },
+          {
+            "name": "github",
+            "blockChars": 110
+          },
+          {
+            "name": "github-workflows",
+            "blockChars": 120
+          },
+          {
+            "name": "gitnexus",
+            "blockChars": 114
+          },
+          {
+            "name": "gog",
+            "blockChars": 104
+          },
+          {
+            "name": "grill-me",
+            "blockChars": 104
+          },
+          {
+            "name": "gsd-mode",
+            "blockChars": 114
+          },
+          {
+            "name": "gws-admin-reports",
+            "blockChars": 132
+          },
+          {
+            "name": "gws-calendar",
+            "blockChars": 122
+          },
+          {
+            "name": "gws-calendar-agenda",
+            "blockChars": 136
+          },
+          {
+            "name": "gws-calendar-insert",
+            "blockChars": 136
+          },
+          {
+            "name": "gws-chat",
+            "blockChars": 114
+          },
+          {
+            "name": "gws-chat-send",
+            "blockChars": 124
+          },
+          {
+            "name": "gws-classroom",
+            "blockChars": 124
+          },
+          {
+            "name": "gws-docs",
+            "blockChars": 114
+          },
+          {
+            "name": "gws-docs-write",
+            "blockChars": 126
+          },
+          {
+            "name": "gws-drive",
+            "blockChars": 116
+          },
+          {
+            "name": "gws-drive-upload",
+            "blockChars": 130
+          },
+          {
+            "name": "gws-events",
+            "blockChars": 118
+          },
+          {
+            "name": "gws-events-renew",
+            "blockChars": 130
+          },
+          {
+            "name": "gws-events-subscribe",
+            "blockChars": 138
+          },
+          {
+            "name": "gws-forms",
+            "blockChars": 116
+          },
+          {
+            "name": "gws-gmail",
+            "blockChars": 116
+          },
+          {
+            "name": "gws-gmail-forward",
+            "blockChars": 132
+          },
+          {
+            "name": "gws-gmail-read",
+            "blockChars": 126
+          },
+          {
+            "name": "gws-gmail-reply",
+            "blockChars": 128
+          },
+          {
+            "name": "gws-gmail-reply-all",
+            "blockChars": 136
+          },
+          {
+            "name": "gws-gmail-send",
+            "blockChars": 126
+          },
+          {
+            "name": "gws-gmail-triage",
+            "blockChars": 130
+          },
+          {
+            "name": "gws-gmail-watch",
+            "blockChars": 128
+          },
+          {
+            "name": "gws-keep",
+            "blockChars": 114
+          },
+          {
+            "name": "gws-meet",
+            "blockChars": 114
+          },
+          {
+            "name": "gws-modelarmor",
+            "blockChars": 126
+          },
+          {
+            "name": "gws-modelarmor-create-template",
+            "blockChars": 158
+          },
+          {
+            "name": "gws-modelarmor-sanitize-prompt",
+            "blockChars": 158
+          },
+          {
+            "name": "gws-modelarmor-sanitize-response",
+            "blockChars": 162
+          },
+          {
+            "name": "gws-people",
+            "blockChars": 118
+          },
+          {
+            "name": "gws-shared",
+            "blockChars": 118
+          },
+          {
+            "name": "gws-sheets",
+            "blockChars": 118
+          },
+          {
+            "name": "gws-sheets-append",
+            "blockChars": 132
+          },
+          {
+            "name": "gws-sheets-read",
+            "blockChars": 128
+          },
+          {
+            "name": "gws-slides",
+            "blockChars": 118
+          },
+          {
+            "name": "gws-tasks",
+            "blockChars": 116
+          },
+          {
+            "name": "gws-workflow",
+            "blockChars": 122
+          },
+          {
+            "name": "gws-workflow-email-to-task",
+            "blockChars": 150
+          },
+          {
+            "name": "gws-workflow-file-announce",
+            "blockChars": 150
+          },
+          {
+            "name": "gws-workflow-meeting-prep",
+            "blockChars": 148
+          },
+          {
+            "name": "gws-workflow-standup-report",
+            "blockChars": 152
+          },
+          {
+            "name": "gws-workflow-weekly-digest",
+            "blockChars": 150
+          },
+          {
+            "name": "handoff",
+            "blockChars": 102
+          },
+          {
+            "name": "happy-place",
+            "blockChars": 120
+          },
+          {
+            "name": "healthcheck",
+            "blockChars": 115
+          },
+          {
+            "name": "hex-mcp",
+            "blockChars": 112
+          },
+          {
+            "name": "idea-capture",
+            "blockChars": 122
+          },
+          {
+            "name": "imsg",
+            "blockChars": 101
+          },
+          {
+            "name": "jira",
+            "blockChars": 106
+          },
+          {
+            "name": "jira-context-pull",
+            "blockChars": 122
+          },
+          {
+            "name": "journal-autopilot",
+            "blockChars": 132
+          },
+          {
+            "name": "kanban",
+            "blockChars": 110
+          },
+          {
+            "name": "keep-markdown",
+            "blockChars": 114
+          },
+          {
+            "name": "leaf",
+            "blockChars": 96
+          },
+          {
+            "name": "linkedin",
+            "blockChars": 114
+          },
+          {
+            "name": "lint",
+            "blockChars": 96
+          },
+          {
+            "name": "lm-evaluation-harness",
+            "blockChars": 140
+          },
+          {
+            "name": "loom-transcript",
+            "blockChars": 128
+          },
+          {
+            "name": "machine-management",
+            "blockChars": 134
+          },
+          {
+            "name": "make-interfaces-feel-better",
+            "blockChars": 142
+          },
+          {
+            "name": "mcporter",
+            "blockChars": 109
+          },
+          {
+            "name": "memory-eval",
+            "blockChars": 120
+          },
+          {
+            "name": "memory-status-report",
+            "blockChars": 138
+          },
+          {
+            "name": "modal",
+            "blockChars": 108
+          },
+          {
+            "name": "model-usage",
+            "blockChars": 115
+          },
+          {
+            "name": "morning-briefing",
+            "blockChars": 130
+          },
+          {
+            "name": "nano-pdf",
+            "blockChars": 109
+          },
+          {
+            "name": "node-connect",
+            "blockChars": 117
+          },
+          {
+            "name": "observability",
+            "blockChars": 114
+          },
+          {
+            "name": "ofm-payrun-report",
+            "blockChars": 132
+          },
+          {
+            "name": "omc-weekly-extract",
+            "blockChars": 126
+          },
+          {
+            "name": "openclaw-output-debugging",
+            "blockChars": 148
+          },
+          {
+            "name": "pdf",
+            "blockChars": 104
+          },
+          {
+            "name": "peekaboo",
+            "blockChars": 109
+          },
+          {
+            "name": "peft",
+            "blockChars": 106
+          },
+          {
+            "name": "personal-operating-model",
+            "blockChars": 136
+          },
+          {
+            "name": "pii-scrub",
+            "blockChars": 116
+          },
+          {
+            "name": "plannotator-annotate",
+            "blockChars": 128
+          }
+        ]
+      },
+      "tools": {
+        "listChars": 0,
+        "schemaChars": 55493,
+        "entries": [
+          {
+            "name": "read",
+            "summaryChars": 298,
+            "schemaChars": 304,
+            "propertiesCount": 3
+          },
+          {
+            "name": "edit",
+            "summaryChars": 326,
+            "schemaChars": 834,
+            "propertiesCount": 2
+          },
+          {
+            "name": "write",
+            "summaryChars": 127,
+            "schemaChars": 225,
+            "propertiesCount": 2
+          },
+          {
+            "name": "exec",
+            "summaryChars": 539,
+            "schemaChars": 1139,
+            "propertiesCount": 12
+          },
+          {
+            "name": "process",
+            "summaryChars": 416,
+            "schemaChars": 1011,
+            "propertiesCount": 12
+          },
+          {
+            "name": "cron",
+            "summaryChars": 4320,
+            "schemaChars": 7953,
+            "propertiesCount": 14
+          },
+          {
+            "name": "image_generate",
+            "summaryChars": 600,
+            "schemaChars": 2587,
+            "propertiesCount": 15
+          },
+          {
+            "name": "video_generate",
+            "summaryChars": 225,
+            "schemaChars": 4005,
+            "propertiesCount": 21
+          },
+          {
+            "name": "update_plan",
+            "summaryChars": 251,
+            "schemaChars": 574,
+            "propertiesCount": 2
+          },
+          {
+            "name": "sessions_list",
+            "summaryChars": 225,
+            "schemaChars": 432,
+            "propertiesCount": 9
+          },
+          {
+            "name": "sessions_history",
+            "summaryChars": 180,
+            "schemaChars": 161,
+            "propertiesCount": 3
+          },
+          {
+            "name": "sessions_send",
+            "summaryChars": 314,
+            "schemaChars": 274,
+            "propertiesCount": 5
+          },
+          {
+            "name": "sessions_spawn",
+            "summaryChars": 419,
+            "schemaChars": 1211,
+            "propertiesCount": 16
+          },
+          {
+            "name": "sessions_yield",
+            "summaryChars": 97,
+            "schemaChars": 60,
+            "propertiesCount": 1
+          },
+          {
+            "name": "subagents",
+            "summaryChars": 105,
+            "schemaChars": 191,
+            "propertiesCount": 4
+          },
+          {
+            "name": "session_status",
+            "summaryChars": 456,
+            "schemaChars": 89,
+            "propertiesCount": 2
+          },
+          {
+            "name": "web_search",
+            "summaryChars": 83,
+            "schemaChars": 1209,
+            "propertiesCount": 12
+          },
+          {
+            "name": "web_fetch",
+            "summaryChars": 129,
+            "schemaChars": 374,
+            "propertiesCount": 3
+          },
+          {
+            "name": "image",
+            "summaryChars": 260,
+            "schemaChars": 342,
+            "propertiesCount": 6
+          },
+          {
+            "name": "memory_search",
+            "summaryChars": 605,
+            "schemaChars": 237,
+            "propertiesCount": 4
+          },
+          {
+            "name": "memory_get",
+            "summaryChars": 239,
+            "schemaChars": 215,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__aaa-health-check",
+            "summaryChars": 274,
+            "schemaChars": 61,
+            "propertiesCount": 0
+          },
+          {
+            "name": "worksuite-attio__add-record-to-list",
+            "summaryChars": 545,
+            "schemaChars": 667,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__advanced-filter-list-entries",
+            "summaryChars": 500,
+            "schemaChars": 1558,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__batch_records",
+            "summaryChars": 312,
+            "schemaChars": 1582,
+            "propertiesCount": 7
+          },
+          {
+            "name": "worksuite-attio__batch_search_records",
+            "summaryChars": 258,
+            "schemaChars": 705,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__create_note",
+            "summaryChars": 431,
+            "schemaChars": 818,
+            "propertiesCount": 5
+          },
+          {
+            "name": "worksuite-attio__create_record",
+            "summaryChars": 507,
+            "schemaChars": 723,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__delete_record",
+            "summaryChars": 361,
+            "schemaChars": 515,
+            "propertiesCount": 2
+          },
+          {
+            "name": "worksuite-attio__discover_record_attributes",
+            "summaryChars": 283,
+            "schemaChars": 529,
+            "propertiesCount": 2
+          },
+          {
+            "name": "worksuite-attio__fetch",
+            "summaryChars": 339,
+            "schemaChars": 175,
+            "propertiesCount": 1
+          },
+          {
+            "name": "worksuite-attio__filter-list-entries",
+            "summaryChars": 2093,
+            "schemaChars": 2800,
+            "propertiesCount": 10
+          },
+          {
+            "name": "worksuite-attio__filter-list-entries-by-parent",
+            "summaryChars": 552,
+            "schemaChars": 1270,
+            "propertiesCount": 7
+          },
+          {
+            "name": "worksuite-attio__filter-list-entries-by-parent-id",
+            "summaryChars": 576,
+            "schemaChars": 572,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__get_record_attribute_options",
+            "summaryChars": 365,
+            "schemaChars": 742,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__get_record_attributes",
+            "summaryChars": 224,
+            "schemaChars": 722,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__get_record_details",
+            "summaryChars": 254,
+            "schemaChars": 638,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__get_record_info",
+            "summaryChars": 255,
+            "schemaChars": 391,
+            "propertiesCount": 2
+          },
+          {
+            "name": "worksuite-attio__get_record_interactions",
+            "summaryChars": 500,
+            "schemaChars": 403,
+            "propertiesCount": 2
+          },
+          {
+            "name": "worksuite-attio__get-list-details",
+            "summaryChars": 255,
+            "schemaChars": 195,
+            "propertiesCount": 1
+          },
+          {
+            "name": "worksuite-attio__get-list-entries",
+            "summaryChars": 269,
+            "schemaChars": 424,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__get-lists",
+            "summaryChars": 245,
+            "schemaChars": 62,
+            "propertiesCount": 0
+          },
+          {
+            "name": "worksuite-attio__get-record-list-memberships",
+            "summaryChars": 252,
+            "schemaChars": 622,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__get-workspace-member",
+            "summaryChars": 250,
+            "schemaChars": 207,
+            "propertiesCount": 1
+          },
+          {
+            "name": "worksuite-attio__list_notes",
+            "summaryChars": 205,
+            "schemaChars": 769,
+            "propertiesCount": 5
+          },
+          {
+            "name": "worksuite-attio__list-workspace-members",
+            "summaryChars": 240,
+            "schemaChars": 433,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__manage-list-entry",
+            "summaryChars": 1373,
+            "schemaChars": 864,
+            "propertiesCount": 6
+          },
+          {
+            "name": "worksuite-attio__remove-record-from-list",
+            "summaryChars": 537,
+            "schemaChars": 373,
+            "propertiesCount": 2
+          },
+          {
+            "name": "worksuite-attio__search",
+            "summaryChars": 395,
+            "schemaChars": 411,
+            "propertiesCount": 3
+          },
+          {
+            "name": "worksuite-attio__search_records",
+            "summaryChars": 188,
+            "schemaChars": 5739,
+            "propertiesCount": 17
+          },
+          {
+            "name": "worksuite-attio__search_records_advanced",
+            "summaryChars": 369,
+            "schemaChars": 2210,
+            "propertiesCount": 7
+          },
+          {
+            "name": "worksuite-attio__search_records_by_content",
+            "summaryChars": 226,
+            "schemaChars": 929,
+            "propertiesCount": 5
+          },
+          {
+            "name": "worksuite-attio__search_records_by_relationship",
+            "summaryChars": 225,
+            "schemaChars": 962,
+            "propertiesCount": 6
+          },
+          {
+            "name": "worksuite-attio__search_records_by_timeframe",
+            "summaryChars": 250,
+            "schemaChars": 1321,
+            "propertiesCount": 7
+          },
+          {
+            "name": "worksuite-attio__search-workspace-members",
+            "summaryChars": 224,
+            "schemaChars": 219,
+            "propertiesCount": 1
+          },
+          {
+            "name": "worksuite-attio__smithery_debug_config",
+            "summaryChars": 369,
+            "schemaChars": 62,
+            "propertiesCount": 0
+          },
+          {
+            "name": "worksuite-attio__update_record",
+            "summaryChars": 472,
+            "schemaChars": 769,
+            "propertiesCount": 4
+          },
+          {
+            "name": "worksuite-attio__update-list-entry",
+            "summaryChars": 548,
+            "schemaChars": 624,
+            "propertiesCount": 3
+          }
+        ]
+      }
+    },
+    "finalPromptText": "respond with exactly: hi",
+    "finalAssistantVisibleText": "hi",
+    "finalAssistantRawText": "hi",
+    "replayInvalid": false,
+    "livenessState": "working",
+    "stopReason": "stop",
+    "executionTrace": {
+      "winnerProvider": "openrouter",
+      "winnerModel": "anthropic/claude-opus-4.7",
+      "attempts": [
+        {
+          "provider": "openrouter",
+          "model": "anthropic/claude-opus-4.7",
+          "result": "success",
+          "stage": "assistant"
+        }
+      ],
+      "fallbackUsed": false,
+      "runner": "embedded"
+    },
+    "requestShaping": {
+      "authMode": "auth-profile",
+      "thinking": "off"
+    },
+    "completion": {
+      "stopReason": "stop",
+      "finishReason": "stop"
+    }
+  }
+}

@@ -8,6 +8,8 @@ import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { NoAccessPage } from "@multica/views/workspace/no-access-page";
+import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
+import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 
 export default function WorkspaceLayout({
@@ -29,6 +31,18 @@ export default function WorkspaceLayout({
   useEffect(() => {
     if (!isAuthLoading && !user) router.replace(paths.login());
   }, [isAuthLoading, user, router]);
+
+  // Hard onboarding gate. Authenticated user but onboarded_at NULL means
+  // they bypassed /onboarding (typed the URL, deeplink, etc.). Redirect
+  // back so the questionnaire + Step 3 finish. The reverse gate lives in
+  // `apps/web/app/(auth)/onboarding/page.tsx` — onboarded users hitting
+  // /onboarding bounce out to their workspace. Together those two effects
+  // make `onboarded_at` the single source of truth for "may access /<slug>/*".
+  useEffect(() => {
+    if (user && user.onboarded_at == null) {
+      router.replace(paths.onboarding());
+    }
+  }, [user, router]);
 
   // Resolve workspace by slug from the React Query list cache.
   // Enabled only when user is authenticated — otherwise the list query isn't seeded.
@@ -60,11 +74,17 @@ export default function WorkspaceLayout({
   // and we just need to hold null briefly.
   const hasBeenSeen = useWorkspaceSeen(workspaceSlug, !!workspace);
 
-  if (isAuthLoading) return null;
+  const loadingIndicator = (
+    <div className="flex h-svh items-center justify-center">
+      <MulticaIcon className="size-6 animate-pulse" />
+    </div>
+  );
+
+  if (isAuthLoading) return loadingIndicator;
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.
-  if (!listFetched) return null;
+  if (!listFetched) return loadingIndicator;
   if (!workspace) {
     // If we've resolved this slug before in this session, it was just
     // removed from our list (deleted/left/evicted). A navigate is almost
@@ -79,6 +99,11 @@ export default function WorkspaceLayout({
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       {children}
+      {/* Reads the welcome-store transient signal parked by
+       *  OnboardingFlow.handleRuntimeNext. Runtime path → loading veil →
+       *  blocking Modal with Helper + starter cards. Skip path → Modal
+       *  with two seeded issues. No signal → null. */}
+      <WelcomeAfterOnboarding />
     </WorkspaceSlugProvider>
   );
 }

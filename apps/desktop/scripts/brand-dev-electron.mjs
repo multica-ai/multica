@@ -9,6 +9,10 @@
 // matches. The patch is isolated to this worktree's node_modules — we
 // unlink the file before rewriting so we never mutate a pnpm-store inode
 // shared with another project.
+//
+// In a worktree, scripts/dev.mjs sets DESKTOP_APP_SUFFIX so the name becomes
+// "Multica Canary <suffix>" — distinguishable in Cmd+Tab and matching the app
+// name src/main/index.ts derives from the same env var.
 
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
@@ -17,7 +21,9 @@ import { resolve } from "node:path";
 
 if (process.platform !== "darwin") process.exit(0);
 
-const DESIRED_NAME = "Multica Canary";
+const DESIRED_NAME = process.env.DESKTOP_APP_SUFFIX
+  ? `Multica Canary ${process.env.DESKTOP_APP_SUFFIX}`
+  : "Multica Canary";
 
 const require = createRequire(import.meta.url);
 // `require('electron')` returns the path to the executable

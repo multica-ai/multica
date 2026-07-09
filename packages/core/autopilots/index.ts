@@ -1,4 +1,11 @@
-export { autopilotKeys, autopilotListOptions, autopilotDetailOptions, autopilotRunsOptions } from "./queries";
+export {
+  autopilotKeys,
+  autopilotListOptions,
+  autopilotDetailOptions,
+  autopilotRunsOptions,
+  autopilotDeliveriesOptions,
+  autopilotDeliveryOptions,
+} from "./queries";
 export {
   useCreateAutopilot,
   useUpdateAutopilot,
@@ -7,4 +14,7 @@ export {
   useCreateAutopilotTrigger,
   useUpdateAutopilotTrigger,
   useDeleteAutopilotTrigger,
+  useRotateAutopilotTriggerWebhookToken,
+  useReplayAutopilotDelivery,
 } from "./mutations";
+export { buildAutopilotWebhookUrl } from "./webhook";

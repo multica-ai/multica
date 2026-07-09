@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Back",
+    "log_out": "Log out"
+  },
+  "not_found": {
+    "title": "Invitation not found",
+    "description": "This invitation may have expired, been revoked, or doesn't belong to your account.",
+    "go_to_dashboard": "Go to dashboard"
+  },
+  "accepted": {
+    "title": "You joined {{workspace_name}}!",
+    "redirecting": "Redirecting to workspace..."
+  },
+  "declined": {
+    "title": "Invitation declined",
+    "description": "You won't be added to this workspace.",
+    "go_to_dashboard": "Go to dashboard"
+  },
+  "main": {
+    "join_title": "Join {{workspace_name}}",
+    "fallback_workspace_name": "workspace",
+    "invited_role_admin": "invited you to join as an admin.",
+    "invited_role_member": "invited you to join as a member.",
+    "already_handled_accepted": "This invitation has already been accepted.",
+    "already_handled_declined": "This invitation has already been declined.",
+    "expired": "This invitation has expired.",
+    "decline": "Decline",
+    "declining": "Declining...",
+    "accept": "Accept & Join",
+    "joining": "Joining..."
+  },
+  "errors": {
+    "accept_failed": "Failed to accept invitation",
+    "decline_failed": "Failed to decline invitation"
+  },
+  "batch": {
+    "log_out": "Log out",
+    "empty_title": "No pending invitations",
+    "empty_hint": "Continue to set up your own workspace.",
+    "empty_continue": "Continue to setup",
+    "title": "You've been invited",
+    "subtitle": "Pick the workspaces you want to join. You can always handle the rest later from the sidebar.",
+    "submit_skip": "Skip and set up my own workspace",
+    "submit_join_one": "Join 1 workspace",
+    "submit_join_other": "Join {{count}} workspaces",
+    "joining": "Joining...",
+    "error_generic": "Failed to process invitations. Please try again.",
+    "row_workspace_fallback": "Workspace",
+    "row_inviter_fallback": "Someone",
+    "row_invited_admin": "{{inviter}} invited you as an admin",
+    "row_invited_member": "{{inviter}} invited you as a member"
+  }
+}

@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -15,8 +17,15 @@ import (
 
 // HealthResponse is returned by the daemon's local health endpoint.
 type HealthResponse struct {
-	Status          string            `json:"status"`
-	PID             int               `json:"pid"`
+	Status string `json:"status"`
+	PID    int    `json:"pid"`
+	// OS is the daemon's runtime.GOOS. The desktop app compares it against its
+	// own host OS to detect a daemon it cannot manage — e.g. a Windows desktop
+	// reaching a Linux daemon inside WSL2 over localhost forwarding. The
+	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
+	// so a foreign-OS daemon can't be started/stopped by the app even though
+	// /health is reachable. See #3916.
+	OS              string            `json:"os"`
 	Uptime          string            `json:"uptime"`
 	DaemonID        string            `json:"daemon_id"`
 	DeviceName      string            `json:"device_name"`
@@ -48,6 +57,7 @@ type repoCheckoutRequest struct {
 	URL         string `json:"url"`
 	WorkspaceID string `json:"workspace_id"`
 	WorkDir     string `json:"workdir"`
+	Ref         string `json:"ref,omitempty"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
 }
@@ -71,9 +81,21 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			agents = append(agents, name)
 		}
 
+		// "starting" until preflight (PAT renew + initial workspace sync +
+		// runtime registration) completes; "running" once the daemon can
+		// actually claim tasks. The health port is bound before preflight for
+		// liveness/diagnostics, so callers must not treat a reachable endpoint
+		// as ready — they gate on this status. Consumers that only know
+		// "running" (older CLI/desktop) safely treat "starting" as not-ready.
+		status := "starting"
+		if d.ready.Load() {
+			status = "running"
+		}
+
 		resp := HealthResponse{
-			Status:          "running",
+			Status:          status,
 			PID:             os.Getpid(),
+			OS:              runtime.GOOS,
 			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
 			DaemonID:        d.cfg.DaemonID,
 			DeviceName:      d.cfg.DeviceName,
@@ -89,13 +111,51 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 	}
 }
 
+// shutdownHandler triggers a graceful daemon shutdown by cancelling the
+// top-level context. Used by `multica daemon stop` so we don't depend on
+// OS-signal delivery, which is unreliable on Windows once the daemon is
+// spawned with DETACHED_PROCESS (no shared console with the stop caller).
+// The listener is bound to 127.0.0.1 only, so only local processes can hit
+// this endpoint.
+func (d *Daemon) shutdownHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "shutting down"})
+		if d.cancelFunc != nil {
+			// Cancel asynchronously so the response flushes first; otherwise
+			// srv.Close() races with the writer.
+			go d.cancelFunc()
+		}
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
+	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
-	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
+	srv := &http.Server{Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		srv.Close()
+	}()
+
+	d.logger.Info("health server listening", "addr", ln.Addr().String())
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		d.logger.Warn("health server error", "error", err)
+	}
+}
+
+func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -106,6 +166,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		req.URL = strings.TrimSpace(req.URL)
 		if req.URL == "" {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
@@ -134,12 +195,19 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
+		checkoutRef := strings.TrimSpace(req.Ref)
+		if checkoutRef == "" {
+			checkoutRef = d.taskRepoDefaultRef(req.WorkspaceID, req.TaskID, req.URL)
+		}
+
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
-			WorkDir:     req.WorkDir,
-			AgentName:   req.AgentName,
-			TaskID:      req.TaskID,
+			WorkspaceID:         req.WorkspaceID,
+			RepoURL:             req.URL,
+			WorkDir:             req.WorkDir,
+			Ref:                 checkoutRef,
+			AgentName:           req.AgentName,
+			TaskID:              req.TaskID,
+			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
@@ -149,18 +217,5 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
-	})
-
-	srv := &http.Server{Handler: mux}
-
-	go func() {
-		<-ctx.Done()
-		srv.Close()
-	}()
-
-	d.logger.Info("health server listening", "addr", ln.Addr().String())
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		d.logger.Warn("health server error", "error", err)
 	}
 }
-

@@ -13,9 +13,9 @@ func TestLegacyCompatibilityCommandsRemainAvailable(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace members remains available", func(t *testing.T) {
-		if _, _, err := workspaceCmd.Find([]string{"members"}); err != nil {
-			t.Fatalf("expected workspace members command to exist: %v", err)
+	t.Run("workspace member list remains available", func(t *testing.T) {
+		if _, _, err := workspaceCmd.Find([]string{"member", "list"}); err != nil {
+			t.Fatalf("expected workspace member list command to exist: %v", err)
 		}
 	})
 

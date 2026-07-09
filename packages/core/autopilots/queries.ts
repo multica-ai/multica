@@ -8,6 +8,12 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "detail", id] as const,
   runs: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "runs", id] as const,
+  run: (wsId: string, autopilotId: string, runId: string) =>
+    [...autopilotKeys.all(wsId), "runs", autopilotId, runId] as const,
+  deliveries: (wsId: string, id: string) =>
+    [...autopilotKeys.all(wsId), "deliveries", id] as const,
+  delivery: (wsId: string, autopilotId: string, deliveryId: string) =>
+    [...autopilotKeys.all(wsId), "deliveries", autopilotId, deliveryId] as const,
 };
 
 export function autopilotListOptions(wsId: string) {
@@ -30,5 +36,54 @@ export function autopilotRunsOptions(wsId: string, id: string) {
     queryKey: autopilotKeys.runs(wsId, id),
     queryFn: () => api.listAutopilotRuns(id),
     select: (data) => data.runs,
+  });
+}
+
+// autopilotRunOptions fetches a single run with its full trigger_payload.
+// The list endpoint (autopilotRunsOptions) omits trigger_payload to keep
+// list responses small; callers (e.g. the run-detail dialog) use this
+// query on demand when the user opens a run.
+export function autopilotRunOptions(
+  wsId: string,
+  autopilotId: string,
+  runId: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.run(wsId, autopilotId, runId),
+    queryFn: () => api.getAutopilotRun(autopilotId, runId),
+    enabled: options?.enabled ?? true,
+  });
+}
+
+// autopilotDeliveriesOptions powers the Deliveries section in the autopilot
+// detail page. The list is slim — raw_body / selected_headers / response_body
+// are omitted server-side. Detail rows are fetched on-demand when the user
+// expands a row (see autopilotDeliveryOptions).
+export function autopilotDeliveriesOptions(
+  wsId: string,
+  autopilotId: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.deliveries(wsId, autopilotId),
+    queryFn: () => api.listAutopilotDeliveries(autopilotId),
+    select: (data) => data.deliveries,
+    enabled: options?.enabled ?? true,
+  });
+}
+
+// autopilotDeliveryOptions fetches the full delivery row including raw_body
+// and headers subset. Used by the detail dialog opened from a list row.
+export function autopilotDeliveryOptions(
+  wsId: string,
+  autopilotId: string,
+  deliveryId: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.delivery(wsId, autopilotId, deliveryId),
+    queryFn: () => api.getAutopilotDelivery(autopilotId, deliveryId),
+    enabled: options?.enabled ?? true,
   });
 }

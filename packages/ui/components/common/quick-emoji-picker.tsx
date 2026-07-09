@@ -8,7 +8,7 @@ const EmojiPicker = lazy(() =>
   import("./emoji-picker").then((m) => ({ default: m.EmojiPicker })),
 );
 
-const QUICK_EMOJIS = ["👍", "👌", "❤️", "😄", "🎉", "😕", "🚀", "👀"];
+const QUICK_EMOJIS = ["👍", "👌", "❤️", "✅", "🎉", "😕", "🚀", "👀"];
 
 interface QuickEmojiPickerProps {
   onSelect: (emoji: string) => void;

@@ -51,8 +51,18 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	switch evt.Type {
 	case "session.start":
 		var ss copilotSessionStart
-		if err := json.Unmarshal(evt.Data, &ss); err == nil && ss.SelectedModel != "" {
-			st.activeModel = ss.SelectedModel
+		if err := json.Unmarshal(evt.Data, &ss); err == nil {
+			if ss.SelectedModel != "" {
+				st.activeModel = ss.SelectedModel
+			}
+			// Capture sessionId from session.start as well: the synthetic
+			// "result" event may never arrive (timeout, cancel, crash, or a
+			// session.error before result), and without this the daemon
+			// reports SessionID="" and the chat-session resume pointer can
+			// drift to a stale turn. result still wins when it does arrive.
+			if ss.SessionID != "" {
+				st.sessionID = ss.SessionID
+			}
 		}
 
 	case "assistant.message_delta":
@@ -158,35 +168,49 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		}
 
 	case "result":
-		st.sessionID = evt.SessionID
+		if evt.SessionID != "" {
+			st.sessionID = evt.SessionID
+		}
 		if evt.ExitCode != 0 {
 			st.finalStatus = "failed"
-			st.finalError = fmt.Sprintf("copilot exited with code %d", evt.ExitCode)
+			st.finalError = withCopilotExitCode(st.finalError, evt.ExitCode)
 		}
 	}
 
 	return msgs
 }
 
-func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "copilot"
+func withCopilotExitCode(msg string, exitCode int) string {
+	exitMsg := fmt.Sprintf("copilot exited with code %d", exitCode)
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return exitMsg
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("copilot executable not found at %q: %w", execPath, err)
+	if strings.Contains(msg, exitMsg) {
+		return msg
+	}
+	return msg + "; " + exitMsg
+}
+
+func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = "copilot"
+	}
+	lookedUp, err := exec.LookPath(execName)
+	if err != nil {
+		return nil, fmt.Errorf("copilot executable not found at %q: %w", execName, err)
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
+	argv0, cmdArgs := chooseCopilotInvocation(execName, lookedUp, args, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	hideAgentWindow(cmd)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -198,7 +222,8 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[copilot:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -238,12 +263,16 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 			var evt copilotEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
+				slog.Warn("copilot event parse failed", "err", err, "line", line)
 				continue
 			}
 
 			for _, m := range handleCopilotEvent(evt, st) {
 				trySend(msgCh, m)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			slog.Warn("copilot stdout scanner error", "err", err)
 		}
 
 		exitErr := cmd.Wait()
@@ -258,6 +287,9 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		} else if exitErr != nil && st.finalStatus == "completed" {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
+		}
+		if st.finalError != "" {
+			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())
 		}
 
 		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -312,7 +344,7 @@ type copilotSessionStart struct {
 type copilotAssistantMessage struct {
 	MessageID     string               `json:"messageId"`
 	Content       string               `json:"content"`
-	ToolRequests  []copilotToolRequest  `json:"toolRequests"`
+	ToolRequests  []copilotToolRequest `json:"toolRequests"`
 	OutputTokens  int64                `json:"outputTokens"`
 	InteractionID string               `json:"interactionId"`
 	ReasoningText string               `json:"reasoningText,omitempty"`
@@ -372,7 +404,7 @@ type copilotSessionWarning struct {
 
 // copilotResultUsage is the usage on the final "result" line.
 type copilotResultUsage struct {
-	PremiumRequests    int                 `json:"premiumRequests"`
+	PremiumRequests    float64             `json:"premiumRequests"`
 	TotalAPIDurationMs int64               `json:"totalApiDurationMs"`
 	SessionDurationMs  int64               `json:"sessionDurationMs"`
 	CodeChanges        *copilotCodeChanges `json:"codeChanges,omitempty"`
@@ -397,7 +429,7 @@ var copilotBlockedArgs = map[string]blockedArgMode{
 	"--allow-all-urls":  blockedStandalone,
 	"--yolo":            blockedStandalone,
 	"--no-ask-user":     blockedStandalone,
-	"--resume":          blockedWithValue, // managed via ExecOptions.ResumeSessionID
+	"--resume":          blockedWithValue,  // managed via ExecOptions.ResumeSessionID
 	"--acp":             blockedStandalone, // prevent switching to ACP mode
 }
 

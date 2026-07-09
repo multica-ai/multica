@@ -3,10 +3,11 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { paths } from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
 import {
   Card,
   CardHeader,
@@ -42,11 +43,43 @@ function CallbackContent() {
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    const nextUrl = nextPart ? nextPart.slice(5) : null; // strip "next:" prefix
+    // Strip "next:" prefix, then drop anything that isn't a safe relative path
+    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
+    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+
+    // CLI callback params — carried across the Google OAuth round-trip so
+    // headless/WSL2 `multica login` can receive the JWT after browser-based
+    // Google auth completes.
+    const cliCallbackPart = stateParts.find((p) => p.startsWith("cli_callback:"));
+    const cliStatePart = stateParts.find((p) => p.startsWith("cli_state:"));
+    const cliCallbackRaw = cliCallbackPart
+      ? decodeURIComponent(cliCallbackPart.slice("cli_callback:".length))
+      : null;
+    const cliState = cliStatePart
+      ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
+      : "";
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
-    if (isDesktop) {
+    // Validate the CLI callback URL before redirecting — the state parameter
+    // passes through Google OAuth and must be treated as attacker-controlled.
+    const cliCallback =
+      cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+        ? cliCallbackRaw
+        : null;
+
+    if (cliCallback) {
+      // CLI login flow: exchange the Google code for a JWT, then redirect the
+      // token back to the CLI's local HTTP listener (e.g. WSL2 host).
+      api
+        .googleLogin(code, redirectUri)
+        .then(({ token }) => {
+          redirectToCliCallback(cliCallback, token, cliState);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+    } else if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
       api
         .googleLogin(code, redirectUri)
@@ -60,18 +93,49 @@ function CallbackContent() {
     } else {
       // Normal web flow
       loginWithGoogle(code, redirectUri)
-        .then(async () => {
+        .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
-          // URL is now the source of truth for the current workspace — the
-          // [workspaceSlug]/layout syncs stores + cookie once we navigate.
-          // Honor ?next= first (e.g. came from /invite/{id}), otherwise land
-          // in the first workspace's issues, or /workspaces/new for zero-workspace users.
-          const [first] = wsList;
-          const defaultDest = first
-            ? paths.workspace(first.slug).issues()
-            : paths.newWorkspace();
-          router.push(nextUrl || defaultDest);
+          const onboarded = loggedInUser.onboarded_at != null;
+
+          // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
+          //    round-trip — the user clicked a specific link and we should
+          //    honor exactly that destination.
+          if (nextUrl) {
+            router.push(nextUrl);
+            return;
+          }
+
+          // 2. Un-onboarded users may have pending invitations on their
+          //    email even when no `next=` was carried (came from a fresh
+          //    login on app.multica.ai instead of clicking the email link,
+          //    or `state` was lost across the round-trip). Look them up by
+          //    email and route to the batch /invitations page if any.
+          //    Already-onboarded users skip this lookup — their new invites
+          //    surface in the sidebar dropdown, not as a forced wall.
+          if (!onboarded) {
+            try {
+              const invites = await api.listMyInvitations();
+              if (invites.length > 0) {
+                qc.setQueryData(workspaceKeys.myInvitations(), invites);
+                router.push(paths.invitations());
+                return;
+              }
+            } catch {
+              // Network blip on the invite lookup is non-fatal — fall through
+              // to the normal post-auth destination so the user isn't stuck
+              // on a blank callback screen. Worst case they land on
+              // /onboarding and the sidebar will surface invites later.
+            }
+          }
+
+          // 3. Default: hand off to the resolver (onboarding for first-timers,
+          //    first workspace for returning users, /workspaces/new for
+          //    onboarded users with zero workspaces). Source-attribution
+          //    backfill for onboarded users with no recorded source is
+          //    handled by `<SourceBackfillModal />` inside the dashboard
+          //    shell — not a route detour, so we route straight to dest.
+          router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

@@ -1,0 +1,252 @@
+---
+title: 环境变量
+description: self-host Multica 服务器需要配置的环境变量清单。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量读取配置——数据库、登录、邮件、存储、注册白名单都在这里配。这一页按用途分组给完整清单：每组说清楚**不设会怎样**、**生产必须设哪几个**。Auth 相关那几个怎么真正配见 [登录与注册配置](/auth-setup)。
+
+## 核心 server 环境变量
+
+这些是你部署前必须考虑的核心变量——有些有默认值能让 server 启动，但生产环境里你应该显式配置必填项。
+
+| 环境变量 | 默认值 | 生产必须设？ |
+|---|---|---|
+| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |
+| `PORT` | `8080` | 否（除非换端口）|
+| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
+| `APP_ENV` | 空 | **是**（必须 `production`）|
+| `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
+| `MULTICA_DEV_VERIFICATION_CODE` | 空 | 否（生产必须保持为空）|
+
+<Callout type="warning">
+**生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。
+</Callout>
+
+### 数据库连接池
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `DATABASE_MAX_CONNS` | `25` | pgxpool 最大连接数。守护进程高频轮询（每 3 秒）会占用连接；大规模部署可能需要调高 |
+| `DATABASE_MIN_CONNS` | `5` | 最小常驻连接 |
+
+**不设时**使用上表默认值，**不是** pgx 内置的 4/NumCPU——后者在生产曾引发连接池耗尽。
+
+## 怎么配邮件
+
+Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合公网部署，SMTP relay 适合内网/自部署。同时设置时 `SMTP_HOST` 优先级高于 `RESEND_API_KEY`。
+
+### Resend
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `RESEND_API_KEY` | 空 | Resend API key |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
+
+### SMTP relay
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `SMTP_HOST` | 空 | SMTP relay 主机名。设置后即启用 SMTP 模式并覆盖 Resend |
+| `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；SMTPS（隐式 TLS，自动启用）用 `465` |
+| `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
+| `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
+| `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
+| `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
+
+服务端 advertise STARTTLS 时会自动升级。dial 超时 10s，整个 SMTP 会话有 30s deadline，避免 relay 黑洞把 auth handler 挂死。
+
+**两种都不设的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发方便（你从 server 日志里抄验证码）；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
+
+## 怎么配 Google OAuth
+
+可选。不设则只有邮箱 + 验证码登录；设了就在登录页出现「用 Google 登录」。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | 空 | Google Cloud OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | 空 | Google Cloud OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth 回调地址（self-host 换成你的前端域名）|
+
+**热生效**：前端在运行时通过 `/api/config` 拿这些配置，**改了不用重启前端也不用重建镜像**——改完重启 server 即可。
+
+完整配置步骤（含 Google Cloud Console 操作）详见 [登录与注册配置](/auth-setup#怎么配-google-oauth)。
+
+## 怎么配文件存储
+
+Multica 存储用户上传的附件（评论里的图片、文件等）。**优先走 S3**；不配 S3 就回落本地磁盘。
+
+### S3 / S3 兼容存储
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `S3_BUCKET` | 空 | **只填 bucket 名**（例如 `my-bucket`），**不要**带 `.s3.<region>.amazonaws.com` 后缀——server 会用 `S3_BUCKET` + `S3_REGION` 自己拼公开 host。设了就启用 S3 存储 |
+| `S3_REGION` | `us-west-2` | AWS 区域。必须和 bucket 所在区域一致——SDK 签名和公开 URL 都用它 |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 空 | 静态凭证。全未设时用 AWS SDK 默认凭证链（IAM role / 环境凭证）|
+| `AWS_ENDPOINT_URL` | 空 | 自定义 S3 兼容端点（例如 [MinIO](https://min.io/)）。设了会切到 path-style URL |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | 附件下载路径：`auto`、`cloudfront`、`presign` 或 `proxy`。`auto` 下 CloudFront 配完整时优先 CloudFront；内网/私有 endpoint host 走 server proxy；公网 S3 兼容 endpoint 在支持时走 presigned GET |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | CloudFront signed URL 和 S3 presigned download URL 的有效期。使用 Go duration 格式 |
+
+**`S3_BUCKET` 未设时**：server 启动时打 info 日志 `"S3_BUCKET not set, cloud upload disabled"`，所有上传回落到本地磁盘。
+
+**对象存储 URL** 按优先级拼装：
+
+1. 设了 `CLOUDFRONT_DOMAIN` → `https://<CLOUDFRONT_DOMAIN>/<key>`
+2. 设了 `AWS_ENDPOINT_URL` → `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>`（path-style）
+3. 默认走 AWS S3 → `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>`（virtual-hosted-style）。bucket 名含点时会回落到 `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>`（path-style），因为 AWS 通配证书无法覆盖含点 host。
+
+API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /api/attachments/{id}/download`。这个端点会在安全时跳转到 CloudFront/S3 presigned URL；遇到 `http://rustfs:9000` 这类私有或内网 endpoint 时则由 server 流式转发。Docker/VPC 内部对象存储建议显式设置 `ATTACHMENT_DOWNLOAD_MODE=proxy`。
+
+### 本地磁盘（S3 未配时）
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | 本地存储目录 |
+| `LOCAL_UPLOAD_BASE_URL` | 空（返回相对路径）| 公开访问的 base URL——不设前端就拿不到附件的完整 URL |
+
+### CloudFront（可选）
+
+如果你用 CloudFront 给 S3 做 CDN，三个相关的环境变量：`CLOUDFRONT_DOMAIN`、`CLOUDFRONT_KEY_PAIR_ID`、`CLOUDFRONT_PRIVATE_KEY`（或从 Secrets Manager 读的 `CLOUDFRONT_PRIVATE_KEY_SECRET`）。不用 CloudFront 就不用管——和配置 S3 不冲突。
+
+### Cookie 域
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `COOKIE_DOMAIN` | 空 | session cookie 的作用域 |
+
+- **空**：cookie 只对访问的那个 host 生效（单主机部署正确）
+- **设成 `.example.com`**：cookie 在所有子域共享（让 `app.example.com` 和 `api.example.com` 共用登录态）
+- ⚠️ 不能是 IP 地址（浏览器会忽略）
+
+## 怎么限制谁能注册
+
+三层白名单按优先级组合。**任何一层白名单一旦设置非空，不匹配的邮箱就会被拒**——即使 `ALLOW_SIGNUP=true` 也挡不住。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ALLOWED_EMAILS` | 空 | 显式邮箱白名单（逗号分隔）。非空时只有列表里的邮箱能注册 |
+| `ALLOWED_EMAIL_DOMAINS` | 空 | 域名白名单（逗号分隔）。非空时只有列表里的域名能注册 |
+| `ALLOW_SIGNUP` | `true` | 注册总开关。设 `false` 完全关闭注册 |
+
+**不直观的点**：`ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` 的组合**不是**「允许 company.io 或所有人」，而是**只允许 company.io**。白名单的 AND 语义——决策树详见 [登录与注册配置 → Signup 白名单](/auth-setup#怎么限制谁能注册)。
+
+**邀请流程本身不检查 signup 白名单**——但被邀请人必须先能**登录**才能接受邀请。如果对方已经有 Multica 账号（比如在其他工作区注册过），可以直接接受，不受白名单影响；**如果对方还没注册过**，他们登录的第一步（发送验证码）仍然会过白名单检查，被 `ALLOW_SIGNUP=false` 或 `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` 拒绝的邮箱**无法完成注册，也就没法接受邀请**。
+
+## 锁死工作区创建
+
+`ALLOW_SIGNUP=false` 能挡住新注册，但**挡不住**已经登录的用户继续 `POST /api/workspaces` 自助开新工作区。在希望平台管理员能看到全部 issue / 仓库 / 智能体的自部署实例里，把 `DISABLE_WORKSPACE_CREATION=true` 打开以堵上这个口子。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `DISABLE_WORKSPACE_CREATION` | `false` | 设为 `true` 时，对 `POST /api/workspaces` 的任何调用都返回 `403 workspace creation is disabled for this instance`。Web UI 通过 `/api/config` 隐藏所有「创建工作区」入口。该开关是实例级的，没有 owner / admin 例外 |
+
+推荐的开服流程：
+
+1. 启动实例时保持 `DISABLE_WORKSPACE_CREATION` 未设置（默认）。
+2. 管理员登录并创建共享工作区。
+3. 把 `DISABLE_WORKSPACE_CREATION=true` 设上并重启 backend。之后新用户只能通过邀请加入。
+
+如果还想让被邀请的新用户能完成首次注册，保留 `ALLOW_SIGNUP=true`（必要时用 `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS` 限定可注册邮箱），只把 `DISABLE_WORKSPACE_CREATION=true` 打开即可；如果同时设 `ALLOW_SIGNUP=false`，连有 pending invite 的邮箱都无法完成首次注册，仅适合所有成员都已有 Multica 账号的实例。
+
+## 速率限制（可选 Redis）
+
+公开认证端点——`/auth/send-code`、`/auth/verify-code`、`/auth/google`——前面挂了按 IP 的固定窗口限流。限流器后端是 Redis。`REDIS_URL` 不设时中间件**直通**（fail-open），后端启动会打日志 `rate limiting disabled: REDIS_URL not configured`。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `REDIS_URL` | 空 | Redis 连接 URL（例如 `redis://localhost:6379/0`）。不设时认证端点的限流功能直接关闭。同一个 Redis 也被实时事件 fan-out、PAT 缓存、守护进程 token 缓存复用；不设时这些组件分别回落到内存模式 / 直查 DB |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | 设为 `true` 可跳过每次 Redis 连接时的 `CLIENT SETNAME` 握手。使用托管 Redis（如 GCP Memorystore 或限制了 ACL 的 AWS ElastiCache）等封禁 `CLIENT` 命令的服务时**必须开启**。启用后连接在 `CLIENT LIST` 输出中会失去描述性名称，但能兼容受限的托管服务 |
+| `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟对 `/auth/send-code` 和 `/auth/google` 的最大请求数 |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟对 `/auth/verify-code` 的最大请求数 |
+| `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 逗号分隔的 CIDR 列表，列在内的来源 IP 才允许通过 `X-Forwarded-For` 标识客户端。默认空 = **永不信任 XFF**，限流器只看直连的 `RemoteAddr` |
+
+被限流的请求会返回 `429 Too Many Requests`，带 `Retry-After: 60` 头和 `{"error":"too many requests"}` 响应体。
+
+<Callout type="warning">
+**部署在反向代理后面时必须设 `RATE_LIMIT_TRUSTED_PROXIES`。** 否则在后端看来所有真实用户都共用代理那个 IP，整个部署落到同一个桶里，`/auth/send-code` 会变成全站每分钟只能发 5 次。常见值：本机 Caddy / Nginx 用 `127.0.0.1/32,::1/128`；Cloudflare / ALB / CloudFront 用各家公开的 CDN IP 段。只有 `RemoteAddr` 落在这些 CIDR 内的请求才被允许通过 `X-Forwarded-For` 改写客户端 IP。
+</Callout>
+
+这里的 `RATE_LIMIT_TRUSTED_PROXIES` 和 `MULTICA_TRUSTED_PROXIES` **不是同一个**变量——后者控制的是 autopilot webhook 端点（`/api/webhooks/autopilots/{token}`）的限流器。两个限流器各自读各自的列表，部署在代理后面的实例需要两个都配上。
+
+## 守护进程的调节参数
+
+守护进程跑在用户本地机器上，配置也是读本地环境变量。常用的几个：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | server 地址（self-host 换成你的域名）|
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
+| `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
+| `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
+| `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
+| `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
+
+完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
+
+为某个后端设置一层**全机队默认**的 CLI 参数——可以方便地给一台守护进程上的所有智能体应用一个默认的成本或资源基线（例如 `--max-turns`），而不必逐个修改每个智能体的 `custom_args`。这是一层默认值，而不是不可突破的硬上限：每个智能体自己的 `custom_args` 会追加在后面，并可以覆盖它（见下方**优先级**）。
+
+- **优先级：** 默认参数先生效，随后追加各智能体自己的 `custom_args`。对于带取值的参数，由下游 CLI 自己的参数解析器决定最终生效值（多数工具采用「后者覆盖」），因此单个智能体可以调高某个守护进程默认值，但在智能体没有覆盖的地方，默认值依然生效。
+- **解析：** 取值按 POSIX shell-word 规则切分，因此引号可用——`MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` 会解析为两个 token。
+- **安全：** 默认参数层和各智能体的 `custom_args` 层都会经过同一套 blocked-flags 过滤，因此协议关键标志（如 Claude 的 `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--mcp-config`，以及 Codex 的 `--listen`）无法从任何一层注入。
+- **未设置 / 为空** 表示不改变行为。
+
+## 前端访问控制
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://app.multica.ai`——self-host 必须显式填 |
+| `MULTICA_APP_URL` | 空 | CLI 登录流程使用的前端 URL。Web UI 也会用它显示带你自己 app domain 的 self-host 守护进程 setup 命令；同源部署中，如果 `MULTICA_PUBLIC_URL` 未设置，它也会作为守护进程的 `server_url` |
+| `MULTICA_PUBLIC_URL` | 空 | 公开 API URL，不带结尾 slash。用于 autopilot webhook URL，也会被 Web UI 用作守护进程的 `server_url` |
+| `CORS_ALLOWED_ORIGINS` | 空 | 额外的 CORS 允许来源（逗号分隔）|
+| `ALLOWED_ORIGINS` | 空 | WebSocket 专用的 origin 白名单（逗号分隔）；不设就按 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` 顺序回落 |
+
+<Callout type="warning">
+**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
+</Callout>
+
+## GitHub 集成
+
+[GitHub PR ↔ issue 集成](/github-integration) 依赖两个必填环境变量。两个都配上才会启用 Settings 里的 Connect GitHub 并接受 webhook。另外两个可选变量用于在安装时直接拿到关联账号名。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → GitHub 里安装按钮的跳转 URL 用它拼 |
+| `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
+| `GITHUB_APP_ID` | 空 | 可选。App 设置页上的数字 App ID。配合 `GITHUB_APP_PRIVATE_KEY` 使用，让 setup 回调在安装那一刻直接从 GitHub 取到关联账号名 |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | 可选。App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行）。用于签发 GitHub App 鉴权 REST 调用所需的短效 JWT |
+
+**任一必填变量未设时：**
+
+- Settings → GitHub 里 `Connect GitHub` 按钮 **disable**，对 admin 显示「not configured」提示
+- `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——secret 没配置时 Multica 拒绝处理任何 webhook 事件，而不是把所有签名当 valid
+
+**可选 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` 未设时：**
+
+- 安装完成后，连接卡片会先短暂显示 `已连接到 unknown`。等 GitHub 的 `installation.created` webhook 到达（通常几秒内），Multica 会把 row 刷成真实的组织/用户名，并通过 realtime 推送让正在打开的 Settings → GitHub 页面无需手动刷新即可更新。
+
+**注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
+
+## 用量统计
+
+默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `ANALYTICS_DISABLED` | `false` | 设 `true` 完全关闭后端上报 |
+| `POSTHOG_API_KEY` | 内置默认 key | 换成你自己的 PostHog 实例时填 |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | 自建 PostHog 的话改成你自己的地址 |
+
+## 下一步
+
+- [登录与注册配置](/auth-setup) —— 上面 auth 相关的那几个环境变量怎么真的配、陷阱在哪
+- [GitHub 集成](/github-integration) —— `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET` 背后的 GitHub App 怎么建
+- [故障排查](/troubleshooting) —— 配错了常见的症状和修复
+- [守护进程与运行时](/daemon-runtimes) —— `MULTICA_DAEMON_*` 参数的行为含义

@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -56,18 +61,75 @@ vi.mock("../../workspace/workspace-avatar", () => ({
 
 // Mock api (queries use api internally)
 const mockListIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ issues: [], total: 0 }));
+const mockListGroupedIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ groups: [] }));
+const mockListMembers = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([
+    {
+      id: "member-1",
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      role: "member",
+      created_at: "2026-01-01T00:00:00Z",
+      name: "Test User",
+      email: "test@test.com",
+      avatar_url: null,
+    },
+  ]),
+);
+const mockListAgents = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([
+    {
+      id: "agent-1",
+      workspace_id: "ws-1",
+      name: "Agent One",
+      description: "",
+      instructions: "",
+      status: "idle",
+      runtime_id: null,
+      owner_id: "user-1",
+      avatar_url: null,
+      visibility: "workspace",
+      archived_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+  ]),
+);
+const mockListSquads = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([
+    {
+      id: "squad-1",
+      workspace_id: "ws-1",
+      name: "Squad One",
+      description: "",
+      instructions: "",
+      avatar_url: null,
+      leader_id: "agent-1",
+      creator_id: "user-1",
+      archived_at: null,
+      archived_by: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+  ]),
+);
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
+    listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     updateIssue: vi.fn(),
-    listMembers: () => Promise.resolve([]),
-    listAgents: () => Promise.resolve([]),
+    listMembers: (...args: any[]) => mockListMembers(...args),
+    listAgents: (...args: any[]) => mockListAgents(...args),
+    listSquads: (...args: any[]) => mockListSquads(...args),
   },
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
+    listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     updateIssue: vi.fn(),
-    listMembers: () => Promise.resolve([]),
-    listAgents: () => Promise.resolve([]),
+    listMembers: (...args: any[]) => mockListMembers(...args),
+    listAgents: (...args: any[]) => mockListAgents(...args),
+    listSquads: (...args: any[]) => mockListSquads(...args),
   }),
   setApiInstance: vi.fn(),
 }));
@@ -75,7 +137,6 @@ vi.mock("@multica/core/api", () => ({
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -98,7 +159,8 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock view store
 const mockViewState = {
-  viewMode: "board" as const,
+  viewMode: "board" as "board" | "list",
+  grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],
   priorityFilters: [] as string[],
   assigneeFilters: [] as { type: string; id: string }[],
@@ -106,11 +168,13 @@ const mockViewState = {
   creatorFilters: [] as { type: string; id: string }[],
   projectFilters: [] as string[],
   includeNoProject: false,
+  labelFilters: [] as string[],
   sortBy: "position" as const,
   sortDirection: "asc" as const,
-  cardProperties: { priority: true, description: true, assignee: true, dueDate: true },
+  cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
   listCollapsedStatuses: [] as string[],
   setViewMode: vi.fn(),
+  setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
   togglePriorityFilter: vi.fn(),
   toggleAssigneeFilter: vi.fn(),
@@ -118,6 +182,7 @@ const mockViewState = {
   toggleCreatorFilter: vi.fn(),
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
+  toggleLabelFilter: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -130,6 +195,7 @@ const mockViewState = {
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   useClearFiltersOnWorkspaceChange: () => {},
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
+  mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
@@ -147,11 +213,18 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
     { value: "created_at", label: "Created date" },
     { value: "title", label: "Title" },
   ],
+  GROUPING_OPTIONS: [
+    { value: "status", label: "Status" },
+    { value: "assignee", label: "Assignee" },
+  ],
   CARD_PROPERTY_OPTIONS: [
     { key: "priority", label: "Priority" },
     { key: "description", label: "Description" },
     { key: "assignee", label: "Assignee" },
     { key: "dueDate", label: "Due date" },
+    { key: "project", label: "Project" },
+    { key: "labels", label: "Labels" },
+    { key: "childProgress", label: "Sub-issue progress" },
   ],
 }));
 
@@ -161,13 +234,15 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   useViewStoreApi: () => ({ getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() }),
 }));
 
+let mockScope = "all";
+
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scope: "all", setScope: vi.fn() };
+      const state = { scope: mockScope, setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scope: "all", setScope: vi.fn() }) },
+    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
   ),
 }));
 
@@ -184,11 +259,18 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
 vi.mock("@multica/core/issues/stores/recent-issues-store", () => ({
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
-      const state = { items: [], recordVisit: vi.fn() };
+      const state = { byWorkspace: {}, recordVisit: vi.fn(), pruneWorkspaces: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ items: [], recordVisit: vi.fn() }) },
+    {
+      getState: () => ({
+        byWorkspace: {},
+        recordVisit: vi.fn(),
+        pruneWorkspaces: vi.fn(),
+      }),
+    },
   ),
+  selectRecentIssues: () => () => [],
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -255,6 +337,8 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
+  metadata: {},
 };
 
 const mockIssues: Issue[] = [
@@ -272,6 +356,7 @@ const mockIssues: Issue[] = [
     assignee_id: "user-1",
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -290,6 +375,7 @@ const mockIssues: Issue[] = [
     assignee_id: "agent-1",
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
     due_date: "2026-02-01T00:00:00Z",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -308,11 +394,58 @@ const mockIssues: Issue[] = [
     assignee_id: null,
     creator_type: "member",
     creator_id: "user-1",
+    start_date: null,
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    ...issueDefaults,
+    id: "issue-4",
+    workspace_id: "ws-1",
+    number: 4,
+    identifier: "TES-4",
+    title: "Squad task",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "squad",
+    assignee_id: "squad-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    start_date: null,
     due_date: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
 ];
+
+function mockAssigneeGroups(issues: Issue[]) {
+  const groups = new Map<string, { assignee_type: Issue["assignee_type"]; assignee_id: string | null; issues: Issue[] }>();
+  for (const issue of issues) {
+    const id =
+      issue.assignee_type && issue.assignee_id
+        ? `assignee:${issue.assignee_type}:${issue.assignee_id}`
+        : "assignee:unassigned";
+    if (!groups.has(id)) {
+      groups.set(id, {
+        assignee_type: issue.assignee_type,
+        assignee_id: issue.assignee_id,
+        issues: [],
+      });
+    }
+    groups.get(id)!.issues.push(issue);
+  }
+  return {
+    groups: [...groups.entries()].map(([id, group]) => ({
+      id,
+      assignee_type: group.assignee_type,
+      assignee_id: group.assignee_id,
+      issues: group.issues,
+      total: group.issues.length,
+    })),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Import component under test (after mocks)
@@ -332,9 +465,11 @@ function renderWithQuery(ui: React.ReactElement) {
     },
   });
   return render(
-    <QueryClientProvider client={qc}>
-      {ui}
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={qc}>
+        {ui}
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 
@@ -346,9 +481,12 @@ describe("IssuesPage (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockListGroupedIssues.mockResolvedValue({ groups: [] });
     mockViewState.viewMode = "board";
+    mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockScope = "all";
   });
 
   it("shows loading skeletons initially", () => {
@@ -360,11 +498,10 @@ describe("IssuesPage (shared)", () => {
 
   it("renders issue titles after data loads", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);
@@ -376,11 +513,10 @@ describe("IssuesPage (shared)", () => {
 
   it("renders board column headers", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);
@@ -390,19 +526,53 @@ describe("IssuesPage (shared)", () => {
     expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows workspace breadcrumb with 'Issues' label", async () => {
+  it("groups board columns by assignee", async () => {
+    mockViewState.grouping = "assignee";
+    mockListGroupedIssues.mockResolvedValue(mockAssigneeGroups(mockIssues));
+
+    renderWithQuery(<IssuesPage />);
+
+    // "Test User" renders both as the assignee group header and on the
+    // assignee chip of each card grouped under that header, so a unique
+    // match is not guaranteed.
+    await screen.findAllByText("Test User");
+    expect(screen.getAllByText("Agent One").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Squad One").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("No assignee")).toBeInTheDocument();
+  });
+
+  it("uses grouped assignee endpoint instead of status page sweep", async () => {
+    mockViewState.grouping = "assignee";
+    mockListGroupedIssues.mockResolvedValue(mockAssigneeGroups(mockIssues));
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(mockListGroupedIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_by: "assignee",
+        limit: 50,
+        offset: 0,
+        statuses: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      }),
+    );
+    expect(mockListIssues).not.toHaveBeenCalled();
+  });
+
+  it("shows the 'Issues' section header without a workspace prefix", async () => {
     mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve(
-        params?.open_only
-          ? { issues: mockIssues, total: mockIssues.length }
-          : { issues: [], total: 0 },
-      ),
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
     );
 
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Issues");
-    expect(screen.getByText("Test WS")).toBeInTheDocument();
+    // The list header is now `icon + title`, matching the other list pages.
+    // The workspace/org name is no longer rendered as a breadcrumb prefix.
+    expect(screen.queryByText("Test WS")).not.toBeInTheDocument();
   });
 
   it("shows empty state when there are no issues", async () => {
@@ -417,8 +587,54 @@ describe("IssuesPage (shared)", () => {
   it("shows scope tab buttons", async () => {
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("All");
+    expect(await screen.findAllByText("All")).not.toHaveLength(0);
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  // The Members/Agents tabs filter server-side via assignee_types (the same
+  // param the grouped endpoint takes), so the mock mirrors the server's
+  // WHERE clause instead of a client-side post-filter.
+  function mockListIssuesHonoringAssigneeTypes() {
+    mockListIssues.mockImplementation((params: any) => {
+      const matches = mockIssues.filter(
+        (i) =>
+          i.status === params?.status &&
+          (!params?.assignee_types ||
+            (i.assignee_type !== null &&
+              params.assignee_types.includes(i.assignee_type))),
+      );
+      return Promise.resolve({ issues: matches, total: matches.length });
+    });
+  }
+
+  it("agents scope includes squad-assigned issues", async () => {
+    mockScope = "agents";
+    mockViewState.viewMode = "list";
+    mockListIssuesHonoringAssigneeTypes();
+    renderWithQuery(<IssuesPage />);
+
+    // Squad task and agent task should be visible
+    await screen.findByText("Design landing page");
+    expect(screen.getByText("Squad task")).toBeInTheDocument();
+    // Member task should NOT be visible
+    expect(screen.queryByText("Implement auth")).not.toBeInTheDocument();
+    expect(mockListIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ assignee_types: ["agent", "squad"] }),
+    );
+  });
+
+  it("members scope excludes squad-assigned issues", async () => {
+    mockScope = "members";
+    mockViewState.viewMode = "list";
+    mockListIssuesHonoringAssigneeTypes();
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    expect(mockListIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ assignee_types: ["member"] }),
+    );
   });
 });

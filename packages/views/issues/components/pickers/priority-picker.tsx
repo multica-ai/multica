@@ -5,6 +5,7 @@ import type { IssuePriority, UpdateIssueRequest } from "@multica/core/types";
 import { PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { PriorityIcon } from "../priority-icon";
 import { PropertyPicker, PickerItem } from "./property-picker";
+import { useT } from "../../../i18n";
 
 export function PriorityPicker({
   priority,
@@ -14,19 +15,29 @@ export function PriorityPicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  defaultOpen = false,
 }: {
-  priority: IssuePriority;
+  /**
+   * The currently-selected priority, used to check the matching row. `null`
+   * means "no single current value" (e.g. a batch selection spanning several
+   * priorities) — no row is checked. Single-issue callers always pass a
+   * concrete priority.
+   */
+  priority: IssuePriority | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Open the picker on first mount. Used by progressive-disclosure
+   *  sidebars so a newly-added field immediately enters edit state. */
+  defaultOpen?: boolean;
 }) {
-  const [internalOpen, setInternalOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
-  const cfg = PRIORITY_CONFIG[priority];
+  const { t } = useT("issues");
 
   return (
     <PropertyPicker
@@ -36,12 +47,13 @@ export function PriorityPicker({
       align={align}
       triggerRender={triggerRender}
       trigger={
-        customTrigger ?? (
+        customTrigger ??
+        (priority != null ? (
           <>
             <PriorityIcon priority={priority} className="shrink-0" />
-            <span className="truncate">{cfg.label}</span>
+            <span className="truncate">{t(($) => $.priority[priority])}</span>
           </>
-        )
+        ) : null)
       }
     >
       {PRIORITY_ORDER.map((p) => {
@@ -57,7 +69,7 @@ export function PriorityPicker({
           >
             <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${c.badgeBg} ${c.badgeText}`}>
               <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
-              {c.label}
+              {t(($) => $.priority[p])}
             </span>
           </PickerItem>
         );

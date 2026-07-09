@@ -16,9 +16,30 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// loginTokenPrefixes are the token prefixes `multica login --token` accepts.
+// The CLI used to hardcode `mul_` only, which made it impossible to log in
+// with a Multica Cloud Node PAT (`mcn_`) even though the server happily
+// authenticates both kinds. Keep this list in sync with the prefix branches
+// in server/internal/middleware/auth.go.
+var loginTokenPrefixes = []string{"mul_", auth.CloudPATPrefix}
+
+// validateLoginTokenPrefix returns nil if token starts with one of the
+// CLI-recognised PAT prefixes, or an error describing the accepted set.
+// Extracted so the prefix list has one obvious test surface.
+func validateLoginTokenPrefix(token string) error {
+	for _, p := range loginTokenPrefixes {
+		if strings.HasPrefix(token, p) {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid token format: must start with %s", strings.Join(loginTokenPrefixes, " or "))
+}
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -37,6 +58,13 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
+// callbackHostFlag lets users override the host/IP that goes into the OAuth
+// cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
+// auto-detected LAN IP isn't the one the browser can reach.
+const callbackHostFlag = "callback-host"
+
+const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
+
 func init() {
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
@@ -45,6 +73,13 @@ func init() {
 func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
+	}
+	// Inside a daemon-managed task, never fall back to the user-global config
+	// token: that silent fallback is how agent writes land as the wrong actor.
+	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
+	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
+	if inDaemonManagedExecutionContext() {
+		return ""
 	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
@@ -78,46 +113,139 @@ func openBrowser(url string) error {
 		cmd = "xdg-open"
 		args = []string{url}
 	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", "", url}
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 	return exec.Command(cmd, args...).Start()
 }
 
-func runAuthLogin(cmd *cobra.Command, _ []string) error {
-	useToken, _ := cmd.Flags().GetBool("token")
-	if useToken {
-		return runAuthLoginToken(cmd)
+func runAuthLogin(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("token") {
+		tokenFlag, _ := cmd.Flags().GetString("token")
+		// `--token mul_xxx` (space form) is what users actually type — that's
+		// the form from the docs and from #1994. NoOptDefVal prevents pflag
+		// from consuming the next arg as the flag value, so it lands here as
+		// a positional. Promote it to the token value.
+		if tokenFlag == tokenPromptSentinel && len(args) == 1 {
+			tokenFlag = args[0]
+		}
+		return runAuthLoginToken(cmd, tokenFlag)
 	}
 	return runAuthLoginBrowser(cmd)
+}
+
+// resolveCallbackBinding picks the host that goes into the `cli_callback`
+// URL and the interface the CLI should bind its local HTTP listener to.
+//
+// The browser running the login flow is on the *server's* machine (or
+// wherever the user clicked the link), not on the CLI host. That means the
+// callback URL must resolve to an address the browser can actually reach,
+// which is different in each topology:
+//
+//   - hosted / public app URL: browser and CLI are on the same machine,
+//     localhost works.
+//   - self-host, CLI on server box: same as above.
+//   - self-host, CLI on a different LAN box: the callback URL must point at
+//     the CLI's own LAN IP, not the server's.
+//   - reverse-proxied / FQDN setups: auto-detection can't know the right
+//     host — the user supplies it via --callback-host.
+//
+// detectOutbound is injected so tests can exercise the routing decisions
+// without real network calls.
+func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound func(string) net.IP) (callbackHost, bindAddr string) {
+	// Explicit flag always wins. Bind on all interfaces so the browser can
+	// reach us regardless of which interface the host name resolves to.
+	if h := strings.TrimSpace(flagHost); h != "" {
+		return h, "0.0.0.0"
+	}
+
+	appIP := urlPrivateIP(appURL)
+	if appIP == nil {
+		// Public hostname, FQDN without private-IP mapping, or parse error.
+		// Loopback is the only safe default — on hosted/public setups the
+		// browser and CLI live on the same machine.
+		return "localhost", "127.0.0.1"
+	}
+
+	// app_url is a private LAN IP. Figure out whether the CLI is on that
+	// same box or a different one by asking the kernel which local address
+	// it would use to reach the server. Same box → loopback is fine.
+	// Different box → use the CLI's outbound IP so the browser can reach us.
+	cliIP := detectOutbound(serverURL)
+	if cliIP == nil {
+		// Detection failed (offline, unreachable server, etc.). Fall back to
+		// the app IP — preserves the pre-existing same-machine behaviour.
+		return appIP.String(), "0.0.0.0"
+	}
+	if cliIP.Equal(appIP) {
+		return "localhost", "127.0.0.1"
+	}
+	return cliIP.String(), "0.0.0.0"
+}
+
+// urlPrivateIP returns the hostname of rawURL parsed as an RFC 1918 IP, or
+// nil if the URL is unparsable or the host is not a private literal.
+func urlPrivateIP(rawURL string) net.IP {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil
+	}
+	ip := net.ParseIP(parsed.Hostname())
+	if ip == nil || !ip.IsPrivate() {
+		return nil
+	}
+	return ip
+}
+
+// detectOutboundIP returns the local IPv4 address the OS would use to reach
+// serverURL, or nil if detection fails. The UDP dial does not send packets —
+// it just causes the kernel to pick a source IP for the destination route.
+func detectOutboundIP(serverURL string) net.IP {
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Hostname() == "" {
+		return nil
+	}
+	port := parsed.Port()
+	if port == "" {
+		if parsed.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	conn, err := net.Dial("udp4", net.JoinHostPort(parsed.Hostname(), port))
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || local.IP == nil {
+		return nil
+	}
+	// Normalise to 4-byte form so Equal() comparisons match net.ParseIP
+	// output consistently.
+	if v4 := local.IP.To4(); v4 != nil {
+		return v4
+	}
+	return local.IP
 }
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
 	serverURL := resolveServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
-	// Determine the callback host from the configured app URL.
-	// For self-hosted setups where the browser is on a different machine
-	// (e.g. Multica running on a LAN server), use the server's private IP
-	// so the browser can reach the CLI's local HTTP server.
-	// For production (public hostnames like multica.ai), keep localhost —
-	// the browser and CLI are on the same machine.
-	callbackHost := "localhost"
-	bindAddr := "127.0.0.1"
-	if parsed, err := url.Parse(appURL); err == nil {
-		h := parsed.Hostname()
-		if ip := net.ParseIP(h); ip != nil && ip.IsPrivate() {
-			callbackHost = h
-			bindAddr = "0.0.0.0"
-		}
-	}
+	flagHost := callbackHostFlagValue(cmd)
+	callbackHost, bindAddr := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
 
-	// Start a local HTTP server on a random port to receive the callback.
-	listener, err := net.Listen("tcp", bindAddr+":0")
+	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
+	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
+	// cannot reach. The callback URL is always an IPv4 literal or hostname,
+	// so an IPv4 listener is what the browser actually needs.
+	listener, err := net.Listen("tcp4", bindAddr+":0")
 	if err != nil {
-		return fmt.Errorf("failed to start local server: %w", err)
+		return fmt.Errorf("could not start the local login callback server (used to receive the browser sign-in); a firewall or another process may be blocking local ports: %w", err)
 	}
 	defer listener.Close()
 
@@ -167,7 +295,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if err := openBrowser(loginURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n\nWaiting for authentication...\n", loginURL)
+	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, runningInSSHSession()))
 
 	// Wait for the JWT from the callback (timeout 5 minutes).
 	var jwtToken string
@@ -182,7 +310,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// Use the JWT to create a PAT via the existing API.
 	client := cli.NewAPIClient(serverURL, "", jwtToken)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	hostname, _ := os.Hostname()
@@ -200,7 +328,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		"expires_in_days": expiresInDays,
 	}, &patResp)
 	if err != nil {
-		return fmt.Errorf("failed to create access token: %w", err)
+		return cli.WithUserMessage("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
 	}
 
 	// Verify the PAT works.
@@ -210,7 +338,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		Email string `json:"email"`
 	}
 	if err := patClient.GetJSON(ctx, "/api/me", &me); err != nil {
-		return fmt.Errorf("token verification failed: %w", err)
+		return cli.WithUserMessage("Sign-in did not complete: the server did not accept the new credential. Run `multica login` again.", err)
 	}
 
 	// Save to config. Reset workspace data on every login — the user or
@@ -229,24 +357,83 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	return nil
 }
 
-func runAuthLoginToken(cmd *cobra.Command) error {
-	fmt.Print("Enter your personal access token: ")
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return fmt.Errorf("no input")
+func runningInSSHSession() bool {
+	for _, key := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
 	}
-	token := strings.TrimSpace(scanner.Text())
+	return false
+}
+
+func callbackHostFlagValue(cmd *cobra.Command) string {
+	for c := cmd; c != nil; c = c.Parent() {
+		if value := nonEmptyFlagValue(c.Flags(), callbackHostFlag); value != "" {
+			return value
+		}
+		if value := nonEmptyFlagValue(c.PersistentFlags(), callbackHostFlag); value != "" {
+			return value
+		}
+		if value := nonEmptyFlagValue(c.InheritedFlags(), callbackHostFlag); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nonEmptyFlagValue(flags *pflag.FlagSet, name string) string {
+	if flag := flags.Lookup(name); flag != nil {
+		return strings.TrimSpace(flag.Value.String())
+	}
+	return ""
+}
+
+func callbackHostIsLoopback(host string) bool {
+	h := strings.Trim(strings.TrimSpace(host), "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func browserLoginInstructions(loginURL, callbackHost string, port int, remoteSSH bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "If the browser didn't open, visit:\n  %s\n", loginURL)
+	if remoteSSH && callbackHostIsLoopback(callbackHost) {
+		fmt.Fprintf(&b, "\nRemote SSH session detected. Before opening that URL on your local computer, forward the callback port in another terminal:\n  ssh -L %d:127.0.0.1:%d <user>@<remote-host>\nThen open the URL above in your local browser.\n", port, port)
+	}
+	fmt.Fprintln(&b, "\nWaiting for authentication...")
+	return b.String()
+}
+
+func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
+	// The prompt sentinel is what pflag substitutes for `--token` with no
+	// value (see loginCmd init); treat it the same as an empty string so we
+	// fall through to the interactive prompt.
+	if providedToken == tokenPromptSentinel {
+		providedToken = ""
+	}
+	token := strings.TrimSpace(providedToken)
+	if token == "" {
+		fmt.Print("Enter your personal access token: ")
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			return fmt.Errorf("no input")
+		}
+		token = strings.TrimSpace(scanner.Text())
+	}
 	if token == "" {
 		return fmt.Errorf("token is required")
 	}
-	if !strings.HasPrefix(token, "mul_") {
-		return fmt.Errorf("invalid token format: must start with mul_")
+	if err := validateLoginTokenPrefix(token); err != nil {
+		return err
 	}
 
 	serverURL := resolveServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {
@@ -254,7 +441,7 @@ func runAuthLoginToken(cmd *cobra.Command) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
-		return fmt.Errorf("invalid token: %w", err)
+		return cli.WithUserMessage("Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again.", err)
 	}
 
 	profile := resolveProfile(cmd)
@@ -281,7 +468,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {

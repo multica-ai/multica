@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRequestId, createSafeId, generateUUID } from "./utils";
+import { createRequestId, createSafeId, generateUUID, isImeComposing } from "./utils";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -29,5 +29,27 @@ describe("utils id helpers", () => {
 
     expect(createRequestId()).toBe("12345678");
     expect(createRequestId(12)).toBe("123456781234");
+  });
+});
+
+describe("isImeComposing", () => {
+  it("returns true when nativeEvent.isComposing is set (React synthetic event)", () => {
+    expect(isImeComposing({ nativeEvent: { isComposing: true, keyCode: 13 } })).toBe(true);
+  });
+
+  it("returns true when nativeEvent.keyCode is 229 (Safari edge case)", () => {
+    // Safari clears isComposing on the keydown that ends composition; keyCode
+    // stays 229 throughout, which is the only reliable signal in that browser.
+    expect(isImeComposing({ nativeEvent: { isComposing: false, keyCode: 229 } })).toBe(true);
+  });
+
+  it("returns true for native KeyboardEvent without nativeEvent wrapper", () => {
+    expect(isImeComposing({ isComposing: true, keyCode: 13 })).toBe(true);
+    expect(isImeComposing({ isComposing: false, keyCode: 229 })).toBe(true);
+  });
+
+  it("returns false when not composing", () => {
+    expect(isImeComposing({ nativeEvent: { isComposing: false, keyCode: 13 } })).toBe(false);
+    expect(isImeComposing({ isComposing: false, keyCode: 13 })).toBe(false);
   });
 });

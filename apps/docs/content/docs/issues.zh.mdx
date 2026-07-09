@@ -1,0 +1,79 @@
+---
+title: Issue 与 project
+description: Multica 的核心工作单位——可以分配给人，也可以分配给智能体。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Issue（工作项）是 Multica 里一个独立工作的单位——一条 bug、一个新功能、一项要做的事。每个 issue 有**标题**、**描述**（支持 Markdown）、**状态**、**优先级**、**分配人（assignee）**，可选地还能归入某个 **project**。如果你用过 Linear 或 Jira，它们是同类东西。
+
+**Multica 最大的特色是：issue 的分配人可以是人，也可以是 [智能体](/agents)**——这是下面先讲的第一件事。
+
+## 把 issue 分配给智能体
+
+把 issue [分配](/assigning-issues) 给某个智能体等于把这项工作交给它。智能体会**自动开工**——在几秒内开始执行、在评论里汇报进展、完成后把状态改到 done。和给同事派活的区别只在于：它不下线、不需要你提醒、7×24 可用。
+
+<Callout type="info">
+智能体的身份、配置、运行位置详见 [智能体](/agents)。
+</Callout>
+
+私有智能体（private agent）只有工作区的 owner 和 admin 能分配到 issue 上。角色权限详见 [成员与权限](/members-roles)。
+
+## 状态
+
+Multica 提供七种状态。**任何状态可以直接改到任何状态**——Multica 不强加工作流，不会因为你从 `backlog` 直接跳到 `done` 就拦你。
+
+| 状态 | 含义 |
+|---|---|
+| `backlog` | 还没排期 |
+| `todo` | 已排期、准备开工 |
+| `in_progress` | 正在做 |
+| `in_review` | 等待 review |
+| `done` | 已完成 |
+| `blocked` | 被外部因素卡住 |
+| `cancelled` | 已取消 |
+
+把 issue 分配给智能体后，智能体会自动把状态从 `backlog` / `todo` 推到 `in_progress`，完成后推到 `done`。你也可以随时手动改。
+
+## 优先级
+
+优先级分五档，用来排列 issue 列表的默认顺序：
+
+| 优先级 | 用途 |
+|---|---|
+| `No priority` | 还没决定（默认值） |
+| `Urgent` | 紧急 |
+| `High` | 高 |
+| `Medium` | 中 |
+| `Low` | 低 |
+
+## Issue 编号
+
+每个 issue 有一个工作区内唯一的编号，格式是 `<前缀>-<数字>`，比如 `MUL-123`。编号在创建时由系统自动分配、**永不改变**。详见 [工作区 → Issue 编号](/workspaces#issue-编号)。
+
+## 评论
+
+Issue 下面的评论区是协作发生的地方——回复某条评论、`@` 点名人或智能体、加表情反应。
+
+在评论里 `@` 一个智能体会**自动触发它开工**——这是除了"分配给"之外的第二种触发方式。详见 [评论与提及](/comments) 和 [在评论里召唤智能体](/mentioning-agents)。
+
+## 删除 issue
+
+<Callout type="warning">
+删除一个 issue 会**立即**清除它下面的所有评论、表情反应、附件，以及它上面已排队的智能体任务（正在执行的任务会被取消）。**无法恢复**。
+
+如果只是想把 issue 移出视野，**把状态改成 `cancelled` 比删除更安全**——数据还在，以后想捞回来也能捞。
+</Callout>
+
+## Project
+
+Project（项目）是把多个 issue 组织在一起的容器。一个 issue 最多属于一个 project，也可以不属于任何 project。
+
+Project 有自己的**负责人（lead）**——**和 issue 的 assignee 一样，lead 可以是人，也可以是智能体**。
+
+删除 project **不会删除它下面的 issue**：这些 issue 只是从这个 project 里脱离，还留在工作区里。
+
+## 下一步
+
+- [评论与提及](/comments) —— 在 issue 下协作
+- [智能体](/agents) —— 理解"分配给智能体"的工作原理

@@ -1,43 +1,143 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { Virtuoso, type Components } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@multica/ui/components/ui/collapsible";
-import { Loader2, ChevronRight, ChevronDown, Brain, AlertCircle } from "lucide-react";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@multica/ui/components/ui/tooltip";
+import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
-import { Markdown } from "@multica/views/common/markdown";
-import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
+import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { MemoizedMarkdown } from "@multica/views/common/markdown";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { AttachmentList } from "../../issues/components/comment-card";
+import type { AgentAvailability } from "@multica/core/agents";
+import type {
+  ChatMessage,
+  ChatPendingTask,
+  TaskFailureReason,
+  TaskMessagePayload,
+} from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
+import { buildTimeline } from "../../common/task-transcript";
+import { TaskStatusPill } from "./task-status-pill";
+import { formatElapsedMs } from "../lib/format";
+import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import { useT } from "../../i18n";
 
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
-  /** When set, streams the live timeline for this task from task-messages cache. */
-  pendingTaskId: string | null;
-  isWaiting: boolean;
+  /**
+   * Server-authoritative pending-task snapshot. `null` / undefined means
+   * no in-flight task — list renders without StatusPill.
+   */
+  pendingTask: ChatPendingTask | null | undefined;
+  /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
+  availability: AgentAvailability | undefined;
+  firstItemIndex?: number;
+  hasOlderMessages?: boolean;
+  isFetchingOlderMessages?: boolean;
+  onLoadOlderMessages?: () => void;
 }
+
+// ─── Virtuoso chrome ─────────────────────────────────────────────────────
+//
+// Header/Footer MUST be stable component references (module scope), never
+// inline arrows in the `components` prop: an inline `components={{ Footer:
+// () => … }}` creates a new component *type* every render, so React unmounts
+// and remounts the whole Header/Footer subtree each time. During task
+// streaming that tore down and rebuilt the entire live timeline — every row
+// and every Markdown parse — on every `task:message` event, freezing the
+// renderer for seconds at a time (MUL-3960). Per-render data flows through
+// Virtuoso's `context` prop instead, which reaches these components as an
+// ordinary prop (re-render, not remount).
+
+interface ChatListContext {
+  isFetchingOlderMessages: boolean;
+  hasLive: boolean;
+  liveTimeline: ChatTimelineItem[];
+  showStatusPill: boolean;
+  pendingTask: ChatPendingTask | null | undefined;
+  liveTaskMessages: readonly TaskMessagePayload[] | undefined;
+  availability: AgentAvailability | undefined;
+}
+
+function ChatListHeader({ context }: { context?: ChatListContext }) {
+  const { t } = useT("chat");
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pt-4">
+      {context?.isFetchingOlderMessages && (
+        <div className="text-center text-xs text-muted-foreground">
+          {t(($) => $.message_list.loading_older)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatListFooter({ context }: { context?: ChatListContext }) {
+  if (!context) return null;
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+      {context.hasLive && (
+        <div className="w-full space-y-1.5">
+          <TimelineView items={context.liveTimeline} isStreaming />
+        </div>
+      )}
+      {context.showStatusPill && context.pendingTask && (
+        <TaskStatusPill
+          pendingTask={context.pendingTask}
+          taskMessages={context.liveTaskMessages ?? []}
+          availability={context.availability}
+        />
+      )}
+    </div>
+  );
+}
+
+const LIST_COMPONENTS: Components<ChatMessage, ChatListContext> = {
+  Header: ChatListHeader,
+  Footer: ChatListFooter,
+};
 
 export function ChatMessageList({
   messages,
-  pendingTaskId,
-  isWaiting,
+  pendingTask,
+  availability,
+  firstItemIndex = 0,
+  hasOlderMessages = false,
+  isFetchingOlderMessages = false,
+  onLoadOlderMessages,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollContainerEl(node);
+  }, []);
   const fadeStyle = useScrollFade(scrollRef);
-  useAutoScroll(scrollRef);
+
+  const pendingTaskId = pendingTask?.task_id ?? null;
 
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
-  // timeline to avoid rendering the same content in two places during the
-  // invalidate → refetch window.
+  // timeline (and pill) to avoid rendering the same content in two places
+  // during the invalidate → refetch window.
   const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
     (m) => m.role === "assistant" && m.task_id === pendingTaskId,
   );
@@ -45,32 +145,72 @@ export function ChatMessageList({
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
   const showLiveTimeline = !!pendingTaskId && !pendingAlreadyPersisted;
+  const canFetchLiveTimeline = isTaskMessageTaskId(pendingTaskId) && !pendingAlreadyPersisted;
   const { data: liveTaskMessages } = useQuery({
     ...taskMessagesOptions(pendingTaskId ?? ""),
-    enabled: showLiveTimeline,
+    enabled: canFetchLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  // Memoized on the cache array identity: mergeTaskMessagesBySeq preserves
+  // the array reference when a duplicate event arrives, so this recomputes
+  // only when a genuinely new message lands — not on unrelated re-renders.
+  const liveTimeline: ChatTimelineItem[] = useMemo(
+    () => buildTimeline(liveTaskMessages ?? []),
+    [liveTaskMessages],
+  );
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
+  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
+
+  const totalCount = messages.length + (hasLive || showStatusPill ? 1 : 0);
+  const firstIndex = totalCount > 0 ? firstItemIndex : 0;
+
+  const listContext: ChatListContext = {
+    isFetchingOlderMessages,
+    hasLive,
+    liveTimeline,
+    showStatusPill,
+    pendingTask,
+    liveTaskMessages,
+    availability,
+  };
 
   return (
-    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
-      {/* Inner container matches issue / project detail width convention
-       *  (max-w-4xl + mx-auto) so switching between chat and content
-       *  views doesn't jolt the reading width. px-5 is a touch tighter
-       *  than issue-detail's px-8 because the chat window can be narrow. */}
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-        {hasLive && (
-          <div className="w-full space-y-1.5">
-            <TimelineView items={liveTimeline} />
+    <div
+      ref={setScrollContainerRef}
+      data-tab-scroll-root
+      style={fadeStyle}
+      className="flex-1 overflow-y-auto"
+    >
+      {!scrollContainerEl ? (
+        <div className="mx-auto w-full max-w-4xl px-5 pt-4 space-y-3">
+          <ChatMessageSkeleton />
+        </div>
+      ) : (
+      <Virtuoso
+        customScrollParent={scrollContainerEl}
+        data={messages}
+        firstItemIndex={firstIndex}
+        increaseViewportBy={{ top: 400, bottom: 600 }}
+        atBottomThreshold={120}
+        atBottomStateChange={setIsNearBottom}
+        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        startReached={() => {
+          if (hasOlderMessages && !isFetchingOlderMessages) {
+            onLoadOlderMessages?.();
+          }
+        }}
+        computeItemKey={(_, msg) => msg.id}
+        context={listContext}
+        components={LIST_COMPONENTS}
+        itemContent={(_, msg) => (
+          <div className="mx-auto w-full max-w-4xl px-5 py-2">
+            <MessageBubble
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+            />
           </div>
         )}
-        {isWaiting && !hasLive && !pendingAlreadyPersisted && (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        )}
-      </div>
+      />
+      )}
     </div>
   );
 }
@@ -86,36 +226,36 @@ export function ChatMessageSkeleton() {
     <div className="flex-1 overflow-hidden">
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-5">
         <div className="space-y-2">
-          <div className="h-3.5 w-3/4 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-1/2 rounded bg-muted animate-pulse" />
+          <Skeleton className="h-3.5 w-3/4" />
+          <Skeleton className="h-3.5 w-1/2" />
         </div>
         <div className="flex justify-end">
-          <div className="h-8 w-48 rounded-2xl bg-muted animate-pulse" />
+          <Skeleton className="h-8 w-48 rounded-2xl" />
         </div>
         <div className="space-y-2">
-          <div className="h-3.5 w-2/3 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-5/6 rounded bg-muted animate-pulse" />
-          <div className="h-3.5 w-1/3 rounded bg-muted animate-pulse" />
+          <Skeleton className="h-3.5 w-2/3" />
+          <Skeleton className="h-3.5 w-5/6" />
+          <Skeleton className="h-3.5 w-1/3" />
         </div>
       </div>
     </div>
   );
 }
 
-function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
-  return {
-    seq: m.seq,
-    type: m.type,
-    tool: m.tool,
-    content: m.content,
-    input: m.input,
-    output: m.output,
-  };
-}
-
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+// memo: every streamed task:message re-renders ChatMessageList, and with it
+// every VISIBLE row via itemContent. Message objects are referentially
+// stable for unchanged messages and isPending is a boolean, so a shallow
+// memo skips reconciling rows the stream didn't touch — the persisted
+// history stays inert while only the live footer updates.
+const MessageBubble = memo(function MessageBubble({
+  message,
+  isPending,
+}: {
+  message: ChatMessage;
+  isPending: boolean;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -125,134 +265,346 @@ function MessageBubble({ message }: { message: ChatMessage }) {
            * Neutralise prose's leading/trailing margin so single-line
            * bubbles stay as compact as the plain-text version used to. */}
           <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown>{message.content}</Markdown>
+            <MemoizedMarkdown attachments={message.attachments}>{message.content}</MemoizedMarkdown>
           </div>
+          <AttachmentList
+            attachments={message.attachments}
+            content={message.content}
+            className="mt-1.5"
+          />
         </div>
       </div>
     );
   }
 
-  return <AssistantMessage message={message} />;
-}
+  return <AssistantMessage message={message} isPending={isPending} />;
+});
 
 function AssistantMessage({
   message,
+  isPending,
 }: {
   message: ChatMessage;
+  isPending: boolean;
 }) {
   const taskId = message.task_id;
+  const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
   // Use the shared taskMessagesOptions so this cache entry is the same one
   // seeded by useRealtimeSync during task execution — zero refetch when the
   // task finishes, since WS already populated it.
   const { data: taskMessages } = useQuery({
     ...taskMessagesOptions(taskId ?? ""),
-    enabled: !!taskId,
+    enabled: canFetchTaskMessages,
   });
 
-  const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
+  // Same memoization rationale as the live timeline in ChatMessageList.
+  const timeline: ChatTimelineItem[] = useMemo(
+    () => buildTimeline(taskMessages ?? []),
+    [taskMessages],
+  );
+
+  // Failure bubble path: when the server's FailTask wrote a failure
+  // chat_message (failure_reason set), render a destructive bubble with the
+  // human-readable reason label + collapsible raw errMsg + the same timeline
+  // so the user can see exactly where the run broke.
+  if (message.failure_reason) {
+    return (
+      <FailureBubble
+        reason={message.failure_reason}
+        rawError={message.content}
+        timeline={timeline}
+        elapsedMs={message.elapsed_ms}
+      />
+    );
+  }
 
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
-        <TimelineView items={timeline} />
+        <TimelineView items={timeline} attachments={message.attachments} />
       ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-          <Markdown>{message.content}</Markdown>
+          <MemoizedMarkdown attachments={message.attachments}>{message.content}</MemoizedMarkdown>
         </div>
+      )}
+      <AttachmentList
+        attachments={message.attachments}
+        content={message.content}
+      />
+      <MessageFooter
+        message={message}
+        timeline={timeline}
+        isPending={isPending}
+      />
+    </div>
+  );
+}
+
+// Inline footer row beneath the assistant reply: "Replied in 38s · [Copy]".
+// Action icons live here (not as a hover-floating overlay) so they're
+// discoverable on first read and don't shift content. Buttons stay quiet
+// (muted) until hover. Copy is suppressed during streaming because the
+// final text is still being appended.
+function MessageFooter({
+  message,
+  timeline,
+  isPending,
+}: {
+  message: ChatMessage;
+  timeline: ChatTimelineItem[];
+  isPending: boolean;
+}) {
+  const showCopy = !isPending;
+  if (message.elapsed_ms == null && !showCopy) return null;
+  return (
+    <div className="flex items-center gap-1.5">
+      {message.elapsed_ms != null && (
+        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+      )}
+      {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
+    </div>
+  );
+}
+
+function MessageCopyButton({
+  message,
+  timeline,
+}: {
+  message: ChatMessage;
+  timeline: ChatTimelineItem[];
+}) {
+  const { t } = useT("chat");
+  const handleCopy = async () => {
+    if (await copyText(extractCopyText(message, timeline))) {
+      toast.success(t(($) => $.message_list.copied_toast));
+    } else {
+      toast.error(t(($) => $.message_list.copy_failed_toast));
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground/70 hover:text-foreground"
+            onClick={handleCopy}
+            aria-label={t(($) => $.message_list.copy_action)}
+          />
+        }
+      >
+        <Copy />
+      </TooltipTrigger>
+      <TooltipContent side="top">
+        {t(($) => $.message_list.copy_action)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Persisted "Replied in 38s" / "Failed after 12s" line under the assistant
+// bubble. Reads `elapsed_ms` straight off the chat_message — server computes
+// it once at task completion, so this caption is identical across reloads
+// and devices. Skipped silently when null (legacy messages predating
+// migration 063 + user messages).
+function ElapsedCaption({
+  variant,
+  elapsedMs,
+  className,
+}: {
+  variant: "replied" | "failed";
+  elapsedMs: number;
+  className?: string;
+}) {
+  const { t } = useT("chat");
+  const text =
+    variant === "replied"
+      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
+      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
+  return (
+    <div className={cn("text-xs text-muted-foreground/80", className)}>
+      {text}
+    </div>
+  );
+}
+
+function FailureBubble({
+  reason,
+  rawError,
+  timeline,
+  elapsedMs,
+}: {
+  reason: string;
+  rawError: string;
+  timeline: ChatTimelineItem[];
+  elapsedMs?: number | null;
+}) {
+  const { t } = useT("chat");
+  const [open, setOpen] = useState(false);
+  // Chat gets its own friendly, reassuring copy per failure reason — plain
+  // language + a "try again" nudge — instead of the terse developer labels
+  // (`failureReasonLabel`) used on the agent-detail / execution-log surfaces.
+  // An unknown reason (a future enum value this build doesn't ship yet) falls
+  // back to a generic friendly line. The raw error stays tucked under the
+  // collapsible below for anyone who wants the technical detail.
+  const chatFailureCopy: Record<TaskFailureReason, string> = {
+    agent_error: t(($) => $.message_list.failure.agent_error),
+    timeout: t(($) => $.message_list.failure.timeout),
+    codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
+    runtime_offline: t(($) => $.message_list.failure.runtime_offline),
+    runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
+    manual: t(($) => $.message_list.failure.manual),
+  };
+  const label =
+    chatFailureCopy[reason as TaskFailureReason] ??
+    t(($) => $.message_list.failure.fallback);
+
+  return (
+    <div className="w-full space-y-1.5">
+      {/* Failure read as an inline, low-key note — not a destructive
+       *  alert. Intentionally borderless / no background tint: a chat
+       *  failure is informational ("this didn't work"), not a system
+       *  error. The icon + muted destructive text are signal enough,
+       *  the rest stays in the normal reply rhythm. */}
+      <div className="flex items-start gap-1.5 text-sm">
+        <AlertTriangle className="size-3.5 shrink-0 text-destructive/80 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-destructive/90">{label}</div>
+          {rawError.trim() && (
+            <Collapsible open={open} onOpenChange={setOpen}>
+              <CollapsibleTrigger className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {open ? (
+                  <ChevronDown className="size-3" />
+                ) : (
+                  <ChevronRight className="size-3" />
+                )}
+                <span>{t(($) => $.message_list.show_details)}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-all">
+                  {rawError}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
+      </div>
+      {timeline.length > 0 && <TimelineView items={timeline} />}
+      {elapsedMs != null && (
+        <ElapsedCaption variant="failed" elapsedMs={elapsedMs} />
       )}
     </div>
   );
 }
 
-// ─── Timeline: flat interleaved text + collapsible tool groups ───────────
+// ─── Timeline: outer process fold + final text (Conductor-style) ─────────
+//
+// splitTimeline (lib/copy-text.ts) carves the items into:
+//   preface — text before the first thinking/tool item
+//   middle  — first → last non-text item (inclusive, may sandwich text)
+//   final   — text after the last non-text item
+//
+// We render preface + final outside an outer Collapsible ("X steps") that
+// wraps middle. The inner row Collapsibles (ThinkingRow / ToolCallRow /
+// ToolResultRow) are unchanged — clicking them toggles independently of
+// the outer fold. Copy mirrors what's visible when the outer fold is
+// closed: preface + final, never middle. See extractCopyText for the
+// authoritative copy logic.
 
-interface TimelineSegment {
-  kind: "text" | "tools";
+function TimelineView({
+  items,
+  isStreaming,
+  attachments,
+}: {
   items: ChatTimelineItem[];
-}
-
-/** Split items into segments: consecutive non-text → "tools", consecutive text → merged "text". */
-function segmentTimeline(items: ChatTimelineItem[]): TimelineSegment[] {
-  const segments: TimelineSegment[] = [];
-  let toolBuf: ChatTimelineItem[] = [];
-  let textBuf: ChatTimelineItem[] = [];
-
-  const flushTools = () => {
-    if (toolBuf.length > 0) {
-      segments.push({ kind: "tools", items: toolBuf });
-      toolBuf = [];
-    }
-  };
-
-  const flushText = () => {
-    if (textBuf.length > 0) {
-      segments.push({ kind: "text", items: textBuf });
-      textBuf = [];
-    }
-  };
-
-  for (const item of items) {
-    if (item.type === "text") {
-      flushTools();
-      textBuf.push(item);
-    } else {
-      flushText();
-      toolBuf.push(item);
-    }
-  }
-  flushText();
-  flushTools();
-  return segments;
-}
-
-function TimelineView({ items }: { items: ChatTimelineItem[] }) {
-  const segments = segmentTimeline(items);
+  isStreaming?: boolean;
+  attachments?: import("@multica/core/types").Attachment[];
+}) {
+  const { preface, middle, final } = splitTimeline(items);
 
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.kind === "text" ? (
-          <div key={seg.items[0]!.seq} className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-            <Markdown>{seg.items.map((t) => t.content ?? "").join("")}</Markdown>
-          </div>
-        ) : (
-          <ToolGroupCollapsible
-            key={seg.items[0]!.seq}
-            items={seg.items}
-            defaultOpen={i === segments.length - 1}
-          />
-        ),
+      {preface.length > 0 && (
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          <MemoizedMarkdown attachments={attachments}>
+            {preface.map((t) => t.content ?? "").join("")}
+          </MemoizedMarkdown>
+        </div>
+      )}
+      {middle.length > 0 && (
+        <OuterProcessFold
+          items={middle}
+          defaultOpen={!!isStreaming}
+          attachments={attachments}
+        />
+      )}
+      {final.length > 0 && (
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          <MemoizedMarkdown attachments={attachments}>
+            {final.map((t) => t.content ?? "").join("")}
+          </MemoizedMarkdown>
+        </div>
       )}
     </>
   );
 }
 
-function ToolGroupCollapsible({
+function OuterProcessFold({
   items,
   defaultOpen,
+  attachments,
 }: {
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
+  attachments?: import("@multica/core/types").Attachment[];
 }) {
+  const { t } = useT("chat");
+  // useState seeds once at mount — subsequent renders never overwrite the
+  // user's manual toggle. The streaming → completed transition unmounts
+  // the live <TimelineView> and mounts the persisted AssistantMessage's
+  // own <TimelineView>, so the persisted instance starts closed (default)
+  // even if the live one was open. That's the desired collapsed-default.
   const [open, setOpen] = useState(defaultOpen ?? false);
-  const toolCount = items.filter((i) => i.type === "tool_use").length;
-  const label = `${toolCount} ${toolCount === 1 ? "tool" : "tools"}`;
+  const stepCount = items.length;
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+      <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>{label}</span>
+        <span>{t(($) => $.message_list.process_steps, { count: stepCount })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
-          {items.map((item) => (
-            <ItemRow key={item.seq} item={item} />
-          ))}
+          {items.map((item) =>
+            item.type === "text" ? (
+              <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
+            ) : (
+              <ItemRow key={item.seq} item={item} />
+            ),
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+// Intermediate text segment rendered inside the outer fold. Visually
+// down-shifted (xs / muted) so it reads as part of the agent's process,
+// not the final answer — the final answer renders below the fold at full
+// prose size.
+function MiddleTextRow({
+  item,
+  attachments,
+}: {
+  item: ChatTimelineItem;
+  attachments?: import("@multica/core/types").Attachment[];
+}) {
+  return (
+    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+      <MemoizedMarkdown attachments={attachments}>{item.content ?? ""}</MemoizedMarkdown>
+    </div>
   );
 }
 
@@ -322,7 +674,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-all">
             {JSON.stringify(item.input, null, 2)}
           </pre>
         </CollapsibleContent>
@@ -332,11 +684,15 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
 }
 
 function ToolResultRow({ item }: { item: ChatTimelineItem }) {
+  const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const output = item.output ?? "";
   if (!output) return null;
 
   const preview = output.length > 120 ? output.slice(0, 120) + "..." : output;
+  const labelPrefix = item.tool
+    ? t(($) => $.message_list.tool_result_named, { tool: item.tool })
+    : t(($) => $.message_list.tool_result_unnamed);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -345,11 +701,11 @@ function ToolResultRow({ item }: { item: ChatTimelineItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform mt-0.5", open && "rotate-90")}
         />
         <span className="text-muted-foreground/70 truncate">
-          {item.tool ? `${item.tool} result: ` : "result: "}{preview}
+          {labelPrefix}{preview}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/50 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-all">
           {output.length > 4000 ? output.slice(0, 4000) + "\n... (truncated)" : output}
         </pre>
       </CollapsibleContent>
@@ -371,7 +727,7 @@ function ThinkingRow({ item }: { item: ChatTimelineItem }) {
         <span className="text-muted-foreground italic truncate">{preview}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/30 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
+        <pre className="ml-[18px] mt-0.5 max-h-40 overflow-auto rounded bg-muted/30 p-2 text-xs text-muted-foreground whitespace-pre-wrap break-words">
           {text}
         </pre>
       </CollapsibleContent>
@@ -389,4 +745,3 @@ function ErrorRow({ item }: { item: ChatTimelineItem }) {
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────
-

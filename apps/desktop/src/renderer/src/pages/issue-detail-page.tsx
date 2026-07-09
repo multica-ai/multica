@@ -13,5 +13,8 @@ export function IssueDetailPage() {
   useDocumentTitle(issue ? `${issue.identifier}: ${issue.title}` : "Issue");
 
   if (!id) return null;
+  // Render errors bubble to the root route errorElement (DesktopRouteErrorPage),
+  // which contains the crash inside the tab content pane. No page-level boundary
+  // here — a whole-page wrapper duplicates the route-level error UI.
   return <IssueDetail issueId={id} />;
 }

@@ -6,15 +6,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
+
+// opencodeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled opencode process is given to exit after SIGTERM before it (and its
+// whole process group) is SIGKILLed. Zero means use the default. It is atomic
+// so tests can shorten the grace without racing the cancellation goroutine that
+// reads it. See the cancellation handler in Execute for why termination must
+// precede closing the stdout pipe (#4533).
+var opencodeTerminateGraceNanos atomic.Int64
+
+func opencodeTerminateGrace() time.Duration {
+	if n := opencodeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
 
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format": blockedWithValue, // json output format for daemon communication
+	"--format":                       blockedWithValue,  // json output format for daemon communication
+	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
+	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -28,19 +51,39 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "opencode"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("opencode executable not found at %q: %w", execPath, err)
 	}
+	if runtime.GOOS == "windows" {
+		if native := resolveOpenCodeNativeFromShim(resolved, os.Stat); native != "" {
+			b.cfg.Logger.Info("opencode resolved to native binary to avoid .cmd shim argv truncation", "shim", resolved, "native", native)
+			resolved = native
+		}
+	}
+	execPath = resolved
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
-	args := []string{"run", "--format", "json"}
+	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
+	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
+	// project config scan) at the task workdir. Without this, OpenCode falls
+	// back to PWD (inherited from the daemon process) or process.cwd(), which
+	// in self-host deployments can resolve to the user's shell working
+	// directory and silently bypass the per-task workdir — agents lose
+	// visibility into their assigned skills and AGENTS.md instructions.
+	// PWD is also overridden below because OpenCode prefers PWD over cwd when
+	// `--dir` is absent and uses it as the starting point for any further
+	// path resolution.
+	if opts.Cwd != "" {
+		args = append(args, "--dir", opts.Cwd)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
@@ -55,15 +98,63 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	args = append(args, prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
-	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+	hideAgentWindow(cmd)
+	// Run opencode in its own process group so cancellation can reach the
+	// whole tree (opencode plus any tool subprocess it spawns), not just the
+	// direct child — otherwise a cancelled or restarted run can orphan a
+	// descendant that keeps spinning (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation. The default CommandContext behaviour
+	// SIGKILLs only the leader the instant runCtx is done; we instead drive a
+	// graceful, group-wide SIGTERM→SIGKILL from the cancellation goroutine
+	// below and close the stdout read end only after the tree has been
+	// signalled. Returning nil here keeps os/exec from racing us with its own
+	// kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 
 	env := buildEnv(b.cfg.Env)
-	// Auto-approve all tool use in daemon mode.
-	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+	// Keep daemon-mode runs non-interactive without relying on
+	// OPENCODE_PERMISSION. OpenCode deep-merges that env override into user
+	// config while preserving existing key order, so a pre-existing
+	// permission.question key can be followed by a wildcard allow and bypass
+	// the intended question deny. Current OpenCode run sessions inject their
+	// own question/plan deny rules after agent config; this flag only answers
+	// prompts that survive those explicit denies.
+	// Override PWD so the child OpenCode process resolves its discovery root
+	// to the task workdir. cmd.Dir alone is not enough: OpenCode reads PWD
+	// (inherited from the parent daemon) before falling back to process.cwd()
+	// when computing the directory it walks for AGENTS.md / .opencode/skills.
+	// See packages/opencode/src/cli/cmd/run.ts in the upstream source.
+	if opts.Cwd != "" {
+		env = append(env, "PWD="+opts.Cwd)
+	}
+	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// OpenCode's general inline-config injection mechanism that merges at
+	// "local" scope (after the project-config loop, before remote / managed
+	// configs). MCP is the only field we currently project there; if a
+	// future Multica field needs the same channel it would assemble a
+	// combined OpenCode config slice before the env append.
+	//
+	// This deliberately leaves <workdir>/opencode.json untouched — the
+	// workdir is reused across turns for the same (agent, issue), and any
+	// agent- or user-written model / tools / permission settings in it must
+	// survive across runs.
+	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if mcpContent != "" {
+		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+		}
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	}
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
@@ -83,9 +174,34 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stdout when the context is cancelled so the scanner unblocks.
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead pid.
+	procDone := make(chan struct{})
+
+	// On cancellation / timeout, terminate opencode (and the tool subprocesses
+	// it spawned) BEFORE unblocking the scanner. The previous implementation
+	// closed the stdout read end immediately, which left opencode writing into
+	// a closed pipe: every write returns EPIPE and, per anomalyco/opencode#33653,
+	// can spin the orphaned process at 100% CPU. Instead we SIGTERM the whole
+	// process group, give it a grace period to exit cleanly, then SIGKILL it.
+	// SIGKILL is uncatchable, so once it is delivered no group member can run
+	// (or write) again — only then is it safe to close the stdout read end as a
+	// last-resort unblock for a scanner that a wedged descendant still keeps
+	// open. WaitDelay is the final backstop (#4533).
 	go func() {
-		<-runCtx.Done()
+		select {
+		case <-procDone:
+			return // finished on its own; nothing to terminate
+		case <-runCtx.Done():
+		}
+		if cmd.Process != nil {
+			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			select {
+			case <-procDone: // exited within the grace window
+			case <-time.After(opencodeTerminateGrace()):
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
+		}
 		_ = stdout.Close()
 	}()
 
@@ -97,8 +213,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		startTime := time.Now()
 		scanResult := b.processEvents(stdout, msgCh)
 
-		// Wait for process exit.
+		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -274,6 +391,59 @@ func (b *opencodeBackend) handleErrorEvent(event opencodeEvent, ch chan<- Messag
 	*finalError = errMsg
 }
 
+// resolveOpenCodeNativeFromShim returns the path to the native OpenCode
+// executable bundled inside the npm package, given the path to the npm
+// `opencode.cmd` shim that PATH lookup found on Windows. Returns "" if shim
+// doesn't end in `.cmd` or no candidate npm platform package has a bundled
+// native binary present.
+//
+// Windows batch argument forwarding via `%*` does not preserve newlines, so
+// multi-line positional argv is truncated at the first newline before the
+// shim hands off to the JS entrypoint. Daemon prompts can include literal
+// newlines (system prompt + user message), which makes the agent see only
+// the first line. Native binary spawn skips the cmd.exe layer entirely.
+//
+// Layout when installed via `npm install -g opencode-ai`:
+//
+//	<prefix>\opencode.cmd                                                                       (shim)
+//	<prefix>\node_modules\opencode-ai\node_modules\opencode-windows-{x64,x64-baseline,arm64}\bin\opencode.exe (native)
+//
+// `opencode-windows-x64-baseline` ships for older CPUs without AVX2;
+// `opencode-windows-arm64` ships for Surface / Copilot+ PC hosts.
+// Candidates are tried in GOARCH-preferred order so the most likely match
+// for the current host comes first.
+//
+// statFn is injected so this is testable on non-Windows hosts.
+func resolveOpenCodeNativeFromShim(shimPath string, statFn func(string) (os.FileInfo, error)) string {
+	if !strings.EqualFold(filepath.Ext(shimPath), ".cmd") {
+		return ""
+	}
+	prefix := filepath.Dir(shimPath)
+	for _, pkg := range opencodeWindowsPackageCandidates(runtime.GOARCH) {
+		candidate := filepath.Join(prefix, "node_modules", "opencode-ai", "node_modules", pkg, "bin", "opencode.exe")
+		if _, err := statFn(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// opencodeWindowsPackageCandidates returns the npm platform package names
+// that may host the bundled `opencode.exe` on Windows, ordered so the most
+// likely match for the given GOARCH comes first. ARM64 hosts try the arm64
+// build first; everything else tries x64, then the baseline x64 build for
+// older CPUs without AVX2, then arm64 as a final fallback. Cost is one
+// extra statFn call per miss when the GOARCH-preferred package isn't
+// installed.
+func opencodeWindowsPackageCandidates(goarch string) []string {
+	switch goarch {
+	case "arm64":
+		return []string{"opencode-windows-arm64", "opencode-windows-x64", "opencode-windows-x64-baseline"}
+	default:
+		return []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
+	}
+}
+
 // extractToolOutput converts the tool state output (which may be a string or
 // structured object) into a string.
 func extractToolOutput(output any) string {
@@ -327,8 +497,8 @@ type opencodeEventPart struct {
 
 // opencodeTokens represents token usage in a step_finish event.
 type opencodeTokens struct {
-	Input  int64              `json:"input"`
-	Output int64              `json:"output"`
+	Input  int64                `json:"input"`
+	Output int64                `json:"output"`
 	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
