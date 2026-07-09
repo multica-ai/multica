@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,9 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return body, true, nil
 	}
 	if filePath != "" {
+		if err := ensureFileFlagWithinWorkdir(cmd, fileFlag, flagName, filePath); err != nil {
+			return "", false, err
+		}
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
@@ -83,6 +87,79 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+// ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
+// outside the current working directory, unless --allow-external-file is set.
+//
+// Agent task workdirs are isolated per profile and per task; machine-shared
+// scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
+// leak to exactly this gap: a quick-create run wrote its description to a fixed
+// /tmp/desc.md, the write silently failed because a *different* environment's
+// run had left a stale file there minutes earlier, and --description-file then
+// fed that stale content into the new issue. Requiring the file to live under
+// the workdir turns "silently read another run's file" into a loud command
+// failure — an "incorrect content" bug becomes a "command errored" bug.
+func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--%s path %q resolves outside the current working directory; "+
+				"write agent temp files inside the task workdir (e.g. ./%s.md) rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be read by mistake. "+
+				"Pass --allow-external-file to override.",
+			fileFlag, filePath, flagName)
+	}
+	return nil
+}
+
+// fileWithinWorkingDir reports whether filePath resolves to a location inside
+// the process working directory. Both sides are symlink-resolved so aliased
+// roots (e.g. macOS /tmp -> /private/tmp) and symlinks planted inside the
+// workdir fail closed. A path that does not exist yet is judged on its cleaned
+// absolute form so the caller's os.ReadFile still surfaces the real not-found
+// error afterwards.
+func fileWithinWorkingDir(filePath string) (bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false, err
+	}
+	base := cwd
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		base = resolved
+	}
+	abs := filePath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	} else {
+		// The file may not exist yet (the caller's os.ReadFile surfaces that).
+		// Resolve symlinks on the parent directory instead so the comparison
+		// base and the candidate share the same canonical prefix — otherwise a
+		// workdir under a symlinked root (e.g. macOS temp dirs) would falsely
+		// read as "outside". A missing parent falls back to a plain clean.
+		if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(abs)); perr == nil {
+			abs = filepath.Join(resolvedParent, filepath.Base(abs))
+		} else {
+			abs = filepath.Clean(abs)
+		}
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil {
+		return false, err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 var issueCmd = &cobra.Command{
@@ -383,7 +460,8 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
-	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -402,7 +480,8 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
-	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -419,11 +498,7 @@ func init() {
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
-	issueReorderCmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
-	issueReorderCmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
-	issueReorderCmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
-	issueReorderCmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
-	issueReorderCmd.Flags().String("output", "json", "Output format: table or json")
+	registerIssueReorderFlags(issueReorderCmd)
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -463,7 +538,8 @@ func init() {
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1332,6 +1408,24 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 // Reorder command
 // ---------------------------------------------------------------------------
 
+// registerIssueReorderFlags wires the reorder command's flags and declares its
+// target selector as a cobra flag group: mutually exclusive so at most one of
+// --before/--after/--top/--bottom is accepted, and one-required so at least one
+// must be given. Declaring the rule (instead of counting the flags by hand in
+// runIssueReorder) lets cobra reject zero-target and multi-target invocations
+// before RunE with a canonical message, and makes shell completion group-aware
+// — it hides the sibling target flags once one of them is set. It is shared with
+// the command's tests so they exercise the exact flag-group wiring that ships.
+func registerIssueReorderFlags(cmd *cobra.Command) {
+	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
+	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
+	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
+	cmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+	cmd.MarkFlagsMutuallyExclusive("before", "after", "top", "bottom")
+	cmd.MarkFlagsOneRequired("before", "after", "top", "bottom")
+}
+
 // runIssueReorder repositions an issue inside its current status column. The
 // new position is computed client-side by computeReorderPosition, which mirrors
 // the board/list drag-and-drop math (computePosition in
@@ -1345,14 +1439,26 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	top, _ := cmd.Flags().GetBool("top")
 	bottom, _ := cmd.Flags().GetBool("bottom")
 
-	modes := 0
-	for _, set := range []bool{before != "", after != "", top, bottom} {
-		if set {
-			modes++
-		}
+	// "Exactly one of --before/--after/--top/--bottom" is enforced declaratively
+	// by the command's mutually-exclusive, one-required flag group (see
+	// registerIssueReorderFlags), so cobra rejects zero-target and multi-target
+	// invocations before RunE runs. Cobra keys off flag *presence* (Changed),
+	// not value, so guard the cases it cannot see: a --before/--after passed
+	// empty (e.g. an unset shell variable), or a --top/--bottom explicitly set
+	// to false (e.g. `--top=false` from a generated command). Each counts as
+	// "set" for the group yet selects no real target, and would otherwise fall
+	// through to a confusing "not found in column" error.
+	if cmd.Flags().Changed("before") && before == "" {
+		return fmt.Errorf("--before requires an issue ID or key")
 	}
-	if modes != 1 {
-		return fmt.Errorf("exactly one of --before, --after, --top, or --bottom is required")
+	if cmd.Flags().Changed("after") && after == "" {
+		return fmt.Errorf("--after requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("top") && !top {
+		return fmt.Errorf("--top cannot be set to false; pass it on its own to move the issue to the top of its column")
+	}
+	if cmd.Flags().Changed("bottom") && !bottom {
+		return fmt.Errorf("--bottom cannot be set to false; pass it on its own to move the issue to the bottom of its column")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -2315,6 +2421,37 @@ var (
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
 )
 
+var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func getAssigneeJSON(ctx context.Context, client *cli.APIClient, path string, out any) error {
+	delays := []time.Duration{100 * time.Millisecond, 250 * time.Millisecond}
+	var err error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err = client.GetJSON(ctx, path, out)
+		if err == nil || !isRetryableAssigneeResolveError(err) || attempt == len(delays) {
+			return err
+		}
+		if assigneeResolveRetrySleep(ctx, delays[attempt]) {
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func isRetryableAssigneeResolveError(err error) bool {
+	var netErr *cli.NetworkError
+	return errors.As(err, &netErr)
+}
+
 func (k assigneeKinds) describe() string {
 	parts := make([]string, 0, 3)
 	if k.member {
@@ -2378,7 +2515,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.member {
 		fetchAttempts++
 		var members []map[string]any
-		if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
@@ -2392,7 +2529,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		fetchAttempts++
 		var agents []map[string]any
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		if err := client.GetJSON(ctx, agentPath, &agents); err != nil {
+		if err := getAssigneeJSON(ctx, client, agentPath, &agents); err != nil {
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
@@ -2411,7 +2548,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.squad {
 		fetchAttempts++
 		var squads []map[string]any
-		if err := client.GetJSON(ctx, "/api/squads", &squads); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/squads", &squads); err != nil {
 			errs = append(errs, fmt.Errorf("fetch squads: %w", err))
 		} else {
 			for _, s := range squads {
@@ -2486,20 +2623,20 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 	var members []map[string]any
 	var memberErr error
 	if kinds.member {
-		memberErr = client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+		memberErr = getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
 	}
 
 	var agents []map[string]any
 	var agentErr error
 	if kinds.agent {
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		agentErr = client.GetJSON(ctx, agentPath, &agents)
+		agentErr = getAssigneeJSON(ctx, client, agentPath, &agents)
 	}
 
 	var squads []map[string]any
 	var squadErr error
 	if kinds.squad {
-		squadErr = client.GetJSON(ctx, "/api/squads", &squads)
+		squadErr = getAssigneeJSON(ctx, client, "/api/squads", &squads)
 	}
 
 	allFailed := true

@@ -294,6 +294,52 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.42",
+        date: "2026-07-09",
+        title: "A dedicated Chat tab, plus reliability fixes",
+        changes: [],
+        features: [
+          "Chat now lives in its own tab, with your conversations on one side and the open chat on the other.",
+          "New chats get a short, fitting title after your first message, in the language you wrote in.",
+          "Starting a new chat drops your cursor right in the message box, so you can type immediately.",
+          "Cancelled issues now appear as their own column on the board and list, like every other status.",
+          "Hover an agent to see which model it is running and its thinking level, without opening its page.",
+        ],
+        improvements: [
+          "The app recovers its connection more reliably after a brief network interruption.",
+          "Assigning an issue from the command line no longer fails on a momentary network hiccup.",
+        ],
+        fixes: [
+          "Your follow-up comment on an issue is never dropped — even sent while the agent is still working, it always gets picked up.",
+          "When one agent mentions another, the mentioned agent now reliably starts working.",
+          "A chat bot that got stuck can be reconnected again, and the \u201calready in use\u201d message now says exactly who holds it.",
+          "Links wrapped in bold in comments and descriptions now display correctly.",
+          "The Windows desktop app now always shows the correct version number.",
+        ],
+      },
+      {
+        version: "0.3.41",
+        date: "2026-07-08",
+        title: "Machine names, member-owned squads, and CLI issue ordering",
+        changes: [],
+        features: [
+          "You can now give your machines their own names, and the runtime picker for creating an agent is searchable and grouped by machine.",
+          "Any member can now create and manage their own squads, not just workspace admins.",
+          "An agent's owner can now connect and manage its Lark bot directly, without needing to be an admin.",
+          "You can now reorder issues from the command line and set an exact position.",
+        ],
+        improvements: [
+          "When an agent task fails in chat, you now get a friendly, plain-language message with a nudge to try again.",
+        ],
+        fixes: [
+          "In Feishu topic groups, each topic now keeps its own separate conversation instead of everyone sharing one.",
+          "The desktop app now always shows a correct version number.",
+          "After a task moves between statuses, the board's count and the rows it shows stay in sync.",
+          "Files brought in through a skill import are now kept instead of being lost.",
+          "Deleting an autopilot now archives it cleanly, with nothing left behind.",
+        ],
+      },
+      {
         version: "0.3.40",
         date: "2026-07-07",
         title: "In-page find, resumable downloads, and fixes",

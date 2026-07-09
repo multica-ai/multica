@@ -98,40 +98,145 @@ SELECT * FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
--- name: DeleteRevokedChannelInstallationByAppID :one
--- Hard-delete a REVOKED installation that belongs to a DIFFERENT agent, keyed
--- by its platform app identity, and RETURN the deleted id. When a Feishu/Lark
--- Bot is disconnected from agent A (status → 'revoked') and the same Bot (same
--- app_id) is later bound to a DIFFERENT agent B, agent A's revoked row still
--- occupies the (channel_type, config->>'app_id') unique slot and blocks the
--- UpsertChannelInstallation INSERT for B. Removing that placeholder first lets
--- the upsert create a fresh row for the new agent.
+-- name: GetChannelInstallationOwnerByAppID :one
+-- Identifies the LIVE owner of a (channel_type, config->>'app_id') routing slot
+-- so the install path can refuse a rebind with an ACCURATE message instead of the
+-- old catch-all "connected to a different Multica workspace". Meant to be read
+-- only after ReclaimDeadChannelInstallationByAppID has removed every DEAD owner,
+-- so a returned row is a live active owner. `agent_archived` distinguishes an
+-- archived (reversible) owner — its bot stays owned, recovered by unarchiving the
+-- agent or disconnecting the bot — from a plain active one. The JOIN drops a row
+-- whose agent no longer exists (an orphan the reclaim gate should already have
+-- cleared), so a missing row (pgx.ErrNoRows) means "no live owner". The caller
+-- reads agent_archived_at.Valid to tell an archived (reversible) owner apart.
+SELECT ci.workspace_id, ci.agent_id, a.archived_at AS agent_archived_at
+FROM channel_installation ci
+JOIN agent a ON a.id = ci.agent_id
+WHERE ci.channel_type = sqlc.arg('channel_type')
+  AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text;
+
+-- name: ReclaimDeadChannelInstallationByAppID :one
+-- Rebind cleanup gate. Frees the (channel_type, config->>'app_id') routing slot
+-- so a valid new agent can (re)bind a bot whose previous owner is DEAD, and, in
+-- the same statement, clears every application-owned dependent row of the removed
+-- installation (channel_* has no FK/cascade, MUL-3515 §4). Returns the removed id
+-- (pgx.ErrNoRows when nothing was dead — a no-op the caller treats as success).
 --
--- The `agent_id <> arg` fence is load-bearing: re-connecting the SAME agent
--- must NOT delete its own revoked row. UpsertChannelInstallation conflicts on
--- (workspace_id, agent_id, channel_type), so the same agent's revoked row is
--- reactivated in place (status → 'active') with its installation_id — and every
--- channel_user_binding / channel_chat_session_binding hanging off it —
--- preserved. Deleting it here would force an INSERT with a fresh installation_id
--- and orphan all of that agent's member links and chat sessions.
+-- "Dead" is exactly one of:
+--   1. a REVOKED placeholder held by ANY agent OTHER than the caller's own
+--      (workspace, agent) pair. Disconnect only flips status to 'revoked' — no
+--      product path ever hard-deletes the row — so a revoked row would otherwise
+--      pin the bot's app_id slot forever with no self-serve recovery, even across
+--      workspaces (workspace A disconnects; workspace B, which proves control by
+--      holding the same app credentials, rebinds). Revoke is the owner's explicit
+--      "I'm done with this bot", so any revoked row is reclaimable — only the
+--      caller's OWN revoked row is spared (reactivated in place; see below).
+--   2. an ORPHAN whose owning workspace OR agent row no longer exists — the
+--      workspace was deleted, or the agent was hard-deleted on runtime teardown.
+--      With no FK the installation outlives its owner and keeps occupying the
+--      app_id slot: the "ghost binding" that made a bot un-rebindable (#4810).
 --
--- Fenced to one workspace AND status='revoked' so an active installation can
--- never be silently deleted through this path.
+-- Deliberately NOT dead (the caller refuses these with an accurate conflict):
+--   - the SAME agent's own revoked row (agent_id = @agent_id): the upsert
+--     reactivates it in place, preserving its installation_id and every binding;
+--   - a live ACTIVE owner whose agent still exists — INCLUDING an ARCHIVED agent:
+--     archive is reversible, so its bot stays owned rather than being silently
+--     stolen. Only a hard delete frees the slot.
 --
--- This DELETE is the atomic gate for the whole rebind cleanup: the caller keys
--- its dependent-row cleanup off the RETURNING id, so cleanup runs ONLY for a row
--- this statement actually removed. Under READ COMMITTED, a concurrent same-agent
--- reconnect that reactivates the row to 'active' first makes the WHERE re-check
--- fail (EvalPlanQual), this deletes nothing (pgx.ErrNoRows), and no dependents
--- are touched — closing the read-then-delete TOCTOU where a stale "it was
--- revoked" read could wipe the bindings of a since-reactivated installation.
-DELETE FROM channel_installation
-WHERE channel_type = sqlc.arg('channel_type')
-  AND config ->> 'app_id' = sqlc.arg('app_id')::text
-  AND workspace_id = sqlc.arg('workspace_id')
-  AND agent_id <> sqlc.arg('agent_id')
-  AND status = 'revoked'
-RETURNING id;
+-- The guard lives in the DELETE predicate (not a prior SELECT) so under READ
+-- COMMITTED the row is re-checked at execution (EvalPlanQual): a concurrent
+-- same-agent reconnect that flips the revoked row back to 'active' first makes
+-- the predicate re-check fail, this deletes nothing, and no dependents are
+-- touched — closing the read-then-delete TOCTOU. Dependent cleanup keys off the
+-- actually-deleted id (the `dead` CTE), so it runs ONLY for a row this statement
+-- removed. The (channel_type, app_id) unique index guarantees at most one match.
+WITH dead AS (
+    DELETE FROM channel_installation ci
+    WHERE ci.channel_type = sqlc.arg('channel_type')
+      AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text
+      AND (
+            (ci.status = 'revoked'
+                AND NOT (ci.workspace_id = sqlc.arg('workspace_id')
+                         AND ci.agent_id = sqlc.arg('agent_id')))
+         OR NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
+         OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
+      )
+    RETURNING ci.id
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM dead)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
+    -- no FK), so it is reached through the just-removed chat-session bindings. On an
+    -- orphan reclaim the chat_session row itself is already cascade-gone, but its
+    -- binding survived and still carries the id — the only reliable link back.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token
+    WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup
+    WHERE installation_id IN (SELECT id FROM dead)
+),
+detached_audit AS (
+    -- Reclaim keeps the DETACH semantics: the workspace still exists, so a
+    -- NULL-installation audit row stays meaningful for operator triage. The hard-
+    -- delete paths (DeleteWorkspace / runtime teardown) purge audit outright.
+    UPDATE channel_inbound_audit SET installation_id = NULL
+    WHERE installation_id IN (SELECT id FROM dead)
+)
+SELECT id FROM dead;
+
+-- name: DeleteChannelInstallationsByArchivedRuntimeAgents :exec
+-- Application-layer replacement for the (deliberately absent, MUL-3515 §4)
+-- workspace/agent ON DELETE CASCADE: on runtime teardown, before the archived
+-- agents are hard-deleted, remove every channel installation they own — plus all
+-- of each installation's dependent rows — so no orphaned installation keeps
+-- occupying its bot's (channel_type, app_id) routing slot after its agent is gone
+-- (#4810). MUST run in the same tx as, and BEFORE, DeleteArchivedAgentsByRuntime.
+-- Mirrors the agent hard-delete predicate (runtime_id, archived_at IS NOT NULL)
+-- exactly.
+WITH doomed AS (
+    SELECT id FROM channel_installation
+    WHERE agent_id IN (
+        SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND archived_at IS NOT NULL
+    )
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)
+    -- through the just-removed chat-session bindings, same as the reclaim path.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_audit AS (
+    -- Hard delete: purge audit rows rather than detaching them into permanently
+    -- unattributable NULL rows (channel_inbound_audit has no workspace_id / reaper).
+    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM doomed)
+)
+DELETE FROM channel_installation WHERE id IN (SELECT id FROM doomed);
 
 -- name: ListChannelInstallationsByWorkspace :many
 -- Scoped by channel_type so a per-channel management surface (e.g. the Lark
@@ -473,6 +578,17 @@ UPDATE channel_outbound_card_message
 SET status = $2,
     last_patched_at = now()
 WHERE id = $1;
+
+-- name: DeleteChannelOutboundCardMessagesBySession :exec
+-- Application-layer integrity (channel_* has no FK/cascade, MUL-3515 §4): drop the
+-- outbound card-message rows for a chat_session being deleted. They are keyed by
+-- chat_session_id with no FK and no reaper, so the standalone chat-session delete
+-- path must prune them here alongside DeleteChannelChatSessionBindingBySession —
+-- otherwise deleting a chat session leaves them as permanent orphans (Elon's
+-- follow-up on #4810; the workspace/agent/reclaim sweeps already cover their
+-- paths). A card that survived its session could only mis-route a later patch.
+DELETE FROM channel_outbound_card_message
+WHERE chat_session_id = $1;
 
 -- =====================
 -- channel_binding_token

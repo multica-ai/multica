@@ -144,6 +144,34 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 	return pgtype.Text{String: summary, Valid: true}
 }
 
+// ResolveOriginatorFromTriggerComment is the exported wrapper used by the
+// comment-merge path (MUL-4195) to compute the top-of-chain human originator
+// for a newly-arrived comment, so a merge can be gated on the originator being
+// unchanged. See resolveOriginatorFromTriggerComment for the chain rules.
+func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
+	return s.resolveOriginatorFromTriggerComment(ctx, commentID)
+}
+
+// BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
+// path (MUL-4195) to refresh a coalesced task's trigger_summary to the newest
+// trigger comment's snapshot.
+func (s *TaskService) BuildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
+	return s.buildCommentTriggerSummary(ctx, commentID)
+}
+
+// BuildRuntimeMCPOverlayForMerge recomputes the Composio MCP overlay +
+// connected-app metadata for (originatorUserID, agent), used when a merge
+// re-stamps a coalesced task's originator (MUL-4195 review must-fix #1). The
+// overlay is a pure function of (originator, agent); re-stamping it alongside
+// originator_user_id keeps the coalescing run's connected-app capabilities and
+// audit attribution consistent with the latest trigger comment's originator
+// instead of the task's original one. Fails soft to empty (same as the enqueue
+// path) so a transient Composio hiccup never blocks the merge.
+func (s *TaskService) BuildRuntimeMCPOverlayForMerge(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (overlay, connectedApps []byte) {
+	data := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	return data.Overlay, data.ConnectedApps
+}
+
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
 	var wakeup TaskWakeupNotifier
 	if len(wakeups) > 0 {
@@ -278,8 +306,10 @@ func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, c
 // resolveOriginatorForIssueTask returns the top-of-chain human for issue-backed
 // dispatches. Comment-triggered runs keep the existing comment-chain semantics;
 // direct issue assignment/creation falls back to the issue's member creator.
-// Agent-created quick-create issues have an explicit origin link back to the
-// quick-create task, so they can inherit that task's originator safely. Other
+// Agent-created issues that carry an explicit task-origin link — quick_create
+// (daemon quick-create flow) or agent_create (an agent's ordinary `issue
+// create`, MUL-4305) — inherit that origin task's originator, since origin_id
+// points at the agent_task_queue row that created the issue. Other
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	if triggerCommentID.Valid {
@@ -292,7 +322,9 @@ func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue d
 		return pgtype.UUID{}
 	}
 	switch issue.OriginType.String {
-	case "quick_create":
+	case "quick_create", "agent_create":
+		// Both stamp origin_id with the agent_task_queue row that created the
+		// issue, so the top-of-chain human is that task's originator_user_id.
 		task, err := s.Queries.GetAgentTask(ctx, issue.OriginID)
 		if err != nil {
 			return pgtype.UUID{}
@@ -301,6 +333,17 @@ func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue d
 	default:
 		return pgtype.UUID{}
 	}
+}
+
+// OriginatorForIssueTask exposes resolveOriginatorForIssueTask to callers
+// outside the service package (the squad-leader access gate in the handler
+// layer) so the gate judges the top-of-chain human with the exact same
+// resolution the enqueue path persists on the task row. Without a shared entry
+// point the gate saw an empty originator for agent-triggered assigns and denied
+// private leaders that the write path would have attributed correctly
+// (MUL-4305).
+func (s *TaskService) OriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
+	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -1735,13 +1778,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
 			} else {
 				assistantMsg = &row
-				// Event-driven unread: stamp unread_since on the first unread
-				// assistant message. No-op if the session already has unread.
-				// If the user is actively viewing the session, the frontend's
-				// auto-mark-read effect will clear this within a tick.
-				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
-				}
+				// Unread is derived from the read cursor (chat_session.last_read_at)
+				// vs the assistant messages after it — no per-reply stamping needed.
 			}
 		}
 		s.broadcastChatDone(ctx, task, assistantMsg)
@@ -1877,10 +1915,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}); err != nil {
 			slog.Error("failed to save failure chat message",
 				"task_id", util.UUIDToString(task.ID),
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		} else if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-			slog.Warn("failed to set unread_since on failure",
 				"chat_session_id", util.UUIDToString(task.ChatSessionID),
 				"error", err)
 		}

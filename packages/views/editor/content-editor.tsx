@@ -224,6 +224,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+    // Live placeholder text. Passed into the Placeholder extension as a getter
+    // (not a static string) so the plugin re-reads it on every decoration pass —
+    // the sync effect below updates this ref and nudges a repaint. Tiptap
+    // snapshots a *string* placeholder at mount, so a getter is what lets it
+    // change without remounting the editor.
+    const placeholderRef = useRef(placeholderText);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -332,6 +338,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     };
 
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // With `immediatelyRender: false` the Tiptap instance is created after
+    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
+    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
+    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    const focusOnReadyRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -364,6 +375,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // repair it so the mounted editor has a real cursor in the list.
         repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        if (focusOnReadyRef.current) {
+          focusOnReadyRef.current = false;
+          ed.commands.focus("end");
+        }
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -372,7 +387,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           ? "markdown"
           : undefined,
       extensions: createEditorExtensions({
-        placeholder: placeholderText,
+        placeholder: () => placeholderRef.current,
         queryClient,
         onSubmitRef,
         onUploadFileRef,
@@ -521,6 +536,24 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       lastEmittedRef.current = normalizeEditorMarkdown(editor);
     }, [defaultValue, editor]);
 
+    // Sync external `placeholder` changes into the mounted editor.
+    // The Placeholder extension is configured with a getter over `placeholderRef`
+    // (see createEditorExtensions above), which the plugin re-invokes every time
+    // it recomputes its decorations. Update the ref, then dispatch an empty
+    // transaction to force that recompute — the placeholder refreshes without a
+    // remount. Without this, it stays frozen at its mount value: switching
+    // between an archived and an active chat session under the same agent (no
+    // editor remount) leaves the input stuck on "This session is archived" even
+    // though it is usable.
+    useEffect(() => {
+      if (placeholderRef.current === placeholderText) return;
+      placeholderRef.current = placeholderText;
+      if (!editor || editor.isDestroyed) return;
+      // `docChanged` is false on an empty transaction, so onUpdate never fires
+      // and no self-write loop is triggered.
+      editor.view.dispatch(editor.state.tr);
+    }, [editor, placeholderText]);
+
     useImperativeHandle(ref, () => ({
       // Intentionally NOT routed through `normalizeMarkdown` — this refactor
       // must preserve the exact current return value (no `trimEnd`).
@@ -529,7 +562,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         editor?.commands.clearContent();
       },
       focus: () => {
-        editor?.commands.focus();
+        if (editor) editor.commands.focus();
+        // Editor not mounted yet — defer the focus to `onCreate`.
+        else focusOnReadyRef.current = true;
       },
       blur: () => {
         editor?.commands.blur();

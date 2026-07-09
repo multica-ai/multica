@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -87,12 +88,14 @@ func pipeStdin(t *testing.T, body string, fn func()) {
 }
 
 // newFlagTestCmd builds a throwaway cobra.Command carrying the inline +
-// stdin + file flag triplet that resolveTextFlag expects.
+// stdin + file flag triplet that resolveTextFlag expects, plus the
+// --allow-external-file escape hatch its workdir guardrail reads.
 func newFlagTestCmd(name string) *cobra.Command {
 	c := &cobra.Command{Use: "test"}
 	c.Flags().String(name, "", "")
 	c.Flags().Bool(name+"-stdin", false, "")
 	c.Flags().String(name+"-file", "", "")
+	c.Flags().Bool("allow-external-file", false, "")
 	return c
 }
 
@@ -153,14 +156,17 @@ func TestResolveTextFlag(t *testing.T) {
 	// Reading the body straight off disk skips the shell entirely.
 	// See issues #2198, #2236, #2376.
 	t.Run("file body is preserved verbatim with non-ASCII content", func(t *testing.T) {
+		// The workdir guardrail (MUL-4252) requires the file to live inside the
+		// current working directory, so chdir into a scratch dir and reference
+		// it by a relative name — the mainline agents actually use.
 		dir := t.TempDir()
-		path := dir + string(os.PathSeparator) + "desc.md"
+		t.Chdir(dir)
 		body := "标题 / Заголовок\n\n中文段落 with `code` and \"quotes\".\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile("desc.md", []byte(body), 0o644); err != nil {
 			t.Fatalf("write tempfile: %v", err)
 		}
 		c := newFlagTestCmd("description")
-		_ = c.Flags().Set("description-file", path)
+		_ = c.Flags().Set("description-file", "desc.md")
 		got, ok, err := resolveTextFlag(c, "description")
 		if err != nil || !ok {
 			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
@@ -172,8 +178,11 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 
 	t.Run("file path that doesn't exist surfaces a useful error", func(t *testing.T) {
+		// A missing file inside the workdir clears the containment check and
+		// fails at the read, not at the guardrail.
+		t.Chdir(t.TempDir())
 		c := newFlagTestCmd("content")
-		_ = c.Flags().Set("content-file", "/this/path/does/not/exist.txt")
+		_ = c.Flags().Set("content-file", "does-not-exist.txt")
 		_, _, err := resolveTextFlag(c, "content")
 		if err == nil {
 			t.Fatalf("expected error for missing file")
@@ -184,16 +193,80 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 
 	t.Run("empty file is rejected", func(t *testing.T) {
-		dir := t.TempDir()
-		path := dir + string(os.PathSeparator) + "empty.md"
-		if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("empty.md", []byte(""), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "empty.md")
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected error for empty file")
+		}
+	})
+
+	// MUL-4252: a --<name>-file path that resolves outside the working
+	// directory is rejected, so a stale file left in a machine-shared path
+	// (e.g. /tmp) by another run/environment cannot silently become this
+	// issue's content.
+	t.Run("file outside the working directory is rejected", func(t *testing.T) {
+		workdir := t.TempDir()
+		t.Chdir(workdir)
+		// A sibling directory outside the workdir stands in for /tmp.
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "stale.md"
+		if err := os.WriteFile(path, []byte("another run's content"), 0o644); err != nil {
 			t.Fatalf("write tempfile: %v", err)
 		}
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description-file", path)
 		_, _, err := resolveTextFlag(c, "description")
 		if err == nil {
-			t.Fatalf("expected error for empty file")
+			t.Fatalf("expected rejection for a file outside the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
+		}
+	})
+
+	t.Run("--allow-external-file permits a path outside the working directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "external.md"
+		if err := os.WriteFile(path, []byte("intentional external body"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		_ = c.Flags().Set("allow-external-file", "true")
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != "intentional external body" {
+			t.Errorf("got %q, want the external body verbatim", got)
+		}
+	})
+
+	t.Run("a symlink inside the workdir pointing outside is rejected", func(t *testing.T) {
+		workdir := t.TempDir()
+		t.Chdir(workdir)
+		outside := t.TempDir()
+		target := outside + string(os.PathSeparator) + "stale.md"
+		if err := os.WriteFile(target, []byte("escaped content"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		if err := os.Symlink(target, "link.md"); err != nil {
+			t.Skipf("symlink unsupported on this platform: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "link.md")
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected rejection: symlink escapes the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
 		}
 	})
 
@@ -232,6 +305,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -1086,6 +1160,81 @@ func TestResolveAssignee(t *testing.T) {
 	})
 }
 
+func TestResolveAssigneeRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			if memberHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": "user-1111", "name": "Alice Smith"},
+			})
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssignee should retry transient EOF: %v", err)
+	}
+	if aType != "member" || aID != "user-1111" {
+		t.Fatalf("got (%q, %q), want Alice member", aType, aID)
+	}
+	if memberHits != 2 {
+		t.Fatalf("member endpoint hits = %d, want 2", memberHits)
+	}
+}
+
+func TestResolveAssigneeDoesNotRetryHTTPStatusErrors(t *testing.T) {
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			http.Error(w, "bad workspace", http.StatusBadRequest)
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	_, _, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err == nil {
+		t.Fatal("expected not-found error after non-retryable members fetch")
+	}
+	if memberHits != 1 {
+		t.Fatalf("member endpoint hits = %d, want 1", memberHits)
+	}
+}
+
 func TestNormalizeAssigneeLookupInput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1443,6 +1592,54 @@ func TestResolveAssigneeByIDStrict(t *testing.T) {
 			t.Fatal("expected error for missing workspace ID")
 		}
 	})
+}
+
+func TestResolveAssigneeByIDRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var agentsHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			agentsHits++
+			if agentsHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+			})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssigneeByID(context.Background(), client, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssigneeByID should retry transient EOF: %v", err)
+	}
+	if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+		t.Fatalf("got (%q, %q), want agent J", aType, aID)
+	}
+	if agentsHits != 2 {
+		t.Fatalf("agents endpoint hits = %d, want 2", agentsHits)
+	}
 }
 
 // TestPickAssigneeFromFlags covers the flag-pair picker that backs every
@@ -2486,6 +2683,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -2518,11 +2716,7 @@ func newIssueListTestCmd() *cobra.Command {
 
 func newIssueReorderTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "reorder"}
-	cmd.Flags().String("before", "", "")
-	cmd.Flags().String("after", "", "")
-	cmd.Flags().Bool("top", false, "")
-	cmd.Flags().Bool("bottom", false, "")
-	cmd.Flags().String("output", "json", "")
+	registerIssueReorderFlags(cmd)
 	return cmd
 }
 
@@ -2677,21 +2871,89 @@ func TestComputeReorderPosition(t *testing.T) {
 	}
 }
 
-func TestRunIssueReorderRejectsModeCount(t *testing.T) {
-	t.Run("zero modes", func(t *testing.T) {
+// TestIssueReorderTargetFlagGroup drives the command through Execute so the real
+// cobra flag group (registerIssueReorderFlags) validates the "exactly one
+// target" rule — zero targets, two bool targets, and --before+--after are all
+// rejected before RunE. A stub RunE that errors proves validation happens first.
+// The assertions match on cobra's canonical flag-group error strings, so they
+// are coupled to cobra's wording (pinned at v1.10.2 in server/go.mod).
+func TestIssueReorderTargetFlagGroup(t *testing.T) {
+	newCmd := func() *cobra.Command {
 		cmd := newIssueReorderTestCmd()
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when no mode flag is set")
+		cmd.Args = exactArgs(1)
+		cmd.RunE = func(*cobra.Command, []string) error {
+			return fmt.Errorf("RunE ran despite an invalid target flag group")
+		}
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd
+	}
+
+	t.Run("no target flag", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when no target flag is set")
+		}
+		if !strings.Contains(err.Error(), "at least one of the flags in the group") {
+			t.Fatalf("want cobra one-required error, got: %v", err)
 		}
 	})
-	t.Run("two modes", func(t *testing.T) {
-		cmd := newIssueReorderTestCmd()
-		_ = cmd.Flags().Set("top", "true")
-		_ = cmd.Flags().Set("bottom", "true")
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when two mode flags are set")
+
+	t.Run("two bool targets", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--top", "--bottom"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --top and --bottom are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
 		}
 	})
+
+	t.Run("before and after together", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--before", "MUL-2", "--after", "MUL-3"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --before and --after are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
+		}
+	})
+}
+
+// TestRunIssueReorderRejectsNoOpTargetValues covers the cases the flag group
+// cannot: cobra keys off flag presence (Changed), not value, so an
+// explicitly-passed but empty --before/--after or an explicit --top=false /
+// --bottom=false satisfies the group yet selects no real target. runIssueReorder
+// rejects each up front rather than falling through to a confusing downstream
+// error.
+func TestRunIssueReorderRejectsNoOpTargetValues(t *testing.T) {
+	cases := []struct{ flag, value string }{
+		{"before", ""},
+		{"after", ""},
+		{"top", "false"},
+		{"bottom", "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.flag, func(t *testing.T) {
+			cmd := newIssueReorderTestCmd()
+			if err := cmd.Flags().Set(tc.flag, tc.value); err != nil {
+				t.Fatalf("set --%s=%q: %v", tc.flag, tc.value, err)
+			}
+			err := runIssueReorder(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected an error when --%s is passed %q", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), "--"+tc.flag) {
+				t.Fatalf("want error naming --%s, got: %v", tc.flag, err)
+			}
+		})
+	}
 }
 
 // reorderTestServer serves a fixed three-issue "todo" column (positions

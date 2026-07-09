@@ -21,11 +21,13 @@ import { configStore } from "@multica/core/config";
  * 4. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
  *    fileCard node parsing
  *
- * `autolinkIssueIdentifiers` is OPT-IN and MUST stay off for the editable
- * Tiptap path: rewriting a bare identifier there would create a mention node
- * whose id is the identifier string (not a real UUID) and corrupt the saved
- * markdown. Only the readonly renderer (which resolves the identifier to a UUID
- * at render time) passes it.
+ * Shared by the Tiptap editor and the read-only react-markdown renderer so both
+ * linkify identically. `autolinkIssueIdentifiers` is the one deliberate
+ * asymmetry: it is OPT-IN and MUST stay off for the editable Tiptap path, since
+ * rewriting a bare identifier there would create a mention node whose id is the
+ * identifier string (not a real UUID) and corrupt the saved markdown. Only the
+ * readonly renderer (which resolves the identifier to a UUID at render time)
+ * passes it.
  */
 export function preprocessMarkdown(
   markdown: string,
