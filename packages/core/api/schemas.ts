@@ -893,6 +893,35 @@ export interface DuplicateIssueErrorBody {
   };
 }
 
+// PUT /api/projects/:id's structured 409: removing a Space from space_ids
+// would strand issues filed under it. `.loose()` on both levels so an added
+// field degrades gracefully; the required fields are the minimum the
+// "move these issues" dialog needs to render a target-space picker per
+// conflicting Space.
+export const ProjectSpaceConflictResponseSchema = z.object({
+  code: z.literal("project_space_has_issues"),
+  error: z.string().optional(),
+  spaces_with_issues: z.array(
+    z.object({
+      space_id: z.string(),
+      space_key: z.string(),
+      issue_count: z.number(),
+    }).loose(),
+  ),
+}).loose();
+
+export interface ProjectSpaceConflict {
+  space_id: string;
+  space_key: string;
+  issue_count: number;
+}
+
+export interface ProjectSpaceConflictResponse {
+  code: "project_space_has_issues";
+  error?: string;
+  spaces_with_issues: ProjectSpaceConflict[];
+}
+
 // ---------------------------------------------------------------------------
 // Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
 // (`status`, `signature_status`, `provider`) are kept as `z.string()` so a

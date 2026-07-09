@@ -13,6 +13,7 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListSpacesResponseSchema,
+  ProjectSpaceConflictResponseSchema,
   SpaceSchema,
   EMPTY_LIST_SPACES_RESPONSE,
   SearchProjectsResponseSchema,
@@ -271,6 +272,62 @@ describe("DuplicateIssueErrorBodySchema", () => {
   it("accepts a missing error field (it is optional)", () => {
     const { error: _omit, ...without } = valid;
     expect(DuplicateIssueErrorBodySchema.safeParse(without).success).toBe(true);
+  });
+});
+
+// The "move issues before removing a space" dialog feeds ApiError.body
+// (typed as `unknown`) through this schema when PUT /api/projects/:id
+// returns 409. A future server drift that loses the contract MUST fail the
+// parse so the UI falls back to a normal error toast instead of rendering a
+// broken reassignment picker.
+describe("ProjectSpaceConflictResponseSchema", () => {
+  const valid = {
+    code: "project_space_has_issues",
+    error: "project has issues in a space being removed",
+    spaces_with_issues: [
+      { space_id: "11111111-1111-1111-1111-111111111111", space_key: "ENG", issue_count: 3 },
+    ],
+  };
+
+  it("accepts a well-formed body", () => {
+    expect(ProjectSpaceConflictResponseSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts unknown extra fields via .loose()", () => {
+    const forwardCompat = {
+      ...valid,
+      spaces_with_issues: [{ ...valid.spaces_with_issues[0], archived: false }],
+    };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(forwardCompat).success).toBe(true);
+  });
+
+  it("rejects a renamed code (so renames degrade to the generic toast)", () => {
+    const renamed = { ...valid, code: "project_has_issues" };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(renamed).success).toBe(false);
+  });
+
+  it("rejects a missing spaces_with_issues array", () => {
+    const { spaces_with_issues: _omit, ...without } = valid;
+    expect(ProjectSpaceConflictResponseSchema.safeParse(without).success).toBe(false);
+  });
+
+  it("rejects a non-numeric issue_count", () => {
+    const broken = {
+      ...valid,
+      spaces_with_issues: [{ ...valid.spaces_with_issues[0], issue_count: "3" }],
+    };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it("accepts an empty spaces_with_issues array", () => {
+    expect(
+      ProjectSpaceConflictResponseSchema.safeParse({ ...valid, spaces_with_issues: [] }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a missing error field (it is optional)", () => {
+    const { error: _omit, ...without } = valid;
+    expect(ProjectSpaceConflictResponseSchema.safeParse(without).success).toBe(true);
   });
 });
 

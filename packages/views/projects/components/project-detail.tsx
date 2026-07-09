@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -25,7 +25,7 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
-import { SpaceMultiPicker } from "../../spaces/components/space-picker";
+import { ManageProjectSpacesDialog } from "../../spaces/components/manage-project-spaces-dialog";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -142,6 +142,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const descEditorRef = useRef<ContentEditorRef>(null);
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [manageSpacesOpen, setManageSpacesOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
@@ -399,16 +400,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
-          {/* Display-only in v1: the project↔space set binds at creation.
-              Post-create editing was cut together with issue move-to-space. */}
-          <PropRow label={t(($) => $.table.spaces)}>
-            <SpaceMultiPicker
-              spaceIds={project.space_ids ?? []}
-              onChange={() => {}}
-              align="start"
-              disabled
-            />
-          </PropRow>
         </div>}
       </div>
 
@@ -512,6 +503,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setManageSpacesOpen(true)}>
+                    <Users className="h-3.5 w-3.5" />
+                    {t(($) => $.detail.manage_spaces_action)}
+                  </DropdownMenuItem>
                   {isWorkspaceAdmin && (
                     <>
                       <DropdownMenuSeparator />
@@ -598,6 +593,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </AlertDialogContent>
         </AlertDialog>
       )}
+      <ManageProjectSpacesDialog
+        open={manageSpacesOpen}
+        onOpenChange={setManageSpacesOpen}
+        wsId={wsId}
+        projectId={project.id}
+        spaceIds={project.space_ids ?? []}
+      />
     </>
   );
 }

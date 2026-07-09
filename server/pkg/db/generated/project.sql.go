@@ -40,6 +40,53 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 	return count, err
 }
 
+const countProjectIssuesBySpace = `-- name: CountProjectIssuesBySpace :many
+SELECT space_id, count(*)::bigint AS issue_count
+FROM issue
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND space_id = ANY($3::uuid[])
+GROUP BY space_id
+`
+
+type CountProjectIssuesBySpaceParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
+	SpaceIds    []pgtype.UUID `json:"space_ids"`
+}
+
+type CountProjectIssuesBySpaceRow struct {
+	SpaceID    pgtype.UUID `json:"space_id"`
+	IssueCount int64       `json:"issue_count"`
+}
+
+// Guards removing a Space from a project's space set: which of the Spaces
+// about to be removed still have issues filed under this project, and how
+// many. UpdateProject rejects the removal (or requires a reassignment
+// target via space_reassignments) for any Space this returns a row for.
+// workspace_id is a SQL-layer tenant guard (defense-in-depth, matching
+// DeleteProject/DeleteIssue) even though callers only ever pass a
+// project_id already resolved within their own workspace.
+func (q *Queries) CountProjectIssuesBySpace(ctx context.Context, arg CountProjectIssuesBySpaceParams) ([]CountProjectIssuesBySpaceRow, error) {
+	rows, err := q.db.Query(ctx, countProjectIssuesBySpace, arg.WorkspaceID, arg.ProjectID, arg.SpaceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountProjectIssuesBySpaceRow{}
+	for rows.Next() {
+		var i CountProjectIssuesBySpaceRow
+		if err := rows.Scan(&i.SpaceID, &i.IssueCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,

@@ -24,7 +24,6 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
-    "spaces": "空间",
     "created": "创建时间",
     "issues": "Issue 数"
   },
@@ -64,6 +63,7 @@
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
     "copy_link": "复制链接",
+    "manage_spaces_action": "管理空间",
     "delete_action": "删除项目",
     "section_properties": "属性",
     "section_progress": "进度",
@@ -120,6 +120,22 @@
     "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
     "cancel": "取消"
+  },
+  "manage_spaces": {
+    "title": "管理空间",
+    "description": "选择这个项目归属的空间。",
+    "empty": "至少选择一个空间。",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "取消",
+    "toast_updated": "空间已更新",
+    "toast_failed": "更新空间失败",
+    "conflict_title": "移除空间前先搬迁 issue",
+    "conflict_body_other": "这个项目在将被移除的空间下还有 {{count}} 个 issue，请选择它们要搬迁到哪个空间。",
+    "conflict_row_other": "{{space}} 下有 {{count}} 个 issue",
+    "conflict_target_placeholder": "搬迁到…",
+    "confirm_move": "搬迁 issue 并保存",
+    "back": "返回"
   },
   "picker": {
     "no_project": "无项目",
