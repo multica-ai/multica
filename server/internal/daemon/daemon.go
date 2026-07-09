@@ -3630,10 +3630,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
-	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.ID)
+	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
+	defer func() {
+		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
+			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+		}
+	}()
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →
@@ -4644,13 +4649,21 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 	return strings.Join(parts, string(os.PathListSeparator)), true
 }
 
-func ensureTaskTempDir(envRoot string, taskID string) (string, error) {
+func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (string, error) {
 	envRoot = strings.TrimSpace(envRoot)
 	if envRoot == "" {
 		return "", errors.New("env root is empty")
 	}
-	dir := filepath.Join(envRoot, "tmp", safeTempPathComponent(taskID))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", errors.New("workspace id is empty")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", errors.New("task id is empty")
+	}
+	dir, err := os.MkdirTemp(socketSafeTempBaseDir(), "multica-task-")
+	if err != nil {
 		return "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
@@ -4659,13 +4672,13 @@ func ensureTaskTempDir(envRoot string, taskID string) (string, error) {
 	return dir, nil
 }
 
-func safeTempPathComponent(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "task"
+func socketSafeTempBaseDir() string {
+	if os.PathSeparator == '/' {
+		if info, err := os.Stat("/tmp"); err == nil && info.IsDir() {
+			return "/tmp"
+		}
 	}
-	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_")
-	return replacer.Replace(value)
+	return os.TempDir()
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-
