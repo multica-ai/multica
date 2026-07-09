@@ -172,12 +172,13 @@ describe("mergeAgentDashboardRows", () => {
     );
     expect(merged[0]!.taskCount).toBe(1);
     expect(merged[0]!.seconds).toBe(0);
+    expect(merged[0]!.usageAvailable).toBe(true);
   });
 
-  it("includes agents that have run-time but no tokens", () => {
-    // Task errored before reporting any usage — run-time row exists but
-    // there's no corresponding token row. Agent must still appear on the
-    // list with zeroed-out token columns.
+  it("marks agents with run-time but no token rows as usage unavailable", () => {
+    // Some upstream CLIs complete tasks but do not expose token usage. The
+    // agent still belongs on the list, but the token/cost cells are unknown,
+    // not true zeros.
     const merged = mergeAgentDashboardRows(
       [],
       [{ agent_id: "agent-c", total_seconds: 30, task_count: 1, failed_count: 1 }],
@@ -186,6 +187,19 @@ describe("mergeAgentDashboardRows", () => {
     expect(merged[0]!.tokens).toBe(0);
     expect(merged[0]!.cost).toBe(0);
     expect(merged[0]!.taskCount).toBe(1);
+    expect(merged[0]!.usageAvailable).toBe(false);
+  });
+
+  it("keeps reported zero-token rows distinct from unavailable usage", () => {
+    const merged = mergeAgentDashboardRows(
+      [{ agentId: "agent-zero", tokens: 0, cost: 0, taskCount: 1 }],
+      [{ agent_id: "agent-zero", total_seconds: 30, task_count: 1, failed_count: 0 }],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.tokens).toBe(0);
+    expect(merged[0]!.cost).toBe(0);
+    expect(merged[0]!.usageAvailable).toBe(true);
   });
 
   it("sorts by cost desc with run-time as a tiebreaker", () => {
@@ -204,13 +218,21 @@ describe("mergeAgentDashboardRows", () => {
 });
 
 describe("bucketUnknownAgentRows", () => {
-  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const live = {
+    agentId: "live",
+    tokens: 100,
+    cost: 1,
+    seconds: 10,
+    taskCount: 1,
+    usageAvailable: true,
+  };
   const archived = {
     agentId: "archived",
     tokens: 80,
     cost: 0.8,
     seconds: 8,
     taskCount: 2,
+    usageAvailable: true,
   };
   const deletedA = {
     agentId: "deleted-a",
@@ -218,6 +240,7 @@ describe("bucketUnknownAgentRows", () => {
     cost: 0.5,
     seconds: 5,
     taskCount: 1,
+    usageAvailable: true,
   };
   const deletedB = {
     agentId: "deleted-b",
@@ -225,6 +248,7 @@ describe("bucketUnknownAgentRows", () => {
     cost: 0.25,
     seconds: 3,
     taskCount: 4,
+    usageAvailable: true,
   };
 
   it("folds every hard-deleted agent into one aggregated bucket row", () => {
@@ -242,6 +266,7 @@ describe("bucketUnknownAgentRows", () => {
     // `agent`, so deleted agents contribute nothing to those columns.
     expect(bucket.seconds).toBe(0);
     expect(bucket.taskCount).toBe(0);
+    expect(bucket.usageAvailable).toBe(true);
   });
 
   it("keeps the bucket total reconciled with the top-line spend", () => {

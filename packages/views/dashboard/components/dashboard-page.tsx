@@ -664,6 +664,7 @@ function Leaderboard({
 }) {
   const { t } = useT("usage");
   const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
+  const usageUnavailableLabel = t(($) => $.leaderboard.usage_unavailable);
 
   const sortOptions = useMemo(
     () => [
@@ -733,6 +734,9 @@ function Leaderboard({
               const agent = agents.find((a) => a.id === row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+              const usageTitle = row.usageAvailable
+                ? undefined
+                : usageUnavailableLabel;
               return (
                 <div
                   key={row.agentId}
@@ -769,14 +773,16 @@ function Leaderboard({
                     />
                   </div>
                   <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    className={`truncate text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    title={usageTitle}
                   >
-                    {formatTokens(row.tokens)}
+                    {row.usageAvailable ? formatTokens(row.tokens) : usageUnavailableLabel}
                   </div>
                   <div
-                    className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
+                    className={`truncate text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
+                    title={usageTitle}
                   >
-                    ${row.cost.toFixed(2)}
+                    {row.usageAvailable ? `$${row.cost.toFixed(2)}` : usageUnavailableLabel}
                   </div>
                   <div
                     className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

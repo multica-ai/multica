@@ -48,6 +48,7 @@
     "header_cost": "费用",
     "header_time": "运行时长",
     "header_tasks": "任务数",
+    "usage_unavailable": "不可用",
     "no_data": "所选时间范围内暂无智能体活动。"
   },
   "empty": {

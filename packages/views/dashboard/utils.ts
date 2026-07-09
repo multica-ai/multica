@@ -179,6 +179,7 @@ export interface AgentDashboardRow {
   cost: number;
   seconds: number;
   taskCount: number;
+  usageAvailable: boolean;
 }
 
 // Merge per-agent token totals with per-agent run-time totals into one
@@ -206,11 +207,12 @@ export function mergeAgentDashboardRows(
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
+      usageAvailable: true,
     });
   }
-  // Agents with run-time rows but zero tokens still belong on the list
-  // (a task that errored before producing usage). Their token columns
-  // stay at 0.
+  // Agents with run-time rows but no token rows still belong on the list, but
+  // their usage is unknown rather than genuinely 0. This covers runtimes whose
+  // upstream CLI cannot report token counts (for example Antigravity today).
   for (const r of runTimeRows) {
     if (merged.has(r.agent_id)) continue;
     merged.set(r.agent_id, {
@@ -219,6 +221,7 @@ export function mergeAgentDashboardRows(
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
+      usageAvailable: false,
     });
   }
   return Array.from(merged.values()).toSorted((a, b) => {
@@ -263,6 +266,7 @@ export function bucketUnknownAgentRows(
     cost: 0,
     seconds: 0,
     taskCount: 0,
+    usageAvailable: false,
   };
   let hasDeleted = false;
   for (const r of rows) {
@@ -273,6 +277,7 @@ export function bucketUnknownAgentRows(
     hasDeleted = true;
     bucket.tokens += r.tokens;
     bucket.cost += r.cost;
+    bucket.usageAvailable ||= r.usageAvailable;
   }
   return hasDeleted ? [...known, bucket] : known;
 }

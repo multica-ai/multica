@@ -48,6 +48,7 @@
     "header_cost": "Cost",
     "header_time": "Time",
     "header_tasks": "Tasks",
+    "usage_unavailable": "Unavailable",
     "no_data": "No agent activity in this window."
   },
   "empty": {
