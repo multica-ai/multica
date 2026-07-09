@@ -12,6 +12,7 @@ import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
+import { remarkCjkAutolink } from './remark-cjk-autolink'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -462,8 +463,12 @@ export function Markdown({
   renderArtifact,
   cdnDomain
 }: MarkdownProps): React.JSX.Element {
-  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
-  // AND extract multica-artifact tags
+  // Preprocess: convert mention shortcodes, file paths, and file cards to
+  // renderable content. URLs are intentionally left bare (urls: false) so
+  // remark-gfm autolinks them in the parse tree — a bare URL can then no longer
+  // swallow an adjacent markdown delimiter like a closing `**` (MUL-4242).
+  // remarkCjkAutolink re-applies the CJK boundary on gfm's autolink nodes.
+  // Also extract multica-artifact tags.
   const { processedContent, artifacts } = React.useMemo(
     () => {
       const parsedArtifacts: { identifier: string; type: string; title: string; content: string }[] = []
@@ -483,7 +488,7 @@ export function Markdown({
       })
       
       let result = preprocessMentionShortcodes(content)
-      result = preprocessLinks(result)
+      result = preprocessLinks(result, { urls: false })
       result = preprocessFileCards(result, cdnDomain ?? '')
       
       return { processedContent: result, artifacts: parsedArtifacts }
@@ -503,6 +508,7 @@ export function Markdown({
           [remarkMath, { singleDollarTextMath: false }],
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
+          remarkCjkAutolink,
         ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}

@@ -42,7 +42,11 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
-import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import {
+  ALL_STATUSES,
+  BOARD_STATUSES,
+  STATUS_CONFIG,
+} from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -552,8 +556,12 @@ export function SwimLaneView({
     [myIssuesScope, myIssuesFilter],
   );
 
+  // Re-impose canonical status order on whatever the controller marked
+  // visible. Filter against ALL_STATUSES (not BOARD_STATUSES) so a
+  // filter-selected `cancelled` column survives — BOARD_STATUSES omits
+  // cancelled and would silently drop it here (MUL-4261).
   const sortedStatuses = useMemo(
-    () => BOARD_STATUSES.filter((s) => visibleStatuses.includes(s)),
+    () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 

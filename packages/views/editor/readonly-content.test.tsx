@@ -616,3 +616,69 @@ describe("ReadonlyContent slash command rendering", () => {
     expect(container.querySelector("a")).not.toBeNull();
   });
 });
+
+describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
+  // A bare URL wrapped in bold used to be pre-linkified into [url**](url**),
+  // which swallowed the closing `**`: the bold never closed (leading `**`
+  // showed as literal asterisks) and the href was corrupted with a trailing
+  // `**`. URLs are now autolinked by remark-gfm in the parse tree — after
+  // emphasis is resolved — so an adjacent delimiter can no longer be absorbed.
+  it("renders a bold-wrapped bare URL as bold plus a clean link", () => {
+    const url = "https://github.com/multica-ai/multica/pull/5081";
+    const { container } = render(<ReadonlyContent content={`**PR：${url}**`} />);
+
+    const strong = container.querySelector("strong");
+    expect(strong).not.toBeNull();
+    const anchor = strong!.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe(url);
+    // No literal asterisks leak into the text, no trailing `**` in the href.
+    expect(container.textContent).not.toContain("**");
+    expect(anchor?.getAttribute("href")).not.toContain("*");
+  });
+
+  it("still autolinks a plain bare URL", () => {
+    const { container } = render(
+      <ReadonlyContent content={"see https://example.com/foo here"} />,
+    );
+    expect(container.querySelector('a[href="https://example.com/foo"]')).not.toBeNull();
+  });
+
+  it("stops an autolinked URL at CJK punctuation instead of swallowing it", () => {
+    const { container } = render(
+      <ReadonlyContent content={"见 https://example.com/foo。后面还有字"} />,
+    );
+    const anchor = container.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe("https://example.com/foo");
+    expect(anchor?.textContent).toBe("https://example.com/foo");
+    // The CJK tail stays outside the link.
+    expect(container.textContent).toContain("。后面还有字");
+  });
+
+  it("keeps every URL in a CJK-separated run linked, not just the first", () => {
+    // Regression: gfm glues `url1、url2` into one autolink; trimming only at the
+    // first 、 left url2 as plain text. The tail must be rescanned so both link.
+    const { container } = render(
+      <ReadonlyContent content={"两个地址 https://a.com/x、https://b.com/y"} />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("https://a.com/x");
+    expect(hrefs).toContain("https://b.com/y");
+    // The 、 separator stays as text between the two links.
+    expect(container.textContent).toContain("、");
+  });
+
+  it("leaves an explicit link's destination untouched even when it ends in CJK", () => {
+    const { container } = render(
+      <ReadonlyContent content={"[看](https://example.com/x。)后文"} />,
+    );
+    const anchor = container.querySelector("a");
+    // react-markdown percent-encodes the CJK char; the point is it is NOT
+    // trimmed off the way an autolink literal would be.
+    expect(decodeURIComponent(anchor?.getAttribute("href") ?? "")).toBe(
+      "https://example.com/x。",
+    );
+    expect(anchor?.textContent).toBe("看");
+  });
+});
