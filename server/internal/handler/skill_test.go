@@ -899,8 +899,8 @@ func TestFetchRawFile_ReturnsErrorOnOversizedFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
-	if !strings.Contains(err.Error(), "byte limit") {
-		t.Fatalf("error = %q, want byte limit message", err.Error())
+	if !strings.Contains(err.Error(), "per-file import limit") {
+		t.Fatalf("error = %q, want per-file import limit message", err.Error())
 	}
 	if !isCapError(err) {
 		t.Fatalf("error %q must be classified as a cap error so callers fail-fast", err.Error())
@@ -979,7 +979,7 @@ func TestFetchFromGitHub_OversizedSupportingFileFailsImport(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected oversized supporting file to fail the whole import")
 	}
-	if !strings.Contains(err.Error(), "huge.bin") || !strings.Contains(err.Error(), "byte limit") {
+	if !strings.Contains(err.Error(), "huge.bin") || !strings.Contains(err.Error(), "per-file import limit") {
 		t.Fatalf("error %q should name the file and the cap", err.Error())
 	}
 }
