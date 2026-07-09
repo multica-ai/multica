@@ -21,6 +21,11 @@
       "sync_failed": "保存时区偏好失败。"
     }
   },
+  "chat": {
+    "floating_title": "悬浮窗",
+    "floating_label": "悬浮聊天窗",
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
+  },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
@@ -28,6 +33,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
       "general": "通用",

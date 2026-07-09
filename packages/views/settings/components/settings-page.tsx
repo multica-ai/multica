@@ -11,6 +11,7 @@ import {
   FlaskConical,
   Bell,
   Plug,
+  MessageCircle,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -18,6 +19,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
+import { ChatTab } from "./chat-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
@@ -28,10 +30,11 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
+const ACCOUNT_TAB_KEYS = ["profile", "preferences", "chat", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
+  chat: MessageCircle,
   notifications: Bell,
   tokens: Key,
 } as const;
@@ -169,6 +172,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
         <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
+          <TabsContent value="chat"><ChatTab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>

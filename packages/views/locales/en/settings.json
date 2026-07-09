@@ -21,6 +21,11 @@
       "sync_failed": "Failed to save your timezone preference."
     }
   },
+  "chat": {
+    "floating_title": "Floating window",
+    "floating_label": "Floating chat window",
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -28,6 +33,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",

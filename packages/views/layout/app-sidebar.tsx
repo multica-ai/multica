@@ -18,6 +18,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import {
   Inbox,
+  MessageSquare,
   ListTodo,
   Bot,
   Monitor,
@@ -72,6 +73,7 @@ import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@m
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
@@ -109,6 +111,7 @@ const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>>
 // Only parameterless paths are valid nav destinations.
 type NavKey =
   | "inbox"
+  | "chat"
   | "myIssues"
   | "issues"
   | "projects"
@@ -123,6 +126,7 @@ type NavKey =
 // Static schema (key + icon) — labels resolved at render via useT("layout").
 type NavLabelKey =
   | "inbox"
+  | "chat"
   | "my_issues"
   | "issues"
   | "projects"
@@ -136,6 +140,7 @@ type NavLabelKey =
 
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "inbox", labelKey: "inbox", icon: Inbox },
+  { key: "chat", labelKey: "chat", icon: MessageSquare },
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
@@ -365,6 +370,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const unreadCount = React.useMemo(
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
+  );
+  // Chat tab unread badge: number of chat threads with a fresh reply.
+  const { data: chatSessions = [] } = useQuery({
+    ...chatSessionsOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  // IM-style: total unread *messages* across all chat threads (not thread count).
+  const chatUnreadCount = React.useMemo(
+    () => chatSessions.reduce((sum, s) => sum + (s.unread_count ?? 0), 0),
+    [chatSessions],
   );
   // Cross-workspace unread summary backs the workspace-switcher dot. One
   // shared cache entry across workspaces; gated on an active workspace since
@@ -681,6 +696,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         {item.key === "inbox" && unreadCount > 0 && (
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
+                          </span>
+                        )}
+                        {item.key === "chat" && chatUnreadCount > 0 && (
+                          <span className="ml-auto text-xs">
+                            {chatUnreadCount > 99 ? "99+" : chatUnreadCount}
                           </span>
                         )}
                       </SidebarMenuButton>

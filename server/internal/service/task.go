@@ -1735,13 +1735,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
 			} else {
 				assistantMsg = &row
-				// Event-driven unread: stamp unread_since on the first unread
-				// assistant message. No-op if the session already has unread.
-				// If the user is actively viewing the session, the frontend's
-				// auto-mark-read effect will clear this within a tick.
-				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
-				}
+				// Unread is derived from the read cursor (chat_session.last_read_at)
+				// vs the assistant messages after it — no per-reply stamping needed.
 			}
 		}
 		s.broadcastChatDone(ctx, task, assistantMsg)
@@ -1877,10 +1872,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}); err != nil {
 			slog.Error("failed to save failure chat message",
 				"task_id", util.UUIDToString(task.ID),
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		} else if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-			slog.Warn("failed to set unread_since on failure",
 				"chat_session_id", util.UUIDToString(task.ChatSessionID),
 				"error", err)
 		}

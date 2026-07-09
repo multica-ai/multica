@@ -478,7 +478,9 @@
     "runtime_label": "运行时",
     "skills_label": "Skills",
     "owner_label": "所有者",
-    "unknown_runtime": "未知运行时"
+    "unknown_runtime": "未知运行时",
+    "model_label": "模型",
+    "model_unset": "运行时默认"
   },
   "live_peek": {
     "current_issue_label": "正在处理",

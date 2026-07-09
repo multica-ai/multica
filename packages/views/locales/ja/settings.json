@@ -21,6 +21,11 @@
       "sync_failed": "タイムゾーン設定を保存できませんでした。"
     }
   },
+  "chat": {
+    "floating_title": "フローティングウィンドウ",
+    "floating_label": "フローティングチャット",
+    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -28,6 +33,7 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
       "general": "一般",

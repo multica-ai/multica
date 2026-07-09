@@ -117,7 +117,14 @@ export const ImageExtension = Image.extend({
 });
 
 export interface EditorExtensionsOptions {
-  placeholder?: string;
+  /**
+   * Placeholder text, or a getter for it. Prefer a getter when the value can
+   * change over the editor's lifetime: Tiptap's Placeholder snapshots a string
+   * option at mount, but re-invokes a function every time it recomputes its
+   * decorations — so a getter (paired with an empty-transaction nudge) lets the
+   * placeholder update live without remounting the editor. See ContentEditor.
+   */
+  placeholder?: string | (() => string);
   queryClient?: import("@tanstack/react-query").QueryClient;
   onSubmitRef?: RefObject<(() => void) | undefined>;
   onUploadFileRef?: RefObject<
