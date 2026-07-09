@@ -99,6 +99,7 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":           "att-999",
 			"filename":     "chart.png",
+			"content_type": "image/png",
 			"url":          "https://cdn.example/chart.png",
 			"download_url": "https://signed.example/chart.png?sig=x",
 			"markdown_url": "https://public.example/api/attachments/att-999/download",
@@ -136,8 +137,50 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 	if !strings.Contains(out, `"markdown_url": "https://public.example/api/attachments/att-999/download"`) {
 		t.Fatalf("stdout missing markdown_url: %q", out)
 	}
+	// Image content type → image markdown so it renders inline.
 	if !strings.Contains(out, `![chart.png](https://public.example/api/attachments/att-999/download)`) {
-		t.Fatalf("stdout missing markdown snippet: %q", out)
+		t.Fatalf("stdout missing image markdown snippet: %q", out)
+	}
+}
+
+// TestRunAttachmentUploadNonImageUsesLinkMarkdown covers the content-type
+// branch: a non-image file must emit a plain link, not `![...]`, which would
+// render as a broken image in the reply.
+func TestRunAttachmentUploadNonImageUsesLinkMarkdown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "att-doc",
+			"filename":     "report.pdf",
+			"content_type": "application/pdf",
+			"url":          "https://cdn.example/report.pdf",
+			"markdown_url": "https://public.example/api/attachments/att-doc/download",
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(docPath, []byte("%PDF-1.4 bytes"), 0o644); err != nil {
+		t.Fatalf("write temp doc: %v", err)
+	}
+
+	cmd := newAttachmentUploadTestCmd()
+	_ = cmd.Flags().Set("task", "task-abc")
+
+	out, err := captureStdout(t, func() error { return runAttachmentUpload(cmd, []string{docPath}) })
+	if err != nil {
+		t.Fatalf("runAttachmentUpload: %v", err)
+	}
+	if !strings.Contains(out, `[report.pdf](https://public.example/api/attachments/att-doc/download)`) {
+		t.Fatalf("stdout missing link markdown: %q", out)
+	}
+	if strings.Contains(out, `![report.pdf]`) {
+		t.Fatalf("non-image must not use image markdown: %q", out)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -90,7 +91,13 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 	}
 
 	filename := filepath.Base(path)
-	markdown := fmt.Sprintf("![%s](%s)", filename, att.MarkdownURL)
+	// Image content types get image markdown so they render inline in the
+	// reply; every other file gets a normal link so it shows as a proper file
+	// reference instead of a broken-image icon.
+	markdown := fmt.Sprintf("[%s](%s)", filename, att.MarkdownURL)
+	if strings.HasPrefix(att.ContentType, "image/") {
+		markdown = fmt.Sprintf("![%s](%s)", filename, att.MarkdownURL)
+	}
 	fmt.Fprintln(os.Stderr, "Uploaded:", filename)
 
 	return cli.PrintJSON(os.Stdout, map[string]any{
