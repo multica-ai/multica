@@ -3887,6 +3887,25 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 	return i, err
 }
 
+const setAgentTaskRerunOf = `-- name: SetAgentTaskRerunOf :exec
+UPDATE agent_task_queue SET rerun_of_task_id = $2 WHERE id = $1
+`
+
+type SetAgentTaskRerunOfParams struct {
+	ID            pgtype.UUID `json:"id"`
+	RerunOfTaskID pgtype.UUID `json:"rerun_of_task_id"`
+}
+
+// Records manual-rerun lineage on a freshly-enqueued rerun task: the historical task
+// ($2) a member re-ran (MUL-4302 §5). Written as a targeted follow-up on the rerun
+// path only, so the shared CreateAgentTask/CreateRetryTask inserts stay untouched.
+// Kept distinct from retry_of_task_id (system retry) so the two stay separable in
+// reporting. Best-effort: lineage is audit metadata, not run-blocking.
+func (q *Queries) SetAgentTaskRerunOf(ctx context.Context, arg SetAgentTaskRerunOfParams) error {
+	_, err := q.db.Exec(ctx, setAgentTaskRerunOf, arg.ID, arg.RerunOfTaskID)
+	return err
+}
+
 const startAgentTask = `-- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running',

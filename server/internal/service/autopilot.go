@@ -617,6 +617,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	} else {
 		autopilotAttr = ruleOwnerAttribution(ctx, s.Queries, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
 	}
+	// If no precise human resolved (a version-less autopilot), degrade to
+	// owner_fallback (accountable = agent owner), or skip the dispatch when the
+	// workspace is fail-closed (MUL-4302 §3.5).
+	autopilotAttr, err = s.TaskSvc.applyAttributionFallback(ctx, autopilotAttr, agent)
+	if err != nil {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run")}
+	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        agent.ID,

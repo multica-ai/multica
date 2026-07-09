@@ -252,6 +252,14 @@ VALUES (
 )
 RETURNING *;
 
+-- name: SetAgentTaskRerunOf :exec
+-- Records manual-rerun lineage on a freshly-enqueued rerun task: the historical task
+-- ($2) a member re-ran (MUL-4302 §5). Written as a targeted follow-up on the rerun
+-- path only, so the shared CreateAgentTask/CreateRetryTask inserts stay untouched.
+-- Kept distinct from retry_of_task_id (system retry) so the two stay separable in
+-- reporting. Best-effort: lineage is audit metadata, not run-blocking.
+UPDATE agent_task_queue SET rerun_of_task_id = $2 WHERE id = $1;
+
 -- name: LinkTaskToIssue :exec
 -- Attaches the issue a quick-create task produced back to the task row, once
 -- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`

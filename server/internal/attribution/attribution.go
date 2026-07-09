@@ -334,3 +334,20 @@ func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind Evidence
 	}
 	return finalizeAttribution(r)
 }
+
+// OwnerFallback degrades an UNATTRIBUTED result to owner_fallback (MUL-4302 §3.5):
+// the agent owner becomes the accountable human so no run is left without one, but
+// this is a DEGRADED label (Source.Precise() == false) and must be surfaced
+// distinctly in reporting. It is audit-only — originator (UserID) stays NULL, so
+// authorization is unaffected. Applied at the enqueue boundary ONLY when the
+// resolved source is unattributed and the workspace has not opted into fail-closed;
+// a precise result, or an invalid ownerUserID (nothing to fall back to), passes
+// through unchanged so a human is never fabricated.
+func OwnerFallback(r Result, ownerUserID pgtype.UUID) Result {
+	if r.Source != SourceUnattributed || !ownerUserID.Valid {
+		return r
+	}
+	r.Source = SourceOwnerFallback
+	r.AccountableUserID = ownerUserID
+	return r
+}

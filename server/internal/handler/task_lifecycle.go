@@ -143,7 +143,16 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		sourceTaskID = parsed
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
+	// A manual rerun is a direct human action: attribute the new run to the
+	// rerunning member (MUL-4302 §5). Resolve the actor the same way assign/promote
+	// does; an agent A2A actor is not a human and threads an invalid actor.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorUserID := memberActorUserID(h.resolveActor(r, userID, uuidToString(issue.WorkspaceID)))
+
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID)
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

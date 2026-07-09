@@ -341,6 +341,37 @@ func TestRuleOwner(t *testing.T) {
 	}
 }
 
+func TestOwnerFallback(t *testing.T) {
+	// Unattributed → owner_fallback: accountable = owner, originator stays NULL,
+	// source is degraded (not precise).
+	base := Unattributed(EvidenceIssueAssignment, issue)
+	got := OwnerFallback(base, other)
+	if got.Source != SourceOwnerFallback {
+		t.Fatalf("source = %q, want owner_fallback", got.Source)
+	}
+	if got.Source.Precise() {
+		t.Errorf("owner_fallback must be a degraded (non-precise) source")
+	}
+	if got.UserID.Valid {
+		t.Errorf("owner_fallback is audit-only; originator must stay NULL")
+	}
+	if got.AccountableUserID != other {
+		t.Errorf("accountable = %v, want owner %v", got.AccountableUserID, other)
+	}
+
+	// Precise results are untouched.
+	precise := ClassifyDirect(DirectFacts{IssueID: issue, CreatorType: "member", CreatorID: human})
+	if OwnerFallback(precise, other) != precise {
+		t.Errorf("owner_fallback must not alter a precise attribution")
+	}
+
+	// Invalid owner → stays unattributed, never fabricates a human.
+	noOwner := OwnerFallback(Unattributed(EvidenceIssueAssignment, issue), pgtype.UUID{})
+	if noOwner.Source != SourceUnattributed || noOwner.AccountableUserID.Valid {
+		t.Errorf("invalid owner must leave the result unattributed with no human, got %+v", noOwner)
+	}
+}
+
 func TestUnattributed(t *testing.T) {
 	got := Unattributed(EvidenceAutopilotRun, srcTask)
 	if got.Source != SourceUnattributed {
