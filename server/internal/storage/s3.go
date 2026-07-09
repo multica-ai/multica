@@ -274,6 +274,23 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 	return s.uploadedURL(key), nil
 }
 
+func (s *S3Storage) UploadStream(ctx context.Context, key string, data io.Reader, contentType string, filename string) (string, error) {
+	input := &s3.PutObjectInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		Body:               data,
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
+		CacheControl:       aws.String("max-age=432000,public"),
+		StorageClass:       s.storageClass(),
+	}
+	_, err := s.client.PutObject(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("s3 PutObject: %w", err)
+	}
+	return s.uploadedURL(key), nil
+}
+
 // uploadedURL returns the URL stored for client consumption after an upload.
 // Priority: CDN domain > custom endpoint > AWS S3 region-qualified host. The CDN
 // domain wins even when a custom endpoint is set so S3-compatible backends

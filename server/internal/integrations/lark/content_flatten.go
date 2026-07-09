@@ -39,7 +39,7 @@ func flattenContent(msgType, rawContent string) string {
 		return "[File]"
 	case "audio":
 		return "[Audio]"
-	case "media":
+	case "media", "video":
 		return "[Video]"
 	case "sticker":
 		return "[Sticker]"

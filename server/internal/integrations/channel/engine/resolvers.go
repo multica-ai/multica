@@ -93,6 +93,7 @@ type AppendParams struct {
 	SessionID      pgtype.UUID
 	Sender         pgtype.UUID
 	InstallationID pgtype.UUID
+	WorkspaceID    pgtype.UUID
 	Message        channel.InboundMessage
 	ClaimToken     pgtype.UUID
 }
@@ -163,6 +164,14 @@ type SessionBinder interface {
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
 }
 
+// MediaResolver resolves platform media after a message has passed routing,
+// group-addressing, identity, and session checks, but before AppendMessage
+// persists the user message. Implementations are best-effort: failures should
+// leave the message text intact and omit the failed MediaRefs.
+type MediaResolver interface {
+	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
+}
+
 // Auditor records a dropped inbound event (no message body — drop-audit
 // policy). instID may be the zero UUID for installation-less events.
 type Auditor interface {
@@ -200,6 +209,7 @@ type ResolverSet struct {
 	Identity     IdentityResolver
 	Dedup        Deduper
 	Session      SessionBinder
+	Media        MediaResolver
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier

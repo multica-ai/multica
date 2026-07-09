@@ -152,6 +152,36 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
+func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, contentType string, filename string) (string, error) {
+	dest := filepath.Join(s.uploadDir, key)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return "", fmt.Errorf("local storage MkdirAll: %w", err)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return "", fmt.Errorf("local storage Create: %w", err)
+	}
+	if _, err := io.Copy(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("local storage stream copy: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("local storage Close: %w", err)
+	}
+	if filename != "" {
+		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
+		if err := os.WriteFile(dest+metaSuffix, body, 0644); err != nil {
+			slog.Error("local storage meta write failed", "key", key, "error", err)
+		}
+	}
+
+	if s.baseURL != "" {
+		return fmt.Sprintf("%s/uploads/%s", s.baseURL, key), nil
+	}
+	return fmt.Sprintf("/uploads/%s", key), nil
+}
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }

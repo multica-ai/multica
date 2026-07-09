@@ -240,6 +240,87 @@ func TestHTTPClient_IsConfigured(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_DownloadMessageResource(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("resource: method = %s, want GET", r.Method)
+		}
+		if got := r.URL.Query().Get("type"); got != "image" {
+			t.Errorf("resource type = %q, want image", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_resource" {
+			t.Errorf("auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", `attachment; filename="shot.png"`)
+		_, _ = w.Write([]byte{1, 2, 3})
+	})
+	c := newTestClient(fake, time.Now)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource: %v", err)
+	}
+	if string(got.Data) != string([]byte{1, 2, 3}) || got.ContentType != "image/png" ||
+		got.Filename != "shot.png" || got.SizeBytes != 3 {
+		t.Fatalf("downloaded resource wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceUsesResourceTimeout(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_video/resources/file_video", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "file" {
+			t.Errorf("resource type = %q, want file", got)
+		}
+		time.Sleep(80 * time.Millisecond)
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", `attachment; filename="clip.mp4"`)
+		_, _ = w.Write([]byte("slow-video"))
+	})
+	c := NewHTTPAPIClient(HTTPClientConfig{
+		BaseURL:                 fake.URL(),
+		HTTPClient:              &http.Client{Timeout: 20 * time.Millisecond},
+		ResourceDownloadTimeout: 500 * time.Millisecond,
+		Now:                     time.Now,
+	}).(*httpAPIClient)
+	got, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_video",
+		FileKey:   "file_video",
+		Type:      "file",
+	})
+	if err != nil {
+		t.Fatalf("DownloadMessageResource slow video: %v", err)
+	}
+	if string(got.Data) != "slow-video" || got.ContentType != "video/mp4" || got.Filename != "clip.mp4" {
+		t.Fatalf("downloaded slow video wrong: %+v", got)
+	}
+}
+
+func TestHTTPClient_DownloadMessageResourceBusinessError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_resource", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages/om_1/resources/img_1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"code": 234003, "msg": "File not in msg"})
+	})
+	c := newTestClient(fake, time.Now)
+	_, err := c.DownloadMessageResource(context.Background(), testCreds(), DownloadResourceParams{
+		MessageID: "om_1",
+		FileKey:   "img_1",
+		Type:      "image",
+	})
+	if err == nil || !strings.Contains(err.Error(), "234003") {
+		t.Fatalf("expected APIError with code, got %v", err)
+	}
+}
+
 // TestHTTPClient_StubReportsNotConfigured pins that the stub never
 // claims wired outbound — handlers gate install / management UI on
 // this signal.

@@ -1,9 +1,12 @@
 package lark
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -14,13 +17,55 @@ import (
 // SendTextMessage — the single method feishuChannel.Send calls.
 type fakeSender struct {
 	APIClient
-	last  SendTextParams
-	msgID string
+	last          SendTextParams
+	msgID         string
+	downloadCalls []DownloadResourceParams
+	downloaded    DownloadedResource
 }
 
 func (f *fakeSender) SendTextMessage(_ context.Context, p SendTextParams) (string, error) {
 	f.last = p
 	return f.msgID, nil
+}
+
+func (f *fakeSender) DownloadMessageResource(_ context.Context, _ InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	f.downloadCalls = append(f.downloadCalls, p)
+	return f.downloaded, nil
+}
+
+func (f *fakeSender) DownloadMessageResourceStream(_ context.Context, _ InstallationCredentials, p DownloadResourceParams) (DownloadedResourceStream, error) {
+	f.downloadCalls = append(f.downloadCalls, p)
+	return DownloadedResourceStream{
+		Body:        io.NopCloser(bytes.NewReader(f.downloaded.Data)),
+		ContentType: f.downloaded.ContentType,
+		Filename:    f.downloaded.Filename,
+		SizeBytes:   f.downloaded.SizeBytes,
+	}, nil
+}
+
+type fakeMediaStorage struct {
+	uploads []fakeMediaUpload
+}
+
+type fakeMediaUpload struct {
+	key         string
+	data        []byte
+	contentType string
+	filename    string
+}
+
+func (s *fakeMediaStorage) Upload(_ context.Context, key string, data []byte, contentType string, filename string) (string, error) {
+	s.uploads = append(s.uploads, fakeMediaUpload{key: key, data: append([]byte(nil), data...), contentType: contentType, filename: filename})
+	return "https://cdn.example.test/" + key, nil
+}
+
+func (s *fakeMediaStorage) UploadStream(_ context.Context, key string, data io.Reader, contentType string, filename string) (string, error) {
+	body, err := io.ReadAll(data)
+	if err != nil {
+		return "", err
+	}
+	s.uploads = append(s.uploads, fakeMediaUpload{key: key, data: body, contentType: contentType, filename: filename})
+	return "https://cdn.example.test/" + key, nil
 }
 
 type fakeCreds struct{ secret string }
@@ -130,6 +175,92 @@ func TestFeishuChannel_SendMapsTextAndReplyTarget(t *testing.T) {
 	// ReplyTo present -> route through the reply endpoint, threaded.
 	if sender.last.ReplyTarget.MessageID != "om_parent" || !sender.last.ReplyTarget.InThread {
 		t.Fatalf("reply target mapping wrong: %+v", sender.last.ReplyTarget)
+	}
+}
+
+func TestFeishuMediaResolver_AttachesImageMediaRef(t *testing.T) {
+	sender := &fakeSender{downloaded: DownloadedResource{
+		Data:        []byte{1, 2, 3},
+		ContentType: "image/png",
+		Filename:    "from-header.png",
+		SizeBytes:   3,
+	}}
+	storage := &fakeMediaStorage{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, newDiscardLogger())
+	lm := InboundMessage{
+		EventID:      "evt-image",
+		AppID:        "cli_app",
+		ChatID:       "oc_dm",
+		ChatType:     ChatTypeP2P,
+		MessageID:    "om_image",
+		SenderOpenID: "ou_user",
+		MessageType:  "image",
+		Body:         "[Image]",
+		Content:      `{"image_key":"img_v3_key"}`,
+	}
+	got := resolver.ResolveMedia(context.Background(), engine.ResolvedInstallation{
+		WorkspaceID: uuidFromString(t, "11111111-1111-1111-1111-111111111111"),
+		Platform:    Installation{AppID: "cli_app", Region: "feishu"},
+	}, engine.ResolvedIdentity{}, uuidFromString(t, "22222222-2222-2222-2222-222222222222"), channelMessageFromLark(lm))
+	if len(sender.downloadCalls) != 1 {
+		t.Fatalf("download calls = %d, want 1", len(sender.downloadCalls))
+	}
+	call := sender.downloadCalls[0]
+	if call.MessageID != "om_image" || call.FileKey != "img_v3_key" || call.Type != "image" {
+		t.Fatalf("download params wrong: %+v", call)
+	}
+	if len(storage.uploads) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(storage.uploads))
+	}
+	up := storage.uploads[0]
+	if up.contentType != "image/png" || up.filename != "from-header.png" || string(up.data) != string([]byte{1, 2, 3}) {
+		t.Fatalf("upload metadata wrong: %+v", up)
+	}
+	if !strings.Contains(up.key, "workspaces/11111111-1111-1111-1111-111111111111/lark/") {
+		t.Fatalf("upload key should be workspace-scoped, got %q", up.key)
+	}
+	if len(got.MediaRefs) != 1 {
+		t.Fatalf("media refs = %+v, want 1", got.MediaRefs)
+	}
+	ref := got.MediaRefs[0]
+	if ref.Type != channel.MsgTypeImage || ref.Filename != "from-header.png" || ref.MimeType != "image/png" ||
+		ref.SizeBytes != 3 || ref.StorageURL == "" || ref.StorageKey == "" {
+		t.Fatalf("media ref wrong: %+v", ref)
+	}
+}
+
+func TestFeishuMediaResolver_AttachesVideoMediaRef(t *testing.T) {
+	sender := &fakeSender{downloaded: DownloadedResource{
+		Data:        []byte("mp4"),
+		ContentType: "video/mp4",
+		SizeBytes:   3,
+	}}
+	storage := &fakeMediaStorage{}
+	resolver := NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, newDiscardLogger())
+	lm := InboundMessage{
+		EventID:      "evt-video",
+		AppID:        "cli_app",
+		ChatID:       "oc_dm",
+		ChatType:     ChatTypeP2P,
+		MessageID:    "om_video",
+		SenderOpenID: "ou_user",
+		MessageType:  "media",
+		Body:         "[Video]",
+		Content:      `{"file_key":"file_v3_key","file_name":"clip.mp4"}`,
+	}
+	got := resolver.ResolveMedia(context.Background(), engine.ResolvedInstallation{
+		WorkspaceID: uuidFromString(t, "11111111-1111-1111-1111-111111111111"),
+		Platform:    Installation{AppID: "cli_app", Region: "feishu"},
+	}, engine.ResolvedIdentity{}, uuidFromString(t, "22222222-2222-2222-2222-222222222222"), channelMessageFromLark(lm))
+	if len(sender.downloadCalls) != 1 {
+		t.Fatalf("download calls = %d, want 1", len(sender.downloadCalls))
+	}
+	call := sender.downloadCalls[0]
+	if call.MessageID != "om_video" || call.FileKey != "file_v3_key" || call.Type != "file" {
+		t.Fatalf("download params wrong: %+v", call)
+	}
+	if len(got.MediaRefs) != 1 || got.MediaRefs[0].Type != channel.MsgTypeVideo || got.MediaRefs[0].Filename != "clip.mp4" {
+		t.Fatalf("video ref wrong: %+v", got.MediaRefs)
 	}
 }
 

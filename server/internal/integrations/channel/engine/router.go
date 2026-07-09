@@ -258,12 +258,16 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		// Single tx; an error rolled it back, nothing landed. Release.
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
+	if set.Media != nil {
+		msg = set.Media.ResolveMedia(ctx, inst, identity, sessionID, msg)
+	}
 
 	// 6. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
 		InstallationID: inst.ID,
+		WorkspaceID:    inst.WorkspaceID,
 		Message:        msg,
 		ClaimToken:     claimToken,
 	})
