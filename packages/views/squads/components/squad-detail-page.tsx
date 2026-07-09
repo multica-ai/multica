@@ -390,7 +390,7 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
       initials={initials}
       avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
       size="sm"
-      className="rounded"
+      className="shrink-0"
     />
   );
 }

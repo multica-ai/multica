@@ -45,9 +45,12 @@ function ActorAvatar({
     <div
       data-slot="avatar"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden rounded-full",
+        "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
         (!avatarUrl || imgError) && "bg-muted text-muted-foreground",
-        className
+        className,
+        // rounded-full stays last so a call-site `className` can never override
+        // the circle — avatar shape is a hard invariant, not a per-site choice.
+        "rounded-full"
       )}
       style={{ width: px, height: px, fontSize: px * 0.45 }}
       title={name}

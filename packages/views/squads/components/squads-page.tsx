@@ -154,12 +154,13 @@ function SquadAvatar({ squad }: { squad: Squad }) {
     );
   }
   return (
-    <div
-      className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-      title={squad.name}
-    >
-      <Users className="h-4 w-4" />
-    </div>
+    <ActorAvatarBase
+      name={squad.name}
+      initials={initials}
+      isSquad
+      size="lg"
+      className="shrink-0"
+    />
   );
 }
 
