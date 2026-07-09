@@ -8,6 +8,12 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSkills from "../../locales/en/skills.json";
 
+// jsdom doesn't implement scrollIntoView, which cmdk (Command) calls on the
+// currently highlighted item to keep it in view.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 const TEST_RESOURCES = {
   en: { common: enCommon, skills: enSkills },
 };
@@ -670,5 +676,128 @@ describe("RuntimeLocalSkillImportPanel", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/user-gone/)).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Adaptive UI — U6 tests
+  // -------------------------------------------------------------------------
+
+  it("renders the summary card grouped by root for 1-2 skills", async () => {
+    // Default mock has 1 skill with root: 'provider'
+    renderPanel();
+
+    await screen.findByText("Review Helper", {}, { timeout: 5000 });
+
+    // Summary card shows the Provider group heading and the skill inside it.
+    expect(
+      screen.getByText("Provider Skills"),
+    ).toBeInTheDocument();
+    // 'Universal Skills' group should NOT appear (no universal skills in mock).
+    expect(screen.queryByText("Universal Skills")).not.toBeInTheDocument();
+    expect(screen.queryByText("Other Skills")).not.toBeInTheDocument();
+    // data-branch attribute marks the branch.
+    expect(
+      document.querySelector('[data-branch="summary"]'),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-branch="search"]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the inline Command search for 3+ skills", async () => {
+    // Override mock with 3 skills
+    const threeSkills = [
+      { ...MOCK_SKILL_A, key: "skill-a", name: "Alpha" },
+      { ...MOCK_SKILL_B, key: "skill-b", name: "Beta" },
+      { ...MOCK_SKILL_A, key: "skill-c", name: "Gamma", root: "universal" },
+    ];
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () => Promise.resolve({ supported: true, skills: threeSkills }),
+    });
+
+    renderPanel();
+
+    await screen.findByText("Alpha", {}, { timeout: 5000 });
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByText("Gamma")).toBeInTheDocument();
+    // Both root groups should appear since we have provider and universal.
+    expect(screen.getByText("Provider Skills")).toBeInTheDocument();
+    expect(screen.getByText("Universal Skills")).toBeInTheDocument();
+    // data-branch attribute marks the search branch.
+    expect(
+      document.querySelector('[data-branch="search"]'),
+    ).toBeInTheDocument();
+    // Search input placeholder renders.
+    expect(screen.getByPlaceholderText(/Search/i)).toBeInTheDocument();
+  });
+
+  it("filters skills by name in the search branch", async () => {
+    const threeSkills = [
+      { ...MOCK_SKILL_A, key: "skill-a", name: "Alpha" },
+      { ...MOCK_SKILL_B, key: "skill-b", name: "Beta" },
+      { ...MOCK_SKILL_A, key: "skill-c", name: "Gamma" },
+    ];
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () => Promise.resolve({ supported: true, skills: threeSkills }),
+    });
+
+    renderPanel();
+    await screen.findByText("Alpha", {}, { timeout: 5000 });
+
+    // Type a filter that matches only 'Beta'.
+    const searchInput = screen.getByPlaceholderText(/Search/i);
+    fireEvent.change(searchInput, { target: { value: "bet" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Beta")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma")).not.toBeInTheDocument();
+  });
+
+  it("shows the no-match state when search yields no results", async () => {
+    const threeSkills = [
+      { ...MOCK_SKILL_A, key: "skill-a", name: "Alpha" },
+      { ...MOCK_SKILL_B, key: "skill-b", name: "Beta" },
+      { ...MOCK_SKILL_A, key: "skill-c", name: "Gamma" },
+    ];
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () => Promise.resolve({ supported: true, skills: threeSkills }),
+    });
+
+    renderPanel();
+    await screen.findByText("Alpha", {}, { timeout: 5000 });
+
+    const searchInput = screen.getByPlaceholderText(/Search/i);
+    fireEvent.change(searchInput, { target: { value: "zzzzz" } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/No skills match/)).toBeInTheDocument();
+    });
+  });
+
+  it("places skills with undefined root in the Other group", async () => {
+    const twoSkills = [
+      // Explicit root: 'universal'
+      { ...MOCK_SKILL_A, key: "skill-a", name: "Alpha", root: "universal" },
+      // Explicitly override root to undefined (older daemon).
+      { ...MOCK_SKILL_B, key: "skill-b", name: "Beta", root: undefined },
+    ];
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () => Promise.resolve({ supported: true, skills: twoSkills }),
+    });
+
+    renderPanel();
+    await screen.findByText("Alpha", {}, { timeout: 5000 });
+
+    // Universal Skills and Other Skills groups should both appear.
+    expect(screen.getByText("Universal Skills")).toBeInTheDocument();
+    expect(screen.getByText("Other Skills")).toBeInTheDocument();
+    // No provider skills in mock, so Provider group must NOT render.
+    expect(screen.queryByText("Provider Skills")).not.toBeInTheDocument();
   });
 });
