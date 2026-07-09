@@ -170,7 +170,7 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
@@ -186,6 +186,7 @@ VALUES (
         ELSE NULL
     END,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
     sqlc.narg(originator_source),
@@ -199,15 +200,23 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
+-- The requester who opened the quick-create modal is a direct_human originator
+-- and accountable; attribution provenance is stamped so this path is not a
+-- NULL-source enqueue bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    runtime_mcp_overlay, runtime_connected_apps
+    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -215,9 +224,15 @@ RETURNING *;
 -- Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
 -- to queued. Used for comment-routing escalation: a thread-owner primary task
 -- gets a delayed assignee fallback without waking both agents at t=0.
+-- Attribution is resolved and stamped at creation (not at promotion), from the
+-- same trigger comment as the primary task, so the fallback assignee's run
+-- carries a non-NULL source and evidence rather than bypassing attribution
+-- (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at
+    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at,
+    originator_user_id, accountable_user_id, originator_source,
+    delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     @agent_id, @runtime_id, @issue_id, 'deferred', @priority,
@@ -226,7 +241,13 @@ VALUES (
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(squad_id),
     @escalation_for_task_id,
-    @fire_at
+    @fire_at,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -269,7 +290,7 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id
 )
@@ -283,6 +304,7 @@ SELECT
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
+    p.accountable_user_id,
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,

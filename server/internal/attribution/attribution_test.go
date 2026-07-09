@@ -195,6 +195,126 @@ func TestClassifyDirect_AgentCreatedNoOriginIsUnattributed(t *testing.T) {
 	}
 }
 
+func TestClassifyDirect_ActorOverridesCreator(t *testing.T) {
+	// A member directly assigned/promoted an issue someone else created: the
+	// acting member is accountable, ahead of the creator (MUL-4302 §4).
+	got := ClassifyDirect(DirectFacts{
+		IssueID:     issue,
+		CreatorType: "member",
+		CreatorID:   other,
+		ActorUserID: human,
+	})
+	if got.Source != SourceDirectHuman {
+		t.Fatalf("source = %q, want direct_human", got.Source)
+	}
+	if got.UserID != human {
+		t.Errorf("actor should be attributed, got %v want %v", got.UserID, human)
+	}
+	if got.EvidenceKind != EvidenceIssueAssignment || got.EvidenceRefID != issue {
+		t.Errorf("evidence should point at the assigned issue")
+	}
+}
+
+func TestClassifyDirect_ActorOverridesAgentOriginInheritance(t *testing.T) {
+	// Even when the issue carries an agent origin link, a real member actor wins:
+	// a human directly acted on it, so we do not fall through to origin delegation.
+	got := ClassifyDirect(DirectFacts{
+		IssueID:          issue,
+		CreatorType:      "agent",
+		OriginType:       "agent_create",
+		OriginTaskID:     originTk,
+		OriginOriginator: other,
+		ActorUserID:      human,
+	})
+	if got.Source != SourceDirectHuman {
+		t.Fatalf("source = %q, want direct_human", got.Source)
+	}
+	if got.UserID != human {
+		t.Errorf("actor should win over origin inheritance, got %v", got.UserID)
+	}
+	if got.DelegatedFromTaskID.Valid {
+		t.Errorf("actor path is not a delegation; delegated_from must stay empty")
+	}
+}
+
+func TestClassifyDirect_AgentCreateInheritsOriginAsDelegation(t *testing.T) {
+	// agent_create (an agent's ordinary `issue create`, MUL-4305) inherits the
+	// origin task's human exactly like quick_create.
+	got := ClassifyDirect(DirectFacts{
+		IssueID:          issue,
+		CreatorType:      "agent",
+		OriginType:       "agent_create",
+		OriginTaskID:     originTk,
+		OriginOriginator: human,
+	})
+	if got.Source != SourceDelegation {
+		t.Fatalf("source = %q, want delegation", got.Source)
+	}
+	if got.UserID != human || got.DelegatedFromTaskID != originTk {
+		t.Errorf("agent_create must inherit origin human + lineage")
+	}
+}
+
+// TestAccountableMirrorsOriginatorInvariant is the MUL-4302 §11 acceptance check
+// at the classification layer: EVERY result the resolver produces must satisfy
+// `originator (UserID) IS NOT NULL ⟹ accountable == originator`, and when there is
+// no human both sides are invalid. finalizeAttribution centralizes this; the test
+// guards against a future Classify path forgetting to route through it.
+func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
+	results := []Result{
+		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "member", AuthorID: human}, SourceCommentSource),
+		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "agent", SourceTaskID: srcTask, ParentOriginator: human}, SourceDelegation),
+		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "agent"}, SourceDelegation),
+		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "system"}, SourceCommentSource),
+		ClassifyDirect(DirectFacts{IssueID: issue, CreatorType: "member", CreatorID: human}),
+		ClassifyDirect(DirectFacts{IssueID: issue, CreatorType: "member", CreatorID: other, ActorUserID: human}),
+		ClassifyDirect(DirectFacts{IssueID: issue, CreatorType: "agent", OriginType: "quick_create", OriginTaskID: originTk, OriginOriginator: human}),
+		ClassifyDirect(DirectFacts{IssueID: issue, CreatorType: "agent"}),
+		DirectHumanRun(human, EvidenceComment, comment),
+		DirectHumanRun(pgtype.UUID{}, "", pgtype.UUID{}),
+		Unattributed(EvidenceAutopilotRun, srcTask),
+	}
+	for i, r := range results {
+		if r.AccountableUserID != r.UserID {
+			t.Errorf("result[%d]: accountable %v != originator %v — invariant violated", i, r.AccountableUserID, r.UserID)
+		}
+		if r.UserID.Valid != r.AccountableUserID.Valid {
+			t.Errorf("result[%d]: validity mismatch originator=%v accountable=%v", i, r.UserID.Valid, r.AccountableUserID.Valid)
+		}
+	}
+}
+
+func TestDirectHumanRun(t *testing.T) {
+	got := DirectHumanRun(human, EvidenceComment, comment)
+	if got.Source != SourceDirectHuman || got.UserID != human || got.AccountableUserID != human {
+		t.Errorf("valid member should be a direct_human originator+accountable, got %+v", got)
+	}
+	if got.EvidenceKind != EvidenceComment || got.EvidenceRefID != comment {
+		t.Errorf("evidence should be carried through")
+	}
+
+	unresolved := DirectHumanRun(pgtype.UUID{}, "", pgtype.UUID{})
+	if unresolved.Source != SourceUnattributed {
+		t.Errorf("invalid user must degrade to unattributed, got %q", unresolved.Source)
+	}
+	if unresolved.UserID.Valid || unresolved.AccountableUserID.Valid {
+		t.Errorf("invalid user must not fabricate a human")
+	}
+}
+
+func TestUnattributed(t *testing.T) {
+	got := Unattributed(EvidenceAutopilotRun, srcTask)
+	if got.Source != SourceUnattributed {
+		t.Fatalf("source = %q, want unattributed", got.Source)
+	}
+	if got.UserID.Valid || got.AccountableUserID.Valid {
+		t.Errorf("unattributed must carry no human on either side")
+	}
+	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != srcTask {
+		t.Errorf("evidence should be carried so the row is not a NULL-source bypass")
+	}
+}
+
 func TestSourcePrecise(t *testing.T) {
 	precise := []Source{SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceRuleOwner}
 	degraded := []Source{SourceOwnerFallback, SourceBackfill, SourceUnattributed, Source("")}

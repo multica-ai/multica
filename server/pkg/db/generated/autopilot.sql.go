@@ -220,22 +220,39 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4, $5,
+    $6,
+    $7,
+    $8
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
 
 type CreateAutopilotTaskParams struct {
-	AgentID        pgtype.UUID `json:"agent_id"`
-	RuntimeID      pgtype.UUID `json:"runtime_id"`
-	Priority       int32       `json:"priority"`
-	AutopilotRunID pgtype.UUID `json:"autopilot_run_id"`
-	TriggerSummary pgtype.Text `json:"trigger_summary"`
+	AgentID              pgtype.UUID `json:"agent_id"`
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
+	Priority             int32       `json:"priority"`
+	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
+	TriggerSummary       pgtype.Text `json:"trigger_summary"`
+	OriginatorSource     pgtype.Text `json:"originator_source"`
+	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 }
 
 // =====================
 // Task Queue (run_only mode)
 // =====================
+// run_only autopilot dispatch. originator_user_id / accountable_user_id stay NULL:
+// no human authorized this run and the precise rule_owner attribution (accountable
+// = the active rule version's publisher) lands with the rule-version snapshot table
+// in a later Phase 1 increment. originator_source is stamped explicitly so the row
+// is not a NULL-source enqueue bypass, and evidence points at the autopilot run
+// (MUL-4302 §2/§3.4).
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
@@ -243,6 +260,9 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.Priority,
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
+		arg.OriginatorSource,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -289,6 +309,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.RuleVersionID,
 		&i.TriggerEvidenceKind,
 		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
 	)
 	return i, err
 }

@@ -115,11 +115,25 @@ const (
 	KindDeferredFallback  TriggerKind = "deferred_fallback"
 )
 
-// Result is the attribution stamped onto a queued run. UserID mirrors the
-// accountable human the caller also writes into originator_user_id; the other
-// fields are audit metadata written into the Phase 1 provenance columns.
+// Result is the attribution stamped onto a queued run.
+//
+//   - UserID is the AUTHORIZATION human the caller writes into
+//     originator_user_id. It is the value canInvokeAgent and the Composio overlay
+//     read; it is legitimately invalid (NULL) when no human authorized the run.
+//   - AccountableUserID is the AUDIT human written into accountable_user_id. Phase
+//     1 invariant (enforced by finalizeAttribution): it mirrors UserID, so when
+//     UserID is valid AccountableUserID equals it, and when UserID is invalid the
+//     accountable side is invalid too. Divergence — a degraded owner_fallback /
+//     rule_owner naming an accountable human while UserID stays NULL — is a later
+//     Phase 1 increment and will extend that single chokepoint, never the callers.
+//
+// The remaining fields are audit metadata written into the Phase 1 provenance
+// columns. Construct a Result through ClassifyComment / ClassifyDirect /
+// DirectHumanRun / Unattributed so AccountableUserID is always finalized; never
+// stamp a hand-built literal onto the queue.
 type Result struct {
 	UserID              pgtype.UUID
+	AccountableUserID   pgtype.UUID
 	Source              Source
 	DelegatedFromTaskID pgtype.UUID
 	RuleVersionID       pgtype.UUID
@@ -127,6 +141,18 @@ type Result struct {
 	RerunOfTaskID       pgtype.UUID
 	EvidenceKind        EvidenceKind
 	EvidenceRefID       pgtype.UUID
+}
+
+// finalizeAttribution enforces the Phase 1 accountability invariant
+// (MUL-4302 §11): the accountable human mirrors the resolved originator, so
+// `originator_user_id IS NOT NULL ⟹ accountable_user_id = originator_user_id`.
+// Every Result handed to a caller flows through here. When the divergent audit
+// sources land (rule_owner names the rule publisher, owner_fallback names the
+// agent owner) while UserID stays NULL, this is the ONE place that will set a
+// non-mirrored AccountableUserID — the enqueue call sites never change.
+func finalizeAttribution(r Result) Result {
+	r.AccountableUserID = r.UserID
+	return r
 }
 
 // CommentFacts are the already-fetched facts about a trigger comment, gathered
@@ -153,18 +179,18 @@ type CommentFacts struct {
 func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
 	switch f.AuthorType {
 	case "member":
-		return Result{
+		return finalizeAttribution(Result{
 			UserID:        f.AuthorID,
 			Source:        SourceDirectHuman,
 			EvidenceKind:  EvidenceComment,
 			EvidenceRefID: f.CommentID,
-		}
+		})
 	case "agent":
 		r := Result{EvidenceKind: EvidenceComment, EvidenceRefID: f.CommentID}
 		if !f.SourceTaskID.Valid {
 			// Agent comment with no source task: cannot walk the chain.
 			r.Source = SourceUnattributed
-			return r
+			return finalizeAttribution(r)
 		}
 		r.DelegatedFromTaskID = f.SourceTaskID
 		if f.ParentOriginator.Valid {
@@ -174,9 +200,9 @@ func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
 			// Source task exists but has no human at its own top of chain.
 			r.Source = SourceUnattributed
 		}
-		return r
+		return finalizeAttribution(r)
 	default:
-		return Result{Source: SourceUnattributed, EvidenceKind: EvidenceComment, EvidenceRefID: f.CommentID}
+		return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: EvidenceComment, EvidenceRefID: f.CommentID})
 	}
 }
 
@@ -186,6 +212,17 @@ type DirectFacts struct {
 	IssueID     pgtype.UUID
 	CreatorType string
 	CreatorID   pgtype.UUID
+
+	// ActorUserID is the member who PERFORMED the action that enqueued this run
+	// (assigned the issue, promoted the backlog child, created-with-assignee).
+	// When valid it is the accountable human per MUL-4302 §4 ("执行 assign /
+	// promote 的成员") and takes precedence over the issue creator: the person who
+	// acted, not whoever happened to file the issue, is on the hook. Left invalid
+	// by non-actor paths (comment chain, rerun, autopilot) which resolve the human
+	// elsewhere and fall back to the creator. Because a direct action is the human
+	// lending authority, the actor becomes BOTH originator (authorization) and
+	// accountable — finalizeAttribution keeps them equal, honoring the invariant.
+	ActorUserID pgtype.UUID
 
 	// OriginType/OriginTaskID describe an agent-created issue's provenance
 	// ("quick_create" or "agent_create"); OriginOriginator is that origin task's
@@ -197,13 +234,24 @@ type DirectFacts struct {
 
 // ClassifyDirect resolves attribution for a run with no trigger comment.
 func ClassifyDirect(f DirectFacts) Result {
+	// A member who directly assigned/promoted the issue is the accountable human,
+	// ahead of the issue's creator (MUL-4302 §4). Evidence points at the issue the
+	// action targeted.
+	if f.ActorUserID.Valid {
+		return finalizeAttribution(Result{
+			UserID:        f.ActorUserID,
+			Source:        SourceDirectHuman,
+			EvidenceKind:  EvidenceIssueAssignment,
+			EvidenceRefID: f.IssueID,
+		})
+	}
 	if f.CreatorType == "member" && f.CreatorID.Valid {
-		return Result{
+		return finalizeAttribution(Result{
 			UserID:        f.CreatorID,
 			Source:        SourceDirectHuman,
 			EvidenceKind:  EvidenceIssueAssignment,
 			EvidenceRefID: f.IssueID,
-		}
+		})
 	}
 	switch f.OriginType {
 	case "quick_create", "agent_create":
@@ -218,8 +266,38 @@ func ClassifyDirect(f DirectFacts) Result {
 		} else {
 			r.Source = SourceUnattributed
 		}
-		return r
+		return finalizeAttribution(r)
 	default:
-		return Result{Source: SourceUnattributed, EvidenceKind: EvidenceIssueAssignment, EvidenceRefID: f.IssueID}
+		return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: EvidenceIssueAssignment, EvidenceRefID: f.IssueID})
 	}
+}
+
+// DirectHumanRun builds attribution for a run a member triggered directly through
+// a path that carries no issue and no trigger comment — a chat message or a
+// quick-create request. userID is the member who acted (the chat sender / the
+// quick-create requester) and becomes both originator and accountable. An invalid
+// userID (e.g. a Lark group message whose sender could not be resolved) yields an
+// explicit unattributed result rather than a NULL-source bypass.
+func DirectHumanRun(userID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
+	if !userID.Valid {
+		return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: evidenceKind, EvidenceRefID: evidenceRefID})
+	}
+	return finalizeAttribution(Result{
+		UserID:        userID,
+		Source:        SourceDirectHuman,
+		EvidenceKind:  evidenceKind,
+		EvidenceRefID: evidenceRefID,
+	})
+}
+
+// Unattributed builds an explicit "no human resolved" result for an enqueue path
+// that currently carries no accountable human — today only the autopilot run_only
+// dispatch, whose precise rule_owner attribution (accountable = the active rule
+// version's publisher) lands with the rule-version snapshot table in a later
+// Phase 1 increment. Stamping SourceUnattributed with real evidence keeps the row
+// off the NULL-source bypass and distinguishes "classified, no human" from a
+// pre-migration NULL, while leaving originator/accountable NULL so authorization
+// still correctly says "no human authorized this run".
+func Unattributed(evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
+	return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: evidenceKind, EvidenceRefID: evidenceRefID})
 }

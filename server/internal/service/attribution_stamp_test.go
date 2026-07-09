@@ -89,11 +89,11 @@ func TestEnqueueTaskForIssueStampsDirectHumanAttribution(t *testing.T) {
 	// Read the stored row so we assert what actually persisted, not just the
 	// returned struct.
 	var source pgtype.Text
-	var originator, evidenceRef pgtype.UUID
+	var originator, accountable, evidenceRef pgtype.UUID
 	var evidenceKind pgtype.Text
 	if err := pool.QueryRow(ctx, `
-		SELECT originator_source, originator_user_id, trigger_evidence_kind, trigger_evidence_ref_id
-		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&source, &originator, &evidenceKind, &evidenceRef); err != nil {
+		SELECT originator_source, originator_user_id, accountable_user_id, trigger_evidence_kind, trigger_evidence_ref_id
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&source, &originator, &accountable, &evidenceKind, &evidenceRef); err != nil {
 		t.Fatalf("read stored attribution: %v", err)
 	}
 
@@ -103,10 +103,74 @@ func TestEnqueueTaskForIssueStampsDirectHumanAttribution(t *testing.T) {
 	if !originator.Valid || originator.Bytes != util.MustParseUUID(userID).Bytes {
 		t.Errorf("originator_user_id = %s, want %s", util.UUIDToString(originator), userID)
 	}
+	// MUL-4302 §11 invariant at the DB layer: a non-NULL originator implies the
+	// accountable human equals it.
+	if !accountable.Valid || accountable.Bytes != originator.Bytes {
+		t.Errorf("accountable_user_id = %s, want == originator %s", util.UUIDToString(accountable), util.UUIDToString(originator))
+	}
 	if evidenceKind.String != string(attribution.EvidenceIssueAssignment) {
 		t.Errorf("trigger_evidence_kind = %q, want issue_assignment", evidenceKind.String)
 	}
 	if !evidenceRef.Valid || evidenceRef.Bytes != util.MustParseUUID(issueID).Bytes {
 		t.Errorf("trigger_evidence_ref_id = %s, want issue %s", util.UUIDToString(evidenceRef), issueID)
+	}
+}
+
+// TestEnqueueTaskForIssueWithHandoffAttributesToActor is the acceptance test for
+// the assign/promote actor fix (MUL-4302 §4): when a member assigns an issue that
+// a DIFFERENT member created, the run's accountable human — and, honoring the
+// invariant, its originator — is the assigning member (the actor), not the issue
+// creator. The evidence still points at the issue.
+func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, creatorID, agentID, issueID := seedAttributionFixture(t, pool)
+
+	// A second member in the same workspace performs the assign.
+	var actorID string
+	suffix := time.Now().UnixNano()
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Actor', $1) RETURNING id`,
+		fmt.Sprintf("actor-%d@multica.test", suffix)).Scan(&actorID); err != nil {
+		t.Fatalf("seed actor user: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		workspaceID, actorID); err != nil {
+		t.Fatalf("seed actor member: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueTaskForIssueWithHandoff(ctx, db.Issue{
+		ID:           util.MustParseUUID(issueID),
+		AssigneeID:   util.MustParseUUID(agentID),
+		Priority:     "medium",
+		CreatorType:  "member",
+		CreatorID:    util.MustParseUUID(creatorID),
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+	}, "", util.MustParseUUID(actorID))
+	if err != nil {
+		t.Fatalf("EnqueueTaskForIssueWithHandoff: %v", err)
+	}
+
+	var source pgtype.Text
+	var originator, accountable pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&source, &originator, &accountable); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+
+	if source.String != string(attribution.SourceDirectHuman) {
+		t.Errorf("originator_source = %q, want direct_human", source.String)
+	}
+	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(actorID).Bytes {
+		t.Errorf("accountable_user_id = %s, want actor %s (not creator %s)", util.UUIDToString(accountable), actorID, creatorID)
+	}
+	// Invariant: originator mirrors accountable, so it is the actor too — the
+	// assigning member lends the authority, not the issue creator.
+	if !originator.Valid || originator.Bytes != accountable.Bytes {
+		t.Errorf("originator_user_id = %s, want == accountable (actor) %s", util.UUIDToString(originator), util.UUIDToString(accountable))
 	}
 }

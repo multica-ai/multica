@@ -140,6 +140,8 @@ type AgentTaskQueue struct {
 	TriggerEvidenceKind pgtype.Text `json:"trigger_evidence_kind"`
 	// The row id referenced by trigger_evidence_kind (a comment id, autopilot_run id, rule_version id, source task id, ...). No FK; resolvable per-kind in the app layer (MUL-4302 §2).
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
+	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL on pre-migration rows.
+	AccountableUserID pgtype.UUID `json:"accountable_user_id"`
 }
 
 type Attachment struct {

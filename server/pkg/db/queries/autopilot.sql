@@ -332,8 +332,22 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
+-- run_only autopilot dispatch. originator_user_id / accountable_user_id stay NULL:
+-- no human authorized this run and the precise rule_owner attribution (accountable
+-- = the active rule version's publisher) lands with the rule-version snapshot table
+-- in a later Phase 1 increment. originator_source is stamped explicitly so the row
+-- is not a NULL-source enqueue bypass, and evidence points at the autopilot run
+-- (MUL-4302 §2/§3.4).
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
+)
 RETURNING *;
 
 -- =====================

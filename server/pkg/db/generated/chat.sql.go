@@ -114,17 +114,21 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 const createChatTask = `-- name: CreateChatTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
-    initiator_user_id, originator_user_id, force_fresh_session, runtime_mcp_overlay,
-    runtime_connected_apps
+    initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
+    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
     $6,
-    COALESCE($7::boolean, FALSE),
-    $8,
-    $9
+    $7,
+    COALESCE($8::boolean, FALSE),
+    $9,
+    $10,
+    $11,
+    $12,
+    $13
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
 
 type CreateChatTaskParams struct {
@@ -134,11 +138,18 @@ type CreateChatTaskParams struct {
 	ChatSessionID        pgtype.UUID `json:"chat_session_id"`
 	InitiatorUserID      pgtype.UUID `json:"initiator_user_id"`
 	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
+	AccountableUserID    pgtype.UUID `json:"accountable_user_id"`
 	ForceFreshSession    pgtype.Bool `json:"force_fresh_session"`
 	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
 	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
+	OriginatorSource     pgtype.Text `json:"originator_source"`
+	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 }
 
+// The chat sender (initiator) is a direct_human originator and accountable;
+// attribution provenance is stamped so this path is not a NULL-source enqueue
+// bypass (MUL-4302 §2).
 func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createChatTask,
 		arg.AgentID,
@@ -147,9 +158,13 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.ChatSessionID,
 		arg.InitiatorUserID,
 		arg.OriginatorUserID,
+		arg.AccountableUserID,
 		arg.ForceFreshSession,
 		arg.RuntimeMcpOverlay,
 		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -196,6 +211,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.RuleVersionID,
 		&i.TriggerEvidenceKind,
 		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
 	)
 	return i, err
 }

@@ -325,7 +325,7 @@ func (s *TaskService) attributionFromTriggerComment(ctx context.Context, comment
 // points at the agent_task_queue row that created the issue. Other
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
-	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource).UserID
+	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, pgtype.UUID{}).UserID
 }
 
 // attributionForIssueTask resolves the full attribution for an issue-backed
@@ -336,7 +336,7 @@ func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue d
 // which now delegates here — so there is a single source of truth and
 // authorization is unaffected. agentAuthoredSource labels the agent-authored
 // trigger comment case (see attributionFromTriggerComment).
-func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, agentAuthoredSource attribution.Source) attribution.Result {
+func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, agentAuthoredSource attribution.Source, actorUserID pgtype.UUID) attribution.Result {
 	if triggerCommentID.Valid {
 		return s.attributionFromTriggerComment(ctx, triggerCommentID, agentAuthoredSource)
 	}
@@ -344,6 +344,11 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		IssueID:     issue.ID,
 		CreatorType: issue.CreatorType,
 		CreatorID:   issue.CreatorID,
+		// A valid actorUserID means a member directly assigned/promoted this
+		// issue: that member is accountable ahead of the issue creator
+		// (MUL-4302 §4). Invalid actor (comment/rerun/deferred paths) falls back
+		// to the creator, preserving the pre-existing resolution.
+		ActorUserID: actorUserID,
 	}
 	// Member-created issues resolve without a DB read. Only origin-linked
 	// agent-created issues (quick_create, agent_create) need to load the origin
@@ -678,15 +683,17 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, "")
+	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{})
 }
 
 // EnqueueTaskForIssueWithHandoff is the assign/promote variant that carries a
 // handoff note into the run's opening context (MUL-3375). The note rides a
 // dedicated task column; the daemon renders it via the assignment-handoff
-// branch. Empty note behaves exactly like EnqueueTaskForIssue.
-func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote)
+// branch. Empty note behaves exactly like EnqueueTaskForIssue. actorUserID is the
+// member who performed the assign/promote and becomes the accountable human for
+// the run (MUL-4302 §4); invalid when the caller has no member actor.
+func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -734,7 +741,7 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 	return headShaText(s.ResolveIssueReviewSHA(ctx, issueID))
 }
 
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -759,7 +766,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	// comment or direct member assignment is direct_human. attr.UserID is the
 	// same value the pre-MUL-4302 resolver produced, so overlay/authorization
 	// are unchanged; the extra fields are audit provenance.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource)
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, actorUserID)
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
@@ -773,6 +780,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		OriginatorUserID:     originatorUserID,
+		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -809,13 +817,13 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{})
 }
 
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -830,17 +838,19 @@ func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.I
 // leader task was triggered (comment @squad, issue assign, autopilot,
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "")
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
 // handoff note into the leader run's opening context (MUL-3375). Empty note
-// behaves exactly like EnqueueTaskForSquadLeader.
-func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote)
+// behaves exactly like EnqueueTaskForSquadLeader. actorUserID is the member who
+// performed the assign/promote and becomes the accountable human (MUL-4302 §4);
+// invalid when the caller has no member actor.
+func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -859,7 +869,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	// agent-authored comment is a delegation (the parent task's human is
 	// copied); a member mention is direct_human. attr.UserID matches the
 	// pre-MUL-4302 value, so authorization is unchanged.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation)
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation, actorUserID)
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
@@ -875,6 +885,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		SquadID:              squadID,
 		OriginatorUserID:     originatorUserID,
+		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -914,18 +925,33 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	// The fallback assignee is reacting to the same trigger comment as the primary
+	// routed task, so resolve attribution from that comment (member author →
+	// direct_human; agent author → comment_source chain) and stamp it at creation.
+	// Promotion later only flips status, so stamping here keeps the eventual run
+	// off the NULL-source bypass (MUL-4302 §2). Overlay is intentionally left for
+	// the existing promotion path — this change is attribution-only. No direct
+	// actor here: the fallback is comment-routed, so attribution rides the comment.
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, pgtype.UUID{})
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	isLeader := squadID.Valid
 	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
-		AgentID:             agentID,
-		RuntimeID:           agent.RuntimeID,
-		IssueID:             issue.ID,
-		Priority:            priorityToInt(issue.Priority),
-		TriggerCommentID:    triggerCommentID,
-		TriggerSummary:      s.buildCommentTriggerSummary(ctx, triggerCommentID),
-		IsLeaderTask:        pgtype.Bool{Bool: isLeader, Valid: isLeader},
-		SquadID:             squadID,
-		EscalationForTaskID: escalationForTaskID,
-		FireAt:              pgtype.Timestamptz{Time: fireAt, Valid: true},
+		AgentID:              agentID,
+		RuntimeID:            agent.RuntimeID,
+		IssueID:              issue.ID,
+		Priority:             priorityToInt(issue.Priority),
+		TriggerCommentID:     triggerCommentID,
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		SquadID:              squadID,
+		EscalationForTaskID:  escalationForTaskID,
+		FireAt:               pgtype.Timestamptz{Time: fireAt, Valid: true},
+		OriginatorUserID:     attr.UserID,
+		AccountableUserID:    attr.AccountableUserID,
+		OriginatorSource:     attrSource,
+		DelegatedFromTaskID:  attrDelegatedFrom,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
 	})
 	if err != nil {
 		slog.Error("deferred fallback enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1036,6 +1062,12 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
 	}
 
+	// The requester who submitted the quick-create modal is the direct_human
+	// originator and accountable. There is no pre-existing comment/issue row to
+	// point evidence at (the run's job is to create the issue), so evidence stays
+	// NULL; the human is captured on originator/accountable_user_id (MUL-4302 §2).
+	attr := attribution.DirectHumanRun(requesterID, "", pgtype.UUID{})
+	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:              agentID,
@@ -1043,8 +1075,12 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
 		OriginatorUserID:     requesterID,
+		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
 	})
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
@@ -1122,20 +1158,31 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
 
+	// The chat sender (initiator) is the direct_human originator and accountable.
+	// The chat_session_id column already identifies the conversation, so no
+	// separate evidence row is stamped; an unresolved sender (some Lark group
+	// messages) degrades to unattributed rather than a NULL-source bypass
+	// (MUL-4302 §2).
+	attr := attribution.DirectHumanRun(initiatorUserID, "", pgtype.UUID{})
+	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:          chatSession.AgentID,
-		RuntimeID:        agent.RuntimeID,
-		Priority:         2, // medium priority for chat
-		ChatSessionID:    chatSession.ID,
-		InitiatorUserID:  initiatorUserID,
-		OriginatorUserID: initiatorUserID,
+		AgentID:           chatSession.AgentID,
+		RuntimeID:         agent.RuntimeID,
+		Priority:          2, // medium priority for chat
+		ChatSessionID:     chatSession.ID,
+		InitiatorUserID:   initiatorUserID,
+		OriginatorUserID:  initiatorUserID,
+		AccountableUserID: attr.AccountableUserID,
 		ForceFreshSession: pgtype.Bool{
 			Bool:  forceFreshSession,
 			Valid: true,
 		},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -2223,9 +2270,9 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "")
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "", pgtype.UUID{})
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "")
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "", pgtype.UUID{})
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
