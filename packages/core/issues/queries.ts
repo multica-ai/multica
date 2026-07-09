@@ -8,7 +8,7 @@ import type {
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
-import { BOARD_STATUSES } from "./config";
+import { ALL_STATUSES } from "./config";
 
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
@@ -132,17 +132,13 @@ export type AssigneeGroupedIssuesFilter = Omit<
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
- * Statuses fetched and paginated into the list/board cache. `cancelled` is
- * included so cancelled issues always live in the cache (and rebucket
- * correctly when an issue is cancelled); the surface hides them by default and
- * only renders a Cancelled section when the status filter explicitly selects
- * it. `BOARD_STATUSES` stays the default *visible* column set — this constant
- * governs fetch/cache membership, not what the board shows.
+ * Statuses fetched and paginated into the list/board cache — every lifecycle
+ * status, `cancelled` included. `cancelled` is a first-class default status
+ * (MUL-4290), so it lives in the cache and renders like any other column;
+ * there is no separate "visible board" subset. This constant governs
+ * fetch/cache membership.
  */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = [
-  ...BOARD_STATUSES,
-  "cancelled",
-];
+export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
