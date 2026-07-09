@@ -329,19 +329,34 @@ WHERE issue_id = @issue_id
 ORDER BY created_at DESC
 LIMIT 1;
 
--- name: ListMemberCommentsForIssueSince :many
--- MUL-4195 completion reconciliation: every MEMBER-authored comment on an issue
--- created strictly after @since (a run's dispatched_at anchor), oldest first.
--- The reconcile pass replays each undelivered one through the normal trigger
--- pipeline so a single coalesced follow-up run covers all of them, guaranteeing
--- at-least-once processing for deliberate user input that landed after the
--- completing run's claim response was built. Restricted to author_type =
--- 'member' to preserve the anti-loop guarantees (agent replies /
--- acknowledgements / self-triggers never qualify). Ordered ASC so replaying in
--- order lets later comments coalesce onto the follow-up created by the first.
+-- name: ListReconcilableCommentsForIssueSince :many
+-- MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
+-- comment on an issue created strictly after @since (the completing run's
+-- created_at anchor), oldest first. The reconcile pass replays each undelivered
+-- one through the normal trigger pipeline so a single coalesced follow-up run
+-- covers all of them, guaranteeing at-least-once processing for input that
+-- landed after the completing run's claim response was built.
+--
+-- Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
+-- That left a gap — an explicit agent→agent @mention (agent A comments
+-- `@agent B`) that landed while B already had a dispatched/running task was
+-- dropped by the enqueue path (merge only folds into a QUEUED task) and then
+-- never compensated here, because agent-authored comments were excluded. We now
+-- also return 'agent' comments so those explicit mentions can be replayed.
+--
+-- This does NOT reopen the anti-loop guarantees the member-only filter was
+-- protecting: the reconcile pass runs each returned comment through
+-- computeCommentAgentTriggers with the comment's OWN author_type, and for an
+-- agent author that function only ever produces triggers for explicit
+-- @agent/@squad mentions (plus the narrow assigned-squad-leader fallback) — a
+-- plain agent reply / acknowledgement with no mention yields nothing. The
+-- reconcile pass further keeps only triggers routing to the agent that just
+-- completed, so an agent comment can never fan out to an unrelated agent.
+-- Ordered ASC so replaying in order lets later comments coalesce onto the
+-- follow-up created by the first.
 SELECT * FROM comment
 WHERE issue_id = @issue_id
-  AND author_type = 'member'
+  AND author_type IN ('member', 'agent')
   AND created_at > @since
 ORDER BY created_at ASC, id ASC;
 

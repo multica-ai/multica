@@ -2452,8 +2452,15 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // a delivered one.
 //
 // Scope + loop safety:
-//   - Only MEMBER comments qualify (agent replies / acknowledgements /
-//     self-triggers never do).
+//   - MEMBER comments qualify as before. AGENT comments now also qualify, but
+//     ONLY through their explicit routing: computeCommentAgentTriggers run under
+//     author_type = 'agent' produces triggers solely for explicit @agent/@squad
+//     mentions (plus the narrow assigned-squad-leader fallback). A plain agent
+//     reply / acknowledgement / self-trigger with no mention yields nothing, so
+//     the anti-loop boundary the old member-only filter protected is preserved.
+//     This closes MUL-4304: an explicit agent→agent @mention that landed while
+//     the target had a dispatched/running task (merge only folds into a QUEUED
+//     task, so it was deferred here) is now compensated instead of dropped.
 //   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
 //     an `@other-agent` comment is left to that agent's own creation-time
 //     trigger, so a completion never re-wakes an unrelated agent.
@@ -2467,12 +2474,12 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
 	}
-	comments, err := h.Queries.ListMemberCommentsForIssueSince(ctx, db.ListMemberCommentsForIssueSinceParams{
+	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
 		IssueID: task.IssueID,
 		Since:   task.CreatedAt,
 	})
 	if err != nil {
-		slog.Warn("reconcile comments on completion: list member comments failed",
+		slog.Warn("reconcile comments on completion: list comments failed",
 			"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
 		return
 	}
@@ -2515,13 +2522,28 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				parentComment = &parent
 			}
 		}
-		// Members are their own originator. Compute what this comment would
-		// trigger, then keep ONLY the agent that just completed — never the
-		// full fan-out (that would re-wake unrelated `@other-agent` targets).
+		// Compute what this comment would trigger, then keep ONLY the agent
+		// that just completed — never the full fan-out (that would re-wake
+		// unrelated `@other-agent` targets).
+		//
+		// The comment is routed under its OWN author_type. A member is its own
+		// originator. For an agent author, the originator is the human at the
+		// top of that agent's trigger chain (resolved from the comment's source
+		// task); canInvokeAgent judges an agent→agent (A2A) mention by that
+		// originator, not the immediate agent principal (MUL-3963). Agent-authored
+		// comments only ever route via an explicit @agent/@squad mention (or the
+		// narrow assigned-squad-leader fallback), so a plain agent reply /
+		// acknowledgement contributes nothing here — the anti-loop boundary the
+		// old member-only filter protected is preserved (MUL-4304).
+		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
-		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, "member", actorID, commentTriggerComputeOptions{
+		originatorUserID := actorID
+		if actorType != "member" {
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, c.ID))
+		}
+		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
-			OriginatorUserID:        actorID,
+			OriginatorUserID:        originatorUserID,
 		})
 		scoped := make([]commentAgentTrigger, 0, 1)
 		for _, trigger := range triggers {
@@ -2543,7 +2565,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"issue_id", uuidToString(task.IssueID),
 			"completed_task_id", uuidToString(task.ID),
 			"agent_id", agentID,
-			"undelivered_member_comments", scheduled)
+			"undelivered_comments", scheduled)
 	}
 }
 

@@ -240,6 +240,157 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	}
 }
 
+// TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent is the
+// MUL-4304 regression test. Agent B is running on an issue when agent A posts a
+// comment that explicitly @-mentions B. At creation time B already has a
+// non-QUEUED (running/dispatched) task, so the enqueue path cannot fold the
+// comment into a queued task and defers it to completion reconcile. Before the
+// fix, reconcile listed only member comments, so A's agent-authored @B mention
+// was NEVER replayed and B was silently never re-woken for it. With the fix
+// (reconcile also considers agent-authored comments, scoped to the agent that
+// just ran and routed only via explicit mention), completing B's task must
+// enqueue exactly one follow-up for B.
+func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: get runtime: %v", err)
+	}
+	// Two workspace-invocable agents: A authors the mention, B is the target
+	// (and the agent whose run completes / reconciles).
+	agentA := createHandlerTestAgent(t, "Reconcile A2A Author A", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile A2A Target B", nil)
+
+	// Issue assigned to B so B's completion is the one that reconciles.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'reconcile-a2a-mention fixture', 'in_progress', 'none', $2, 'member', 999007, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// B's trigger comment, created before the run starts.
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: trigger comment: %v", err)
+	}
+
+	// A running task for B whose started_at is in the past.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	// An AGENT-authored comment posted DURING B's run that explicitly @-mentions
+	// B. This is the comment the old member-only reconcile would have dropped.
+	mention := "[@B](mention://agent/" + agentB + ") please also handle this"
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'agent', $3, $4, 'comment', now() - interval '1 minute')
+	`, issueID, testWorkspaceID, agentA, mention); err != nil {
+		t.Fatalf("setup: mid-run agent @B comment: %v", err)
+	}
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The explicit agent→agent @B mention must earn exactly one follow-up for B.
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentB); n != 1 {
+		t.Fatalf("expected exactly 1 follow-up for B from the agent-authored @B mention, got %d", n)
+	}
+	// A authored the comment but is not its target, so A must not be enqueued.
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentA); n != 0 {
+		t.Fatalf("comment author A must not be enqueued, got %d A task(s)", n)
+	}
+}
+
+// TestCompleteTask_DoesNotReconcilePlainAgentReply guards the anti-loop
+// boundary broadened in MUL-4304: an agent-authored comment with NO explicit
+// @mention (a plain reply / acknowledgement) must never earn a follow-up, even
+// though reconcile now considers agent comments. Only explicit routing counts.
+func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: get runtime: %v", err)
+	}
+	agentA := createHandlerTestAgent(t, "Reconcile PlainReply Author A", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile PlainReply Target B", nil)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, 'reconcile-plain-agent-reply fixture', 'in_progress', 'none', $2, 'member', 999008, 0, 'agent', $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: trigger comment: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		RETURNING id
+	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: running task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	// A plain agent-authored reply during B's run — NO mention of anyone.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'agent', $3, 'thanks, looks good to me', 'comment', now() - interval '1 minute')
+	`, issueID, testWorkspaceID, agentA); err != nil {
+		t.Fatalf("setup: plain agent reply: %v", err)
+	}
+
+	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentB); n != 0 {
+		t.Fatalf("a plain agent reply (no mention) must not enqueue a follow-up, got %d B task(s)", n)
+	}
+	if n := pendingTaskCountForAgentIssue(t, issueID, agentA); n != 0 {
+		t.Fatalf("a plain agent reply (no mention) must not enqueue a follow-up, got %d A task(s)", n)
+	}
+}
+
 // handlerWorkspaceMember inserts a fresh user + workspace member and returns
 // the user id (for a second distinct originator).
 func handlerWorkspaceMember(t *testing.T, slug string) string {
