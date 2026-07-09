@@ -23,6 +23,7 @@ import {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.1;
+const ROUNDED_SQUARE_CROP_AREA_STYLE = { borderRadius: "0.5rem" };
 
 export type AvatarCropShape = "circle" | "square";
 
@@ -138,6 +139,10 @@ export function AvatarCropDialog({
                 minZoom={MIN_ZOOM}
                 maxZoom={MAX_ZOOM}
                 cropShape={shape === "circle" ? "round" : "rect"}
+                style={{
+                  cropAreaStyle:
+                    shape === "circle" ? undefined : ROUNDED_SQUARE_CROP_AREA_STYLE,
+                }}
                 showGrid={false}
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
