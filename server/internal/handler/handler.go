@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -722,6 +723,9 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
+	if !strings.EqualFold(parts.prefix, h.getIssueDisplayPrefix(ctx, issue)) {
+		return db.Issue{}, false
+	}
 	return issue, true
 }
 
@@ -767,6 +771,36 @@ func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) s
 		return ws.IssuePrefix
 	}
 	return generateIssuePrefix(ws.Name)
+}
+
+func (h *Handler) getProjectIssuePrefixes(ctx context.Context, workspaceID pgtype.UUID, projectIDs []pgtype.UUID) map[string]string {
+	if len(projectIDs) == 0 {
+		return map[string]string{}
+	}
+	rows, err := h.Queries.ListProjectIssuePrefixes(ctx, db.ListProjectIssuePrefixesParams{
+		WorkspaceID: workspaceID,
+		ProjectIds:  projectIDs,
+	})
+	if err != nil {
+		slog.Warn("ListProjectIssuePrefixes failed", "error", err)
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.IssuePrefix.Valid && row.IssuePrefix.String != "" {
+			out[uuidToString(row.ID)] = row.IssuePrefix.String
+		}
+	}
+	return out
+}
+
+func (h *Handler) getIssueDisplayPrefix(ctx context.Context, issue db.Issue) string {
+	workspacePrefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	if !issue.ProjectID.Valid {
+		return workspacePrefix
+	}
+	projectPrefixes := h.getProjectIssuePrefixes(ctx, issue.WorkspaceID, []pgtype.UUID{issue.ProjectID})
+	return issueDisplayPrefix(issue, workspacePrefix, projectPrefixes)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

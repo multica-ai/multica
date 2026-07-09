@@ -16,9 +16,9 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, issue_prefix
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, NULLIF(sqlc.narg('issue_prefix'), '')
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -28,11 +28,19 @@ UPDATE project SET
     icon = sqlc.narg('icon'),
     status = COALESCE(sqlc.narg('status'), status),
     priority = COALESCE(sqlc.narg('priority'), priority),
+    issue_prefix = NULLIF(sqlc.narg('issue_prefix'), ''),
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListProjectIssuePrefixes :many
+SELECT id, issue_prefix FROM project
+WHERE workspace_id = $1
+  AND id = ANY(sqlc.arg('project_ids')::uuid[])
+  AND issue_prefix IS NOT NULL
+  AND issue_prefix <> '';
 
 -- name: DeleteProject :exec
 -- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.

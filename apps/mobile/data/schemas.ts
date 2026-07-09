@@ -196,6 +196,7 @@ export const EMPTY_PROJECT: Project = {
   priority: "none",
   lead_type: null,
   lead_id: null,
+  issue_prefix: "",
   created_at: "",
   updated_at: "",
   issue_count: 0,

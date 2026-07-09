@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,7 @@ type ProjectResponse struct {
 	Icon        *string `json:"icon"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
+	IssuePrefix *string `json:"issue_prefix"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
 	CreatedAt   string  `json:"created_at"`
@@ -48,6 +50,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Icon:        textToPtr(p.Icon),
 		Status:      p.Status,
 		Priority:    p.Priority,
+		IssuePrefix: textToPtr(p.IssuePrefix),
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
 		CreatedAt:   timestampToString(p.CreatedAt),
@@ -77,6 +80,7 @@ type CreateProjectRequest struct {
 	Icon        *string                               `json:"icon"`
 	Status      string                                `json:"status"`
 	Priority    string                                `json:"priority"`
+	IssuePrefix *string                               `json:"issue_prefix"`
 	LeadType    *string                               `json:"lead_type"`
 	LeadID      *string                               `json:"lead_id"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
@@ -98,6 +102,7 @@ type UpdateProjectRequest struct {
 	Icon        *string `json:"icon"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
+	IssuePrefix *string `json:"issue_prefix"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
 }
@@ -191,6 +196,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 // exact mismatch reported in #3925 (`--status active`).
 var validProjectStatuses = []string{"planned", "in_progress", "paused", "completed", "cancelled"}
 var validProjectPriorities = []string{"urgent", "high", "medium", "low", "none"}
+var projectIssuePrefixPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
 // validateProjectEnum writes a 400 and returns false when value is not in
 // allowed; the caller returns immediately on false.
@@ -201,6 +207,28 @@ func validateProjectEnum(w http.ResponseWriter, field, value string, allowed []s
 		}
 	}
 	writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", ")))
+	return false
+}
+
+func normalizeProjectIssuePrefix(raw *string) pgtype.Text {
+	if raw == nil {
+		return pgtype.Text{}
+	}
+	prefix := strings.ToUpper(strings.TrimSpace(*raw))
+	if prefix == "" {
+		return pgtype.Text{String: "", Valid: true}
+	}
+	return pgtype.Text{String: prefix, Valid: true}
+}
+
+func validateProjectIssuePrefix(w http.ResponseWriter, prefix pgtype.Text) bool {
+	if !prefix.Valid || prefix.String == "" {
+		return true
+	}
+	if projectIssuePrefixPattern.MatchString(prefix.String) {
+		return true
+	}
+	writeError(w, http.StatusBadRequest, "invalid issue_prefix; use 2-10 uppercase letters or digits, starting with a letter")
 	return false
 }
 
@@ -246,6 +274,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		priority = "none"
 	}
 	if !validateProjectEnum(w, "priority", priority, validProjectPriorities) {
+		return
+	}
+	issuePrefix := normalizeProjectIssuePrefix(req.IssuePrefix)
+	if !validateProjectIssuePrefix(w, issuePrefix) {
 		return
 	}
 	var leadType pgtype.Text
@@ -310,6 +342,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
+		IssuePrefix: issuePrefix,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -441,6 +474,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		Icon:        prevProject.Icon,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
+		IssuePrefix: prevProject.IssuePrefix,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -456,6 +490,12 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
+	}
+	if _, ok := rawFields["issue_prefix"]; ok {
+		params.IssuePrefix = normalizeProjectIssuePrefix(req.IssuePrefix)
+		if !validateProjectIssuePrefix(w, params.IssuePrefix) {
+			return
+		}
 	}
 	if _, ok := rawFields["description"]; ok {
 		if req.Description != nil {

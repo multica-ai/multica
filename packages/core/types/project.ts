@@ -10,6 +10,7 @@ export interface Project {
   icon: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
+  issue_prefix: string | null;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
   created_at: string;
@@ -25,6 +26,7 @@ export interface CreateProjectRequest {
   icon?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  issue_prefix?: string;
   lead_type?: "member" | "agent";
   lead_id?: string;
   // Resources to attach in the same transaction as the project. Server returns
@@ -38,6 +40,7 @@ export interface UpdateProjectRequest {
   icon?: string | null;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  issue_prefix?: string | null;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
 }
