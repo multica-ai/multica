@@ -181,6 +181,52 @@ func TestSendChatMessage_RestoresExistingSessionRuntime(t *testing.T) {
 	}
 }
 
+func TestSendChatMessageGoalDirectivePersistsExecutionMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "ChatGoalDirectiveAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content": "/goal\n\nInvestigate the failing test and fix it.",
+	})
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp SendChatMessageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode send response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, resp.TaskID)
+	})
+
+	var executionMode, messageContent string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT atq.execution_mode, cm.content
+		   FROM agent_task_queue atq
+		   JOIN chat_message cm ON cm.task_id = atq.id
+		  WHERE atq.id = $1`,
+		resp.TaskID,
+	).Scan(&executionMode, &messageContent); err != nil {
+		t.Fatalf("load chat task/message: %v", err)
+	}
+	if executionMode != "goal" {
+		t.Fatalf("execution_mode = %q, want goal", executionMode)
+	}
+	if messageContent != "Investigate the failing test and fix it." {
+		t.Fatalf("message content = %q, want stripped prompt", messageContent)
+	}
+}
+
 // TestSendChatMessage_LinksAttachments verifies that attachments uploaded
 // against a chat_session (chat_message_id NULL) are back-filled with the
 // message_id when SendChatMessage receives the matching attachment_ids.

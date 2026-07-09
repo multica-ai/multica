@@ -33,6 +33,7 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	ResumeSessionID           string          // if non-empty, resume a previous agent session
+	ExecutionMode             string          // "goal" enables provider-native or prompt-contract goal execution for this task
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config

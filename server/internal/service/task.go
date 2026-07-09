@@ -464,15 +464,19 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, noImplicitRuntimeRequester(), pgtype.UUID{})
+	return s.enqueueIssueTask(ctx, issue, commentID, false, noImplicitRuntimeRequester(), pgtype.UUID{}, TaskExecutionModeNormal)
 }
 
 func (s *TaskService) EnqueueTaskForIssueByRequester(ctx context.Context, issue db.Issue, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForIssueByRequesterWithExecutionMode(ctx, issue, requesterID, selectedRuntimeID, TaskExecutionModeNormal, triggerCommentID...)
+}
+
+func (s *TaskService) EnqueueTaskForIssueByRequesterWithExecutionMode(ctx context.Context, issue db.Issue, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID, executionMode string, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	var commentID pgtype.UUID
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, requesterID, selectedRuntimeID)
+	return s.enqueueIssueTask(ctx, issue, commentID, false, requesterID, selectedRuntimeID, executionMode)
 }
 
 func (s *TaskService) ResolveRuntimeForIssueByRequester(ctx context.Context, issue db.Issue, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID) (db.AgentRuntime, error) {
@@ -498,7 +502,7 @@ func (s *TaskService) ResolveRuntimeForAgentByRequester(ctx context.Context, wor
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID, executionMode string) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -527,6 +531,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		ExecutionMode:     taskExecutionModeParam(executionMode),
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -554,11 +559,15 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, noImplicitRuntimeRequester(), pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, noImplicitRuntimeRequester(), pgtype.UUID{}, TaskExecutionModeNormal)
 }
 
 func (s *TaskService) EnqueueTaskForMentionByRequester(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, requesterID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, requesterID, pgtype.UUID{})
+	return s.EnqueueTaskForMentionByRequesterWithExecutionMode(ctx, issue, agentID, triggerCommentID, requesterID, TaskExecutionModeNormal)
+}
+
+func (s *TaskService) EnqueueTaskForMentionByRequesterWithExecutionMode(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, requesterID pgtype.UUID, executionMode string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, requesterID, pgtype.UUID{}, executionMode)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -568,18 +577,22 @@ func (s *TaskService) EnqueueTaskForMentionByRequester(ctx context.Context, issu
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, noImplicitRuntimeRequester(), pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, noImplicitRuntimeRequester(), pgtype.UUID{}, TaskExecutionModeNormal)
 }
 
 func (s *TaskService) EnqueueTaskForSquadLeaderByRequester(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID, requesterID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.EnqueueTaskForSquadLeaderByRequesterWithRuntime(ctx, issue, leaderID, triggerCommentID, requesterID, pgtype.UUID{})
+	return s.EnqueueTaskForSquadLeaderByRequesterWithExecutionMode(ctx, issue, leaderID, triggerCommentID, requesterID, TaskExecutionModeNormal)
+}
+
+func (s *TaskService) EnqueueTaskForSquadLeaderByRequesterWithExecutionMode(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID, requesterID pgtype.UUID, executionMode string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, requesterID, pgtype.UUID{}, executionMode)
 }
 
 func (s *TaskService) EnqueueTaskForSquadLeaderByRequesterWithRuntime(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, requesterID, selectedRuntimeID)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, requesterID, selectedRuntimeID, TaskExecutionModeNormal)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, requesterID pgtype.UUID, selectedRuntimeID pgtype.UUID, executionMode string) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -604,6 +617,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		ExecutionMode:     taskExecutionModeParam(executionMode),
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -700,6 +714,9 @@ func (e *QuickCreateDaemonVersionError) Unwrap() error {
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, selectedRuntimeID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	directive := ParseTaskPromptDirectives(prompt)
+	prompt = directive.Prompt
+
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -744,10 +761,11 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		AgentID:   agentID,
-		RuntimeID: runtime.ID,
-		Priority:  priorityToInt("high"),
-		Context:   contextJSON,
+		AgentID:       agentID,
+		RuntimeID:     runtime.ID,
+		Priority:      priorityToInt("high"),
+		Context:       contextJSON,
+		ExecutionMode: taskExecutionModeParam(directive.ExecutionMode),
 	})
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
@@ -831,6 +849,10 @@ var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 // latest message in the silence window. Stored on the task so the daemon brief
 // can attribute the run to the right person. See MUL-2645.
 func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueChatTaskWithExecutionMode(ctx, chatSession, initiatorUserID, TaskExecutionModeNormal)
+}
+
+func (s *TaskService) EnqueueChatTaskWithExecutionMode(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, executionMode string) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -854,6 +876,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		ChatSessionID:   chatSession.ID,
 		InitiatorUserID: initiatorUserID,
 		IssueID:         chatSession.IssueID,
+		ExecutionMode:   taskExecutionModeParam(executionMode),
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1830,9 +1853,9 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, reque
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, requesterID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, requesterID, pgtype.UUID{})
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, requesterID, pgtype.UUID{}, TaskExecutionModeNormal)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, requesterID, pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, requesterID, pgtype.UUID{}, TaskExecutionModeNormal)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

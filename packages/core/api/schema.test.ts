@@ -200,10 +200,34 @@ describe("ApiClient schema fallback", () => {
       expect(tasks[0]?.runtime_id).toBe("");
       expect(tasks[0]?.id).toBe("task-1");
       expect(tasks[0]?.status).toBe("running");
+      expect(tasks[0]?.execution_mode).toBe("normal");
       const rawTask = tasks[0] as unknown as Record<string, unknown>;
       expect("connection_credentials" in rawTask).toBe(false);
       expect("daemon_operation" in rawTask).toBe(false);
       expect("runtime_detail_url" in rawTask).toBe(false);
+    });
+
+    it("preserves task execution mode when present", async () => {
+      stubFetchJson([
+        {
+          id: "task-goal",
+          agent_id: "agent-1",
+          runtime_id: "runtime-private",
+          issue_id: "issue-1",
+          execution_mode: "goal",
+          status: "queued",
+          priority: 0,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: null,
+          result: null,
+          error: null,
+          created_at: "2026-06-20T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const tasks = await client.getAgentTaskSnapshot();
+      expect(tasks[0]?.execution_mode).toBe("goal");
     });
 
     it("redacts runtime fields from issue task history", async () => {

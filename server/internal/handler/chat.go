@@ -422,6 +422,12 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	directive := service.ParseTaskPromptDirectives(req.Content)
+	req.Content = directive.Prompt
+	if req.Content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
 	// any state mutation. The actual link runs after CreateChatMessage so we
@@ -490,7 +496,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Enqueue a chat task after the message exists. For web chat the sender is
 	// the authenticated request user (sessions are creator-only), so they are
 	// the task initiator — surfaced to the agent under `## Task Initiator`.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
+	task, err := h.TaskService.EnqueueChatTaskWithExecutionMode(r.Context(), session, parseUUID(userID), directive.ExecutionMode)
 	if err != nil {
 		if reason, ok := runtimeResolveFailureReason(err); ok {
 			writeAgentUnavailable(w, reason)

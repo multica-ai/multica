@@ -280,3 +280,71 @@ func TestQuickCreateIssueDaemonVersionErrorDoesNotReturnRuntimeID(t *testing.T) 
 		t.Fatalf("min_version = %v, want %s", resp["min_version"], agent.MinQuickCreateCLIVersion)
 	}
 }
+
+func TestQuickCreateIssueGoalDirectivePersistsExecutionMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', $1::text) WHERE id = $2`,
+		agent.MinQuickCreateCLIVersion, runtimeID,
+	); err != nil {
+		t.Fatalf("bump runtime cli_version: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE agent_runtime SET metadata = '{}'::jsonb WHERE id = $1`, runtimeID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/quick-create", map[string]any{
+		"agent_id": agentID,
+		"prompt":   "/goal\n\nCreate a follow-up issue and verify it.",
+	})
+	testHandler.QuickCreateIssue(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp QuickCreateIssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, resp.TaskID)
+	})
+
+	var executionMode string
+	var contextJSON []byte
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT execution_mode, context FROM agent_task_queue WHERE id = $1`,
+		resp.TaskID,
+	).Scan(&executionMode, &contextJSON); err != nil {
+		t.Fatalf("load task row: %v", err)
+	}
+	if executionMode != "goal" {
+		t.Fatalf("execution_mode = %q, want goal", executionMode)
+	}
+	var qc service.QuickCreateContext
+	if err := json.Unmarshal(contextJSON, &qc); err != nil {
+		t.Fatalf("unmarshal context: %v", err)
+	}
+	if qc.Prompt != "Create a follow-up issue and verify it." {
+		t.Fatalf("quick-create prompt = %q, want stripped prompt", qc.Prompt)
+	}
+}

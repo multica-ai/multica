@@ -115,7 +115,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
-		err := writeClaudeInput(stdin, prompt)
+		err := writeClaudeInput(stdin, prompt, opts)
 		if err != nil {
 			closeStdin()
 		}
@@ -599,8 +599,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompt string) error {
-	data, err := buildClaudeInput(prompt)
+func writeClaudeInput(w io.Writer, prompt string, opts ExecOptions) error {
+	data, err := buildClaudeInput(prompt, opts)
 	if err != nil {
 		return err
 	}
@@ -610,7 +610,10 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-func buildClaudeInput(prompt string) ([]byte, error) {
+func buildClaudeInput(prompt string, opts ExecOptions) ([]byte, error) {
+	if opts.ExecutionMode == "goal" {
+		prompt = buildClaudeGoalPrompt(prompt)
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
@@ -628,6 +631,13 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 		return nil, fmt.Errorf("marshal claude input: %w", err)
 	}
 	return append(data, '\n'), nil
+}
+
+func buildClaudeGoalPrompt(prompt string) string {
+	return "# Execution mode: Goal\n\n" +
+		"Work until this goal is genuinely handled:\n" +
+		prompt +
+		"\n\nIf the goal is complete, say so in the final answer. If blocked, explain the blocking condition and what is needed next."
 }
 
 // resolveSessionID decides which session id to report on the Result. When the

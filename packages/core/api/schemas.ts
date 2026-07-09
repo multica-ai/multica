@@ -527,6 +527,7 @@ const AgentTaskResponseBaseSchema = z.object({
   agent_id: z.string().default(""),
   runtime_id: z.unknown().optional().transform(() => ""),
   issue_id: z.string().default(""),
+  execution_mode: z.enum(["normal", "goal"]).default("normal").catch("normal"),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),

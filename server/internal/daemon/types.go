@@ -51,6 +51,7 @@ type Task struct {
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext         string                `json:"workspace_context,omitempty"`
 	ThreadName               string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ExecutionMode            string                `json:"execution_mode,omitempty"`
 	Agent                    *AgentData            `json:"agent,omitempty"`
 	Repos                    []RepoData            `json:"repos,omitempty"`
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present

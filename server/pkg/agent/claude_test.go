@@ -480,7 +480,7 @@ func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	t.Parallel()
 
-	data, err := buildClaudeInput("say pong")
+	data, err := buildClaudeInput("say pong", ExecOptions{})
 	if err != nil {
 		t.Fatalf("buildClaudeInput: %v", err)
 	}
@@ -514,6 +514,37 @@ func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	}
 	if block["type"] != "text" || block["text"] != "say pong" {
 		t.Fatalf("unexpected content block: %v", block)
+	}
+}
+
+func TestBuildClaudeInputWrapsGoalExecutionMode(t *testing.T) {
+	t.Parallel()
+
+	data, err := buildClaudeInput("Implement login validation.", ExecOptions{ExecutionMode: "goal"})
+	if err != nil {
+		t.Fatalf("buildClaudeInput: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	message := payload["message"].(map[string]any)
+	content := message["content"].([]any)
+	block := content[0].(map[string]any)
+	text := block["text"].(string)
+
+	if !strings.Contains(text, "# Execution mode: Goal") {
+		t.Fatalf("goal contract missing from prompt: %q", text)
+	}
+	if !strings.Contains(text, "Work until this goal is genuinely handled:") {
+		t.Fatalf("goal objective contract missing from prompt: %q", text)
+	}
+	if !strings.Contains(text, "Implement login validation.") {
+		t.Fatalf("original prompt body missing from prompt: %q", text)
+	}
+	if strings.Contains(text, "/goal") {
+		t.Fatalf("provider prompt must not include directive line: %q", text)
 	}
 }
 

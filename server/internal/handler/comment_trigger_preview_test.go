@@ -124,6 +124,37 @@ func countQueuedCommentTriggerTasks(t *testing.T, issueID, agentID string) int {
 	return n
 }
 
+func TestCreateCommentGoalDirectivePersistsExecutionMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CommentGoalDirectiveAgent", []byte("[]"))
+	issueID := createCommentTriggerPreviewIssue(t, "comment goal directive", "", "")
+	content := fmt.Sprintf("/goal\n\n[@Agent](mention://agent/%s) fix the flaky test", agentID)
+
+	commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content": content,
+	})
+
+	var savedContent, executionMode string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT c.content, atq.execution_mode
+		  FROM comment c
+		  JOIN agent_task_queue atq ON atq.trigger_comment_id = c.id
+		 WHERE c.id = $1
+	`, commentID).Scan(&savedContent, &executionMode); err != nil {
+		t.Fatalf("load comment task: %v", err)
+	}
+	wantContent := fmt.Sprintf("[@Agent](mention://agent/%s) fix the flaky test", agentID)
+	if savedContent != wantContent {
+		t.Fatalf("comment content = %q, want stripped content %q", savedContent, wantContent)
+	}
+	if executionMode != "goal" {
+		t.Fatalf("execution_mode = %q, want goal", executionMode)
+	}
+}
+
 func createCommentTriggerPreviewSquad(t *testing.T, name, leaderID string) string {
 	t.Helper()
 

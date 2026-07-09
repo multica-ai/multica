@@ -3140,6 +3140,7 @@ type claimRuntimeGuardTask struct {
 	PriorWorkDir             string   `json:"prior_work_dir"`
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
+	ExecutionMode            string   `json:"execution_mode"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
 }
 
@@ -4169,6 +4170,27 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	}
 	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
 		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
+	}
+}
+
+func TestClaimTask_ReturnsExecutionMode(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, execution_mode)
+		VALUES ($1, $2, 'queued', 2, 'goal')
+	`, agentID, runtimeID); err != nil {
+		t.Fatalf("setup: create goal task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ExecutionMode != "goal" {
+		t.Fatalf("execution_mode = %q, want goal", task.ExecutionMode)
 	}
 }
 

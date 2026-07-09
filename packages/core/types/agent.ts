@@ -168,6 +168,8 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
+  /** Task-level execution mode. Missing from older backends, treated as normal. */
+  execution_mode?: "normal" | "goal";
   // `waiting_local_directory` is the daemon-emitted hold state for the
   // local_directory flow: a task that has been dispatched but is parked
   // because another task currently owns the same on-disk path lock.

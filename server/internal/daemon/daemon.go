@@ -48,6 +48,20 @@ const (
 	taskSlotCapacityBackoff = 5 * time.Second
 )
 
+func normalizeTaskExecutionMode(mode string, logger *slog.Logger) string {
+	switch mode {
+	case "", "normal":
+		return "normal"
+	case "goal":
+		return "goal"
+	default:
+		if logger != nil {
+			logger.Warn("unknown task execution_mode; falling back to normal", "execution_mode", mode)
+		}
+		return "normal"
+	}
+}
+
 func taskScopedAuthToken(task Task) (string, error) {
 	token := strings.TrimSpace(task.AuthToken)
 	if token == "" {
@@ -3560,6 +3574,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
 		ResumeSessionID:           task.PriorSessionID,
+		ExecutionMode:             normalizeTaskExecutionMode(task.ExecutionMode, taskLog),
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,

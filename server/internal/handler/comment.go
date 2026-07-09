@@ -898,6 +898,8 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	}
 
 	content := req.Content
+	directive := service.ParseTaskPromptDirectives(content)
+	content = directive.Prompt
 	if content == "" {
 		writeJSON(w, http.StatusOK, CommentTriggerPreviewResponse{Agents: []CommentTriggerAgentResponse{}})
 		return
@@ -930,6 +932,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	directive := service.ParseTaskPromptDirectives(req.Content)
+	req.Content = directive.Prompt
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
@@ -1064,7 +1068,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
-	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, parseUUID(userID), suppressAgentIDs)
+	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, parseUUID(userID), suppressAgentIDs, directive.ExecutionMode)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -1087,13 +1091,17 @@ func isNoteComment(content string) bool {
 	return strings.EqualFold(firstToken, noteCommentPrefix)
 }
 
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, requestUserID pgtype.UUID, suppressAgentIDs []pgtype.UUID) {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, requestUserID pgtype.UUID, suppressAgentIDs []pgtype.UUID, executionMode ...string) {
 	if isNoteComment(comment.Content) {
 		return
 	}
+	mode := service.TaskExecutionModeNormal
+	if len(executionMode) > 0 {
+		mode = executionMode[0]
+	}
 	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
-	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers, actorType, actorID, requestUserID)
+	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers, actorType, actorID, requestUserID, mode)
 }
 
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
@@ -1119,7 +1127,7 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 	return filtered
 }
 
-func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger, actorType, actorID string, requestUserID pgtype.UUID) {
+func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger, actorType, actorID string, requestUserID pgtype.UUID, executionMode string) {
 	requesterID := requestUserID
 	if actorType == "member" {
 		requesterID = parseUUID(actorID)
@@ -1128,7 +1136,7 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		switch trigger.Source {
 		case commentTriggerSourceIssueAssignee:
 			if trigger.Squad != nil {
-				if _, err := h.TaskService.EnqueueTaskForSquadLeaderByRequester(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID); err != nil {
+				if _, err := h.TaskService.EnqueueTaskForSquadLeaderByRequesterWithExecutionMode(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID, executionMode); err != nil {
 					slog.Warn("enqueue squad leader task failed",
 						"issue_id", uuidToString(issue.ID),
 						"squad_id", uuidToString(trigger.Squad.ID),
@@ -1137,18 +1145,18 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 				}
 				continue
 			}
-			if _, err := h.TaskService.EnqueueTaskForIssueByRequester(ctx, issue, requesterID, pgtype.UUID{}, triggerCommentID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForIssueByRequesterWithExecutionMode(ctx, issue, requesterID, pgtype.UUID{}, executionMode, triggerCommentID); err != nil {
 				slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 			}
 		case commentTriggerSourceMentionSquadLeader:
-			if _, err := h.TaskService.EnqueueTaskForSquadLeaderByRequester(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForSquadLeaderByRequesterWithExecutionMode(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID, executionMode); err != nil {
 				slog.Warn("enqueue squad leader mention task failed",
 					"issue_id", uuidToString(issue.ID),
 					"agent_id", uuidToString(trigger.Agent.ID),
 					"error", err)
 			}
 		case commentTriggerSourceMentionAgent:
-			if _, err := h.TaskService.EnqueueTaskForMentionByRequester(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForMentionByRequesterWithExecutionMode(ctx, issue, trigger.Agent.ID, triggerCommentID, requesterID, executionMode); err != nil {
 				slog.Warn("enqueue mention agent task failed",
 					"issue_id", uuidToString(issue.ID),
 					"agent_id", uuidToString(trigger.Agent.ID),
@@ -1517,6 +1525,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	directive := service.ParseTaskPromptDirectives(req.Content)
+	req.Content = directive.Prompt
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
@@ -1590,7 +1600,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, parseUUID(userID), suppressAgentIDs)
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, parseUUID(userID), suppressAgentIDs, directive.ExecutionMode)
 		}
 	}
 

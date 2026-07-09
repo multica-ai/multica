@@ -38,6 +38,7 @@ describe("mobile task audit schemas", () => {
     ]);
 
     expect(tasks[0]?.runtime_id).toBe("");
+    expect(tasks[0]?.execution_mode).toBe("normal");
     const rawTask = tasks[0] as unknown as Record<string, unknown>;
     expect("work_dir" in rawTask).toBe(false);
     expect("prior_work_dir" in rawTask).toBe(false);
@@ -53,6 +54,28 @@ describe("mobile task audit schemas", () => {
     expect(steps[1]?.name).toBe("unsafe");
     expect("daemon_operation_params" in steps[1]!).toBe(false);
     expect("daemonOperationParams" in steps[1]!).toBe(false);
+  });
+
+  it("preserves task execution mode when present", () => {
+    const tasks = AgentTaskListSchema.parse([
+      {
+        id: "task-goal",
+        agent_id: "agent-1",
+        runtime_id: "runtime-private",
+        issue_id: "issue-1",
+        execution_mode: "goal",
+        status: "queued",
+        priority: 0,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-06-20T00:00:00Z",
+      },
+    ]);
+
+    expect(tasks[0]?.execution_mode).toBe("goal");
   });
 
   it("redacts runtime invocation fields from task message inputs", () => {

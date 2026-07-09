@@ -1060,6 +1060,87 @@ func TestCodexStartOrResumeThreadNameFailureDoesNotBlock(t *testing.T) {
 	}
 }
 
+func TestCodexTrySetThreadGoalSendsGoalRPC(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/goal/set",
+			result: json.RawMessage(`{}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["threadId"] != "thr_goal" {
+					t.Fatalf("threadId = %v, want thr_goal", params["threadId"])
+				}
+				if params["objective"] != "Implement login validation." {
+					t.Fatalf("objective = %v, want stripped task prompt", params["objective"])
+				}
+				if params["status"] != "active" {
+					t.Fatalf("status = %v, want active", params["status"])
+				}
+				if _, ok := params["tokenBudget"]; !ok {
+					t.Fatal("tokenBudget key missing")
+				}
+				if params["tokenBudget"] != nil {
+					t.Fatalf("tokenBudget = %v, want null", params["tokenBudget"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	c.trySetThreadGoal(
+		context.Background(),
+		"thr_goal",
+		"Implement login validation.",
+		ExecOptions{ExecutionMode: "goal"},
+		slog.Default(),
+	)
+}
+
+func TestCodexTrySetThreadGoalSkipsNormalMode(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, nil)
+	defer wait()
+
+	c.trySetThreadGoal(
+		context.Background(),
+		"thr_normal",
+		"Implement login validation.",
+		ExecOptions{},
+		slog.Default(),
+	)
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("normal mode wrote RPC calls: %v", lines)
+	}
+}
+
+func TestCodexTrySetThreadGoalFailureDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:  "thread/goal/set",
+			errMsg:  "unsupported method",
+			errCode: -32601,
+		},
+	})
+	defer wait()
+
+	c.trySetThreadGoal(
+		context.Background(),
+		"thr_goal",
+		"Implement login validation.",
+		ExecOptions{ExecutionMode: "goal"},
+		slog.Default(),
+	)
+}
+
 func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	t.Parallel()
 

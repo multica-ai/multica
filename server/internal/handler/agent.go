@@ -239,6 +239,7 @@ type AgentTaskResponse struct {
 	// shared context. Empty when the workspace owner hasn't set it.
 	WorkspaceContext string                `json:"workspace_context,omitempty"`
 	ThreadName       string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ExecutionMode    string                `json:"execution_mode"`
 	Status           string                `json:"status"`
 	Priority         int32                 `json:"priority"`
 	DispatchedAt     *string               `json:"dispatched_at"`
@@ -387,6 +388,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),
 		WorkspaceID:      workspaceID,
+		ExecutionMode:    taskResponseExecutionMode(t.ExecutionMode),
 		Status:           t.Status,
 		Priority:         t.Priority,
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),
@@ -410,6 +412,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 	}
+}
+
+func taskResponseExecutionMode(mode string) string {
+	if mode == "goal" {
+		return "goal"
+	}
+	return "normal"
 }
 
 func taskToAuditResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
