@@ -68,6 +68,9 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	if err := os.MkdirAll(projectDataDir, 0o700); err != nil {
 		return "", fmt.Errorf("create cursor project data dir: %w", err)
 	}
+	if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
+		return "", err
+	}
 	approvals, err := cursorMcpApprovalKeys(projectRoot, servers)
 	if err != nil {
 		return "", err
@@ -105,14 +108,19 @@ func seedCursorMcpAuthFile(projectDataDir, source string) error {
 		return err
 	}
 	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
-	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove prior cursor mcp auth link: %w", err)
-	}
 	if err := os.Symlink(sourcePath, target); err == nil {
 		return nil
 	}
 	if err := copyCursorMcpAuthFile(target, sourcePath); err != nil {
 		return fmt.Errorf("seed cursor mcp auth file: %w", err)
+	}
+	return nil
+}
+
+func removeCursorMcpAuthFile(projectDataDir string) error {
+	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
+	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove prior cursor mcp auth file: %w", err)
 	}
 	return nil
 }
