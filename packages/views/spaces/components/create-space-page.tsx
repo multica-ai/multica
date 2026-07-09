@@ -28,9 +28,6 @@ import { PageHeader } from "../../layout/page-header";
 import { SpaceIcon } from "./space-icon";
 import { useT } from "../../i18n";
 
-const underline =
-  "rounded-none border-0 border-b border-input bg-transparent dark:bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground";
-
 /**
  * Create-space page — /space/new, a static sibling of /space/:key ("new" is
  * a reserved space key so it can never collide with a real space's detail
@@ -118,10 +115,14 @@ export function CreateSpacePage() {
         <form
           onSubmit={submit}
           autoComplete="off"
-          className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8"
+          className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8"
         >
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3">
+          {/* Name + icon */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="space-name" className="text-xs font-medium text-muted-foreground">
+              {t(($) => $.form.name)}
+            </Label>
+            <div className="flex items-center gap-2">
               {/* Icon is emoji-only — picked, never typed. */}
               <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
                 <PopoverTrigger
@@ -129,11 +130,11 @@ export function CreateSpacePage() {
                     <button
                       type="button"
                       aria-label={t(($) => $.form.icon)}
-                      className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-muted/60 text-2xl transition-colors hover:bg-accent"
+                      className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-muted/40 text-xl transition-colors hover:bg-accent"
                     />
                   }
                 >
-                  {icon || <SpaceIcon space={{ icon: null }} className="size-5" />}
+                  {icon || <SpaceIcon space={{ icon: null }} className="size-4" />}
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-auto p-0">
                   <EmojiPicker
@@ -144,39 +145,40 @@ export function CreateSpacePage() {
                   />
                 </PopoverContent>
               </Popover>
-              <div className="min-w-0 flex-1">
-                <Input
-                  autoFocus
-                  aria-label={t(($) => $.form.name)}
-                  value={name}
-                  onChange={(event) => handleNameChange(event.target.value)}
-                  onBlur={() => setNameTouched(true)}
-                  placeholder={t(($) => $.form.name_placeholder)}
-                  className="h-auto rounded-none border-0 bg-transparent px-0 py-1 !text-2xl font-bold leading-snug tracking-tight shadow-none focus-visible:ring-0 dark:bg-transparent"
-                />
-              </div>
+              <Input
+                id="space-name"
+                autoFocus
+                aria-label={t(($) => $.form.name)}
+                value={name}
+                onChange={(event) => handleNameChange(event.target.value)}
+                onBlur={() => setNameTouched(true)}
+                aria-invalid={nameError}
+                placeholder={t(($) => $.form.name_placeholder)}
+                className="flex-1"
+              />
             </div>
-            {/* pl-[52px] = icon (size-10) + row gap-3, so this lines up under the name input, not the icon.
-                Always mounted (visibility toggled, not conditionally rendered) so the row below doesn't jump. */}
-            <p
-              className={cn(
-                "pl-[52px] text-xs text-destructive",
-                nameError ? "visible" : "invisible",
-              )}
-            >
-              {t(($) => $.dialog.name_required)}
-            </p>
+            {nameError && (
+              <p className="text-xs text-destructive">{t(($) => $.dialog.name_required)}</p>
+            )}
+          </div>
+
+          {/* Description */}
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t(($) => $.form.description)}
+            </Label>
             <PlainTextField
               defaultValue={description}
               placeholder={t(($) => $.form.description_placeholder)}
               aria-label={t(($) => $.form.description)}
-              className="text-sm text-muted-foreground"
+              className="min-h-16 rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring"
               limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
               onCommit={setDescription}
             />
           </div>
 
-          <div className="space-y-1.5">
+          {/* Identifier */}
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="space-key" className="text-xs font-medium text-muted-foreground">
               {t(($) => $.form.key)}
             </Label>
@@ -188,9 +190,10 @@ export function CreateSpacePage() {
                 setKeyTouched(true);
               }}
               onBlur={() => setKeyTouched(true)}
+              aria-invalid={keyError}
               placeholder="ENG"
               maxLength={7}
-              className={cn(underline, "max-w-40 font-mono", keyError && "border-destructive")}
+              className="max-w-40 font-mono"
             />
             <p className={cn("text-xs", keyError ? "text-destructive" : "text-muted-foreground")}>
               {keyError && keyReserved
@@ -201,9 +204,10 @@ export function CreateSpacePage() {
             </p>
           </div>
 
+          {/* Members — renders its own label. */}
           <MembersField memberIds={memberIds} onChange={setMemberIds} />
 
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-2">
             <Button type="submit" disabled={!canSubmit}>
               {submitting ? t(($) => $.actions.saving) : t(($) => $.actions.save)}
             </Button>
@@ -310,7 +314,8 @@ function MembersField({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t(($) => $.dialog.member_search)}
-              className={cn(underline, "pl-6")}
+              variant="underline"
+              className="pl-6"
             />
           </div>
           <div className="max-h-64 min-h-0 overflow-y-auto overflow-x-hidden">

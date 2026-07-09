@@ -266,6 +266,8 @@
     "cta_create_named": "创建 {{name}}",
     "cta_create_workspace": "创建工作区",
     "cta_creating": "创建中...",
+    "name_required": "请输入工作区名称",
+    "slug_required": "请输入 URL",
     "slug_format_error": "只能包含小写字母、数字和连字符",
     "slug_taken_error": "该工作区 URL 已被占用。",
     "slug_reserved_error": "该工作区 URL 是系统保留的，无法使用。",

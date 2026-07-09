@@ -79,6 +79,7 @@ type TaskContextForEnv struct {
 	SpaceID                 string                  // issue/autopilot/quick-create Space — always set for issue-bound tasks
 	SpaceKey                string                  // Space issue namespace key, e.g. MUL
 	SpaceName               string                  // human-readable Space name
+	SpaceDescription        string                  // durable Space-level context, rendered into the brief's Space Context section
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title
 	ProjectDescription      string                  // durable project-level context, rendered into the brief's Project Context section

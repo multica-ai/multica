@@ -266,6 +266,8 @@
     "cta_create_named": "{{name}} を作成",
     "cta_create_workspace": "ワークスペースを作成",
     "cta_creating": "作成中…",
+    "name_required": "ワークスペース名を入力してください",
+    "slug_required": "URL を入力してください",
     "slug_format_error": "使用できるのは小文字、数字、ハイフンのみです",
     "slug_taken_error": "そのワークスペース URL はすでに使われています。",
     "slug_reserved_error": "そのワークスペース URL は予約済みのため使用できません。",

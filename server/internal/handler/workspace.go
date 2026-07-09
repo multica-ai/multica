@@ -28,12 +28,21 @@ var reservedSpaceKeys = map[string]struct{}{
 	"NEW": {},
 }
 
-// defaultSpaceKeyFromSlug derives the default space key by normalizing the
-// slug: the first 7 usable characters, so workspace "naiyuan" gets NAIYUAN.
+// defaultSpaceKeyFromSlug derives the default space key from the slug: the
+// first 7 usable characters, so workspace "naiyuan" gets NAIYUAN. Unlike
+// normalizeSpaceKey (the legacy-data mirror), it does NOT coerce digit-leading
+// or empty input with a mystery "T" prefix — an onboarding-derived key should
+// read cleanly or fall back to a readable "SPACE" (the same fallback migration
+// 131 uses). This matches the create-space page, which leaves an underivable
+// key blank for manual entry rather than seeding an invalid one.
 func defaultSpaceKeyFromSlug(slug string) string {
-	key := normalizeSpaceKey(slug)
-	if key == "" {
-		return "T"
+	key := nonSpaceKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(slug)), "")
+	if len(key) > 7 {
+		key = key[:7]
+	}
+	// Empty or digit-leading (both fail validSpaceKey) → readable default.
+	if !validSpaceKey(key) {
+		return "SPACE"
 	}
 	return key
 }
@@ -305,6 +314,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 type UpdateWorkspaceRequest struct {
 	Name        *string `json:"name"`
+	Slug        *string `json:"slug"`
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
@@ -378,6 +388,22 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		params.Name = pgtype.Text{String: name, Valid: true}
 	}
+	if req.Slug != nil {
+		slug := strings.ToLower(strings.TrimSpace(*req.Slug))
+		if slug == "" {
+			writeError(w, http.StatusBadRequest, "slug is required")
+			return
+		}
+		if !workspaceSlugPattern.MatchString(slug) {
+			writeError(w, http.StatusBadRequest, "slug must match ^[a-z0-9]+(?:-[a-z0-9]+)*$")
+			return
+		}
+		if isReservedSlug(slug) {
+			writeError(w, http.StatusBadRequest, "slug is reserved")
+			return
+		}
+		params.Slug = pgtype.Text{String: slug, Valid: true}
+	}
 	if req.Description != nil {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
@@ -433,10 +459,6 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: idUUID,
 			Key:         params.IssuePrefix,
 		}); spaceErr != nil {
-			if spaceErr == errSpaceKeyFrozen {
-				writeError(w, http.StatusConflict, "space identifier cannot be changed after issues have been created")
-				return
-			}
 			if isUniqueViolation(spaceErr) || isCheckViolation(spaceErr) {
 				writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
 				return
@@ -452,6 +474,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		ws, err = h.Queries.UpdateWorkspace(r.Context(), params)
 	}
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "workspace slug already exists")
+			return
+		}
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
 		return

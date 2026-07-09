@@ -20,6 +20,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { projectListOptions } from "@multica/core/projects/queries";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { sanitizeSpaceKeyInput, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
 import type { Space } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -32,20 +33,17 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { SpaceIcon } from "./space-icon";
 import { useT } from "../../i18n";
-
-// Underline style for the member search field inside the config popover.
-const underline =
-  "rounded-none border-0 border-b border-input bg-transparent dark:bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:border-foreground";
 
 /**
  * Space detail — /space/:key, the sidebar space row's landing page. A single
@@ -101,14 +99,31 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
  */
 function Identity({ space }: { space: Space }) {
   const { t } = useT("spaces");
+  const wsId = useWorkspaceId();
+  const { role } = useCurrentMember(wsId);
+  const isAdmin = role === "owner" || role === "admin";
+  const navigation = useNavigation();
+  const p = useWorkspacePaths();
   const updateSpace = useUpdateSpace();
   const [name, setName] = useState(space.name);
+  const [keyDraft, setKeyDraft] = useState(space.key);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
 
   // Re-seed when navigating between spaces (or after a save round-trips).
   useEffect(() => {
     setName(space.name);
-  }, [space.id, space.name]);
+    setKeyDraft(space.key);
+  }, [space.id, space.name, space.key]);
+
+  // The Identifier doubles as the issue-number prefix (ENG-1) and is the
+  // workspace-wide issue namespace, so key changes are admin-only. Renaming a
+  // space that already has issues is allowed — the server records aliases so
+  // old OLDKEY-N references keep resolving — but we confirm first (below).
+  const canEditKey = isAdmin;
+  const keyReserved = RESERVED_SPACE_KEYS.has(keyDraft);
+  const keyStartsWithDigit = /^[0-9]/.test(keyDraft);
+  const keyError = keyDraft.length > 0 && !isValidSpaceKey(keyDraft);
 
   const saveField = async (patch: { name?: string; icon?: string | null; description?: string }) => {
     try {
@@ -128,6 +143,36 @@ function Identity({ space }: { space: Space }) {
       return;
     }
     if (next !== space.name) void saveField({ name: next });
+  };
+
+  const doRename = async (nextKey: string) => {
+    try {
+      await updateSpace.mutateAsync({ id: space.id, key: nextKey });
+      toast.success(t(($) => $.toast_updated));
+      // The Identifier is the space's URL segment — move to the new URL so
+      // the current /space/:key route keeps resolving.
+      navigation.replace(p.spaceDetail(nextKey));
+    } catch (err) {
+      setKeyDraft(space.key);
+      toast.error(
+        err instanceof Error && err.message ? err.message : t(($) => $.toast_save_failed),
+      );
+    }
+  };
+
+  const commitKey = () => {
+    if (!canEditKey) return;
+    if (!isValidSpaceKey(keyDraft) || keyDraft === space.key) {
+      setKeyDraft(space.key);
+      return;
+    }
+    // A rename rewrites every issue identifier in the space, so confirm first
+    // when the space already holds issues. Keep the field on the pending value.
+    if (space.issue_counter > 0) {
+      setPendingKey(keyDraft);
+      return;
+    }
+    void doRename(keyDraft);
   };
 
   return (
@@ -181,6 +226,77 @@ function Identity({ space }: { space: Space }) {
         limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
         onCommit={(value) => void saveField({ description: value })}
       />
+      <div className="flex flex-col gap-1 pt-1">
+        <Label htmlFor="space-key" className="text-xs font-medium text-muted-foreground">
+          {t(($) => $.form.key)}
+        </Label>
+        <Input
+          id="space-key"
+          value={keyDraft}
+          onChange={(event) => setKeyDraft(sanitizeSpaceKeyInput(event.target.value))}
+          onBlur={commitKey}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setKeyDraft(space.key);
+              event.currentTarget.blur();
+            }
+          }}
+          disabled={!canEditKey}
+          maxLength={7}
+          placeholder={space.key}
+          variant="underline"
+          className={cn("max-w-40 font-mono", keyError && "border-destructive")}
+        />
+        <p className={cn("text-xs", keyError ? "text-destructive" : "text-muted-foreground")}>
+          {keyError && keyReserved
+            ? t(($) => $.form.key_reserved)
+            : keyError && keyStartsWithDigit
+              ? t(($) => $.form.key_start_letter)
+              : t(($) => $.form.key_hint)}
+        </p>
+      </div>
+
+      <Dialog
+        open={pendingKey !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingKey(null);
+            setKeyDraft(space.key);
+          }
+        }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogTitle>{t(($) => $.form.key_rename_confirm_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.form.key_rename_confirm_body, {
+              count: space.issue_counter,
+              oldKey: space.key,
+              newKey: pendingKey ?? "",
+            })}
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingKey(null);
+                setKeyDraft(space.key);
+              }}
+            >
+              {t(($) => $.actions.cancel)}
+            </Button>
+            <Button
+              onClick={() => {
+                const next = pendingKey;
+                setPendingKey(null);
+                if (next) void doRename(next);
+              }}
+            >
+              {t(($) => $.actions.save)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -323,7 +439,8 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t(($) => $.dialog.member_search)}
-              className={cn(underline, "pl-6")}
+              variant="underline"
+              className="pl-6"
             />
           </div>
           <div className="max-h-64 min-h-0 overflow-y-auto overflow-x-hidden">
@@ -477,15 +594,16 @@ function ArchiveSection({
           but disabled with the reason, so users learn the rule instead of
           wondering where the action went. */}
       <Tooltip>
-        <TooltipTrigger render={<span className="-mx-1.5 inline-flex w-fit" />}>
-          <button
+        <TooltipTrigger render={<span className="inline-flex w-fit" />}>
+          <Button
             type="button"
+            variant="destructive"
+            size="sm"
             disabled={blockedReason !== null}
             onClick={() => setConfirmOpen(true)}
-            className="flex items-center rounded-md px-1.5 py-1 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {t(($) => $.actions.archive)}
-          </button>
+          </Button>
         </TooltipTrigger>
         {blockedReason !== null && (
           <TooltipContent>

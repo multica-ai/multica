@@ -266,6 +266,8 @@
     "cta_create_named": "Create {{name}}",
     "cta_create_workspace": "Create workspace",
     "cta_creating": "Creating…",
+    "name_required": "Enter a workspace name",
+    "slug_required": "Enter a URL",
     "slug_format_error": "Only lowercase letters, numbers, and hyphens",
     "slug_taken_error": "That workspace URL is already taken.",
     "slug_reserved_error": "That workspace URL is reserved and cannot be used.",

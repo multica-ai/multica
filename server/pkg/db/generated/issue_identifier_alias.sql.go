@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillSpaceKeyAliases = `-- name: BackfillSpaceKeyAliases :exec
+INSERT INTO issue_identifier_alias (workspace_id, space_key_lower, number, issue_id)
+SELECT i.workspace_id, $1::text, i.number, i.id
+FROM issue i
+WHERE i.workspace_id = $2 AND i.space_id = $3
+ON CONFLICT DO NOTHING
+`
+
+type BackfillSpaceKeyAliasesParams struct {
+	SpaceKeyLower string      `json:"space_key_lower"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	SpaceID       pgtype.UUID `json:"space_id"`
+}
+
+// Record an alias under the given (old) space key for every issue currently in
+// the space, so pre-rename identifiers (OLDKEY-N) keep resolving after a key
+// change. Per-space numbers are unique, so there are no in-batch conflicts;
+// ON CONFLICT DO NOTHING preserves any alias already recorded for that number.
+func (q *Queries) BackfillSpaceKeyAliases(ctx context.Context, arg BackfillSpaceKeyAliasesParams) error {
+	_, err := q.db.Exec(ctx, backfillSpaceKeyAliases, arg.SpaceKeyLower, arg.WorkspaceID, arg.SpaceID)
+	return err
+}
+
 const getIssueByIdentifierAlias = `-- name: GetIssueByIdentifierAlias :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.space_id FROM issue_identifier_alias a
 JOIN issue i ON i.id = a.issue_id

@@ -7,6 +7,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { cn } from "@multica/ui/lib/utils";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -26,11 +27,11 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
+  paths,
   resolvePostAuthDestination,
   useCurrentWorkspace,
   useHasOnboarded,
@@ -105,9 +106,9 @@ export function WorkspaceTab() {
   };
 
   const [name, setName] = useState(workspace?.name ?? "");
+  const [slug, setSlug] = useState(workspace?.slug ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
-  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -129,49 +130,40 @@ export function WorkspaceTab() {
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
 
+  const normalizeSlug = (raw: string) => raw.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const normalizedSlug = normalizeSlug(slug);
+  const slugChanged = !!workspace && normalizedSlug !== workspace.slug;
+  const slugInvalid = !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug);
+
   // Reset form state only when the user switches to a different workspace.
   // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
   // when an unrelated mutation — e.g. avatar/logo upload — replaces the
   // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
+    setSlug(workspace?.slug ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
-    setIssuePrefix(workspace?.issue_prefix ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
-  // Letters + digits only, uppercase, capped at 10 chars. The backend
-  // uppercases and trims on its side too — this is purely a UX guardrail
-  // so the value the user sees in the input matches what gets persisted.
-  const normalizePrefix = (raw: string) =>
-    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-
-  const normalizedPrefix = normalizePrefix(issuePrefix);
-  const prefixChanged =
-    !!workspace && normalizedPrefix !== workspace.issue_prefix;
-  const prefixInvalid = normalizedPrefix.length === 0;
-
-  const performSave = async (includePrefix: boolean) => {
+  const performSave = async () => {
     if (!workspace) return;
+    const previousSlug = workspace.slug;
     setSaving(true);
     try {
       const updated = await api.updateWorkspace(workspace.id, {
         name,
+        slug: normalizedSlug,
         description,
         context,
-        ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      // Issue identifiers (`MUL-123`) are computed from `issue_prefix` at
-      // read time, not stored on each issue row. When the prefix changes,
-      // every cached issue's rendered identifier is stale until refetched.
-      // Limit invalidation to the prefix-changed branch so unrelated saves
-      // (name / description / context) stay cheap.
-      if (includePrefix) {
-        qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
+      if (updated.slug !== previousSlug) {
+        setCurrentWorkspace(updated.slug, updated.id);
+        navigation.replace(paths.workspace(updated.slug).settings());
       }
       toast.success(t(($) => $.workspace.toast_saved));
     } catch (e) {
@@ -182,20 +174,20 @@ export function WorkspaceTab() {
   };
 
   const handleSave = () => {
-    if (!workspace || prefixInvalid) return;
-    if (prefixChanged) {
+    if (!workspace || slugInvalid) return;
+    if (slugChanged) {
       setConfirmAction({
-        title: t(($) => $.workspace.prefix_confirm_title),
-        description: t(($) => $.workspace.prefix_confirm_description, {
-          oldPrefix: workspace.issue_prefix,
-          newPrefix: normalizedPrefix,
+        title: t(($) => $.workspace.slug_confirm_title),
+        description: t(($) => $.workspace.slug_confirm_description, {
+          oldSlug: workspace.slug,
+          newSlug: normalizedSlug,
         }),
         variant: "destructive",
-        onConfirm: () => performSave(true),
+        onConfirm: () => performSave(),
       });
       return;
     }
-    void performSave(false);
+    void performSave();
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -347,32 +339,23 @@ export function WorkspaceTab() {
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.slug_label)}</Label>
-              <div className="mt-1 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                {workspace.slug}
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.issue_prefix_label)}</Label>
               <Input
                 type="text"
-                value={issuePrefix}
-                onChange={(e) => setIssuePrefix(normalizePrefix(e.target.value))}
+                value={slug}
+                onChange={(e) => setSlug(normalizeSlug(e.target.value))}
                 disabled={!canManageWorkspace}
-                maxLength={10}
-                className="mt-1 font-mono uppercase"
-                placeholder={workspace.issue_prefix}
+                className={cn("mt-1 font-mono", slugChanged && slugInvalid && "border-destructive")}
+                placeholder={workspace.slug}
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                {t(($) => $.workspace.issue_prefix_hint, {
-                  example: `${normalizedPrefix || workspace.issue_prefix}-123`,
-                })}
+                {t(($) => $.workspace.slug_hint)}
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={saving || !name.trim() || prefixInvalid || !canManageWorkspace}
+                disabled={saving || !name.trim() || !canManageWorkspace || slugInvalid}
               >
                 <Save className="h-3 w-3" />
                 {saving ? t(($) => $.workspace.saving) : t(($) => $.workspace.save)}
