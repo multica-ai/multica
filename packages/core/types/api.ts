@@ -79,6 +79,13 @@ export interface ListIssuesParams {
   workspace_id?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
+  /**
+   * Multi-select priority filter. Serialized as `priorities=high,urgent`.
+   * The status board pushes its priority facet here so per-status `total`
+   * reflects the filter. `priority` (singular) stays for older clients; the
+   * server reads `priorities` first and falls back to `priority`.
+   */
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
   /**

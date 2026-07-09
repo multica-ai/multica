@@ -14,6 +14,7 @@ import {
   issueMatchesListFilter,
   listFilterDependsOn,
   type IssueChangedDims,
+  type IssueMembership,
 } from "./surface/membership";
 import type { InboxItem, Issue, ListIssuesCache } from "../types";
 
@@ -75,10 +76,12 @@ export interface IssueCacheChangeResult {
   prevIssue: Issue | undefined;
 }
 
-/** The server contract a bucketed list key encodes. `myListSorted` keys are
- *  `["issues", wsId, "my", scope, filter, sort]`; the workspace list carries
- *  no filter. The `byStatus` shape check upstream keeps grouped/flat caches
- *  under the same prefixes out of this path. */
+/** The server contract a bucketed list key encodes. Both key shapes carry a
+ *  filter segment: `myListSorted` is `["issues", wsId, "my", scope, filter,
+ *  sort]` and the workspace `listSorted` is `["issues", wsId, "list", filter,
+ *  sort]` (the filter holds the priority membership contract, empty for the
+ *  default board). The `byStatus` shape check upstream keeps grouped/flat
+ *  caches under the same prefixes out of this path. */
 function listContractFromKey(
   key: QueryKey,
 ): { scope: string | undefined; filter: MyIssuesFilter } {
@@ -88,7 +91,22 @@ function listContractFromKey(
       filter: (key[4] ?? {}) as MyIssuesFilter,
     };
   }
-  return { scope: undefined, filter: {} };
+  return { scope: undefined, filter: (key[3] ?? {}) as MyIssuesFilter };
+}
+
+/**
+ * Judge a created / updated issue against the list contract a bucketed cache
+ * key encodes. Create paths use this to skip inserting an issue into a
+ * filtered cache it does not belong to (e.g. a `priorities:["high"]` list must
+ * not gain a freshly-created `low` issue). `false` → skip, `true` → insert,
+ * `"unknown"` → let the caller refetch that key.
+ */
+export function issueMatchesListKey(
+  key: QueryKey,
+  issue: Partial<Issue>,
+): IssueMembership {
+  const { scope, filter } = listContractFromKey(key);
+  return issueMatchesListFilter(issue, scope, filter);
 }
 
 function bucketedListEntries(

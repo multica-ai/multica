@@ -759,9 +759,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// Parse optional filter params. Malformed UUIDs in filters return 400 —
 	// silently coercing them to a zero UUID would mask a client bug and let
 	// the query return an empty result set (or worse, match a NULL row).
-	var priorityFilter pgtype.Text
-	if p := r.URL.Query().Get("priority"); p != "" {
-		priorityFilter = pgtype.Text{String: p, Valid: true}
+	// Multi-select priorities with single-`priority` back-compat (mirrors
+	// ListGroupedIssues): new clients send priorities=high,urgent; older
+	// clients keep sending priority=high.
+	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
+	if len(priorities) == 0 {
+		priorities = splitCommaParam(r.URL.Query().Get("priority"))
 	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
@@ -824,6 +827,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
+		// open_only keeps its original single-`priority` contract (no frontend
+		// caller; intentionally not widened to the multi-select `priorities`
+		// the paginated path uses, to avoid expanding the sqlc query).
+		var priorityFilter pgtype.Text
+		if p := r.URL.Query().Get("priority"); p != "" {
+			priorityFilter = pgtype.Text{String: p, Valid: true}
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:    wsUUID,
 			Priority:       priorityFilter,
@@ -945,8 +955,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if statusFilter.Valid {
 		where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
 	}
-	if priorityFilter.Valid {
-		where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
+	if len(priorities) > 0 {
+		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorities)))
 	}
 	if assigneeFilter.Valid {
 		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))

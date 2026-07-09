@@ -7,6 +7,7 @@ import {
   projectGanttIssuesOptions,
   type AssigneeGroupedIssuesFilter,
   type IssueSortParam,
+  type MyIssuesFilter,
 } from "../queries";
 import type {
   GroupedIssuesResponse,
@@ -31,12 +32,15 @@ import type { IssueSurfaceQueryPlan } from "./query-plan";
 export function issueSurfaceListOptions(
   wsId: string,
   plan: IssueSurfaceQueryPlan,
+  // The membership filter (scope fields + normalized priorities), merged by
+  // the caller so the surface query key matches load-more's `activeKey`.
+  filter: MyIssuesFilter,
   sort?: IssueSortParam,
 ): UseQueryOptions<ListIssuesCache, Error, Issue[]> {
   return (
     plan.kind === "workspace"
-      ? issueListOptions(wsId, sort)
-      : myIssueListOptions(wsId, plan.queryScope, plan.queryFilter, plan.userId, sort)
+      ? issueListOptions(wsId, filter, sort)
+      : myIssueListOptions(wsId, plan.queryScope, filter, plan.userId, sort)
   ) as UseQueryOptions<ListIssuesCache, Error, Issue[]>;
 }
 

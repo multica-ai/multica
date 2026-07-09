@@ -158,9 +158,9 @@ export function BoardView({
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
     : null;
   const { getActorName } = useActorName();
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
+  // Always defined so the workspace list (no scope) still carries its priority
+  // filter into load-more; `scope` undefined keys off `listSorted`.
+  const myIssuesOpts = { scope: myIssuesScope, filter: myIssuesFilter ?? {} };
   const groupedIssues = useMemo(
     () =>
       grouping === "assignee" && assigneeGroups
@@ -569,7 +569,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
@@ -577,7 +577,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
-    myIssuesOpts,
+    myIssuesOpts ?? { filter: {} },
     sort,
   );
   return (
@@ -613,10 +613,10 @@ function BoardHiddenColumnRow({
   sort,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { total } = useLoadMoreByStatus(status, myIssuesOpts ?? { filter: {} }, sort);
   return <HiddenColumnRow status={status} total={total} />;
 }
 
@@ -626,7 +626,7 @@ function BoardHiddenColumnsPanel({
   sort,
 }: {
   hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
   return (

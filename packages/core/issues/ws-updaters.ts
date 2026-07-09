@@ -6,6 +6,7 @@ import {
   applyIssueChange,
   invalidateIssueDerivatives,
   invalidateStaleListKeys,
+  issueMatchesListKey,
 } from "./cache-coordinator";
 import {
   addIssueToBuckets,
@@ -22,7 +23,18 @@ export function onIssueCreated(
   issue: Issue,
 ) {
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+    if (!data) continue;
+    // A filtered workspace list (e.g. priorities:["high"]) must not gain an
+    // issue that doesn't match its contract. Membership is client-decidable
+    // from the full created entity, so this is true/false in practice; keep
+    // the "unknown" → refetch branch for safety.
+    const membership = issueMatchesListKey(key, issue);
+    if (membership === false) continue;
+    if (membership === "unknown") {
+      qc.invalidateQueries({ queryKey: key, exact: true });
+      continue;
+    }
+    qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
@@ -45,15 +57,17 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
-  // assigneeChanged / statusChanged / projectChanged come from the server's
-  // issue:updated flags — authoritative "did this write move a membership
-  // dimension" signals. They feed the coordinator's changed-dims input so a
-  // non-membership change (title / position / priority / label) keeps every
-  // loaded list in place instead of refetching.
+  // assigneeChanged / statusChanged / projectChanged / priorityChanged come
+  // from the server's issue:updated flags — authoritative "did this write move
+  // a membership dimension" signals. They feed the coordinator's changed-dims
+  // input so a non-membership change (title / position / label) keeps every
+  // loaded list in place instead of refetching, while a priority change
+  // reconciles priority-filtered lists.
   meta: {
     assigneeChanged?: boolean;
     statusChanged?: boolean;
     projectChanged?: boolean;
+    priorityChanged?: boolean;
   } = {},
 ) {
   // Look up the OLD parent + cached entity before mutating cache state, so we
@@ -96,6 +110,11 @@ export function onIssueUpdated(
       (cachedIssue !== undefined &&
         issue.status !== undefined &&
         issue.status !== cachedIssue.status),
+    priority:
+      meta.priorityChanged ??
+      (cachedIssue !== undefined &&
+        issue.priority !== undefined &&
+        issue.priority !== cachedIssue.priority),
   };
 
   // The coordinator applies the same rules table the local mutations use:

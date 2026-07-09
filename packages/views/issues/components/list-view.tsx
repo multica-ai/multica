@@ -98,9 +98,10 @@ export function ListView({
     [visibleStatuses, listCollapsedStatuses]
   );
 
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
+  // Always defined: the workspace list (no scope) still needs its filter to
+  // carry the priority selection into load-more. `scope` is undefined for the
+  // workspace list, which keys off `listSorted` instead of `myListSorted`.
+  const myIssuesOpts = { scope: myIssuesScope, filter: myIssuesFilter ?? {} };
 
   const dragEnabled = !!onMoveIssue;
 
@@ -384,7 +385,7 @@ function StatusAccordionItem({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   dragEnabled: boolean;
@@ -399,7 +400,7 @@ function StatusAccordionItem({
   const deselect = selection.deselect;
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
+    myIssuesOpts ?? { filter: {} },
     sort,
   );
 

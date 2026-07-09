@@ -15,13 +15,14 @@ export type IssueMembership = true | false | "unknown";
 
 /**
  * The field groups a write can touch that move an issue in or out of a
- * filtered list (assignee / project) or shift per-status bucket totals
- * (status). Creator is not here: it is immutable after create.
+ * filtered list (assignee / project / priority) or shift per-status bucket
+ * totals (status). Creator is not here: it is immutable after create.
  */
 export interface IssueChangedDims {
   assignee: boolean;
   project: boolean;
   status: boolean;
+  priority: boolean;
 }
 
 /**
@@ -44,6 +45,8 @@ export function issueChangedDims(
       (has("assignee_type") && (!base || base.assignee_type !== p.assignee_type)),
     project: has("project_id") && (!base || base.project_id !== p.project_id),
     status: has("status") && p.status !== undefined && (!base || base.status !== p.status),
+    priority:
+      has("priority") && p.priority !== undefined && (!base || base.priority !== p.priority),
   };
 }
 
@@ -59,9 +62,13 @@ export function listFilterDependsOn(
   filter: MyIssuesFilter,
   changed: IssueChangedDims,
 ): boolean {
+  // Priority is an AND filter layered on every scope, so a priority change can
+  // move an issue in/out of any priority-filtered list — including my:all.
+  const priorityTouched =
+    changed.priority && (filter.priorities?.length ?? 0) > 0;
   // my:all is the union of assigned / created / involved — the assigned and
   // involved legs key on the assignee.
-  if (scope === "all") return changed.assignee;
+  if (scope === "all") return changed.assignee || priorityTouched;
   if (
     changed.assignee &&
     (filter.assignee_id !== undefined ||
@@ -72,6 +79,7 @@ export function listFilterDependsOn(
     return true;
   }
   if (changed.project && filter.project_id !== undefined) return true;
+  if (priorityTouched) return true;
   // creator_id filters never react to updates — creator is immutable.
   return false;
 }
@@ -87,11 +95,23 @@ export function issueMatchesListFilter(
   scope: string | undefined,
   filter: MyIssuesFilter,
 ): IssueMembership {
-  // my:all — union across relations; the involved leg needs the server's
-  // agent-ownership graph, so membership is never decidable client-side.
-  if (scope === "all") return "unknown";
-
   let unknown = false;
+
+  // Priority is a hard AND filter, decidable from the entity's own field.
+  // It runs BEFORE every scope branch — including the scope==="all" union
+  // whose own membership is server-only — so a priority miss is a definitive
+  // non-member even there (the all-scope early return must NOT bypass it). A
+  // field missing on a partial entity degrades to "unknown" instead of a guess.
+  if (filter.priorities !== undefined) {
+    if (issue.priority === undefined) unknown = true;
+    else if (!filter.priorities.includes(issue.priority)) return false;
+  }
+
+  // my:all — union across relations; the involved leg needs the server's
+  // agent-ownership graph, so scope membership is never decidable client-side.
+  // A confirmed priority miss already returned above; here membership stays
+  // uncertain.
+  if (scope === "all") return "unknown";
 
   if (filter.assignee_id !== undefined) {
     if (issue.assignee_id === undefined) unknown = true;

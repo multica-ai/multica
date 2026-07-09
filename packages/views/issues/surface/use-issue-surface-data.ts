@@ -7,6 +7,7 @@ import { ALL_STATUSES, BOARD_STATUSES } from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   childIssueProgressOptions,
+  withPriorityFilter,
   type AssigneeGroupedIssuesFilter,
   type IssueSortParam,
   type MyIssuesFilter,
@@ -137,8 +138,17 @@ export function useIssueSurfaceData({
     sort,
   );
 
+  // The membership filter for the bucketed status list: the plan's scope
+  // fields plus the normalized priority selection. Built once here (the single
+  // source of truth) and threaded to BOTH the surface query key and the
+  // load-more `activeKey` (via loadMoreFilter) so they hash identically.
+  const listFilter = useMemo<MyIssuesFilter>(
+    () => withPriorityFilter(queryPlan.queryFilter, priorityFilters),
+    [queryPlan.queryFilter, priorityFilters],
+  );
+
   const statusIssuesQuery = useQuery({
-    ...issueSurfaceListOptions(wsId, queryPlan, sort),
+    ...issueSurfaceListOptions(wsId, queryPlan, listFilter, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -324,7 +334,10 @@ export function useIssueSurfaceData({
     assigneeGroupFilter: usesAssigneeBoard ? assigneeGroupFilter : undefined,
     filter: queryPlan.queryFilter,
     loadMoreScope: queryPlan.loadMoreScope,
-    loadMoreFilter: queryPlan.loadMoreFilter,
+    // Always the merged filter (scope + priorities), even for the workspace
+    // list whose plan carries no loadMoreFilter — the load-more hook keys off
+    // this, so it must match the surface query's `listFilter` byte-for-byte.
+    loadMoreFilter: listFilter,
     ganttIssues,
     visibleStatuses,
     hiddenStatuses,

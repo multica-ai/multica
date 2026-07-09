@@ -12,7 +12,7 @@ import type { InboxItem, Issue, ListIssuesCache } from "../types";
 const WS_ID = "ws-1";
 const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
 
-const wsKey = issueKeys.listSorted(WS_ID, sort);
+const wsKey = issueKeys.listSorted(WS_ID, {}, sort);
 const myAssignedKey = issueKeys.myListSorted(WS_ID, "assigned", { assignee_id: "me" }, sort);
 const myAllKey = issueKeys.myListSorted(WS_ID, "all", {}, sort);
 const involvedKey = issueKeys.myListSorted(WS_ID, "agents", { involves_user_id: "me" }, sort);
@@ -359,5 +359,72 @@ describe("applyIssueChange", () => {
 
     expect(qc.getQueryData(groupedKey)).toBe(grouped);
     expect(result.staleKeys.map(hashKey)).not.toContain(hashKey(groupedKey));
+  });
+});
+
+describe("applyIssueChange — priority membership", () => {
+  let qc: QueryClient;
+  const wsHighKey = issueKeys.listSorted(WS_ID, { priorities: ["high"] }, sort);
+  const wsLowKey = issueKeys.listSorted(WS_ID, { priorities: ["low"] }, sort);
+  const highIssue = () => makeIssue(1, { priority: "high" });
+  const priorityPatch = { priority: "low" as const };
+  const priorityChanged = () =>
+    issueChangedDims(priorityPatch, highIssue());
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+  afterEach(() => qc.clear());
+
+  it("removes a loaded card that no longer matches the priority filter", () => {
+    qc.setQueryData<ListIssuesCache>(wsHighKey, bucketed([highIssue()]));
+
+    applyIssueChange(qc, WS_ID, "issue-1", priorityPatch, {
+      changed: priorityChanged(),
+      baseIssue: highIssue(),
+    });
+
+    expect(ids(qc, wsHighKey, "todo")).toEqual([]);
+    expect(total(qc, wsHighKey, "todo")).toBe(0);
+  });
+
+  it("decrements the bucket total for an off-screen high→low member", () => {
+    // Off-screen: counted in `total` but not in the loaded window.
+    qc.setQueryData<ListIssuesCache>(wsHighKey, bucketed([], 1));
+
+    applyIssueChange(qc, WS_ID, "issue-1", priorityPatch, {
+      changed: priorityChanged(),
+      baseIssue: highIssue(),
+    });
+
+    expect(total(qc, wsHighKey, "todo")).toBe(0);
+  });
+
+  it("marks the low-filtered list stale when an issue may have entered it", () => {
+    qc.setQueryData<ListIssuesCache>(wsLowKey, bucketed([], 0));
+
+    const result = applyIssueChange(qc, WS_ID, "issue-1", priorityPatch, {
+      changed: priorityChanged(),
+      baseIssue: highIssue(),
+    });
+
+    expect(result.staleKeys.map(hashKey)).toContain(hashKey(wsLowKey));
+  });
+
+  it("leaves an unfiltered workspace list in place on a priority change", () => {
+    qc.setQueryData<ListIssuesCache>(wsKey, bucketed([highIssue()]));
+
+    const result = applyIssueChange(qc, WS_ID, "issue-1", priorityPatch, {
+      changed: priorityChanged(),
+      baseIssue: highIssue(),
+    });
+
+    // Still present (patched in place), no stale key — priority isn't a
+    // membership dimension for a list without a priority facet.
+    expect(ids(qc, wsKey, "todo")).toEqual(["issue-1"]);
+    expect(qc.getQueryData<ListIssuesCache>(wsKey)?.byStatus.todo?.issues[0]?.priority).toBe(
+      "low",
+    );
+    expect(result.staleKeys.map(hashKey)).not.toContain(hashKey(wsKey));
   });
 });

@@ -548,11 +548,10 @@ export function SwimLaneView({
 
   const laneSourceIssues = unfilteredIssues ?? issues;
 
+  // Always defined so the workspace list (no scope) still carries its priority
+  // filter into load-more; `scope` undefined keys off `listSorted`.
   const myIssuesOpts = useMemo(
-    () =>
-      myIssuesScope
-        ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-        : undefined,
+    () => ({ scope: myIssuesScope, filter: myIssuesFilter ?? {} }),
     [myIssuesScope, myIssuesFilter],
   );
 
@@ -1559,7 +1558,7 @@ function SwimLaneLoadMoreRow({
 }: {
   sortedStatuses: IssueStatus[];
   gridStyle: React.CSSProperties;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
   return (
@@ -1582,10 +1581,10 @@ function SwimLaneLoadMoreCell({
   sort,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: { scope?: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
-  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts ?? { filter: {} }, sort);
   if (!hasMore) return <div />;
   return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
 }

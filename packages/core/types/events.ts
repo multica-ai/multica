@@ -101,11 +101,13 @@ export interface IssueUpdatedPayload {
   // counts when a status change lands on an off-screen (unloaded) issue;
   // project_changed lets it drop a moved issue from the old project's filtered
   // list (the client-side cache diff is unreliable after an optimistic local
-  // move — MUL-3669 / #4548). Other change flags are present on the wire too and
-  // can be surfaced here when needed.
+  // move — MUL-3669 / #4548); priority_changed does the same for
+  // priority-filtered status boards (MUL-4289). Other change flags are present
+  // on the wire too and can be surfaced here when needed.
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  priority_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {

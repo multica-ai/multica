@@ -114,7 +114,7 @@ describe("useLoadMoreByStatus", () => {
 
   it("targets the sorted cache key and forwards sort to the API", async () => {
     const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const activeKey = issueKeys.listSorted(WS_ID, sort);
+    const activeKey = issueKeys.listSorted(WS_ID, {}, sort);
     const seed: ListIssuesCache = {
       byStatus: {
         todo: { issues: [makeIssue(1)], total: 3 },
@@ -128,7 +128,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, sort),
+      () => useLoadMoreByStatus("todo", { filter: {} }, sort),
       { wrapper: createWrapper(qc) },
     );
 
@@ -159,13 +159,13 @@ describe("useLoadMoreByStatus", () => {
   it("ignores a stale cache entry under a different sort", async () => {
     // Stale entry from a previous sort lingers (kept by gcTime / keepPreviousData).
     const staleSort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort), {
+    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, {}, staleSort), {
       byStatus: { todo: { issues: [makeIssue(99)], total: 99 } },
     });
 
     // The active sort cache has its own bucket — load-more must target THIS one.
     const activeSort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const activeKey = issueKeys.listSorted(WS_ID, activeSort);
+    const activeKey = issueKeys.listSorted(WS_ID, {}, activeSort);
     qc.setQueryData<ListIssuesCache>(activeKey, {
       byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
     });
@@ -176,7 +176,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, activeSort),
+      () => useLoadMoreByStatus("todo", { filter: {} }, activeSort),
       { wrapper: createWrapper(qc) },
     );
 
@@ -198,7 +198,7 @@ describe("useLoadMoreByStatus", () => {
     ]);
 
     // Stale cache is untouched.
-    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort));
+    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, {}, staleSort));
     expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
   });
 
@@ -393,7 +393,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   const myFilter = { assignee_id: "user-1" };
   const projectScope = "project:p1";
   const projectFilter = { project_id: "p1" };
-  const wsKey = issueKeys.listSorted(WS_ID, sort);
+  const wsKey = issueKeys.listSorted(WS_ID, {}, sort);
   const inboxKey = inboxKeys.list(WS_ID);
   // My-Issues AND the Project board both ride this myList cache; a move that
   // only patched the workspace cache snaps back on those boards.
@@ -706,7 +706,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
   const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
   const myScope = "assigned";
   const myFilter = { assignee_id: "user-1" };
-  const wsKey = issueKeys.listSorted(WS_ID, sort);
+  const wsKey = issueKeys.listSorted(WS_ID, {}, sort);
   const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
 
   let qc: QueryClient;

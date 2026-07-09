@@ -734,4 +734,46 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
   });
+
+  describe("listIssues priority serialization", () => {
+    function stubOkList() {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ issues: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("serializes multi-select priorities as a comma-joined param", async () => {
+      const fetchMock = stubOkList();
+      const client = new ApiClient("https://api.example.test");
+      await client.listIssues({ status: "todo", priorities: ["high", "urgent"] });
+
+      const url = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(url.searchParams.get("priorities")).toBe("high,urgent");
+      expect(url.searchParams.get("status")).toBe("todo");
+    });
+
+    it("omits priorities entirely when the list is empty (byte-consistent default)", async () => {
+      const fetchMock = stubOkList();
+      const client = new ApiClient("https://api.example.test");
+      await client.listIssues({ status: "todo", priorities: [] });
+
+      const url = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(url.searchParams.has("priorities")).toBe(false);
+    });
+
+    it("still serializes the legacy single priority param", async () => {
+      const fetchMock = stubOkList();
+      const client = new ApiClient("https://api.example.test");
+      await client.listIssues({ priority: "high" });
+
+      const url = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(url.searchParams.get("priority")).toBe("high");
+      expect(url.searchParams.has("priorities")).toBe(false);
+    });
+  });
 });

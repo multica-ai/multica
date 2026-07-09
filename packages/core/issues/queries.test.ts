@@ -4,13 +4,18 @@ import { QueryClient } from "@tanstack/react-query";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { Issue, ListIssuesParams, ListIssuesResponse } from "../types";
+import { hashKey } from "@tanstack/react-query";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   issueKeys,
+  issueListOptions,
+  myIssueListOptions,
+  normalizePriorities,
   projectGanttIssuesOptions,
+  withPriorityFilter,
 } from "./queries";
 
 const WS_ID = "ws-1";
@@ -212,5 +217,83 @@ describe("childrenByParentsOptions chunking", () => {
 
     expect(grouped.get("p-0")).toHaveLength(1);
     expect(grouped.get(lastId)).toHaveLength(1);
+  });
+});
+
+describe("priority filter wiring", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("normalizePriorities drops an empty selection to undefined", () => {
+    expect(normalizePriorities([])).toBeUndefined();
+    expect(normalizePriorities(undefined)).toBeUndefined();
+    expect(normalizePriorities(["high"])).toEqual(["high"]);
+  });
+
+  it("normalizePriorities dedupes and stably sorts so the SET keys once", () => {
+    // Same set, different click orders → identical normalized result.
+    expect(normalizePriorities(["urgent", "high"])).toEqual(["high", "urgent"]);
+    expect(normalizePriorities(["high", "urgent"])).toEqual(["high", "urgent"]);
+    // Duplicates collapse.
+    expect(normalizePriorities(["high", "high", "low"])).toEqual(["high", "low"]);
+  });
+
+  it("withPriorityFilter returns the base unchanged when nothing is selected", () => {
+    const base = { assignee_id: "me" };
+    expect(withPriorityFilter(base, [])).toBe(base);
+    expect(withPriorityFilter(base, ["high"])).toEqual({
+      assignee_id: "me",
+      priorities: ["high"],
+    });
+  });
+
+  it("keys the default board identically whether priorities are empty or absent", () => {
+    // JSON.stringify drops undefined props, so an empty selection must hash to
+    // the same key as the unfiltered default — no cache fragmentation.
+    const sort = { sort_by: "position" as const, sort_direction: undefined };
+    const withEmpty = issueListOptions(WS_ID, withPriorityFilter({}, []), sort).queryKey;
+    const bare = issueListOptions(WS_ID, {}, sort).queryKey;
+    expect(hashKey(withEmpty)).toBe(hashKey(bare));
+  });
+
+  it("surface list key and load-more activeKey stay byte-consistent", () => {
+    // The surface query and useLoadMoreByStatus both build their key from the
+    // same `listFilter`, so identical inputs must hash identically. This guards
+    // the one invariant that would silently break pagination.
+    const sort = { sort_by: "position" as const, sort_direction: undefined };
+    const filter = withPriorityFilter({}, ["high", "urgent"]);
+    const surfaceKey = issueListOptions(WS_ID, filter, sort).queryKey;
+    const loadMoreKey = issueKeys.listSorted(WS_ID, filter, sort);
+    expect(hashKey(surfaceKey)).toBe(hashKey(loadMoreKey));
+
+    const scopedFilter = withPriorityFilter({ assignee_id: "me" }, ["high"]);
+    const scopedSurface = myIssueListOptions(
+      WS_ID,
+      "assigned",
+      scopedFilter,
+      undefined,
+      sort,
+    ).queryKey;
+    const scopedLoadMore = issueKeys.myListSorted(WS_ID, "assigned", scopedFilter, sort);
+    expect(hashKey(scopedSurface)).toBe(hashKey(scopedLoadMore));
+  });
+
+  it("forwards priorities to every per-status first-page request", async () => {
+    const listIssues = vi
+      .fn<(p?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [], total: 0 });
+    installFakeApi(listIssues);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await qc.fetchQuery(
+      issueListOptions(WS_ID, withPriorityFilter({}, ["high", "urgent"])),
+    );
+
+    expect(listIssues).toHaveBeenCalled();
+    for (const call of listIssues.mock.calls) {
+      expect(call[0]).toMatchObject({ priorities: ["high", "urgent"] });
+    }
+    qc.clear();
   });
 });

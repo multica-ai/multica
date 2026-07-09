@@ -14,6 +14,7 @@ import {
   applyIssueChange,
   invalidateIssueDerivatives,
   invalidateStaleListKeys,
+  issueMatchesListKey,
   rollbackIssueChange,
 } from "./cache-coordinator";
 import { issueChangedDims } from "./surface/membership";
@@ -65,27 +66,33 @@ export type ToggleIssueReactionVars = {
 
 /**
  * Paginate one status column into the cache. Works for both the workspace
- * issue list and per-scope My Issues lists (pass `myIssues` to target the
- * latter).
+ * issue list (`opts.scope === undefined` → `listSorted`) and per-scope My
+ * Issues lists (`opts.scope` set → `myListSorted`).
  *
- * `sort` must match the sort the consuming `useQuery` was called with —
- * the query key embeds it (see `listSorted` / `myListSorted`), so a load-more
- * with the wrong sort would patch a stale cache entry that nobody is
- * subscribed to. It is also threaded into the API request so the appended
- * page lines up with the server-side ordering of the existing items.
+ * `opts.filter` is the membership filter that keyed the surface query —
+ * scope fields plus the normalized `priorities` — so `activeKey` and the
+ * appended page's request are byte-consistent with the surface query. Passing
+ * a filter whose shape differs from the surface's would patch a cache entry
+ * nobody is subscribed to.
+ *
+ * `sort` must likewise match the sort the consuming `useQuery` was called
+ * with — the query key embeds it (see `listSorted` / `myListSorted`). It is
+ * also threaded into the API request so the appended page lines up with the
+ * server-side ordering of the existing items.
  */
 export function useLoadMoreByStatus(
   status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
+  opts: { scope?: string; filter: MyIssuesFilter },
   sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const activeKey = myIssues
-    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
+  const activeKey =
+    opts.scope !== undefined
+      ? issueKeys.myListSorted(wsId, opts.scope, opts.filter, sort)
+      : issueKeys.listSorted(wsId, opts.filter, sort);
   const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
@@ -101,7 +108,7 @@ export function useLoadMoreByStatus(
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...sort,
-        ...myIssues?.filter,
+        ...opts.filter,
       });
       qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
         if (!old) return old;
@@ -116,7 +123,7 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, opts.filter, sort]);
 
   return { loadMore, hasMore, isLoading, total };
 }
@@ -193,7 +200,17 @@ export function useCreateIssue() {
     mutationFn: (data: CreateIssueRequest) => api.createIssue(data),
     onSuccess: (newIssue) => {
       for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-        if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));
+        if (!data) continue;
+        // Don't optimistically insert into a filtered cache the new issue
+        // doesn't match (e.g. a priorities:["high"] board getting a `low`
+        // issue) — that would flash a wrong card before onSettled refetches.
+        const membership = issueMatchesListKey(key, newIssue);
+        if (membership === false) continue;
+        if (membership === "unknown") {
+          qc.invalidateQueries({ queryKey: key, exact: true });
+          continue;
+        }
+        qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));
       }
       // Surface the just-created issue in cmd+k's Recent list without
       // requiring the user to open it first.

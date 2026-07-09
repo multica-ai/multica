@@ -803,3 +803,89 @@ describe("project gantt cache invalidation", () => {
     expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
   });
 });
+
+describe("onIssueUpdated — priority_changed reconciles priority-filtered lists", () => {
+  let qc: QueryClient;
+  const highKey = issueKeys.listSorted(WS_ID, { priorities: ["high"] });
+  const lowKey = issueKeys.listSorted(WS_ID, { priorities: ["low"] });
+  const highIssue: Issue = { ...baseIssue, priority: "high" };
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("removes a loaded issue from a high-filtered list and marks the low list stale", () => {
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), highIssue);
+    qc.setQueryData<ListIssuesCache>(highKey, makeListCache(highIssue));
+    qc.setQueryData<ListIssuesCache>(lowKey, {
+      byStatus: { todo: { issues: [], total: 0 } },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...highIssue, priority: "low" },
+      { priorityChanged: true },
+    );
+
+    // Left the high list surgically.
+    const high = qc.getQueryData<ListIssuesCache>(highKey);
+    expect(high?.byStatus.todo?.issues.map((i) => i.id)).toEqual([]);
+    expect(high?.byStatus.todo?.total).toBe(0);
+    // May have entered the low list — refetch is the only channel that can
+    // place the row into its server-ordered slot.
+    expectInvalidated(qc, lowKey);
+  });
+
+  it("decrements an off-screen high→low member's bucket total", () => {
+    const offScreen: Issue = { ...highIssue, id: "off-screen" };
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, "off-screen"), offScreen);
+    qc.setQueryData<ListIssuesCache>(highKey, {
+      byStatus: { todo: { issues: [], total: 1 } },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...offScreen, priority: "low" },
+      { priorityChanged: true },
+    );
+
+    expect(qc.getQueryData<ListIssuesCache>(highKey)?.byStatus.todo?.total).toBe(0);
+  });
+});
+
+describe("onIssueCreated — respects priority-filtered workspace caches", () => {
+  let qc: QueryClient;
+  const highKey = issueKeys.listSorted(WS_ID, { priorities: ["high"] });
+  const defaultKey = issueKeys.listSorted(WS_ID, {});
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("does not insert a non-matching new issue into a priority-filtered cache", () => {
+    qc.setQueryData<ListIssuesCache>(highKey, { byStatus: { todo: { issues: [], total: 0 } } });
+    qc.setQueryData<ListIssuesCache>(defaultKey, { byStatus: { todo: { issues: [], total: 0 } } });
+
+    onIssueCreated(qc, WS_ID, { ...baseIssue, priority: "low", status: "todo" });
+
+    // High-only cache is untouched; the unfiltered default cache gains the row.
+    expect(qc.getQueryData<ListIssuesCache>(highKey)?.byStatus.todo?.issues).toEqual([]);
+    expect(qc.getQueryData<ListIssuesCache>(highKey)?.byStatus.todo?.total).toBe(0);
+    expect(
+      qc.getQueryData<ListIssuesCache>(defaultKey)?.byStatus.todo?.issues.map((i) => i.id),
+    ).toEqual([ISSUE_ID]);
+  });
+
+  it("inserts a matching new issue into a priority-filtered cache", () => {
+    qc.setQueryData<ListIssuesCache>(highKey, { byStatus: { todo: { issues: [], total: 0 } } });
+
+    onIssueCreated(qc, WS_ID, { ...baseIssue, priority: "high", status: "todo" });
+
+    expect(
+      qc.getQueryData<ListIssuesCache>(highKey)?.byStatus.todo?.issues.map((i) => i.id),
+    ).toEqual([ISSUE_ID]);
+    expect(qc.getQueryData<ListIssuesCache>(highKey)?.byStatus.todo?.total).toBe(1);
+  });
+});

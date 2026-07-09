@@ -3,6 +3,7 @@ import { api } from "../api";
 import type {
   GroupedIssuesResponse,
   Issue,
+  IssuePriority,
   IssueStatus,
   ListGroupedIssuesParams,
   ListIssuesParams,
@@ -20,11 +21,15 @@ export interface IssueSortParam {
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
-  /** PREFIX for invalidation — no sort. */
+  /** PREFIX for invalidation — no filter, no sort. */
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
-  /** FULL KEY for queryOptions — includes sort. */
-  listSorted: (wsId: string, sort?: IssueSortParam) =>
-    [...issueKeys.list(wsId), sort ?? {}] as const,
+  /** FULL KEY for queryOptions — includes the membership filter (priorities)
+   *  and sort. The filter segment mirrors `myListSorted` so the cache
+   *  coordinator can recover the workspace list's priority contract from its
+   *  key (see `listContractFromKey`). An empty filter hashes identically to
+   *  the unfiltered default (`JSON.stringify` drops `undefined`). */
+  listSorted: (wsId: string, filter?: MyIssuesFilter, sort?: IssueSortParam) =>
+    [...issueKeys.list(wsId), filter ?? {}, sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -121,7 +126,42 @@ export type MyIssuesFilter = Pick<
   | "creator_id"
   | "project_id"
   | "involves_user_id"
+  // Priority is a membership dimension of the server list (not a scope), but
+  // it rides in the same key-encoded filter object so the cache coordinator
+  // and load-more reconstruct one contract. Normalized empty → omitted.
+  | "priorities"
 >;
+
+/**
+ * Normalize the view store's priority selection into the list filter's
+ * `priorities` field. An empty selection becomes `undefined` so the query key
+ * and request are byte-identical to the unfiltered default (`JSON.stringify`
+ * drops `undefined` object props). The result is deduped and stably sorted so
+ * the same selected SET yields one cache key regardless of the toggle order
+ * that built it — otherwise `["high","urgent"]` and `["urgent","high"]` would
+ * hash to two distinct-but-equivalent query keys and each refetch its own page.
+ */
+export function normalizePriorities(
+  priorities: readonly IssuePriority[] | undefined,
+): IssuePriority[] | undefined {
+  if (!priorities || priorities.length === 0) return undefined;
+  return [...new Set(priorities)].sort();
+}
+
+/**
+ * Merge a priority selection into a base list filter. THE single source of
+ * truth for the filter that keys BOTH the first-page query and the load-more
+ * request, so the surface query key and `useLoadMoreByStatus`'s `activeKey`
+ * stay byte-consistent. Returns `base` unchanged (same reference) when no
+ * priority is selected.
+ */
+export function withPriorityFilter(
+  base: MyIssuesFilter,
+  priorities: readonly IssuePriority[] | undefined,
+): MyIssuesFilter {
+  const normalized = normalizePriorities(priorities);
+  return normalized ? { ...base, priorities: normalized } : base;
+}
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -187,11 +227,15 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchAllMyFirstPages(
+  userId: string,
+  sort?: IssueSortParam,
+  priorities?: IssuePriority[],
+): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
+    fetchFirstPages({ assignee_id: userId, priorities }, sort),
+    fetchFirstPages({ creator_id: userId, priorities }, sort),
+    fetchFirstPages({ involves_user_id: userId, priorities }, sort),
   ]);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -275,10 +319,14 @@ async function fetchAllMyAssigneeGroups(
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string, sort?: IssueSortParam) {
+export function issueListOptions(
+  wsId: string,
+  filter: MyIssuesFilter = {},
+  sort?: IssueSortParam,
+) {
   return queryOptions({
-    queryKey: issueKeys.listSorted(wsId, sort),
-    queryFn: () => fetchFirstPages({}, sort),
+    queryKey: issueKeys.listSorted(wsId, filter, sort),
+    queryFn: () => fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -322,7 +370,7 @@ export function myIssueListOptions(
     queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
+        ? fetchAllMyFirstPages(userId, sort, filter.priorities)
         : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,

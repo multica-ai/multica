@@ -182,13 +182,19 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.scopeKey).toBe("workspace:all");
     expect(result.current.filter).toEqual({});
     expect(result.current.loadMoreScope).toBeUndefined();
-    expect(result.current.loadMoreFilter).toBeUndefined();
+    // loadMoreFilter is now always the merged membership filter — empty for the
+    // default workspace board (no priority selected), not undefined.
+    expect(result.current.loadMoreFilter).toEqual({});
     expect(
       qc.getQueryCache().find({
-        queryKey: issueKeys.listSorted("ws-1", {
-          sort_by: "position",
-          sort_direction: undefined,
-        }),
+        queryKey: issueKeys.listSorted(
+          "ws-1",
+          {},
+          {
+            sort_by: "position",
+            sort_direction: undefined,
+          },
+        ),
         exact: true,
       }),
     ).toBeDefined();
