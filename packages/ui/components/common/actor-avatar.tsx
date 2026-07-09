@@ -38,18 +38,14 @@ function ActorAvatar({
     setImgError(false);
   }, [avatarUrl]);
 
-  // Only humans (members) read as a circle. Non-human actors — agents, squads,
-  // and the system identity — get a rounded square so they don't read as a
-  // single person. This is the single source of truth for avatar shape; the
-  // upload editors mirror it (packages/views/common/avatar-upload-control.tsx).
-  const isHuman = !isAgent && !isSystem && !isSquad;
-
+  // Every actor — member, agent, squad, or system — renders as a circle. This
+  // is the single source of truth for avatar shape; the upload editors mirror
+  // it (packages/views/common/avatar-upload-control.tsx).
   return (
     <div
       data-slot="avatar"
       className={cn(
-        "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        isHuman ? "rounded-full" : "rounded-md",
+        "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden rounded-full",
         (!avatarUrl || imgError) && "bg-muted text-muted-foreground",
         className
       )}

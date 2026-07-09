@@ -71,7 +71,6 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
           avatarUrl={squad.avatar_url}
           isSquad
           size="xl"
-          className="rounded-md"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

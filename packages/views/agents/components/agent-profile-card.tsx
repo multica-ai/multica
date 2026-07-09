@@ -80,7 +80,6 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
           size="xl"
-          className="rounded-md"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

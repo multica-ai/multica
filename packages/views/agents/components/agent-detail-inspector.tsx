@@ -295,13 +295,8 @@ function AvatarEditor({
 }) {
   if (!canEdit) {
     return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
-        <ActorAvatar
-          actorType="agent"
-          actorId={agent.id}
-          size="2xl"
-          className="rounded-none"
-        />
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
+        <ActorAvatar actorType="agent" actorId={agent.id} size="2xl" />
       </div>
     );
   }

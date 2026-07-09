@@ -400,14 +400,13 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
 // affordance.
 function SquadStaticAvatar({ squad, initials }: { squad: Squad; initials: string }) {
   return (
-    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
       {squad.avatar_url ? (
         <ActorAvatarBase
           name={squad.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
           size="2xl"
-          className="rounded-none"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-muted-foreground">

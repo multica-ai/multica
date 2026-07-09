@@ -343,7 +343,7 @@ function NameCell({ row }: { row: AgentListRow }) {
         actorType="agent"
         actorId={agent.id}
         size="lg"
-        className={`shrink-0 rounded-md ${isArchived ? "opacity-50 grayscale" : ""}`}
+        className={`shrink-0 ${isArchived ? "opacity-50 grayscale" : ""}`}
         showStatusDot
       />
       <div className="min-w-0 flex-1">

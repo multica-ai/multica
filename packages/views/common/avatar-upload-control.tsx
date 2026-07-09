@@ -8,18 +8,18 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
-import { AvatarCropDialog, type AvatarCropShape } from "./avatar-crop-dialog";
+import { AvatarCropDialog } from "./avatar-crop-dialog";
 
 export type AvatarUploadVariant = "user" | "agent" | "squad" | "workspace";
 
 interface AvatarUploadControlProps {
   /** Current avatar URL, raw (unresolved). `null` renders the empty state. */
   value: string | null;
-  /** Drives display shape and the empty-state fallback icon/initials. */
+  /** Drives the empty-state fallback icon/initials. */
   variant: AvatarUploadVariant;
   /** Name used for initials / first-letter fallback and the image alt. */
   name?: string;
-  /** Pixel side of the square/circle. Defaults to 64. */
+  /** Pixel diameter of the circle. Defaults to 64. */
   size?: number;
   disabled?: boolean;
   /**
@@ -38,16 +38,6 @@ interface AvatarUploadControlProps {
   className?: string;
   ariaLabel?: string;
 }
-
-// Humans read as a circle; non-human actors (agent, squad, workspace) get a
-// rounded square so they don't read as a single person. Matches the shared
-// display avatar (packages/ui/components/common/actor-avatar.tsx).
-const VARIANT_SHAPE: Record<AvatarUploadVariant, AvatarCropShape> = {
-  user: "circle",
-  agent: "square",
-  squad: "square",
-  workspace: "square",
-};
 
 function initialsOf(name: string): string {
   return name
@@ -112,8 +102,6 @@ export function AvatarUploadControl({
 
   const resolved = value ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;
-  const shape = VARIANT_SHAPE[variant];
-  const radiusClass = shape === "circle" ? "rounded-full" : "rounded-lg";
 
   const handlePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -158,7 +146,7 @@ export function AvatarUploadControl({
           "flex items-center justify-center",
           "focus-visible:ring-2 focus-visible:ring-ring",
           "disabled:cursor-not-allowed disabled:opacity-60",
-          radiusClass,
+          "rounded-full",
           className,
         )}
         style={{ width: size, height: size }}
@@ -211,7 +199,6 @@ export function AvatarUploadControl({
       <AvatarCropDialog
         file={pickedFile}
         open={dialogOpen}
-        shape={shape}
         busy={busy}
         onOpenChange={(next) => {
           if (busy) return;

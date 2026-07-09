@@ -23,15 +23,11 @@ import {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.1;
-const ROUNDED_SQUARE_CROP_AREA_STYLE = { borderRadius: "0.5rem" };
-
-export type AvatarCropShape = "circle" | "square";
 
 interface AvatarCropDialogProps {
   /** The picked source file. `null` keeps the dialog empty. */
   file: File | null;
   open: boolean;
-  shape: AvatarCropShape;
   /** Parent's upload/save is in flight — locks the controls and blocks close. */
   busy?: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,10 +36,10 @@ interface AvatarCropDialogProps {
 }
 
 /**
- * Avatar cropper. The image pans/zooms/rotates beneath a fixed crop window
- * (round for people, rounded-square for non-human actors); everything outside
- * the window is dimmed. Output is a square {@link AVATAR_OUTPUT_SIZE}px image —
- * the round/square mask is display-only, never baked into the pixels.
+ * Avatar cropper. The image pans/zooms/rotates beneath a fixed round crop
+ * window; everything outside the window is dimmed. Output is a square {@link
+ * AVATAR_OUTPUT_SIZE}px image — the round mask is display-only, never baked
+ * into the pixels.
  *
  * Interaction (drag / zoom / rotate + the dim overlay) is delegated to
  * react-easy-crop; this component owns the chrome (header, zoom slider, rotate
@@ -52,7 +48,6 @@ interface AvatarCropDialogProps {
 export function AvatarCropDialog({
   file,
   open,
-  shape,
   busy = false,
   onOpenChange,
   onCropped,
@@ -138,11 +133,7 @@ export function AvatarCropDialog({
                 aspect={1}
                 minZoom={MIN_ZOOM}
                 maxZoom={MAX_ZOOM}
-                cropShape={shape === "circle" ? "round" : "rect"}
-                style={{
-                  cropAreaStyle:
-                    shape === "circle" ? undefined : ROUNDED_SQUARE_CROP_AREA_STYLE,
-                }}
+                cropShape="round"
                 showGrid={false}
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
