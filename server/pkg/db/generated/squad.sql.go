@@ -127,6 +127,56 @@ func (q *Queries) CreateSquad(ctx context.Context, arg CreateSquadParams) (Squad
 	return i, err
 }
 
+const getLatestCoordinatingSquadForIssue = `-- name: GetLatestCoordinatingSquadForIssue :one
+WITH latest_leader_task AS (
+    SELECT squad_id, status
+    FROM agent_task_queue
+    WHERE issue_id = $1
+      AND is_leader_task = TRUE
+      AND squad_id IS NOT NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
+SELECT s.id, s.workspace_id, s.name, s.description, s.leader_id, s.creator_id, s.created_at, s.updated_at, s.archived_at, s.archived_by, s.avatar_url, s.instructions
+FROM latest_leader_task lt
+JOIN squad s ON s.id = lt.squad_id
+JOIN agent a ON a.id = s.leader_id
+WHERE lt.status <> 'cancelled'
+  AND s.workspace_id = $2
+  AND s.archived_at IS NULL
+  AND a.workspace_id = $2
+  AND a.archived_at IS NULL
+  AND a.runtime_id IS NOT NULL
+`
+
+type GetLatestCoordinatingSquadForIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The coordinating squad is the exact squad on the latest leader task for
+// this issue. Validate that row's squad and leader, but do not fall back to an
+// older squad when the latest leader task is cancelled, archived, or dangling.
+func (q *Queries) GetLatestCoordinatingSquadForIssue(ctx context.Context, arg GetLatestCoordinatingSquadForIssueParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, getLatestCoordinatingSquadForIssue, arg.IssueID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
 const getSquad = `-- name: GetSquad :one
 SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad WHERE id = $1
 `

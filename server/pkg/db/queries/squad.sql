@@ -91,6 +91,30 @@ SELECT count(*) FROM squad_member WHERE squad_id = $1;
 -- Look up the squad when an issue is assigned to a squad.
 SELECT s.* FROM squad s WHERE s.id = $1 AND s.workspace_id = $2;
 
+-- name: GetLatestCoordinatingSquadForIssue :one
+-- The coordinating squad is the exact squad on the latest leader task for
+-- this issue. Validate that row's squad and leader, but do not fall back to an
+-- older squad when the latest leader task is cancelled, archived, or dangling.
+WITH latest_leader_task AS (
+    SELECT squad_id, status
+    FROM agent_task_queue
+    WHERE issue_id = $1
+      AND is_leader_task = TRUE
+      AND squad_id IS NOT NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
+SELECT s.*
+FROM latest_leader_task lt
+JOIN squad s ON s.id = lt.squad_id
+JOIN agent a ON a.id = s.leader_id
+WHERE lt.status <> 'cancelled'
+  AND s.workspace_id = $2
+  AND s.archived_at IS NULL
+  AND a.workspace_id = $2
+  AND a.archived_at IS NULL
+  AND a.runtime_id IS NOT NULL;
+
 -- name: ListSquadsByMember :many
 -- Find all squads a given entity belongs to in a workspace.
 SELECT s.* FROM squad s
