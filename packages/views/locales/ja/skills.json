@@ -304,8 +304,7 @@
     "universal_group_heading": "ユニバーサルスキル",
     "other_group_heading": "その他のスキル",
     "search_empty": "\"{{query}}\" に一致するスキルはありません",
-    "group_count": "{{count}}",
-    "summary_import_all": "すべてインポート"
+    "group_count": "{{count}}"
   },
   "file_tree": {
     "no_files": "ファイルなし"

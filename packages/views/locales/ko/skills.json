@@ -304,8 +304,7 @@
     "universal_group_heading": "범용 스킬",
     "other_group_heading": "기타 스킬",
     "search_empty": "\"{{query}}\"과(와) 일치하는 스킬이 없습니다",
-    "group_count": "{{count}}",
-    "summary_import_all": "모두 가져오기"
+    "group_count": "{{count}}"
   },
   "file_tree": {
     "no_files": "파일 없음"

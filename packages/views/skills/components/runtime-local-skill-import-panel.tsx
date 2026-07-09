@@ -637,14 +637,21 @@ export function RuntimeLocalSkillImportPanel({
   const branch: "summary" | "search" =
     runtimeSkills.length <= 2 ? "summary" : "search";
 
-  // U3: Skills filtered by search query (only meaningful in the 'search'
-  // branch; the summary branch ignores this and renders all skills).
+    // U3: Skills filtered by search query (only meaningful in the 'search'
+    // branch; the summary branch ignores this and renders all skills).
   const filteredSkills = useMemo(
     () =>
       searchQuery
         ? runtimeSkills.filter((s) => skillMatchesQuery(s, searchQuery))
         : runtimeSkills,
     [runtimeSkills, searchQuery],
+  );
+
+  // U3: Grouped+sorted skills for the search branch. Computed outside the
+  // middle IIFE so the useMemo call order is stable across branch switches.
+  const searchGrouped = useMemo(
+    () => groupSkillsByRoot(filteredSkills),
+    [filteredSkills],
   );
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
@@ -1130,7 +1137,8 @@ export function RuntimeLocalSkillImportPanel({
       );
     }
 
-    // Branch dispatch (R11, R12): locked on first data arrival.
+    // Branch dispatch (R11, R12): derived from runtimeSkills.length each
+    // render. Re-evaluation on polling updates is "best-effort" per R11.
     if (branch === "summary") {
       const grouped = groupSkillsByRoot(runtimeSkills);
       const groupLabel = (g: RootGroup) => {
@@ -1224,7 +1232,6 @@ export function RuntimeLocalSkillImportPanel({
     //   SkillItem's existing Checkbox (feasibility-review P1).
     // - The outer `Command` gets a transparent background so it composes with
     //   the panel's existing scroll region rather than adding its own.
-    const searchGrouped = groupSkillsByRoot(filteredSkills);
 
     return (
       <Command
@@ -1289,7 +1296,7 @@ export function RuntimeLocalSkillImportPanel({
                     <SkillItem
                       skill={s}
                       checked={selectedKeys.has(s.key)}
-                      onToggle={() => toggleSkill(s.key)}
+                      onToggle={() => {}} // Cmdk's onSelect drives selection; SkillItem's onClick is pointer-events-none
                       disabled={importing}
                       expanded={singleSelectedSkill?.key === s.key}
                       editName={
