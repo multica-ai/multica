@@ -137,7 +137,7 @@ prepareCodexHomeWithOpts(codexHome, opts, logger)
 ### 4.3 受影响的运维
 
 - 新增一条 `logger.Info("execenv: codex-home hook trust sync", ...)`（字段：codex_home 路径、shared/mapped/stale 计数、changed），便于排障；**只记路径与计数，绝不记 hook 内容 / token / cookie / socket**（评审中风险#8）。
-- 无新增监控 / 告警 / SOP；验收阶段在自托管开发测试环境确认 Flux native hook `raw/result/reportTokenUsage` 链路与 Grafana `used`↔`reported` 收敛（proposal §5，属开发官/验收环节）。
+- 无新增监控 / 告警 / SOP；验收阶段在自托管开发测试环境确认用户 Codex native hook 的加载与执行链路，以及外部 hook 上报集成端相关用量指标收敛（proposal §5，属开发官/验收环节）。
 
 ## 5. 测试策略
 
@@ -173,7 +173,7 @@ prepareCodexHomeWithOpts(codexHome, opts, logger)
 - [x] 本 change 是否触及 constitution.md 红线：**仓库无 constitution.md，无可对照红线**；本 change 主动坚守的隔离边界（下列）应作为未来宪法 candidate。
 - [x] 隔离边界红线（Requirement 4，逐条落到实现/日志/测试）：
   - 只暴露 `hooks.json` + `hooks/` 两项，**不暴露整份 `~/.codex`**（T11 断言）。
-  - **不把 Flux cookie / token / socket 写入 git 或 issue metadata**；日志只记路径 + 计数（§4.3）。
+  - **不把用户 hook 工具链的本机私密（cookie / token / socket 等）写入 git 或 issue metadata**；日志只记路径 + 计数（§4.3）。
   - **不改变** auth / session / config / skills / MCP / sandbox / memory / multi-agent 既有语义（T11 断言；新增代码不触碰既有资源分支）。
 - [x] 无需红线强制覆盖（§8 无覆盖记录）。
 
@@ -195,7 +195,7 @@ prepareCodexHomeWithOpts(codexHome, opts, logger)
 | 非 ENOENT stat 错误残留 stale hook | D2 fail closed 清 stale（评审#2） |
 | Windows junction 清理误删 shared 目标 | D5 区分 link/junction 与真实目录；T13 Windows 测试（评审#3） |
 | trust sync 与 sandbox/multi-agent/memory block 相互覆盖 | D4 置于所有 config 变更之后；T12 共存测试（评审#9） |
-| 把 Flux 私密写入版本库 / metadata | 只暴露两项资源、日志只记路径计数；不 dump 内容（Requirement 4 / 评审#8） |
+| 把用户 hook 工具链私密写入版本库 / metadata | 只暴露两项资源、日志只记路径计数；不 dump 内容（Requirement 4 / 评审#8） |
 
 ## 10. Codex 交叉评审摘要（强制环节）
 
@@ -220,7 +220,7 @@ prepareCodexHomeWithOpts(codexHome, opts, logger)
 2. **dev↔test 内循环**：开发官在 worktree 内跑 `go test ./server/internal/daemon/execenv/...`（按 `~/.agents/rules/go-version.md` 用 `go.mod` 声明版本对应的 `~/go/goX.Y.Z/bin/go`）全绿后再交测；测试全部用 `t.TempDir()` fake home，不碰真实 `~/.codex`、不联网。
 3. **归档动作**：把 spec-delta 各 Scenario 的 `TBD(...)` 替换为真实测试标识；features.hooks 三个 Scenario 标注"依 design Q1 不适用"。
 4. **正确性必查（对应 review-workflow 验收红线）**：T4（fail closed）、T10（不写坏 config）、T9（不误映射 plugin）、T12（block 共存）为**阻断级**用例，缺一不可；happy-path 全绿 ≠ 通过。
-5. **真实环境验收（proposal §5，验收/MR 环节）**：自托管开发测试环境确认新 Codex session 仍 `originator=multica-agent-sdk`/`source=vscode`，Flux 日志见 native hook `raw/result/reportTokenUsage`，Grafana `used`↔`reported` 收敛；trust key 一致性做一次真实集成核对（§9 风险闭环）。
+5. **真实环境验收（proposal §5，验收/MR 环节）**：自托管开发测试环境确认新 Codex session 仍 `originator=multica-agent-sdk`/`source=vscode`，用户配置的 Codex native hook 能被正常加载与执行，外部 hook 上报集成端可见对应事件链路且相关用量指标收敛；trust key 一致性做一次真实集成核对（§9 风险闭环）。
 
 ## 12. 后续动作建议
 
