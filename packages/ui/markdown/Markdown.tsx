@@ -12,7 +12,6 @@ import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
-import { remarkCjkAutolink } from './remark-cjk-autolink'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -450,15 +449,11 @@ export function Markdown({
     [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
   )
 
-  // Preprocess: convert mention shortcodes, file paths, and file cards to
-  // renderable content. URLs are intentionally left bare (urls: false) so
-  // remark-gfm autolinks them in the parse tree — a bare URL can then no longer
-  // swallow an adjacent markdown delimiter like a closing `**` (MUL-4242).
-  // remarkCjkAutolink re-applies the CJK boundary on gfm's autolink nodes.
+  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
-      result = preprocessLinks(result, { urls: false })
+      result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
       return result
     },
@@ -472,7 +467,6 @@ export function Markdown({
           [remarkMath, { singleDollarTextMath: false }],
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
-          remarkCjkAutolink,
         ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}

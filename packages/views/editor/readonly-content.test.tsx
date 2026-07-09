@@ -618,11 +618,11 @@ describe("ReadonlyContent slash command rendering", () => {
 });
 
 describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
-  // A bare URL wrapped in bold used to be pre-linkified into [url**](url**),
-  // which swallowed the closing `**`: the bold never closed (leading `**`
-  // showed as literal asterisks) and the href was corrupted with a trailing
-  // `**`. URLs are now autolinked by remark-gfm in the parse tree — after
-  // emphasis is resolved — so an adjacent delimiter can no longer be absorbed.
+  // A bare URL wrapped in bold used to be linkified into [url**](url**), which
+  // swallowed the closing `**`: the bold never closed (leading `**` showed as
+  // literal asterisks) and the href was corrupted with a trailing `**`. The
+  // shared linkify now drops a trailing markdown-delimiter run from the URL, so
+  // the closing `**` stays as emphasis outside a clean [url](url).
   it("renders a bold-wrapped bare URL as bold plus a clean link", () => {
     const url = "https://github.com/multica-ai/multica/pull/5081";
     const { container } = render(<ReadonlyContent content={`**PR：${url}**`} />);
@@ -634,6 +634,21 @@ describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
     // No literal asterisks leak into the text, no trailing `**` in the href.
     expect(container.textContent).not.toContain("**");
     expect(anchor?.getAttribute("href")).not.toContain("*");
+  });
+
+  it("bolds a bare URL even when a CJK punctuation immediately follows (variant B)", () => {
+    // `**url**（MUL）` — the closing `**` is glued to a fullwidth paren. gfm
+    // autolink swallowed the `**` here; the shared string linkify does not.
+    const url = "https://github.com/multica-ai/multica/pull/5133";
+    const { container } = render(
+      <ReadonlyContent content={`PR：**${url}**（MUL-4277）。`} />,
+    );
+
+    const strong = container.querySelector("strong");
+    expect(strong).not.toBeNull();
+    expect(strong!.querySelector("a")?.getAttribute("href")).toBe(url);
+    expect(container.textContent).not.toContain("**");
+    expect(container.textContent).toContain("（MUL-4277）");
   });
 
   it("still autolinks a plain bare URL", () => {
@@ -655,8 +670,8 @@ describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
   });
 
   it("keeps every URL in a CJK-separated run linked, not just the first", () => {
-    // Regression: gfm glues `url1、url2` into one autolink; trimming only at the
-    // first 、 left url2 as plain text. The tail must be rescanned so both link.
+    // `url1、url2` — linkify-it merges both across the CJK comma; collectLinkify
+    // truncates at 、 and rescans the tail so both URLs become their own link.
     const { container } = render(
       <ReadonlyContent content={"两个地址 https://a.com/x、https://b.com/y"} />,
     );
