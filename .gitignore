@@ -55,9 +55,6 @@ apps/web/test-results/
 .claude/
 .tool-versions
 
-# iServU internal workspace docs — separate nested git repo, never track here
-.iservu-workspace/
-
 # feature tracking
 _features/
 
