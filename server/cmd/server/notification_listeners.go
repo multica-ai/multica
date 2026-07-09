@@ -134,6 +134,8 @@ type inboxItemDraft struct {
 	Actor              events.Event
 	IsAssignee         bool
 	SuppressMobilePush bool
+	// CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — create the row already-read (soft) so it shows without counting as unread.
+	CreateAsRead bool
 }
 
 // dispatchToMember resolves the recipient's per-channel preferences for this
@@ -156,7 +158,9 @@ func dispatchToMember(
 
 	inboxOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelInbox, key)
 	notifOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelNotifications, key)
-	if !inboxOn && !notifOn {
+	// CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — a reaction always leaves a soft (read) inbox row; the Inbox setting only gates unread.
+	softReaction := d.NotifType == "reaction_added" && !inboxOn
+	if !inboxOn && !notifOn && !softReaction {
 		return false
 	}
 
@@ -165,6 +169,9 @@ func dispatchToMember(
 		if createInboxItemForChannel(ctx, queries, bus, d, routeInbox) {
 			created = true
 		}
+	} else if softReaction {
+		d.CreateAsRead = true // CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — soft row, already-read; leaves `created` false so no push fires.
+		createInboxItemForChannel(ctx, queries, bus, d, routeInbox)
 	}
 	if notifOn {
 		if createInboxItemForChannel(ctx, queries, bus, d, routeNotifications) {
@@ -242,6 +249,11 @@ func createInboxItemForChannel(
 		slog.Error("inbox item creation failed",
 			"recipient_id", d.RecipientID, "type", d.NotifType, "route", route, "error", err)
 		return false
+	}
+	if d.CreateAsRead { // CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — mark the fresh row read so the live event and DB agree it is soft.
+		if r, e := queries.MarkInboxRead(ctx, item.ID); e == nil {
+			item = r
+		}
 	}
 	resp := inboxItemToResponse(item)
 	if d.IssueStatus != "" {
