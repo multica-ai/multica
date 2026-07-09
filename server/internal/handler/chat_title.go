@@ -64,6 +64,21 @@ func (h *Handler) maybeGenerateChatTitleAsync(workspaceID, userID string, sessio
 	}
 
 	go func() {
+		// Panic containment: this goroutine is detached from the HTTP request,
+		// so chi's Recoverer middleware is NOT in the call stack. A panic
+		// anywhere below (GenerateText, sanitizing, the DB write, publish)
+		// would otherwise crash the whole server process. This is a
+		// best-effort nicety — swallow the panic, log it, and leave the
+		// original title in place.
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("chat title generation panicked; keeping original title",
+					"session_id", uuidToString(sessionID),
+					"panic", rec,
+				)
+			}
+		}()
+
 		ctx, cancel := context.WithTimeout(context.Background(), chatTitleGenTimeout)
 		defer cancel()
 
@@ -153,28 +168,30 @@ var chatTitleLabelPrefixes = []string{
 // pairs, drop trailing sentence punctuation, and hard-cap the length at
 // chatSessionTitleMaxLen runes (the same ceiling the manual rename endpoint
 // enforces). Returns "" when nothing meaningful remains.
+//
+// Prefix-stripping and wrapper-stripping run in a loop until the string stops
+// changing: a model may nest the two (e.g. `"Title: Fix login"` or
+// `「标题：修复登录问题」`), where the outer wrapper hides the forbidden prefix
+// on a single pass. Iterating to a fixed point peels both regardless of order.
 func sanitizeChatTitle(raw string) string {
 	// Collapse all internal whitespace (including newlines/tabs the model may
 	// emit) into single spaces so a multi-line reply becomes one clean line.
-	s := strings.Join(strings.Fields(raw), " ")
-	s = strings.TrimSpace(s)
+	s := strings.TrimSpace(strings.Join(strings.Fields(raw), " "))
 	if s == "" {
 		return ""
 	}
 
-	// Strip a leading label prefix ("Title:", "标题：", ...), then re-trim so a
-	// following quote/space is handled by the steps below.
-	lower := strings.ToLower(s)
-	for _, p := range chatTitleLabelPrefixes {
-		if strings.HasPrefix(lower, p) {
-			s = strings.TrimSpace(s[len(p):])
+	// Alternate stripping the leading label prefix and one layer of surrounding
+	// quotes/brackets until neither changes anything. Bounded by the string
+	// only ever getting shorter, so it always terminates.
+	for {
+		before := s
+		s = strings.TrimSpace(stripChatTitleLabelPrefix(s))
+		s = stripSurroundingQuotes(s)
+		if s == before || s == "" {
 			break
 		}
 	}
-
-	// Remove one layer of surrounding matching quotes/brackets. Repeats so
-	// nested wrappers (e.g. 「"..."」) are peeled fully.
-	s = stripSurroundingQuotes(s)
 
 	// Drop trailing sentence-ending punctuation (ASCII + common CJK/full-width).
 	s = strings.TrimRight(s, ".。!！?？,，;；:：、 ")
@@ -186,6 +203,19 @@ func sanitizeChatTitle(raw string) string {
 	// Hard cap on rune length to match the manual-rename ceiling.
 	if runes := []rune(s); len(runes) > chatSessionTitleMaxLen {
 		s = strings.TrimSpace(string(runes[:chatSessionTitleMaxLen]))
+	}
+	return s
+}
+
+// stripChatTitleLabelPrefix removes one leading label prefix ("Title:",
+// "标题：", ...) when present, matched case-insensitively. Returns s unchanged
+// when none matches.
+func stripChatTitleLabelPrefix(s string) string {
+	lower := strings.ToLower(s)
+	for _, p := range chatTitleLabelPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return s[len(p):]
+		}
 	}
 	return s
 }
