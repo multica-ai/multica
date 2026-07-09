@@ -98,11 +98,23 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parent.Status == "backlog" {
 		return
 	}
+	var coordinatingSquad *db.Squad
+
 	// Human-assigned parents read their own timeline; an automated system
-	// comment is just noise and there is no agent task to trigger. Skip the
-	// whole notification (comment + mention + inbox row) — MUL-2538.
+	// comment is just noise and there is no agent task to trigger. A squad that
+	// was explicitly @mentioned can still be coordinating this parent; in that
+	// case the system comment drives the same leader continuation as a squad
+	// assignment without changing issue.assignee.
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
-		return
+		squad, ok := h.resolveCoordinatingSquadForIssue(ctx, parent)
+		if !ok {
+			return
+		}
+		coordinatingSquad = &squad
+	} else if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
+		if squad, ok := h.resolveCoordinatingSquadForIssue(ctx, parent); ok {
+			coordinatingSquad = &squad
+		}
 	}
 
 	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
@@ -134,8 +146,12 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 
 	// Build the parent-assignee mention prefix. Empty when the parent has no
 	// assignee or the assignee row is missing (deleted member, archived
-	// agent the workspace lost track of, etc.).
+	// agent the workspace lost track of, etc.). Coordinating-squad fallback
+	// names the leader agent directly because the squad is not the assignee.
 	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
+	if coordinatingSquad != nil {
+		mentionPrefix = h.buildCoordinatingSquadLeaderMention(ctx, parent.WorkspaceID, *coordinatingSquad)
+	}
 
 	var content string
 	// When the set is staged and the barrier closed, the completed child is
@@ -190,7 +206,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+	h.dispatchParentAssigneeTrigger(ctx, parent, comment, coordinatingSquad)
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
@@ -349,6 +365,17 @@ func (h *Handler) buildParentAssigneeMention(ctx context.Context, parent db.Issu
 	return fmt.Sprintf("[@%s](mention://%s/%s) ", label, parent.AssigneeType.String, uuidToString(parent.AssigneeID))
 }
 
+func (h *Handler) buildCoordinatingSquadLeaderMention(ctx context.Context, workspaceID pgtype.UUID, squad db.Squad) string {
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          squad.LeaderID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("[@%s](mention://agent/%s) ", sanitizeMentionLabel(agent.Name), uuidToString(squad.LeaderID))
+}
+
 // resolveAssigneeMentionLabel returns the label text to render inside the
 // mention link. The label is for human display only — the mention regex
 // keys off the URL path, not the label — but a sensible fallback keeps the
@@ -394,11 +421,12 @@ func sanitizeMentionLabel(name string) string {
 
 // dispatchParentAssigneeTrigger fires the explicit side effect that pairs
 // with the @mention link in the system comment body — an agent task for
-// agent or squad-leader assignees. Member assignees never reach this code
-// path; notifyParentOfChildDone skips them outright. The generic comment
-// listener is intentionally bypassed (it short-circuits on
-// author_type='system'), so this is the single place where the platform
-// applies the idempotency guard for the child-done notification.
+// agent or squad-leader assignees, or for the coordinating squad leader when
+// a parent has no runnable agent/squad assignee. Member assignees without a
+// coordinating squad never reach this code path; notifyParentOfChildDone skips
+// them outright. The generic comment listener is intentionally bypassed (it
+// short-circuits on author_type='system'), so this is the single place where
+// the platform applies the idempotency guard for the child-done notification.
 //
 // Side-effect semantics (intentionally narrower than a normal @mention):
 //   - agent parent: one EnqueueTaskForMention on the parent assignee, same
@@ -412,6 +440,10 @@ func sanitizeMentionLabel(name string) string {
 //     actor that closed the child is irrelevant to routing: the target is the
 //     parent's own leader, chosen (and permission-checked) at squad-assign
 //     time, so no actor identity is threaded in — see triggerChildDoneSquad.
+//   - coordinating squad fallback: when the parent is member-assigned or
+//     unassigned, the latest valid leader task can supply a temporary
+//     coordinating squad. That leader is woken with the same leader-only side
+//     effect as the assigned squad path, without mutating issue.assignee.
 //   - notification_preference is not consulted: this is a platform routing
 //     signal targeted at the assignee that already owns the parent, not a
 //     general notification. Per-user mute settings are evaluated by the
@@ -421,7 +453,7 @@ func sanitizeMentionLabel(name string) string {
 //     child title are inert — only the explicit dispatch below runs.
 //
 // Guards applied here:
-//   - No-op when the parent has no assignee row.
+//   - No-op when the parent has no assignee row and no coordinating squad.
 //   - NO self-trigger guard on either the agent OR the squad path. Waking the
 //     parent assignee when one of its children finishes is a serial sub-task
 //     handoff across two DIFFERENT issues, not a self-loop — legitimate per
@@ -442,16 +474,27 @@ func sanitizeMentionLabel(name string) string {
 //     itself push a child back into a terminal transition.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
-	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
-		return
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment, coordinatingSquad *db.Squad) {
+	if parent.AssigneeType.Valid && parent.AssigneeID.Valid {
+		switch parent.AssigneeType.String {
+		case "agent":
+			h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
+			return
+		case "squad":
+			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          parent.AssigneeID,
+				WorkspaceID: parent.WorkspaceID,
+			})
+			if err != nil {
+				return
+			}
+			h.triggerChildDoneSquad(ctx, parent, squad, systemComment.ID)
+			return
+		}
 	}
 
-	switch parent.AssigneeType.String {
-	case "agent":
-		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
-	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, systemComment.ID)
+	if coordinatingSquad != nil {
+		h.triggerChildDoneSquad(ctx, parent, *coordinatingSquad, systemComment.ID)
 	}
 }
 
@@ -495,8 +538,9 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 	}
 }
 
-// triggerChildDoneSquad enqueues a leader-role task for the parent's squad
-// assignee. It mirrors the agent path (see triggerChildDoneAgent) exactly:
+// triggerChildDoneSquad enqueues a leader-role task for a parent squad assignee
+// or coordinating squad. It mirrors the agent path (see triggerChildDoneAgent)
+// exactly:
 //
 //   - NO self-trigger guard: even when the finished child is owned by the same
 //     squad or by another squad sharing this leader, the leader must still be
@@ -520,16 +564,11 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //
 // Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
 // check below, exactly as the agent path relies on it.
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
-	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          parent.AssigneeID,
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, squad db.Squad, triggerCommentID pgtype.UUID) {
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          squad.LeaderID,
 		WorkspaceID: parent.WorkspaceID,
 	})
-	if err != nil {
-		return
-	}
-
-	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return
 	}
