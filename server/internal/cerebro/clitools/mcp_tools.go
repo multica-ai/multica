@@ -122,6 +122,9 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	// CEREBRO-PATCH(mcp-connection-tools): FIR-2273 api-type workspace connection endpoints
 	// (feature-flagged + default-deny per agent), dispatched server-side via Multica.
 	registerConnectionTools(srv, client)
+	// CEREBRO-PATCH(cerebro-connections-admin-mcp): FIR-2835 connection registry CRUD tools
+	// (create/list/get/update/delete/test connections), gated on manage_connections.
+	registerCerebroConnectionAdminTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues

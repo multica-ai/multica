@@ -1791,8 +1791,32 @@
       "gate": "via:POST /api/artifact-folders/"
     },
     {
+      "id": "create_connection",
+      "gate": "via:POST /api/workspaces/{id}/connections"
+    },
+    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
+    },
+    {
+      "id": "delete_connection",
+      "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_connection",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "list_connections",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "test_connection",
+      "gate": "via:POST /api/workspaces/{id}/connections/test"
+    },
+    {
+      "id": "update_connection",
+      "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
     },
     {
       "id": "create_issue",
@@ -2247,6 +2271,30 @@
     {
       "id": "config show",
       "exempt": "local-only — reads CLI config file on disk"
+    },
+    {
+      "id": "connection create",
+      "gate": "via:POST /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "connection delete",
+      "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "connection get",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "connection list",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "connection test",
+      "gate": "via:POST /api/workspaces/{id}/connections/test"
+    },
+    {
+      "id": "connection update",
+      "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
     },
     {
       "id": "daemon disk-usage",
