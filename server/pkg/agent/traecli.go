@@ -96,17 +96,25 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("traecli executable not found at %q: %w", execPath, err)
 	}
 
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	hardenedMcpConfig, mcpTempCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("traecli: harden mcp_config: %w", err)
+	}
+	context.AfterFunc(runCtx, mcpTempCleanup)
+
 	// Translate the agent's mcp_config (Claude-style object of objects) into
 	// the array shape ACP session/new and session/load expect. Fail closed on
 	// malformed JSON so the launch surfaces the real error instead of silently
 	// dropping every MCP server.
-	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	mcpServers, err := buildACPMcpServers(hardenedMcpConfig, b.cfg.Logger)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("traecli: invalid mcp_config: %w", err)
 	}
-
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
 
 	traecliArgs := append(
 		[]string{"acp", "serve", "--yolo"},
