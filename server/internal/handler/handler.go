@@ -210,10 +210,11 @@ type Handler struct {
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
-	// OpenAI Go SDK backing the OpenAI-compatible chat-completions endpoints
-	// and any internal one-shot LLM helpers. Always non-nil (New builds it
-	// from Config); when unconfigured its Enabled() reports false and the
-	// handlers return 503.
+	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
+	// title generation. The generic passthrough endpoints were removed in
+	// MUL-4309, so it is internal-only now. Always non-nil (New builds it from
+	// Config); when unconfigured its Enabled() reports false and callers fall
+	// back silently.
 	LLM *llm.Client
 	cfg Config
 }
