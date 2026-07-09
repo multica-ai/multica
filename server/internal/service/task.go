@@ -340,12 +340,16 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	if triggerCommentID.Valid {
 		return s.attributionFromTriggerComment(ctx, triggerCommentID, agentAuthoredSource)
 	}
-	// Autopilot-origin issues (origin_id is the autopilot id): no human authorized
-	// the run, so originator stays NULL, but it is accountable to the publisher of
-	// the autopilot's active rule version — rule_owner (MUL-4302 §3.4). Resolved
-	// the same way the run_only dispatch resolves it, so both autopilot execution
-	// modes attribute identically.
-	if s != nil && s.Queries != nil && issue.OriginType.Valid &&
+	// Autopilot-origin issues (origin_id is the autopilot id) with NO direct actor
+	// — i.e. a schedule / webhook trigger: no human authorized the run, so
+	// originator stays NULL, but it is accountable to the publisher of the
+	// autopilot's active rule version — rule_owner (MUL-4302 §3.4). Resolved the
+	// same way run_only dispatch resolves it, so both autopilot execution modes
+	// attribute identically. A MANUAL trigger threads a valid actorUserID and is
+	// deliberately excluded here so it falls through to the direct_human actor
+	// override below (MUL-4302 §4): the member who clicked "run now" is the
+	// accountable human and originator, not the rule publisher.
+	if !actorUserID.Valid && s != nil && s.Queries != nil && issue.OriginType.Valid &&
 		issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
 		return ruleOwnerAttribution(ctx, s.Queries, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)
 	}

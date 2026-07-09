@@ -1860,7 +1860,17 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	// A manual "run now" is a direct human action, so the run is attributed
+	// direct_human to the triggering member (MUL-4302 §4). Resolve the actor the
+	// same way assign/promote does; only a member actor is a human — an agent
+	// triggering via A2A yields an invalid actor and falls back to rule_owner.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	run, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return

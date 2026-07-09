@@ -271,7 +271,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
-    accountable_user_id, rule_version_id,
+    originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
@@ -280,7 +280,8 @@ VALUES (
     $7,
     $8,
     $9,
-    $10
+    $10,
+    $11
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
@@ -291,6 +292,7 @@ type CreateAutopilotTaskParams struct {
 	Priority             int32       `json:"priority"`
 	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
 	TriggerSummary       pgtype.Text `json:"trigger_summary"`
+	OriginatorUserID     pgtype.UUID `json:"originator_user_id"`
 	AccountableUserID    pgtype.UUID `json:"accountable_user_id"`
 	RuleVersionID        pgtype.UUID `json:"rule_version_id"`
 	OriginatorSource     pgtype.Text `json:"originator_source"`
@@ -301,13 +303,18 @@ type CreateAutopilotTaskParams struct {
 // =====================
 // Task Queue (run_only mode)
 // =====================
-// run_only autopilot dispatch. originator_user_id stays NULL: no human authorized
-// this run, so authorization correctly carries none. accountable_user_id is the
-// rule_owner — the publisher of the autopilot's active rule version — and
-// rule_version_id records which snapshot resolved it (MUL-4302 §3.4). This is the
-// accountable-diverges-from-originator case. When no version/publisher resolves,
-// the caller passes NULL accountable + originator_source='unattributed' so the row
-// is still not a NULL-source bypass (MUL-4302 §2).
+// run_only autopilot dispatch. Attribution depends on the trigger:
+//   - schedule / webhook / api: no human authorized the run, so originator_user_id
+//     stays NULL and accountable_user_id is the rule_owner (the publisher of the
+//     autopilot's active rule version), with rule_version_id recording the snapshot
+//     (MUL-4302 §3.4) — the accountable-diverges-from-originator case.
+//   - manual: a member clicked "run now", a direct human action, so originator and
+//     accountable are BOTH that member (originator_source='direct_human'); no rule
+//     version is involved (MUL-4302 §4).
+//
+// When no version/publisher resolves on the non-manual path, the caller passes NULL
+// accountable + originator_source='unattributed' so the row is still not a
+// NULL-source bypass (MUL-4302 §2).
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
@@ -315,6 +322,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.Priority,
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
+		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuleVersionID,
 		arg.OriginatorSource,

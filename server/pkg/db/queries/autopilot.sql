@@ -360,20 +360,25 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
--- run_only autopilot dispatch. originator_user_id stays NULL: no human authorized
--- this run, so authorization correctly carries none. accountable_user_id is the
--- rule_owner — the publisher of the autopilot's active rule version — and
--- rule_version_id records which snapshot resolved it (MUL-4302 §3.4). This is the
--- accountable-diverges-from-originator case. When no version/publisher resolves,
--- the caller passes NULL accountable + originator_source='unattributed' so the row
--- is still not a NULL-source bypass (MUL-4302 §2).
+-- run_only autopilot dispatch. Attribution depends on the trigger:
+--   * schedule / webhook / api: no human authorized the run, so originator_user_id
+--     stays NULL and accountable_user_id is the rule_owner (the publisher of the
+--     autopilot's active rule version), with rule_version_id recording the snapshot
+--     (MUL-4302 §3.4) — the accountable-diverges-from-originator case.
+--   * manual: a member clicked "run now", a direct human action, so originator and
+--     accountable are BOTH that member (originator_source='direct_human'); no rule
+--     version is involved (MUL-4302 §4).
+-- When no version/publisher resolves on the non-manual path, the caller passes NULL
+-- accountable + originator_source='unattributed' so the row is still not a
+-- NULL-source bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
-    accountable_user_id, rule_version_id,
+    originator_user_id, accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(rule_version_id),
     sqlc.narg(originator_source),

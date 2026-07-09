@@ -293,6 +293,215 @@ func TestEnqueueTaskForIssueAutopilotOriginWithoutVersionDegrades(t *testing.T) 
 	}
 }
 
+// seedRunOnlyAutopilot creates an active run_only autopilot (agent-assigned) plus a
+// running autopilot_run for it, and returns their ids. Used to exercise
+// dispatchRunOnly's direct CreateAutopilotTask path.
+func seedRunOnlyAutopilot(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID, creatorID string) (autopilotID, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'run-only ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, creatorID).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status) VALUES ($1, 'manual', 'running') RETURNING id`,
+		autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("seed autopilot run: %v", err)
+	}
+	return autopilotID, runID
+}
+
+// TestDispatchRunOnlyScheduleStampsRuleOwnerRow is the run_only row assertion Elon
+// asked for: the direct CreateAutopilotTask path (no member actor → schedule-like)
+// must persist rule_owner on the queue row — originator NULL, accountable = the
+// active rule version publisher, rule_version_id set.
+func TestDispatchRunOnlyScheduleStampsRuleOwnerRow(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, publisherID, agentID, _ := seedAttributionFixture(t, pool)
+	autopilotID, runID := seedRunOnlyAutopilot(t, pool, workspaceID, agentID, publisherID)
+
+	var ruleVersionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_rule_version (autopilot_id, workspace_id, published_by_type, published_by_id)
+		VALUES ($1, $2, 'member', $3) RETURNING id`, autopilotID, workspaceID, publisherID).Scan(&ruleVersionID); err != nil {
+		t.Fatalf("seed rule version: %v", err)
+	}
+
+	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}}
+	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("get autopilot: %v", err)
+	}
+	run, err := q.GetAutopilotRun(ctx, util.MustParseUUID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	// No member actor → schedule/webhook-style rule_owner attribution.
+	if err := svc.dispatchRunOnly(ctx, ap, &run, pgtype.UUID{}); err != nil {
+		t.Fatalf("dispatchRunOnly: %v", err)
+	}
+
+	var source pgtype.Text
+	var originator, accountable, ruleVersion pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id, rule_version_id
+		FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID).Scan(&source, &originator, &accountable, &ruleVersion); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+	if source.String != string(attribution.SourceRuleOwner) {
+		t.Errorf("originator_source = %q, want rule_owner", source.String)
+	}
+	if originator.Valid {
+		t.Errorf("run_only autopilot must NOT set originator, got %s", util.UUIDToString(originator))
+	}
+	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(publisherID).Bytes {
+		t.Errorf("accountable_user_id = %s, want publisher %s", util.UUIDToString(accountable), publisherID)
+	}
+	if !ruleVersion.Valid || ruleVersion.Bytes != util.MustParseUUID(ruleVersionID).Bytes {
+		t.Errorf("rule_version_id = %s, want %s", util.UUIDToString(ruleVersion), ruleVersionID)
+	}
+}
+
+// TestDispatchRunOnlyManualStampsDirectHuman verifies the blocking-finding fix on the
+// run_only path: a MANUAL trigger attributes direct_human to the triggering member —
+// originator == accountable == actor, no rule_version — even when the autopilot has a
+// published rule owned by someone else (MUL-4302 §4).
+func TestDispatchRunOnlyManualStampsDirectHuman(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, publisherID, agentID, _ := seedAttributionFixture(t, pool)
+	autopilotID, runID := seedRunOnlyAutopilot(t, pool, workspaceID, agentID, publisherID)
+
+	// A rule version published by the creator exists; the manual actor is a
+	// DIFFERENT member, who must win.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO autopilot_rule_version (autopilot_id, workspace_id, published_by_type, published_by_id)
+		VALUES ($1, $2, 'member', $3)`, autopilotID, workspaceID, publisherID); err != nil {
+		t.Fatalf("seed rule version: %v", err)
+	}
+	var actorID string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Trigger', $1) RETURNING id`,
+		fmt.Sprintf("trigger-%d@multica.test", time.Now().UnixNano())).Scan(&actorID); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		workspaceID, actorID); err != nil {
+		t.Fatalf("seed actor member: %v", err)
+	}
+
+	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}}
+	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("get autopilot: %v", err)
+	}
+	run, err := q.GetAutopilotRun(ctx, util.MustParseUUID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if err := svc.dispatchRunOnly(ctx, ap, &run, util.MustParseUUID(actorID)); err != nil {
+		t.Fatalf("dispatchRunOnly: %v", err)
+	}
+
+	var source pgtype.Text
+	var originator, accountable, ruleVersion pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id, rule_version_id
+		FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID).Scan(&source, &originator, &accountable, &ruleVersion); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+	if source.String != string(attribution.SourceDirectHuman) {
+		t.Errorf("originator_source = %q, want direct_human", source.String)
+	}
+	if !originator.Valid || originator.Bytes != util.MustParseUUID(actorID).Bytes {
+		t.Errorf("originator_user_id = %s, want triggering member %s", util.UUIDToString(originator), actorID)
+	}
+	if !accountable.Valid || accountable.Bytes != originator.Bytes {
+		t.Errorf("accountable_user_id = %s, want == originator (actor)", util.UUIDToString(accountable))
+	}
+	if ruleVersion.Valid {
+		t.Errorf("manual direct_human must not set rule_version_id, got %s", util.UUIDToString(ruleVersion))
+	}
+}
+
+// TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman verifies the manual fix on
+// the create_issue path: enqueuing an autopilot-origin issue WITH a triggering actor
+// (as dispatchCreateIssue does for a manual trigger) attributes direct_human to that
+// actor, not rule_owner — the actor override wins over the autopilot-origin branch.
+func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, publisherID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var autopilotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_rule_version (autopilot_id, workspace_id, published_by_type, published_by_id)
+		VALUES (gen_random_uuid(), $1, 'member', $2) RETURNING autopilot_id`,
+		workspaceID, publisherID).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed rule version: %v", err)
+	}
+	var issueID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
+		VALUES ($1, 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9101, 'autopilot', $3) RETURNING id`,
+		workspaceID, agentID, autopilotID).Scan(&issueID); err != nil {
+		t.Fatalf("seed autopilot-origin issue: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// A distinct triggering member (not the rule publisher) manually triggers.
+	var actorID string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Trigger', $1) RETURNING id`,
+		fmt.Sprintf("trig2-%d@multica.test", time.Now().UnixNano())).Scan(&actorID); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	// dispatchCreateIssue routes a manual trigger through the actor-carrying enqueue.
+	task, err := svc.EnqueueTaskForIssueWithHandoff(ctx, db.Issue{
+		ID:           util.MustParseUUID(issueID),
+		AssigneeID:   util.MustParseUUID(agentID),
+		Priority:     "medium",
+		CreatorType:  "agent",
+		CreatorID:    util.MustParseUUID(agentID),
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:     util.MustParseUUID(autopilotID),
+	}, "", util.MustParseUUID(actorID))
+	if err != nil {
+		t.Fatalf("EnqueueTaskForIssueWithHandoff: %v", err)
+	}
+
+	var source pgtype.Text
+	var originator, accountable, ruleVersion pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id, rule_version_id
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&source, &originator, &accountable, &ruleVersion); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+	if source.String != string(attribution.SourceDirectHuman) {
+		t.Errorf("originator_source = %q, want direct_human", source.String)
+	}
+	if !originator.Valid || originator.Bytes != util.MustParseUUID(actorID).Bytes {
+		t.Errorf("originator_user_id = %s, want actor %s", util.UUIDToString(originator), actorID)
+	}
+	if !accountable.Valid || accountable.Bytes != originator.Bytes {
+		t.Errorf("accountable_user_id = %s, want == originator (actor)", util.UUIDToString(accountable))
+	}
+	if ruleVersion.Valid {
+		t.Errorf("manual direct_human must not set rule_version_id, got %s", util.UUIDToString(ruleVersion))
+	}
+}
+
 // TestEnqueueChatTaskStampsChatEvidence verifies the chat enqueue path is no
 // longer a NULL-source bypass and uses the UNIFORM evidence pair: the sender is a
 // direct_human originator+accountable, and evidence is (kind=chat,

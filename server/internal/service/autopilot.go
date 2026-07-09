@@ -72,7 +72,25 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+	// No member actor on this entry point (schedule / webhook / api, or a manual
+	// trigger without a resolved member): attribution resolves rule_owner.
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{})
+}
+
+// DispatchAutopilotManual is the "run now" entry point for a member manually
+// triggering an autopilot. Unlike scheduled / webhook / api dispatch (no human in
+// the loop → rule_owner), a manual trigger is a direct human action: the run is
+// attributed direct_human to actorUserID, which becomes BOTH its originator
+// (authorization) and accountable human (MUL-4302 §4), across both execution modes.
+// An invalid actorUserID behaves exactly like DispatchAutopilot(source="manual").
+func (s *AutopilotService) DispatchAutopilotManual(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	payload []byte,
+	actorUserID pgtype.UUID,
+) (*db.AutopilotRun, error) {
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, actorUserID)
 }
 
 // DispatchAutopilotForPlan is the entry point for scheduled triggers that
@@ -156,7 +174,8 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS)
+	// Scheduled dispatch has no member actor → rule_owner attribution.
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{})
 }
 
 // isAutopilotRunComplete decides whether an existing autopilot_run row
@@ -205,6 +224,7 @@ func (s *AutopilotService) dispatchAutopilot(
 	source string,
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
+	actorUserID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
@@ -233,7 +253,7 @@ func (s *AutopilotService) dispatchAutopilot(
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone, actorUserID); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil
 			}
@@ -242,7 +262,7 @@ func (s *AutopilotService) dispatchAutopilot(
 			return &run, fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
-		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
+		if err := s.dispatchRunOnly(ctx, autopilot, &run, actorUserID); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil
 			}
@@ -286,7 +306,7 @@ func (s *AutopilotService) dispatchAutopilot(
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, triggerTimezone string) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, triggerTimezone string, actorUserID pgtype.UUID) error {
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -416,6 +436,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// route to the resolved leader as the executing agent (Path A from
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
+	// A MANUAL trigger (valid actorUserID) is a direct human action: enqueue via the
+	// actor-carrying entry points so attribution resolves direct_human to the
+	// triggering member (originator == accountable == actor, MUL-4302 §4). Schedule /
+	// webhook dispatch has no actor and takes the plain entry points, where the
+	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
+	// the existing actor-carrying enqueue methods; the handoff note is empty here.
 	if ap.AssigneeType == "squad" {
 		// Fail-closed invocation gate: verify the autopilot creator may still
 		// invoke the leader under the permission model. Catches configs that
@@ -424,13 +450,19 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		if !s.canCreatorInvokeAgent(ctx, ap, leader) {
 			return fmt.Errorf("autopilot creator cannot access private squad leader")
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
+		if actorUserID.Valid {
+			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID); err != nil {
+				return fmt.Errorf("enqueue squad leader task: %w", err)
+			}
+		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
-	} else {
-		if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+	} else if actorUserID.Valid {
+		if _, err := s.TaskSvc.EnqueueTaskForIssueWithHandoff(ctx, issue, "", actorUserID); err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
+	} else if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+		return fmt.Errorf("enqueue task for issue: %w", err)
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -546,7 +578,7 @@ func (e *errDispatchSkipped) Error() string { return e.reason }
 // applies also run here as belt-and-braces: if the leader changed between
 // admission and dispatch, or the runtime went offline in the gap, we still
 // fail closed instead of enqueueing a doomed task.
-func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, actorUserID pgtype.UUID) error {
 	agent, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		// Same admission-vs-failure classification as shouldSkipDispatch:
@@ -570,14 +602,21 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
-	// No human authorized a run_only autopilot dispatch, so originator_user_id stays
-	// NULL and authorization keeps saying "no human". The audit-accountable human is
-	// the rule_owner — the publisher of the autopilot's active rule version — with
-	// rule_version_id recording which snapshot resolved it (MUL-4302 §3.4). This is
-	// the accountable-diverges-from-originator case. A missing version/publisher
-	// degrades to unattributed (see ruleOwnerAttribution), still not a NULL-source
-	// bypass. Evidence points at the autopilot run.
-	autopilotAttr := ruleOwnerAttribution(ctx, s.Queries, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
+	// Attribution splits on the trigger. A MANUAL trigger is a direct human action:
+	// the triggering member is direct_human and becomes BOTH originator (so the run
+	// carries their authorization context) and accountable (MUL-4302 §4). A
+	// schedule / webhook trigger has no human — originator_user_id stays NULL and
+	// the audit-accountable human is the rule_owner, the publisher of the active
+	// rule version, with rule_version_id recording the snapshot (MUL-4302 §3.4); a
+	// missing version/publisher degrades to unattributed (see ruleOwnerAttribution).
+	// Either way evidence points at the autopilot run and the row is never a
+	// NULL-source bypass.
+	var autopilotAttr attribution.Result
+	if actorUserID.Valid {
+		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
+	} else {
+		autopilotAttr = ruleOwnerAttribution(ctx, s.Queries, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
+	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        agent.ID,
@@ -591,6 +630,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 			String: truncateForSummary(ap.Title, triggerSummaryMaxLen),
 			Valid:  ap.Title != "",
 		},
+		OriginatorUserID:     autopilotAttr.UserID,
 		AccountableUserID:    autopilotAttr.AccountableUserID,
 		RuleVersionID:        autopilotAttr.RuleVersionID,
 		OriginatorSource:     apSource,
