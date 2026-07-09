@@ -23,7 +23,7 @@ var codexSymlinkedDirs = []string{
 // CODEX_HOME. Unlike codexSymlinkedDirs, a missing source is NOT created —
 // environments without Codex hooks must not sprout empty hook directories.
 // A missing or non-directory source instead clears any stale per-task residue
-// so a removed ~/.codex/hooks/ does not survive workspace reuse (RAS-50).
+// so a removed ~/.codex/hooks/ does not survive workspace reuse.
 var codexOptionalSymlinkedDirs = []string{
 	"hooks",
 }
@@ -37,7 +37,7 @@ var codexSymlinkedFiles = []string{
 // Optional files to symlink from the shared ~/.codex/ into the per-task
 // CODEX_HOME. A missing or non-regular source clears any stale per-task
 // copy/link so removed hook configuration does not linger across workspace
-// reuse and get loaded by a later Codex session (RAS-50).
+// reuse and get loaded by a later Codex session.
 var codexOptionalSymlinkedFiles = []string{
 	"hooks.json",
 }
