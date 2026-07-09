@@ -998,11 +998,12 @@ type CommentTriggerAgentResponse struct {
 type commentAgentTriggerSource string
 
 const (
-	commentTriggerSourceIssueAssignee      commentAgentTriggerSource = "issue_assignee"
-	commentTriggerSourceMentionAgent       commentAgentTriggerSource = "mention_agent"
-	commentTriggerSourceMentionSquadLeader commentAgentTriggerSource = "mention_squad_leader"
-	commentTriggerSourceThreadParent       commentAgentTriggerSource = "thread_parent"
-	commentTriggerSourceConversation       commentAgentTriggerSource = "conversation_continuation"
+	commentTriggerSourceIssueAssignee           commentAgentTriggerSource = "issue_assignee"
+	commentTriggerSourceMentionAgent            commentAgentTriggerSource = "mention_agent"
+	commentTriggerSourceMentionSquadLeader      commentAgentTriggerSource = "mention_squad_leader"
+	commentTriggerSourceCoordinatingSquadLeader commentAgentTriggerSource = "coordinating_squad_leader"
+	commentTriggerSourceThreadParent            commentAgentTriggerSource = "thread_parent"
+	commentTriggerSourceConversation            commentAgentTriggerSource = "conversation_continuation"
 )
 
 const defaultCommentRoutingEscalationDelay = 5 * time.Minute
@@ -1057,6 +1058,8 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 		return "This agent was mentioned in the comment."
 	case commentTriggerSourceMentionSquadLeader:
 		return "A mentioned squad will trigger its leader."
+	case commentTriggerSourceCoordinatingSquadLeader:
+		return "A coordinating squad will trigger its leader."
 	case commentTriggerSourceThreadParent:
 		return "This reply will trigger the parent comment's author."
 	case commentTriggerSourceConversation:
@@ -1514,15 +1517,19 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 // (MUL-4195) can fall back to it when a pending task vanished mid-flight.
 func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger, getEscalationDelay func() time.Duration) {
 	switch trigger.Source {
-	case commentTriggerSourceIssueAssignee:
+	case commentTriggerSourceIssueAssignee, commentTriggerSourceCoordinatingSquadLeader:
 		if trigger.Squad != nil {
 			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
 				slog.Warn("enqueue squad leader task failed",
 					"issue_id", uuidToString(issue.ID),
 					"squad_id", uuidToString(trigger.Squad.ID),
 					"leader_id", uuidToString(trigger.Agent.ID),
+					"source", trigger.Source,
 					"error", err)
 			}
+			return
+		}
+		if trigger.Source == commentTriggerSourceCoordinatingSquadLeader {
 			return
 		}
 		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
@@ -1607,6 +1614,10 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
 				return []commentAgentTrigger{trigger}
 			}
+			return nil
+		}
+		if trigger, ok := h.routeCoordinatingSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
+			return []commentAgentTrigger{trigger}
 		}
 		return nil
 	}
@@ -1843,6 +1854,18 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if err != nil {
 		return commentAgentTrigger{}, false
 	}
+	return h.routeSquadLeaderFallback(ctx, issue, squad, authorType, authorID, opts, commentTriggerSourceIssueAssignee)
+}
+
+func (h *Handler) routeCoordinatingSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	squad, ok := h.resolveCoordinatingSquadForIssue(ctx, issue)
+	if !ok {
+		return commentAgentTrigger{}, false
+	}
+	return h.routeSquadLeaderFallback(ctx, issue, squad, authorType, authorID, opts, commentTriggerSourceCoordinatingSquadLeader)
+}
+
+func (h *Handler) routeSquadLeaderFallback(ctx context.Context, issue db.Issue, squad db.Squad, authorType, authorID string, opts commentTriggerComputeOptions, source commentAgentTriggerSource) (commentAgentTrigger, bool) {
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
 		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
 		return commentAgentTrigger{}, false
@@ -1861,7 +1884,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if err != nil {
 		return commentAgentTrigger{}, false
 	}
-	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee, Squad: &squad, AlreadyPending: hasPending}, true
+	return commentAgentTrigger{Agent: agent, Source: source, Squad: &squad, AlreadyPending: hasPending}, true
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
