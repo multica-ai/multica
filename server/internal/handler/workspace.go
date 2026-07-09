@@ -539,6 +539,10 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 type CreateMemberRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// SpaceIDs are the spaces the invitee joins on accept. Empty/omitted means
+	// the invitee falls back to the workspace default space (older clients that
+	// know nothing about spaces keep working unchanged).
+	SpaceIDs []string `json:"space_ids"`
 }
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {

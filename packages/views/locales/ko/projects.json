@@ -63,7 +63,7 @@
     "unpin_tooltip": "사이드바 고정 해제",
     "sidebar_tooltip": "사이드바 열기/닫기",
     "copy_link": "링크 복사",
-    "manage_spaces_action": "Space 관리",
+    "spaces": "Space",
     "delete_action": "프로젝트 삭제",
     "section_properties": "속성",
     "section_progress": "진행률",
@@ -125,20 +125,8 @@
     "cancel": "취소"
   },
   "manage_spaces": {
-    "title": "Space 관리",
-    "description": "이 프로젝트가 속할 Space를 선택하세요.",
     "empty": "최소 하나의 Space를 선택하세요.",
-    "save": "저장",
-    "saving": "저장 중…",
-    "cancel": "취소",
-    "toast_updated": "Space가 업데이트되었습니다",
-    "toast_failed": "Space 업데이트에 실패했습니다",
-    "conflict_title": "Space를 제거하기 전에 이슈를 이동하세요",
-    "conflict_body_other": "제거하려는 Space에 이 프로젝트의 이슈가 {{count}}개 있습니다. 이동할 위치를 선택하세요.",
-    "conflict_row_other": "{{space}}에 이슈 {{count}}개",
-    "conflict_target_placeholder": "이동 위치 선택…",
-    "confirm_move": "이슈 이동 후 저장",
-    "back": "뒤로"
+    "toast_failed": "Space 업데이트에 실패했습니다"
   },
   "picker": {
     "no_project": "프로젝트 없음",

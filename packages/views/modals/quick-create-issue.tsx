@@ -35,7 +35,6 @@ import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { SpacePicker } from "../spaces/components/space-picker";
-import { SpaceProjectConflictDialog } from "../spaces/components/space-project-conflict-dialog";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -316,23 +315,7 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Linear-style interception: space ∉ project's space set pauses the submit
-  // behind a resolution dialog (see SpaceProjectConflictDialog).
-  const spaceProjectConflict = useMemo(() => {
-    if (!selectedProject || !effectiveSpaceId) return null;
-    const ids = selectedProject.space_ids ?? [];
-    if (ids.length === 0 || ids.includes(effectiveSpaceId)) return null;
-    const space = spaces.find((tm) => tm.id === effectiveSpaceId);
-    if (!space) return null;
-    return { space, projectSpaces: spaces.filter((tm) => ids.includes(tm.id)) };
-  }, [selectedProject, effectiveSpaceId, spaces]);
-  const [conflictOpen, setConflictOpen] = useState(false);
-
   const submit = async () => {
-    if (spaceProjectConflict) {
-      setConflictOpen(true);
-      return;
-    }
     await doSubmit(effectiveSpaceId);
   };
 
@@ -658,24 +641,6 @@ export function AgentCreatePanel({
             </Button>
           </div>
         </div>
-      {spaceProjectConflict && (
-        <SpaceProjectConflictDialog
-          open={conflictOpen}
-          spaceName={spaceProjectConflict.space.name}
-          projectName={selectedProject?.title ?? ""}
-          projectSpaces={spaceProjectConflict.projectSpaces}
-          onAddSpace={() => {
-            setConflictOpen(false);
-            void doSubmit(effectiveSpaceId);
-          }}
-          onMoveToSpace={(tid) => {
-            setConflictOpen(false);
-            setSpaceId(tid);
-            void doSubmit(tid);
-          }}
-          onCancel={() => setConflictOpen(false)}
-        />
-      )}
     </>
   );
 }

@@ -613,6 +613,7 @@
     "invite_title": "メンバーを招待",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "招待",
+    "invite_spaces_label": "参加するスペース",
     "inviting": "招待中...",
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",

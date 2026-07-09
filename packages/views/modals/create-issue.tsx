@@ -40,7 +40,6 @@ import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, 
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { SpacePicker } from "../spaces/components/space-picker";
-import { SpaceProjectConflictDialog } from "../spaces/components/space-project-conflict-dialog";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -365,25 +364,8 @@ export function ManualCreatePanel({
     setFormResetKey((key) => key + 1);
   };
 
-  // Linear-style interception: space ∉ project's space set pauses the submit
-  // behind a resolution dialog. "Add to project" proceeds unchanged (the
-  // server adds the association), "move" retargets the issue's space first.
-  const spaceProjectConflict = useMemo(() => {
-    if (!selectedProject || !effectiveSpaceId) return null;
-    const ids = selectedProject.space_ids ?? [];
-    if (ids.length === 0 || ids.includes(effectiveSpaceId)) return null;
-    const space = spaces.find((tm) => tm.id === effectiveSpaceId);
-    if (!space) return null;
-    return { space, projectSpaces: spaces.filter((tm) => ids.includes(tm.id)) };
-  }, [selectedProject, effectiveSpaceId, spaces]);
-  const [conflictOpen, setConflictOpen] = useState(false);
-
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
-    if (spaceProjectConflict) {
-      setConflictOpen(true);
-      return;
-    }
     await doSubmit(effectiveSpaceId);
   };
 
@@ -958,24 +940,6 @@ export function ManualCreatePanel({
                 )}
               </div>
             </div>
-      {spaceProjectConflict && (
-        <SpaceProjectConflictDialog
-          open={conflictOpen}
-          spaceName={spaceProjectConflict.space.name}
-          projectName={selectedProject?.title ?? ""}
-          projectSpaces={spaceProjectConflict.projectSpaces}
-          onAddSpace={() => {
-            setConflictOpen(false);
-            void doSubmit(effectiveSpaceId);
-          }}
-          onMoveToSpace={(tid) => {
-            setConflictOpen(false);
-            setSpaceId(tid);
-            void doSubmit(tid);
-          }}
-          onCancel={() => setConflictOpen(false)}
-        />
-      )}
     </>
   );
 }

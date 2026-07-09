@@ -74,10 +74,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions, projectListOptions } from "@multica/core/projects/queries";
-import { activeSpaceListOptions } from "@multica/core/spaces/queries";
-import type { Space } from "@multica/core/types";
-import { SpaceProjectConflictDialog } from "../../spaces/components/space-project-conflict-dialog";
+import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
@@ -1454,32 +1451,6 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
-  // Attaching the issue to a project whose space set misses the issue's space
-  // pauses behind the Linear-style resolution dialog (add space vs move issue).
-  const { data: allProjects = [] } = useQuery(projectListOptions(wsId));
-  const { data: allSpaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const [projectConflict, setProjectConflict] = useState<{
-    projectId: string;
-    projectTitle: string;
-    projectSpaces: Space[];
-  } | null>(null);
-  const handleProjectUpdate = (updates: Partial<UpdateIssueRequest>) => {
-    const pid = updates.project_id;
-    if (pid && issue?.space_id) {
-      const proj = allProjects.find((p) => p.id === pid);
-      const ids = proj?.space_ids ?? [];
-      if (ids.length > 0 && !ids.includes(issue.space_id)) {
-        setProjectConflict({
-          projectId: pid,
-          projectTitle: proj?.title ?? "",
-          projectSpaces: allSpaces.filter((tm) => ids.includes(tm.id)),
-        });
-        return;
-      }
-    }
-    handleUpdateField(updates);
-  };
-
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
   // shown for an issue that already has labels attached.
@@ -1643,26 +1614,9 @@ function IssueDetailInner({ issueId, onDelete, onDone, defaultSidebarOpen = true
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}
-              onUpdate={handleProjectUpdate}
+              onUpdate={handleUpdateField}
             />
           </PropRow>
-          {projectConflict && (
-            <SpaceProjectConflictDialog
-              open
-              spaceName={allSpaces.find((tm) => tm.id === issue.space_id)?.name ?? ""}
-              projectName={projectConflict.projectTitle}
-              projectSpaces={projectConflict.projectSpaces}
-              onAddSpace={() => {
-                handleUpdateField({ project_id: projectConflict.projectId });
-                setProjectConflict(null);
-              }}
-              onMoveToSpace={(tid) => {
-                handleUpdateField({ project_id: projectConflict.projectId, space_id: tid });
-                setProjectConflict(null);
-              }}
-              onCancel={() => setProjectConflict(null)}
-            />
-          )}
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the

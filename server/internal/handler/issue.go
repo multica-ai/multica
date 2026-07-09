@@ -2762,7 +2762,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
 		}
 	}
-	finalProjectID := prevIssue.ProjectID
 	projectTouched := false
 	if _, ok := rawFields["project_id"]; ok {
 		projectTouched = true
@@ -2779,10 +2778,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.ProjectID = projectUUID
-			finalProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
-			finalProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 	if _, ok := rawFields["stage"]; ok {
@@ -2865,13 +2862,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 			writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
-			return
-		}
-		// Ensure exactly the final issue/project pair is represented. For combined
-		// project+space patches this avoids adding old-space→new-project or
-		// new-space→old-project associations.
-		if err := service.EnsureProjectHasSpace(r.Context(), qtx, prevIssue.WorkspaceID, finalProjectID, finalSpaceID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update project spaces")
 			return
 		}
 		if err := tx.Commit(r.Context()); err != nil {

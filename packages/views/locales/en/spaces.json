@@ -40,6 +40,7 @@
     "key": "Identifier",
     "key_hint": "Numbers this space’s issues — e.g. ENG-123. 1-7 uppercase letters or numbers, starting with a letter.",
     "key_reserved": "NEW is a reserved identifier — pick another one.",
+  "key_start_letter": "The identifier must start with a letter.",
     "key_locked": "The identifier is locked because issues have already been created.",
     "icon": "Icon",
     "description": "Description",
@@ -78,12 +79,5 @@
     "last_space_cannot_archive": "A workspace must keep at least one space",
     "archive_admin_only": "Only admins can archive a space",
     "goto": "Go to"
-  },
-  "conflict": {
-    "title": "{{space}} is not part of the project",
-    "body": "The {{space}} space is not currently part of the {{project}} project. Add the space to the project, or move the issue to one of the project's spaces.",
-    "add_space": "Add {{space}} to the project",
-    "project_spaces": "Project spaces",
-    "move_issue": "Move issue to {{space}}"
   }
 }

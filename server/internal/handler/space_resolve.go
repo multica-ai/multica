@@ -12,22 +12,14 @@ import (
 // project space lists) maps the same typed error to the same string so callers
 // see one wording per condition.
 const (
-	spaceNotFoundMessage         = "space not found in this workspace"
-	spaceArchivedMessage         = "space is archived"
-	projectSpaceAmbiguousMessage = "project has multiple spaces; specify space_id"
+	spaceNotFoundMessage = "space not found in this workspace"
+	spaceArchivedMessage = "space is archived"
 )
 
 // spaceResolveMessage maps a service space-resolution error to its unified
-// message. The ambiguous case includes the candidate Space keys. Returns "" for
-// errors that are not space-resolution errors.
+// message. Returns "" for errors that are not space-resolution errors.
 func spaceResolveMessage(err error) string {
 	switch {
-	case errors.Is(err, service.ErrProjectSpaceAmbiguous):
-		var amb *service.ProjectSpaceAmbiguousError
-		if errors.As(err, &amb) {
-			return amb.Error()
-		}
-		return projectSpaceAmbiguousMessage
 	case errors.Is(err, service.ErrSpaceNotFound):
 		return spaceNotFoundMessage
 	case errors.Is(err, service.ErrSpaceArchived):

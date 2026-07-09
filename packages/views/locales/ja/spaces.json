@@ -40,6 +40,7 @@
     "key": "識別子",
     "key_hint": "この Space の issue 番号に使われます（例: ENG-123）。1〜7 文字の大文字英数字、先頭は英字。",
     "key_reserved": "NEW は予約済みの識別子です。別の識別子を選んでください。",
+  "key_start_letter": "識別子は英字で始める必要があります。",
     "key_locked": "issue が作成された後は識別子を変更できません。",
     "icon": "アイコン",
     "description": "説明",
@@ -77,12 +78,5 @@
     "last_space_cannot_archive": "ワークスペースには少なくとも 1 つの Space が必要です",
     "archive_admin_only": "Space をアーカイブできるのは管理者のみです",
     "goto": "移動"
-  },
-  "conflict": {
-    "title": "{{space}} はプロジェクトに含まれていません",
-    "body": "{{space}} Space はプロジェクト {{project}} にまだ含まれていません。Space をプロジェクトに追加するか、Issue をプロジェクトの Space に移動できます。",
-    "add_space": "{{space}} をプロジェクトに追加",
-    "project_spaces": "プロジェクトの Space",
-    "move_issue": "Issue を {{space}} に移動"
   }
 }

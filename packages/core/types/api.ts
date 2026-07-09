@@ -233,6 +233,8 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  /** Spaces the invitee joins on accept. Empty/omitted → workspace default space. */
+  space_ids?: string[];
 }
 
 export interface UpdateMemberRequest {

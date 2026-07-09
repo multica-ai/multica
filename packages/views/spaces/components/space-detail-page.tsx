@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FolderKanban, ListTodo, Search, Zap } from "lucide-react";
+import { ChevronDown, FolderKanban, ListTodo, Search, Zap } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { PlainTextField } from "@multica/ui/components/common/plain-text-field";
 import { useQuery } from "@tanstack/react-query";
@@ -177,7 +177,7 @@ function Identity({ space }: { space: Space }) {
         defaultValue={space.description}
         placeholder={t(($) => $.form.description_placeholder)}
         aria-label={t(($) => $.form.description)}
-        className="text-sm text-muted-foreground"
+        className="text-sm"
         limitHint={(count, max) => t(($) => $.form.description_limit, { count, max })}
         onCommit={(value) => void saveField({ description: value })}
       />
@@ -283,9 +283,10 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
-            <button
+            <Button
               type="button"
-              className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent/60"
+              variant="outline"
+              className="h-auto min-w-48 max-w-full self-start justify-start gap-2 py-1.5 font-normal"
             />
           }
         >
@@ -312,6 +313,7 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
               {t(($) => $.settings.members_empty)}
             </span>
           )}
+          <ChevronDown className="ml-auto size-3 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent align="start" className="flex w-80 flex-col gap-2 p-3">
           <div className="relative shrink-0">

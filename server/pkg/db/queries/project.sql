@@ -80,21 +80,6 @@ INSERT INTO project_space (workspace_id, project_id, space_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (project_id, space_id) DO NOTHING;
 
--- name: CountProjectIssuesBySpace :many
--- Guards removing a Space from a project's space set: which of the Spaces
--- about to be removed still have issues filed under this project, and how
--- many. UpdateProject rejects the removal (or requires a reassignment
--- target via space_reassignments) for any Space this returns a row for.
--- workspace_id is a SQL-layer tenant guard (defense-in-depth, matching
--- DeleteProject/DeleteIssue) even though callers only ever pass a
--- project_id already resolved within their own workspace.
-SELECT space_id, count(*)::bigint AS issue_count
-FROM issue
-WHERE workspace_id = sqlc.arg('workspace_id')
-  AND project_id = sqlc.arg('project_id')
-  AND space_id = ANY(sqlc.arg('space_ids')::uuid[])
-GROUP BY space_id;
-
 -- name: ReplaceProjectSpaces :exec
 WITH deleted AS (
   DELETE FROM project_space

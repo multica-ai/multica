@@ -620,6 +620,7 @@
     "invite_title": "邀请成员",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀请",
+    "invite_spaces_label": "加入空间",
     "inviting": "邀请中...",
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",
