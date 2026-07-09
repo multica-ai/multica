@@ -1,5 +1,6 @@
 "use client";
 
+import { Command as CommandPrimitive } from "cmdk";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,6 +37,13 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandList,
+} from "@multica/ui/components/ui/command";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Progress } from "@multica/ui/components/ui/progress";
@@ -50,6 +58,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { isNameConflictError } from "../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -269,6 +278,27 @@ function groupSkillsByRoot(
 }
 
 const ROOT_GROUP_ORDER: RootGroup[] = ["provider", "universal", "other"];
+
+/**
+ * U3: Match a skill against a search query. Matches on `name`, `description`,
+ * and `source_path`, with pinyin fallback for Chinese characters in any field.
+ * Returns true for empty queries (matches everything).
+ */
+function skillMatchesQuery(
+  skill: RuntimeLocalSkillSummary,
+  query: string,
+): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  const fields = [
+    skill.name,
+    skill.description ?? "",
+    skill.source_path,
+  ];
+  return fields.some(
+    (f) => f.toLowerCase().includes(q) || matchesPinyin(f, q),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Summary view (shown after bulk import completes)
@@ -566,6 +596,9 @@ export function RuntimeLocalSkillImportPanel({
     new Set(),
   );
 
+  // U3 — Search branch query (3+ skills). Empty query shows all skills.
+  const [searchQuery, setSearchQuery] = useState("");
+
   const importing = bulkState.phase === "importing";
   const resolvingConflicts = bulkState.phase === "resolving";
   const busy = importing || resolvingConflicts;
@@ -581,6 +614,7 @@ export function RuntimeLocalSkillImportPanel({
     setEditName("");
     setEditDescription("");
     setCollapsedGroups(new Set());
+    setSearchQuery("");
   }, [selectedRuntimeId]);
 
   const selectedRuntime = localRuntimes.find((r) => r.id === selectedRuntimeId);
@@ -601,6 +635,16 @@ export function RuntimeLocalSkillImportPanel({
   // (added in U3) is what must not be interrupted, not the branch itself.
   const branch: "summary" | "search" =
     runtimeSkills.length <= 2 ? "summary" : "search";
+
+  // U3: Skills filtered by search query (only meaningful in the 'search'
+  // branch; the summary branch ignores this and renders all skills).
+  const filteredSkills = useMemo(
+    () =>
+      searchQuery
+        ? runtimeSkills.filter((s) => skillMatchesQuery(s, searchQuery))
+        : runtimeSkills,
+    [runtimeSkills, searchQuery],
+  );
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
   const singleSelectedSkill =
@@ -1170,44 +1214,85 @@ export function RuntimeLocalSkillImportPanel({
       );
     }
 
-    // search branch (3+): existing list rendering. U3 will replace this block.
-    return (
-      <div className="space-y-2" data-branch="search">
-        {/* Select all header */}
-        <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(el) => {
-              if (el) el.indeterminate = someSelected;
-            }}
-            onChange={toggleAll}
-            className="cursor-pointer accent-primary"
-          />
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.select_all, {
-              count: runtimeSkills.length,
-            })}
-          </span>
-        </label>
+    // search branch (3+): inline Command with root grouping (R6, R7, R12).
+    // - `shouldFilter={false}` disables cmdk's built-in filter so we control
+    //   filtering via `filteredSkills` (matches on name + description +
+    //   source_path + pinyin).
+    // - `CommandPrimitive.Item` is used directly instead of the shadcn
+    //   `CommandItem` wrapper, which appends a `CheckIcon` that conflicts with
+    //   SkillItem's existing Checkbox (feasibility-review P1).
+    // - The outer `Command` gets a transparent background so it composes with
+    //   the panel's existing scroll region rather than adding its own.
+    const searchGrouped = groupSkillsByRoot(filteredSkills);
 
-        {runtimeSkills.map((s) => (
-          <SkillItem
-            key={s.key}
-            skill={s}
-            checked={selectedKeys.has(s.key)}
-            onToggle={() => toggleSkill(s.key)}
-            disabled={importing}
-            expanded={singleSelectedSkill?.key === s.key}
-            editName={singleSelectedSkill?.key === s.key ? editName : undefined}
-            editDescription={
-              singleSelectedSkill?.key === s.key ? editDescription : undefined
-            }
-            onNameChange={setEditName}
-            onDescriptionChange={setEditDescription}
-          />
-        ))}
-      </div>
+    return (
+      <Command
+        shouldFilter={false}
+        className="flex flex-col bg-transparent"
+        data-branch="search"
+      >
+        <CommandInput
+          placeholder={t(($) => $.page.search_placeholder)}
+          value={searchQuery}
+          onValueChange={setSearchQuery}
+        />
+        <CommandList className="max-h-none flex-1">
+          {filteredSkills.length === 0 && (
+            <CommandEmpty>
+              {t(($) => $.runtime_import.search_empty, {
+                query: searchQuery,
+              })}
+            </CommandEmpty>
+          )}
+          {ROOT_GROUP_ORDER.map((group) => {
+            const skills = searchGrouped[group];
+            if (skills.length === 0) return null;
+            const groupLabel =
+              group === "provider"
+                ? t(($) => $.runtime_import.provider_group_heading)
+                : group === "universal"
+                  ? t(($) => $.runtime_import.universal_group_heading)
+                  : t(($) => $.runtime_import.other_group_heading);
+            return (
+              <CommandGroup
+                key={group}
+                heading={groupLabel}
+                className="[&_[cmdk-group-heading]]:sticky [&_[cmdk-group-heading]]:top-0 [&_[cmdk-group-heading]]:z-10 [&_[cmdk-group-heading]]:bg-background [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {skills.map((s) => (
+                  <CommandPrimitive.Item
+                    key={s.key}
+                    value={s.key}
+                    onSelect={() => toggleSkill(s.key)}
+                    className="block cursor-default rounded-sm p-0 outline-hidden select-none data-[selected=true]:bg-muted data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50"
+                    disabled={importing}
+                  >
+                    <SkillItem
+                      skill={s}
+                      checked={selectedKeys.has(s.key)}
+                      onToggle={() => toggleSkill(s.key)}
+                      disabled={importing}
+                      expanded={singleSelectedSkill?.key === s.key}
+                      editName={
+                        singleSelectedSkill?.key === s.key
+                          ? editName
+                          : undefined
+                      }
+                      editDescription={
+                        singleSelectedSkill?.key === s.key
+                          ? editDescription
+                          : undefined
+                      }
+                      onNameChange={setEditName}
+                      onDescriptionChange={setEditDescription}
+                    />
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandGroup>
+            );
+          })}
+        </CommandList>
+      </Command>
     );
   })();
 
