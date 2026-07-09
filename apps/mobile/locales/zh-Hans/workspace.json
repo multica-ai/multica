@@ -39,7 +39,8 @@
       "pinned": "固定",
       "issues": "issue",
       "projects": "项目",
-      "skills": "skill"
+      "skills": "skill",
+      "runtimes": "运行时"
     },
     "account_settings_a11y": "账号设置",
     "switch_workspace_a11y": "切换工作区",

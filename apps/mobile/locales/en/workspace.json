@@ -39,7 +39,8 @@
       "pinned": "Pinned",
       "issues": "Issues",
       "projects": "Projects",
-      "skills": "Skills"
+      "skills": "Skills",
+      "runtimes": "Runtimes"
     },
     "account_settings_a11y": "Account settings",
     "switch_workspace_a11y": "Switch workspace",

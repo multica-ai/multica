@@ -125,6 +125,11 @@ export default function MorePage() {
             chevronColor={mutedFg}
             title={t("more_page.nav.skills")}
           />
+          <NavRow
+            onPress={() => slug && router.push(`/${slug}/more/runtimes`)}
+            chevronColor={mutedFg}
+            title={t("more_page.nav.runtimes")}
+          />
         </SectionGroup>
       </View>
     </View>
