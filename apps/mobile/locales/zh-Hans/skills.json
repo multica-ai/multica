@@ -36,6 +36,7 @@
     "file_root_label": "SKILL.md"
   },
   "file": {
-    "header_default_title": "文件"
+    "header_default_title": "文件",
+    "not_found": "未找到文件。"
   }
 }

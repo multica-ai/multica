@@ -4,7 +4,7 @@
  * other extension renders as plain monospaced text. No editing — see
  * docs/superpowers/specs/2026-07-08-mobile-skills-browse-design.md.
  */
-import { ScrollView, View } from "react-native";
+import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -17,7 +17,7 @@ export default function SkillFilePage() {
   const { id, path } = useLocalSearchParams<{ id: string; path: string[] }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { t } = useTranslation("skills");
-  const { data: skill } = useQuery(skillDetailOptions(wsId, id));
+  const { data: skill, isLoading } = useQuery(skillDetailOptions(wsId, id));
 
   const fullPath = Array.isArray(path) ? path.join("/") : (path ?? "");
   const isRoot = fullPath === "SKILL.md";
@@ -31,13 +31,27 @@ export default function SkillFilePage() {
       <Stack.Screen
         options={{ title: fullPath || t("file.header_default_title") }}
       />
-      <ScrollView contentContainerClassName="px-4 py-4">
-        {content === undefined ? null : isMarkdown ? (
-          <Markdown content={content} />
-        ) : (
-          <Text className="text-xs font-mono text-foreground">{content}</Text>
-        )}
-      </ScrollView>
+      {isLoading ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator />
+        </View>
+      ) : content === undefined ? (
+        <View className="flex-1 items-center justify-center px-4">
+          <Text className="text-sm text-muted-foreground">
+            {t("file.not_found")}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerClassName="px-4 py-4">
+          {isMarkdown ? (
+            <Markdown content={content} />
+          ) : (
+            <Text className="text-xs font-mono text-foreground">
+              {content}
+            </Text>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
