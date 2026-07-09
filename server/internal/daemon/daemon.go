@@ -3603,6 +3603,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
 			WorkDir:         task.PriorWorkDir,
 			Provider:        provider,
 			CodexVersion:    codexVersion,
