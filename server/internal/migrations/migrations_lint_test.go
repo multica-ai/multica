@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -126,23 +127,33 @@ func migrationStemsByPrefix(t *testing.T) map[string][]string {
 func migrationFilesForLint(t *testing.T, pattern string) []string {
 	t.Helper()
 
-	dir, err := ResolveDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir := realMigrationsDir(t)
 	files, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no migration files matched %s in %s", pattern, dir)
 	}
 	sort.Strings(files)
 	return files
 }
 
+func realMigrationsDir(t *testing.T) string {
+	t.Helper()
+
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve migration lint test path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", "migrations"))
+}
+
 func splitMigrationFilename(name string) (stem, direction string, ok bool) {
-	for _, direction := range []string{"up", "down"} {
-		suffix := fmt.Sprintf(".%s.sql", direction)
+	for _, candidateDirection := range []string{"up", "down"} {
+		suffix := fmt.Sprintf(".%s.sql", candidateDirection)
 		if strings.HasSuffix(name, suffix) {
-			return strings.TrimSuffix(name, suffix), direction, true
+			return strings.TrimSuffix(name, suffix), candidateDirection, true
 		}
 	}
 	return "", "", false
