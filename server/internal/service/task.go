@@ -409,33 +409,54 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 	return attribution.RuleOwner(publisher, ver.ID, evidenceKind, evidenceRefID)
 }
 
-// ErrAttributionFailClosed signals that a run could not be attributed to a precise
-// human and the workspace opted into the fail-closed policy, so the enqueue is
-// refused rather than degraded to owner_fallback (MUL-4302 §3.5). Enqueue paths
-// surface it so the run never starts.
-var ErrAttributionFailClosed = errors.New("attribution: workspace is fail-closed and no precise accountable human resolved")
+// ErrAttributionFailClosed signals that a run resolved to no precise accountable
+// human and the enqueue is REFUSED rather than started. It covers three cases, all
+// of which mean "we cannot guarantee an accountable human for this run" (MUL-4302
+// §1/§3.5): the workspace opted into fail-closed; the workspace policy could not be
+// read (so we cannot confirm fallback is allowed — fail closed, don't run); or
+// owner_fallback has no agent owner to fall back to. Enqueue paths surface it so the
+// run never starts.
+var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
 // applyAttributionFallback applies the workspace's degraded-attribution policy to a
-// resolved attribution whose source came back unattributed (no precise human):
-//   - fail-closed workspace → returns ErrAttributionFailClosed so the caller refuses
-//     the enqueue (a run with no accountable human must not start).
-//   - otherwise → owner_fallback, degrading accountable to the agent owner (§3.5),
-//     audit-only (originator stays NULL, authorization untouched).
+// resolved attribution whose source came back unattributed (no precise human). A
+// PRECISE attribution passes through untouched (no policy read at all). For an
+// unattributed run the accountable-never-null guarantee is enforced fail-closed —
+// we never silently enqueue a task that could run with a NULL accountable_user_id:
 //
-// A precise attribution passes through untouched. The policy read is best-effort: a
-// lookup error defaults to owner_fallback (open), never blocking on a transient DB
-// hiccup. Keeping this at the enqueue boundary (not inside the pure classifiers)
-// means owner_fallback needs the agent owner, which every enqueue path has in hand.
+//   - policy read fails (or no workspace) → REFUSE. We cannot confirm the workspace
+//     permits fallback, so we do not run an unattributable task on a transient DB
+//     hiccup. (Only the rare unattributed path pays this; precise runs never read.)
+//   - fail-closed workspace → REFUSE.
+//   - otherwise → owner_fallback (accountable = agent owner, audit-only, originator
+//     untouched). If there is no valid agent owner, owner_fallback stays
+//     unattributed → REFUSE rather than enqueue a NULL-accountable task.
+//
+// Keeping this at the enqueue boundary (not inside the pure classifiers) means
+// owner_fallback needs the agent owner, which every enqueue path has in hand.
 func (s *TaskService) applyAttributionFallback(ctx context.Context, attr attribution.Result, agent db.Agent) (attribution.Result, error) {
 	if attr.Source != attribution.SourceUnattributed {
 		return attr, nil
 	}
-	if s != nil && s.Queries != nil && agent.WorkspaceID.Valid {
-		if failClosed, err := s.Queries.GetWorkspaceAttributionFailClosed(ctx, agent.WorkspaceID); err == nil && failClosed {
-			return attr, ErrAttributionFailClosed
-		}
+	if s == nil || s.Queries == nil || !agent.WorkspaceID.Valid {
+		return attr, fmt.Errorf("%w: workspace policy unavailable", ErrAttributionFailClosed)
 	}
-	return attribution.OwnerFallback(attr, agent.OwnerID), nil
+	failClosed, err := s.Queries.GetWorkspaceAttributionFailClosed(ctx, agent.WorkspaceID)
+	if err != nil {
+		// Cannot confirm the workspace allows fallback → fail closed rather than
+		// silently run an unattributable task.
+		return attr, fmt.Errorf("%w: policy read failed: %v", ErrAttributionFailClosed, err)
+	}
+	if failClosed {
+		return attr, ErrAttributionFailClosed
+	}
+	fallback := attribution.OwnerFallback(attr, agent.OwnerID)
+	if fallback.Source == attribution.SourceUnattributed {
+		// owner_fallback could not resolve an accountable human (no valid agent
+		// owner): refuse rather than enqueue a NULL-accountable task.
+		return attr, fmt.Errorf("%w: no agent owner to attribute", ErrAttributionFailClosed)
+	}
+	return fallback, nil
 }
 
 // attributionCreateParams maps a resolved attribution onto the CreateAgentTask
@@ -753,7 +774,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{})
+	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForIssueWithHandoff is the assign/promote variant that carries a
@@ -763,7 +784,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // member who performed the assign/promote and becomes the accountable human for
 // the run (MUL-4302 §4); invalid when the caller has no member actor.
 func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID)
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID, pgtype.UUID{})
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -811,7 +832,7 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 	return headShaText(s.ResolveIssueReviewSHA(ctx, issueID))
 }
 
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -859,6 +880,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
+		RerunOfTaskID:        rerunOfTaskID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -895,13 +917,13 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -916,7 +938,7 @@ func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.I
 // leader task was triggered (comment @squad, issue assign, autopilot,
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
@@ -925,10 +947,10 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 // performed the assign/promote and becomes the accountable human (MUL-4302 §4);
 // invalid when the caller has no member actor.
 func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID)
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{})
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -972,6 +994,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuleVersionID:        attr.RuleVersionID,
+		RerunOfTaskID:        rerunOfTaskID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -2359,17 +2382,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 
 	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
 	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, actorUserID)
+	// sourceTaskID is the rerun lineage: it rides the CreateAgentTask insert
+	// (rerun_of_task_id) so the queued event / daemon claim never sees a NULL
+	// lineage, and it stays distinct from system-retry's retry_of_task_id (§5).
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, actorUserID, sourceTaskID)
 	if err != nil {
 		return nil, err
-	}
-	// Record rerun lineage back to the source task so retry (system) and rerun
-	// (human) stay separable in reporting (§5). Best-effort — lineage is audit
-	// metadata and must not fail the rerun.
-	if sourceTaskID.Valid {
-		if err := s.Queries.SetAgentTaskRerunOf(ctx, db.SetAgentTaskRerunOfParams{ID: task.ID, RerunOfTaskID: sourceTaskID}); err != nil {
-			slog.Warn("rerun: set rerun_of_task_id failed", "task_id", util.UUIDToString(task.ID), "source_task_id", util.UUIDToString(sourceTaskID), "error", err)
-		}
 	}
 	slog.Info("issue rerun enqueued",
 		"task_id", util.UUIDToString(task.ID),
@@ -2388,12 +2406,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "", actorUserID)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "", actorUserID, rerunOfTaskID)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "", actorUserID)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

@@ -1229,7 +1229,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, delegated_from_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, $5,
@@ -1251,7 +1251,8 @@ VALUES (
     $17,
     $18,
     $19,
-    $20
+    $20,
+    $21
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
@@ -1275,6 +1276,7 @@ type CreateAgentTaskParams struct {
 	OriginatorSource     pgtype.Text `json:"originator_source"`
 	DelegatedFromTaskID  pgtype.UUID `json:"delegated_from_task_id"`
 	RuleVersionID        pgtype.UUID `json:"rule_version_id"`
+	RerunOfTaskID        pgtype.UUID `json:"rerun_of_task_id"`
 	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 }
@@ -1306,6 +1308,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.OriginatorSource,
 		arg.DelegatedFromTaskID,
 		arg.RuleVersionID,
+		arg.RerunOfTaskID,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
 	)
@@ -3885,25 +3888,6 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.PermissionMode,
 	)
 	return i, err
-}
-
-const setAgentTaskRerunOf = `-- name: SetAgentTaskRerunOf :exec
-UPDATE agent_task_queue SET rerun_of_task_id = $2 WHERE id = $1
-`
-
-type SetAgentTaskRerunOfParams struct {
-	ID            pgtype.UUID `json:"id"`
-	RerunOfTaskID pgtype.UUID `json:"rerun_of_task_id"`
-}
-
-// Records manual-rerun lineage on a freshly-enqueued rerun task: the historical task
-// ($2) a member re-ran (MUL-4302 §5). Written as a targeted follow-up on the rerun
-// path only, so the shared CreateAgentTask/CreateRetryTask inserts stay untouched.
-// Kept distinct from retry_of_task_id (system retry) so the two stay separable in
-// reporting. Best-effort: lineage is audit metadata, not run-blocking.
-func (q *Queries) SetAgentTaskRerunOf(ctx context.Context, arg SetAgentTaskRerunOfParams) error {
-	_, err := q.db.Exec(ctx, setAgentTaskRerunOf, arg.ID, arg.RerunOfTaskID)
-	return err
 }
 
 const startAgentTask = `-- name: StartAgentTask :one

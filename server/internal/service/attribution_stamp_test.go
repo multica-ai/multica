@@ -558,6 +558,56 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 	}
 }
 
+// TestApplyAttributionFallbackRefusesOnMissingOwner: an unattributed run in an
+// OPEN (non-fail-closed) workspace whose agent has no valid owner cannot resolve an
+// accountable human via owner_fallback, so the enqueue is refused rather than
+// creating a NULL-accountable task (MUL-4302 §3.5, Elon must-fix 1).
+func TestApplyAttributionFallbackRefusesOnMissingOwner(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, _, _, _ := seedAttributionFixture(t, pool) // default policy = open
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	unattr := attribution.Unattributed(attribution.EvidenceIssueAssignment, util.MustParseUUID(workspaceID))
+	_, err := svc.applyAttributionFallback(ctx, unattr, db.Agent{WorkspaceID: util.MustParseUUID(workspaceID)}) // OwnerID zero
+	if !errors.Is(err, ErrAttributionFailClosed) {
+		t.Fatalf("missing owner: err = %v, want ErrAttributionFailClosed", err)
+	}
+}
+
+// TestApplyAttributionFallbackRefusesOnPolicyReadFailure: if the workspace policy
+// cannot be read for an unattributed run, fail CLOSED (refuse) rather than silently
+// running an unattributable task — even when a valid owner is present (Elon must-fix 1).
+func TestApplyAttributionFallbackRefusesOnPolicyReadFailure(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, ownerID, _, _ := seedAttributionFixture(t, pool)
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	unattr := attribution.Unattributed(attribution.EvidenceIssueAssignment, pgtype.UUID{})
+	missingWs := pgtype.UUID{Bytes: [16]byte{0xDE, 0xAD, 0xBE, 0xEF}, Valid: true} // no such workspace
+	_, err := svc.applyAttributionFallback(ctx, unattr, db.Agent{WorkspaceID: missingWs, OwnerID: util.MustParseUUID(ownerID)})
+	if !errors.Is(err, ErrAttributionFailClosed) {
+		t.Fatalf("policy read failure: err = %v, want ErrAttributionFailClosed", err)
+	}
+}
+
+// TestApplyAttributionFallbackPreciseUntouched: a precise attribution never reads
+// the policy and passes through unchanged (proven with a nil-Queries service).
+func TestApplyAttributionFallbackPreciseUntouched(t *testing.T) {
+	svc := &TaskService{} // no Queries: a policy read would panic/error if attempted
+	precise := attribution.DirectHumanRun(pgtype.UUID{Bytes: [16]byte{0x11}, Valid: true}, attribution.EvidenceComment, pgtype.UUID{})
+	got, err := svc.applyAttributionFallback(context.Background(), precise, db.Agent{})
+	if err != nil {
+		t.Fatalf("precise attribution must not error: %v", err)
+	}
+	if got.Source != attribution.SourceDirectHuman || got != precise {
+		t.Errorf("precise attribution must pass through unchanged, got %+v", got)
+	}
+}
+
 // TestRerunIssueAttributesToRerunningMember is the §5 acceptance test: a manual
 // rerun is a NEW direct_human trigger attributed to the member who re-ran — not the
 // original run's human — and records rerun_of_task_id lineage back to the source.

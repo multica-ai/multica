@@ -171,7 +171,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, delegated_from_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -192,6 +192,7 @@ VALUES (
     sqlc.narg(originator_source),
     sqlc.narg(delegated_from_task_id),
     sqlc.narg(rule_version_id),
+    sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)
 )
@@ -251,14 +252,6 @@ VALUES (
     sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
-
--- name: SetAgentTaskRerunOf :exec
--- Records manual-rerun lineage on a freshly-enqueued rerun task: the historical task
--- ($2) a member re-ran (MUL-4302 §5). Written as a targeted follow-up on the rerun
--- path only, so the shared CreateAgentTask/CreateRetryTask inserts stay untouched.
--- Kept distinct from retry_of_task_id (system retry) so the two stay separable in
--- reporting. Best-effort: lineage is audit metadata, not run-blocking.
-UPDATE agent_task_queue SET rerun_of_task_id = $2 WHERE id = $1;
 
 -- name: LinkTaskToIssue :exec
 -- Attaches the issue a quick-create task produced back to the task row, once
