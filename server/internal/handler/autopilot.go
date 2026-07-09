@@ -676,6 +676,14 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Creating an autopilot IS a substantive publish: append rule-version v1 with
+	// the creating member as publisher, so every autopilot has an accountable
+	// human at dispatch time (MUL-4302 §3.4).
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+
 	for _, uid := range subscriberUUIDs {
 		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 			AutopilotID: autopilot.ID,
@@ -887,6 +895,18 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A substantive change (target / enabled-state / execution mode) republishes the
+	// rule: append a new version with THIS member as publisher, so a later run
+	// attributes to whoever last changed what the rule does — not the original
+	// creator. Cosmetic edits (title / description / template) write no version and
+	// leave accountability with the previous publisher (MUL-4302 §3.4).
+	if autopilotRuleSubstantiveChange(prev, autopilot) {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
+	}
+
 	if replaceSubscribers {
 		if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
@@ -916,6 +936,58 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// autopilotRuleConfigSummary captures the substantive (accountability-bearing)
+// config of an autopilot at publish time, stored on each rule-version snapshot for
+// audit display (MUL-4302 §7). Cosmetic fields (title / description / issue title
+// template) are intentionally excluded — changing them does not transfer
+// accountability, so they neither appear here nor trigger a new version.
+type autopilotRuleConfigSummary struct {
+	AssigneeType  string `json:"assignee_type"`
+	AssigneeID    string `json:"assignee_id"`
+	Status        string `json:"status"`
+	ExecutionMode string `json:"execution_mode"`
+}
+
+// autopilotRuleSubstantiveChange reports whether a substantive (publish-worthy)
+// field of the autopilot ROW changed between prev and next: the execution target
+// (assignee), enabled-state (status: active/paused/archived), or execution mode
+// (MUL-4302 §3.4). Trigger-table edits (cron / webhook / event_filters) are also
+// substantive per the design but are not yet wired here — see the PR description's
+// remaining-work note.
+func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
+	return prev.AssigneeType != next.AssigneeType ||
+		prev.AssigneeID != next.AssigneeID ||
+		prev.Status != next.Status ||
+		prev.ExecutionMode != next.ExecutionMode
+}
+
+// recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
+// publish (MUL-4302 §3.4), recording the publisher and the effective config. Runs
+// inside the caller's tx so the version is atomic with the autopilot write; a
+// failure surfaces to the caller rather than leaving a version-less publish that
+// would degrade every future run to unattributed.
+func (h *Handler) recordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
+	summary, err := json.Marshal(autopilotRuleConfigSummary{
+		AssigneeType:  ap.AssigneeType,
+		AssigneeID:    uuidToString(ap.AssigneeID),
+		Status:        ap.Status,
+		ExecutionMode: ap.ExecutionMode,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal rule version config summary: %w", err)
+	}
+	if _, err := q.CreateAutopilotRuleVersion(ctx, db.CreateAutopilotRuleVersionParams{
+		AutopilotID:     ap.ID,
+		WorkspaceID:     ap.WorkspaceID,
+		PublishedByType: publishedByType,
+		PublishedByID:   publishedByID,
+		ConfigSummary:   summary,
+	}); err != nil {
+		return fmt.Errorf("create autopilot rule version: %w", err)
+	}
+	return nil
 }
 
 func (h *Handler) parseAutopilotProjectID(

@@ -140,7 +140,7 @@ type AgentTaskQueue struct {
 	TriggerEvidenceKind pgtype.Text `json:"trigger_evidence_kind"`
 	// The row id referenced by trigger_evidence_kind (a comment id, autopilot_run id, rule_version id, source task id, ...). No FK; resolvable per-kind in the app layer (MUL-4302 §2).
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
-	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL on pre-migration rows.
+	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.
 	AccountableUserID pgtype.UUID `json:"accountable_user_id"`
 }
 
@@ -184,6 +184,17 @@ type AutopilotCollaborator struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	GrantedBy   pgtype.UUID        `json:"granted_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// Append-only snapshot of autopilot rule publishes (MUL-4302 §3.4). One row per substantive publish (create / enable / resume / trigger-condition / target / instructions change), recording the publisher + effective-config summary. Dispatch resolves the latest row for an autopilot as the run's rule_owner accountable human. No FK, no cascade.
+type AutopilotRuleVersion struct {
+	ID              pgtype.UUID        `json:"id"`
+	AutopilotID     pgtype.UUID        `json:"autopilot_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	PublishedByType string             `json:"published_by_type"`
+	PublishedByID   pgtype.UUID        `json:"published_by_id"`
+	ConfigSummary   []byte             `json:"config_summary"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type AutopilotRun struct {

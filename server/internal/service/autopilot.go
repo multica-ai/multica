@@ -570,13 +570,14 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
-	// No human authorized a run_only autopilot dispatch, so originator/accountable
-	// stay NULL and authorization keeps saying "no human". Precise rule_owner
-	// attribution (accountable = the active rule version's publisher) lands with the
-	// rule-version snapshot table in a later Phase 1 increment; for now stamp the
-	// source explicitly and point evidence at the autopilot run so this path is not
-	// a NULL-source enqueue bypass (MUL-4302 §2/§3.4).
-	autopilotAttr := attribution.Unattributed(attribution.EvidenceAutopilotRun, run.ID)
+	// No human authorized a run_only autopilot dispatch, so originator_user_id stays
+	// NULL and authorization keeps saying "no human". The audit-accountable human is
+	// the rule_owner — the publisher of the autopilot's active rule version — with
+	// rule_version_id recording which snapshot resolved it (MUL-4302 §3.4). This is
+	// the accountable-diverges-from-originator case. A missing version/publisher
+	// degrades to unattributed (see ruleOwnerAttribution), still not a NULL-source
+	// bypass. Evidence points at the autopilot run.
+	autopilotAttr := ruleOwnerAttribution(ctx, s.Queries, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        agent.ID,
@@ -590,6 +591,8 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 			String: truncateForSummary(ap.Title, triggerSummaryMaxLen),
 			Valid:  ap.Title != "",
 		},
+		AccountableUserID:    autopilotAttr.AccountableUserID,
+		RuleVersionID:        autopilotAttr.RuleVersionID,
 		OriginatorSource:     apSource,
 		TriggerEvidenceKind:  apEvidenceKind,
 		TriggerEvidenceRefID: apEvidenceRef,

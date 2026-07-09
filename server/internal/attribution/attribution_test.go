@@ -24,6 +24,7 @@ var (
 	srcTask  = uid(0x5A)
 	issue    = uid(0x15)
 	originTk = uid(0x0A)
+	ruleVer  = uid(0x4E)
 )
 
 func TestClassifyComment_MemberAuthoredIsDirectHuman(t *testing.T) {
@@ -256,10 +257,12 @@ func TestClassifyDirect_AgentCreateInheritsOriginAsDelegation(t *testing.T) {
 }
 
 // TestAccountableMirrorsOriginatorInvariant is the MUL-4302 §11 acceptance check
-// at the classification layer: EVERY result the resolver produces must satisfy
-// `originator (UserID) IS NOT NULL ⟹ accountable == originator`, and when there is
-// no human both sides are invalid. finalizeAttribution centralizes this; the test
-// guards against a future Classify path forgetting to route through it.
+// at the classification layer: EVERY result the resolver produces must satisfy the
+// ONE-WAY invariant `originator (UserID) IS NOT NULL ⟹ accountable == originator`.
+// When UserID is NULL the two MAY diverge (rule_owner / owner_fallback name an
+// accountable human while authorization carries none), so the invariant only
+// constrains the valid-originator direction. finalizeAttribution centralizes this;
+// the test guards against a future Classify path forgetting to route through it.
 func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 	results := []Result{
 		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "member", AuthorID: human}, SourceCommentSource),
@@ -273,13 +276,19 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		DirectHumanRun(human, EvidenceComment, comment),
 		DirectHumanRun(pgtype.UUID{}, "", pgtype.UUID{}),
 		Unattributed(EvidenceAutopilotRun, srcTask),
+		RuleOwner(human, ruleVer, EvidenceAutopilotRun, srcTask),         // divergent: accountable set, originator NULL
+		RuleOwner(pgtype.UUID{}, ruleVer, EvidenceAutopilotRun, srcTask), // no publisher → unattributed
 	}
 	for i, r := range results {
-		if r.AccountableUserID != r.UserID {
-			t.Errorf("result[%d]: accountable %v != originator %v — invariant violated", i, r.AccountableUserID, r.UserID)
+		// One-way invariant: a valid originator must equal accountable.
+		if r.UserID.Valid && r.AccountableUserID != r.UserID {
+			t.Errorf("result[%d]: originator %v valid but accountable %v differs — invariant violated", i, r.UserID, r.AccountableUserID)
 		}
-		if r.UserID.Valid != r.AccountableUserID.Valid {
-			t.Errorf("result[%d]: validity mismatch originator=%v accountable=%v", i, r.UserID.Valid, r.AccountableUserID.Valid)
+		// Authorization must never be forged from the audit side: a non-NULL
+		// accountable with a NULL originator is allowed (divergence), but the
+		// reverse — originator set from accountable — must never happen implicitly.
+		if r.AccountableUserID.Valid && !r.UserID.Valid && r.Source != SourceRuleOwner && r.Source != SourceOwnerFallback {
+			t.Errorf("result[%d]: accountable set with NULL originator only allowed for rule_owner/owner_fallback, got source=%q", i, r.Source)
 		}
 	}
 }
@@ -299,6 +308,36 @@ func TestDirectHumanRun(t *testing.T) {
 	}
 	if unresolved.UserID.Valid || unresolved.AccountableUserID.Valid {
 		t.Errorf("invalid user must not fabricate a human")
+	}
+}
+
+func TestRuleOwner(t *testing.T) {
+	// The divergence case: an autopilot run has NO authorizing human (originator
+	// NULL) but IS accountable to the rule publisher.
+	got := RuleOwner(human, ruleVer, EvidenceAutopilotRun, issue)
+	if got.Source != SourceRuleOwner {
+		t.Fatalf("source = %q, want rule_owner", got.Source)
+	}
+	if got.UserID.Valid {
+		t.Errorf("rule_owner must NOT set originator (authorization stays NULL), got %v", got.UserID)
+	}
+	if got.AccountableUserID != human {
+		t.Errorf("accountable should be the rule publisher, got %v", got.AccountableUserID)
+	}
+	if got.RuleVersionID != ruleVer {
+		t.Errorf("rule_version_id = %v, want %v", got.RuleVersionID, ruleVer)
+	}
+	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != issue {
+		t.Errorf("evidence should be carried through")
+	}
+
+	// No publisher (system-published / unresolved) must not fabricate a human.
+	none := RuleOwner(pgtype.UUID{}, ruleVer, EvidenceAutopilotRun, issue)
+	if none.Source != SourceUnattributed {
+		t.Errorf("missing publisher must degrade to unattributed, got %q", none.Source)
+	}
+	if none.UserID.Valid || none.AccountableUserID.Valid {
+		t.Errorf("missing publisher must carry no human on either side")
 	}
 }
 

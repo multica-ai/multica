@@ -125,17 +125,17 @@ const (
 //   - UserID is the AUTHORIZATION human the caller writes into
 //     originator_user_id. It is the value canInvokeAgent and the Composio overlay
 //     read; it is legitimately invalid (NULL) when no human authorized the run.
-//   - AccountableUserID is the AUDIT human written into accountable_user_id. Phase
-//     1 invariant (enforced by finalizeAttribution): it mirrors UserID, so when
-//     UserID is valid AccountableUserID equals it, and when UserID is invalid the
-//     accountable side is invalid too. Divergence — a degraded owner_fallback /
-//     rule_owner naming an accountable human while UserID stays NULL — is a later
-//     Phase 1 increment and will extend that single chokepoint, never the callers.
+//   - AccountableUserID is the AUDIT human written into accountable_user_id. The
+//     one-way invariant (enforced by finalizeAttribution): when UserID is valid,
+//     AccountableUserID equals it. When UserID is NULL (no human authorized the
+//     run), the two may diverge — rule_owner names the rule publisher and
+//     owner_fallback names the agent owner as the accountable human while
+//     authorization correctly carries none.
 //
 // The remaining fields are audit metadata written into the Phase 1 provenance
 // columns. Construct a Result through ClassifyComment / ClassifyDirect /
-// DirectHumanRun / Unattributed so AccountableUserID is always finalized; never
-// stamp a hand-built literal onto the queue.
+// DirectHumanRun / Unattributed / RuleOwner so AccountableUserID is always
+// finalized; never stamp a hand-built literal onto the queue.
 type Result struct {
 	UserID              pgtype.UUID
 	AccountableUserID   pgtype.UUID
@@ -148,15 +148,19 @@ type Result struct {
 	EvidenceRefID       pgtype.UUID
 }
 
-// finalizeAttribution enforces the Phase 1 accountability invariant
-// (MUL-4302 §11): the accountable human mirrors the resolved originator, so
+// finalizeAttribution enforces the one-way Phase 1 accountability invariant
+// (MUL-4302 §11): a resolved originator IS the accountable human, so
 // `originator_user_id IS NOT NULL ⟹ accountable_user_id = originator_user_id`.
-// Every Result handed to a caller flows through here. When the divergent audit
-// sources land (rule_owner names the rule publisher, owner_fallback names the
-// agent owner) while UserID stays NULL, this is the ONE place that will set a
-// non-mirrored AccountableUserID — the enqueue call sites never change.
+// Every Result flows through here. It mirrors UserID onto AccountableUserID
+// whenever UserID is valid; when UserID is NULL (no human authorized the run) it
+// leaves AccountableUserID exactly as the caller set it — the single divergence
+// point where rule_owner (rule publisher) and owner_fallback (agent owner) name an
+// accountable human for audit while authorization correctly carries none. The
+// enqueue call sites never special-case this.
 func finalizeAttribution(r Result) Result {
-	r.AccountableUserID = r.UserID
+	if r.UserID.Valid {
+		r.AccountableUserID = r.UserID
+	}
 	return r
 }
 
@@ -305,4 +309,28 @@ func DirectHumanRun(userID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID
 // still correctly says "no human authorized this run".
 func Unattributed(evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 	return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: evidenceKind, EvidenceRefID: evidenceRefID})
+}
+
+// RuleOwner builds attribution for an autopilot-triggered run (MUL-4302 §3.4).
+// No human authorized it, so UserID (originator, the authorization value) stays
+// NULL and canInvokeAgent / the Composio overlay keep seeing "no human"; the
+// AUDIT-accountable human is publisherUserID — the member who published the active
+// rule version — which is THE divergence the two-column split exists for
+// (accountable set, originator NULL). ruleVersionID records which snapshot
+// resolved it; evidence points the caller supplies (autopilot_run for run_only,
+// the issue for create_issue). A missing publisher (system-published rule, or no
+// version resolved yet) degrades to unattributed so we never fabricate a human.
+func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
+	r := Result{
+		RuleVersionID: ruleVersionID,
+		EvidenceKind:  evidenceKind,
+		EvidenceRefID: evidenceRefID,
+	}
+	if publisherUserID.Valid {
+		r.Source = SourceRuleOwner
+		r.AccountableUserID = publisherUserID
+	} else {
+		r.Source = SourceUnattributed
+	}
+	return finalizeAttribution(r)
 }

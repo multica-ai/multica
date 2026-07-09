@@ -79,6 +79,34 @@ UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
 
 -- =====================
+-- Autopilot Rule Version (rule_owner attribution, MUL-4302 §3.4)
+-- =====================
+
+-- name: CreateAutopilotRuleVersion :one
+-- Append one immutable rule-version snapshot on a substantive publish (create /
+-- enable / resume / target / execution-mode change). published_by_* is the acting
+-- member (or 'system' with NULL id for the failure monitor); config_summary is the
+-- effective config at publish time. Dispatch reads the latest row for the autopilot
+-- as the run's rule_owner accountable human.
+INSERT INTO autopilot_rule_version (
+    autopilot_id, workspace_id, published_by_type, published_by_id, config_summary
+)
+VALUES (
+    @autopilot_id, @workspace_id, @published_by_type, sqlc.narg(published_by_id),
+    COALESCE(sqlc.narg(config_summary), '{}'::jsonb)
+)
+RETURNING *;
+
+-- name: GetActiveAutopilotRuleVersion :one
+-- The active version is the newest published row for the autopilot. Scoped by
+-- workspace_id per the workspace query rule; autopilot_id is globally unique so the
+-- workspace filter is a guard, not the selector.
+SELECT * FROM autopilot_rule_version
+WHERE workspace_id = $1 AND autopilot_id = $2
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- =====================
 -- Autopilot Trigger CRUD
 -- =====================
 
@@ -332,18 +360,22 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
--- run_only autopilot dispatch. originator_user_id / accountable_user_id stay NULL:
--- no human authorized this run and the precise rule_owner attribution (accountable
--- = the active rule version's publisher) lands with the rule-version snapshot table
--- in a later Phase 1 increment. originator_source is stamped explicitly so the row
--- is not a NULL-source enqueue bypass, and evidence points at the autopilot run
--- (MUL-4302 §2/§3.4).
+-- run_only autopilot dispatch. originator_user_id stays NULL: no human authorized
+-- this run, so authorization correctly carries none. accountable_user_id is the
+-- rule_owner — the publisher of the autopilot's active rule version — and
+-- rule_version_id records which snapshot resolved it (MUL-4302 §3.4). This is the
+-- accountable-diverges-from-originator case. When no version/publisher resolves,
+-- the caller passes NULL accountable + originator_source='unattributed' so the row
+-- is still not a NULL-source bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
+    accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(rule_version_id),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id)

@@ -153,6 +153,55 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 	return i, err
 }
 
+const createAutopilotRuleVersion = `-- name: CreateAutopilotRuleVersion :one
+
+INSERT INTO autopilot_rule_version (
+    autopilot_id, workspace_id, published_by_type, published_by_id, config_summary
+)
+VALUES (
+    $1, $2, $3, $4,
+    COALESCE($5, '{}'::jsonb)
+)
+RETURNING id, autopilot_id, workspace_id, published_by_type, published_by_id, config_summary, created_at
+`
+
+type CreateAutopilotRuleVersionParams struct {
+	AutopilotID     pgtype.UUID `json:"autopilot_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	PublishedByType string      `json:"published_by_type"`
+	PublishedByID   pgtype.UUID `json:"published_by_id"`
+	ConfigSummary   interface{} `json:"config_summary"`
+}
+
+// =====================
+// Autopilot Rule Version (rule_owner attribution, MUL-4302 §3.4)
+// =====================
+// Append one immutable rule-version snapshot on a substantive publish (create /
+// enable / resume / target / execution-mode change). published_by_* is the acting
+// member (or 'system' with NULL id for the failure monitor); config_summary is the
+// effective config at publish time. Dispatch reads the latest row for the autopilot
+// as the run's rule_owner accountable human.
+func (q *Queries) CreateAutopilotRuleVersion(ctx context.Context, arg CreateAutopilotRuleVersionParams) (AutopilotRuleVersion, error) {
+	row := q.db.QueryRow(ctx, createAutopilotRuleVersion,
+		arg.AutopilotID,
+		arg.WorkspaceID,
+		arg.PublishedByType,
+		arg.PublishedByID,
+		arg.ConfigSummary,
+	)
+	var i AutopilotRuleVersion
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.WorkspaceID,
+		&i.PublishedByType,
+		&i.PublishedByID,
+		&i.ConfigSummary,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createAutopilotRun = `-- name: CreateAutopilotRun :one
 
 INSERT INTO autopilot_run (
@@ -222,13 +271,16 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
+    accountable_user_id, rule_version_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
     $6,
     $7,
-    $8
+    $8,
+    $9,
+    $10
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
@@ -239,6 +291,8 @@ type CreateAutopilotTaskParams struct {
 	Priority             int32       `json:"priority"`
 	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
 	TriggerSummary       pgtype.Text `json:"trigger_summary"`
+	AccountableUserID    pgtype.UUID `json:"accountable_user_id"`
+	RuleVersionID        pgtype.UUID `json:"rule_version_id"`
 	OriginatorSource     pgtype.Text `json:"originator_source"`
 	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
@@ -247,12 +301,13 @@ type CreateAutopilotTaskParams struct {
 // =====================
 // Task Queue (run_only mode)
 // =====================
-// run_only autopilot dispatch. originator_user_id / accountable_user_id stay NULL:
-// no human authorized this run and the precise rule_owner attribution (accountable
-// = the active rule version's publisher) lands with the rule-version snapshot table
-// in a later Phase 1 increment. originator_source is stamped explicitly so the row
-// is not a NULL-source enqueue bypass, and evidence points at the autopilot run
-// (MUL-4302 §2/§3.4).
+// run_only autopilot dispatch. originator_user_id stays NULL: no human authorized
+// this run, so authorization correctly carries none. accountable_user_id is the
+// rule_owner — the publisher of the autopilot's active rule version — and
+// rule_version_id records which snapshot resolved it (MUL-4302 §3.4). This is the
+// accountable-diverges-from-originator case. When no version/publisher resolves,
+// the caller passes NULL accountable + originator_source='unattributed' so the row
+// is still not a NULL-source bypass (MUL-4302 §2).
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
@@ -260,6 +315,8 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.Priority,
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
+		arg.AccountableUserID,
+		arg.RuleVersionID,
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
@@ -432,6 +489,36 @@ WHERE issue_id = $1
 func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, failAutopilotRunsByIssue, issueID)
 	return err
+}
+
+const getActiveAutopilotRuleVersion = `-- name: GetActiveAutopilotRuleVersion :one
+SELECT id, autopilot_id, workspace_id, published_by_type, published_by_id, config_summary, created_at FROM autopilot_rule_version
+WHERE workspace_id = $1 AND autopilot_id = $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetActiveAutopilotRuleVersionParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+}
+
+// The active version is the newest published row for the autopilot. Scoped by
+// workspace_id per the workspace query rule; autopilot_id is globally unique so the
+// workspace filter is a guard, not the selector.
+func (q *Queries) GetActiveAutopilotRuleVersion(ctx context.Context, arg GetActiveAutopilotRuleVersionParams) (AutopilotRuleVersion, error) {
+	row := q.db.QueryRow(ctx, getActiveAutopilotRuleVersion, arg.WorkspaceID, arg.AutopilotID)
+	var i AutopilotRuleVersion
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.WorkspaceID,
+		&i.PublishedByType,
+		&i.PublishedByID,
+		&i.ConfigSummary,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getAutopilot = `-- name: GetAutopilot :one

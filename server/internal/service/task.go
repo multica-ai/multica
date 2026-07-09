@@ -340,6 +340,15 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	if triggerCommentID.Valid {
 		return s.attributionFromTriggerComment(ctx, triggerCommentID, agentAuthoredSource)
 	}
+	// Autopilot-origin issues (origin_id is the autopilot id): no human authorized
+	// the run, so originator stays NULL, but it is accountable to the publisher of
+	// the autopilot's active rule version — rule_owner (MUL-4302 §3.4). Resolved
+	// the same way the run_only dispatch resolves it, so both autopilot execution
+	// modes attribute identically.
+	if s != nil && s.Queries != nil && issue.OriginType.Valid &&
+		issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
+		return ruleOwnerAttribution(ctx, s.Queries, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)
+	}
 	facts := attribution.DirectFacts{
 		IssueID:     issue.ID,
 		CreatorType: issue.CreatorType,
@@ -366,6 +375,33 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		}
 	}
 	return attribution.ClassifyDirect(facts)
+}
+
+// ruleOwnerAttribution resolves the rule_owner attribution for an autopilot run
+// from its active (latest) rule version snapshot (MUL-4302 §3.4). Shared by both
+// autopilot execution modes — run_only dispatch and the create_issue enqueue path —
+// so they attribute identically. originator stays NULL (an autopilot carries no
+// human's authority); only the audit-accountable side is set, to the version's
+// member publisher. A missing version (autopilot published before this feature, or
+// none yet) or a non-member/absent publisher degrades to unattributed rather than
+// fabricating a human. Never returns an error: attribution must not fail an
+// enqueue, and a degraded label is the honest fallback.
+func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
+	if q == nil || !autopilotID.Valid {
+		return attribution.RuleOwner(pgtype.UUID{}, pgtype.UUID{}, evidenceKind, evidenceRefID)
+	}
+	ver, err := q.GetActiveAutopilotRuleVersion(ctx, db.GetActiveAutopilotRuleVersionParams{
+		WorkspaceID: workspaceID,
+		AutopilotID: autopilotID,
+	})
+	if err != nil {
+		return attribution.RuleOwner(pgtype.UUID{}, pgtype.UUID{}, evidenceKind, evidenceRefID)
+	}
+	var publisher pgtype.UUID
+	if ver.PublishedByType == "member" {
+		publisher = ver.PublishedByID
+	}
+	return attribution.RuleOwner(publisher, ver.ID, evidenceKind, evidenceRefID)
 }
 
 // attributionCreateParams maps a resolved attribution onto the CreateAgentTask
@@ -781,6 +817,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
+		RuleVersionID:        attr.RuleVersionID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -886,6 +923,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		SquadID:              squadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
+		RuleVersionID:        attr.RuleVersionID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
