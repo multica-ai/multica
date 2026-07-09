@@ -25,7 +25,6 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
-    "spaces": "Spaces",
     "created": "Created",
     "issues": "Issues"
   },
@@ -65,6 +64,7 @@
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",
     "copy_link": "Copy link",
+    "manage_spaces_action": "Manage spaces",
     "delete_action": "Delete project",
     "section_properties": "Properties",
     "section_progress": "Progress",
@@ -124,6 +124,24 @@
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
     "confirm": "Delete",
     "cancel": "Cancel"
+  },
+  "manage_spaces": {
+    "title": "Manage spaces",
+    "description": "Choose which spaces this project belongs to.",
+    "empty": "Select at least one space.",
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "toast_updated": "Spaces updated",
+    "toast_failed": "Failed to update spaces",
+    "conflict_title": "Move issues before removing a space",
+    "conflict_body_one": "This project has {{count}} issue in a space you're removing. Choose where it should move.",
+    "conflict_body_other": "This project has {{count}} issues in spaces you're removing. Choose where each should move.",
+    "conflict_row_one": "{{count}} issue in {{space}}",
+    "conflict_row_other": "{{count}} issues in {{space}}",
+    "conflict_target_placeholder": "Move to...",
+    "confirm_move": "Move issues and save",
+    "back": "Back"
   },
   "picker": {
     "no_project": "No project",

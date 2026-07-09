@@ -20,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueidentifier"
-	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -2856,45 +2855,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		qtx := h.Queries.WithTx(tx)
 
 		if spaceChanged {
-			newNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
-				ID:          finalSpaceID,
-				WorkspaceID: prevIssue.WorkspaceID,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
-				return
-			}
-			newPosition, err := issueposition.NextTopPositionForSpace(r.Context(), tx, prevIssue.WorkspaceID, finalSpaceID, prevIssue.Status)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to position issue")
-				return
-			}
-			if _, err := qtx.MoveIssueToSpace(r.Context(), db.MoveIssueToSpaceParams{
-				ID:       prevIssue.ID,
-				SpaceID:  finalSpaceID,
-				Number:   newNumber,
-				Position: newPosition,
-			}); err != nil {
+			if _, err := service.MoveIssueToSpace(r.Context(), qtx, tx, prevIssue.WorkspaceID, prevIssue, finalSpaceID); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to move issue to space")
 				return
-			}
-			// Preserve the pre-move identifier so it keeps resolving.
-			if prevIssue.SpaceID.Valid {
-				oldSpace, err := qtx.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
-					ID:          prevIssue.SpaceID,
-					WorkspaceID: prevIssue.WorkspaceID,
-				})
-				if err == nil && oldSpace.Key != "" {
-					if err := qtx.UpsertIssueIdentifierAlias(r.Context(), db.UpsertIssueIdentifierAliasParams{
-						WorkspaceID:   prevIssue.WorkspaceID,
-						SpaceKeyLower: strings.ToLower(oldSpace.Key),
-						Number:        prevIssue.Number,
-						IssueID:       prevIssue.ID,
-					}); err != nil {
-						writeError(w, http.StatusInternalServerError, "failed to record identifier alias")
-						return
-					}
-				}
 			}
 		}
 

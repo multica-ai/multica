@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -172,6 +173,35 @@ type UpdateProjectRequest struct {
 	StartDate   *string  `json:"start_date"`
 	DueDate     *string  `json:"due_date"`
 	SpaceIDs    []string `json:"space_ids"`
+	// SpaceReassignments resolves a space_ids removal that would otherwise
+	// strand issues: keys are the Space being removed, values are the
+	// (still-remaining) Space its issues move to. Only consulted for Spaces
+	// CountProjectIssuesBySpace reports as non-empty; omitting an entry for
+	// one of those returns 409 rather than silently dropping the issues'
+	// project association or leaving them under a Space the project no
+	// longer lists.
+	SpaceReassignments map[string]string `json:"space_reassignments"`
+}
+
+// projectSpaceMove is a resolved (from → to) pair for issues that must move
+// out of a Space UpdateProject is about to drop from the project's set.
+type projectSpaceMove struct {
+	FromSpaceID pgtype.UUID
+	ToSpaceID   pgtype.UUID
+}
+
+type projectSpaceIssueConflict struct {
+	SpaceID    string `json:"space_id"`
+	SpaceKey   string `json:"space_key"`
+	IssueCount int64  `json:"issue_count"`
+}
+
+type projectSpaceConflictResponse struct {
+	Error string `json:"error"`
+	// Code lets clients branch on a stable identifier instead of matching
+	// the human-readable message, mirroring other structured-409 endpoints.
+	Code             string                      `json:"code"`
+	SpacesWithIssues []projectSpaceIssueConflict `json:"spaces_with_issues"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -671,6 +701,70 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A Space leaving the project's space set must not strand the issues
+	// filed under it: reconcile via space_reassignments (move them into a
+	// Space the project still lists) or reject with the full conflict list
+	// so the caller can ask the user, mirroring the issue→project "move or
+	// add" dialog for this reverse direction.
+	var pendingMoves []projectSpaceMove
+	if replaceSpaces {
+		currentSpaces, err := h.Queries.ListProjectSpaces(r.Context(), db.ListProjectSpacesParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   idUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project spaces")
+			return
+		}
+		nextSet := make(map[string]struct{}, len(nextSpaceIDs))
+		for _, spaceID := range nextSpaceIDs {
+			nextSet[uuidToString(spaceID)] = struct{}{}
+		}
+		spaceKeyByID := make(map[string]string, len(currentSpaces))
+		var removedSpaceIDs []pgtype.UUID
+		for _, space := range currentSpaces {
+			spaceKeyByID[uuidToString(space.ID)] = space.Key
+			if _, stays := nextSet[uuidToString(space.ID)]; !stays {
+				removedSpaceIDs = append(removedSpaceIDs, space.ID)
+			}
+		}
+		if len(removedSpaceIDs) > 0 {
+			counts, err := h.Queries.CountProjectIssuesBySpace(r.Context(), db.CountProjectIssuesBySpaceParams{
+				WorkspaceID: wsUUID,
+				ProjectID:   idUUID,
+				SpaceIds:    removedSpaceIDs,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to check project issues")
+				return
+			}
+			var conflicts []projectSpaceIssueConflict
+			for _, count := range counts {
+				fromKey := uuidToString(count.SpaceID)
+				targetRaw, given := req.SpaceReassignments[fromKey]
+				targetID, targetErr := parseStrictUUID(strings.TrimSpace(targetRaw))
+				_, targetStays := nextSet[uuidToString(targetID)]
+				if !given || targetErr != nil || !targetStays {
+					conflicts = append(conflicts, projectSpaceIssueConflict{
+						SpaceID:    fromKey,
+						SpaceKey:   spaceKeyByID[fromKey],
+						IssueCount: count.IssueCount,
+					})
+					continue
+				}
+				pendingMoves = append(pendingMoves, projectSpaceMove{FromSpaceID: count.SpaceID, ToSpaceID: targetID})
+			}
+			if len(conflicts) > 0 {
+				writeJSON(w, http.StatusConflict, projectSpaceConflictResponse{
+					Error:            "project has issues in a space being removed",
+					Code:             "project_space_has_issues",
+					SpacesWithIssues: conflicts,
+				})
+				return
+			}
+		}
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -686,6 +780,26 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
 		return
+	}
+	var movedIssues []db.Issue
+	for _, move := range pendingMoves {
+		strandedIssues, err := qtx.ListIssuesByProjectAndSpace(r.Context(), db.ListIssuesByProjectAndSpaceParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   idUUID,
+			SpaceID:     move.FromSpaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load issues to move")
+			return
+		}
+		for _, issue := range strandedIssues {
+			moved, err := service.MoveIssueToSpace(r.Context(), qtx, tx, wsUUID, issue, move.ToSpaceID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to move issue to space")
+				return
+			}
+			movedIssues = append(movedIssues, moved)
+		}
 	}
 	if replaceSpaces {
 		if err := qtx.ReplaceProjectSpaces(r.Context(), db.ReplaceProjectSpacesParams{
@@ -708,6 +822,17 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to attach project spaces", append(logger.RequestAttrs(r), "error", err, "project_id", uuidToString(project.ID))...)
 	}
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
+	// Each moved issue gets its own issue:updated broadcast (same event the
+	// single-issue move-to-space path emits) so the realtime layer reconciles
+	// space-filtered issue lists exactly as it would for a manual move.
+	for _, issue := range movedIssues {
+		prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
+		h.publish(protocol.EventIssueUpdated, workspaceID, "member", userID, map[string]any{
+			"issue":           issueToResponse(issue, prefix),
+			"space_changed":   true,
+			"project_changed": false,
+		})
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
