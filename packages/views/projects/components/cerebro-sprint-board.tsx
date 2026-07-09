@@ -18,6 +18,8 @@ import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { sprintOptions } from "@multica/cerebro-sprints/core/queries";
 import type { SprintStatus } from "@multica/cerebro-sprints/core";
+// CEREBRO-PATCH(sprint-header-date-range): FIR-2817 compact "DD-MM - DD-MM" date range instead of raw ISO strings.
+import { formatSprintDateRange } from "@multica/cerebro-sprints/core";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -87,7 +89,8 @@ export function SprintBoard({ sprintId }: { sprintId: string }) {
               {statusConfig.label}
             </Badge>
             <span className="truncate text-xs text-muted-foreground">
-              {sprint.start_date} → {sprint.end_date}
+              {/* CEREBRO-PATCH(sprint-header-date-range): FIR-2817 "DD-MM - DD-MM" instead of raw ISO dates. */}
+              {formatSprintDateRange(sprint.start_date, sprint.end_date)}
               {sprint.goal ? ` · ${sprint.goal}` : ""}
             </span>
           </div>

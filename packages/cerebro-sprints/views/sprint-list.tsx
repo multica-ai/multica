@@ -37,6 +37,7 @@ import {
   computeEnd,
   computeNextStart,
   formatDateOnly,
+  formatSprintDateRange,
   parseDateOnly,
 } from "../core/template";
 
@@ -324,7 +325,7 @@ export function SprintList({ workspaceId, projectId }: Props) {
                     </Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {sprint.start_date} → {sprint.end_date}
+                    {formatSprintDateRange(sprint.start_date, sprint.end_date)}
                     {sprint.goal ? ` · ${sprint.goal}` : ""}
                   </span>
                 </div>
