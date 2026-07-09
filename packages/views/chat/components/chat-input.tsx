@@ -9,8 +9,8 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { ChatAddMenu } from "./chat-add-menu";
 import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
@@ -75,6 +75,10 @@ interface ChatInputProps {
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
    *  archived-session copy stays untouched. */
   noAgent?: boolean;
+  /** True when `disabled` is because the bound agent was archived (retired),
+   *  as opposed to the session itself being archived — swaps the placeholder
+   *  copy so the read-only reason reads accurately. */
+  agentArchived?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
@@ -92,6 +96,7 @@ export function ChatInput({
   isRunning,
   disabled,
   noAgent,
+  agentArchived,
   agentName,
   leftAdornment,
   contextItems,
@@ -108,10 +113,12 @@ export function ChatInput({
   // mid-compose gives each agent its own draft. This is a STORAGE key, not
   // a React identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Used to force a
-  // remount when the user explicitly switches agent (so Tiptap's
-  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…").
-  // A cancelled-run draft restore does NOT bump this key: it just writes
+  // `editorKey` — React `key` on the ContentEditor. Forces a fresh editor
+  // instance when the user explicitly switches agent. Placeholder text itself
+  // no longer depends on this: ContentEditor's placeholder-sync effect
+  // refreshes it live (e.g. across archived ↔ active sessions of the SAME
+  // agent, where this key does not change). A cancelled-run draft restore
+  // does NOT bump this key either: it just writes
   // the restored text into `inputDraft`, and the editor's own
   // defaultValue-sync effect (content-editor.tsx) pushes it into the live
   // instance. There is no second copy of the draft to drift or resurface.
@@ -320,7 +327,9 @@ export function ChatInput({
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
-      ? t(($) => $.input.placeholder_archived)
+      ? agentArchived
+        ? t(($) => $.input.placeholder_archived_agent)
+        : t(($) => $.input.placeholder_archived)
       : agentName
         ? t(($) => $.input.placeholder_named, { name: agentName })
         : t(($) => $.input.placeholder_default);
@@ -389,20 +398,19 @@ export function ChatInput({
             // continues a bullet list, leaving users stuck after one item.
           />
         </div>
-        {leftAdornment && (
-          <div className="absolute bottom-1.5 left-2 flex items-center">
+        {(uploadEnabled || leftAdornment) && (
+          <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
+            {uploadEnabled && (
+              <ChatAddMenu
+                onSelectFile={(file) => editorRef.current?.uploadFile(file)}
+              />
+            )}
             {leftAdornment}
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          {uploadEnabled && (
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-          )}
           <SubmitButton
+            shape="circle"
             onClick={handleSend}
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             loading={isSubmitting}

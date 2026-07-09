@@ -276,6 +276,51 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+WHERE issue_id = $1
+  AND author_type = 'member'
+  AND created_at > $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLatestMemberCommentForIssueSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// MUL-4195 completion reconciliation: the newest MEMBER-authored comment on an
+// issue created strictly after @since (a run's started_at). Used when a task
+// completes to detect deliberate user input that landed while the agent was
+// busy — or that was merged into the running task after its context was
+// already built — so a single follow-up run can be scheduled for it. Restricted
+// to author_type = 'member' on purpose: only human input earns the guaranteed
+// follow-up, which preserves the existing anti-loop guarantees (agent replies,
+// acknowledgements, and self-triggers never qualify). Returns pgx.ErrNoRows
+// when nothing newer exists, i.e. the run already covered the latest input.
+func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg GetLatestMemberCommentForIssueSinceParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestMemberCommentForIssueSince, arg.IssueID, arg.Since)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
@@ -439,6 +484,63 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 		arg.CreatedAt,
 		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemberCommentsForIssueSince = `-- name: ListMemberCommentsForIssueSince :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+WHERE issue_id = $1
+  AND author_type = 'member'
+  AND created_at > $2
+ORDER BY created_at ASC, id ASC
+`
+
+type ListMemberCommentsForIssueSinceParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// MUL-4195 completion reconciliation: every MEMBER-authored comment on an issue
+// created strictly after @since (a run's dispatched_at anchor), oldest first.
+// The reconcile pass replays each undelivered one through the normal trigger
+// pipeline so a single coalesced follow-up run covers all of them, guaranteeing
+// at-least-once processing for deliberate user input that landed after the
+// completing run's claim response was built. Restricted to author_type =
+// 'member' to preserve the anti-loop guarantees (agent replies /
+// acknowledgements / self-triggers never qualify). Ordered ASC so replaying in
+// order lets later comments coalesce onto the follow-up created by the first.
+func (q *Queries) ListMemberCommentsForIssueSince(ctx context.Context, arg ListMemberCommentsForIssueSinceParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listMemberCommentsForIssueSince, arg.IssueID, arg.Since)
 	if err != nil {
 		return nil, err
 	}

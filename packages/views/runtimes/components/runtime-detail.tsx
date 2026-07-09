@@ -7,7 +7,6 @@ import {
   Cpu,
   Globe,
   Lock,
-  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -48,7 +47,6 @@ import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
-import { RenameRuntimeDialog } from "./rename-runtime-dialog";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -111,7 +109,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
 
   const health = deriveRuntimeHealth(runtime, now);
   const ownerMember = runtime.owner_id
@@ -189,8 +186,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               ownerMember={ownerMember}
               cliVersion={cliVersion}
               daemonShort={daemonShort}
-              canEdit={!!canEditRuntime}
-              onRename={() => setRenameOpen(true)}
             />
             <UsageSection runtime={runtime} />
           </div>
@@ -231,15 +226,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           onDeleted={handleRuntimeDeleted}
         />
       )}
-
-      {canEditRuntime && (
-        <RenameRuntimeDialog
-          open={renameOpen}
-          onOpenChange={setRenameOpen}
-          runtime={runtime}
-          wsId={wsId}
-        />
-      )}
     </div>
   );
 }
@@ -265,8 +251,6 @@ function HeroCard({
   ownerMember,
   cliVersion,
   daemonShort,
-  canEdit,
-  onRename,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -274,8 +258,6 @@ function HeroCard({
   ownerMember: MemberWithUser | null;
   cliVersion: string | null;
   daemonShort: string | null;
-  canEdit: boolean;
-  onRename: () => void;
 }) {
   const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
@@ -294,25 +276,6 @@ function HeroCard({
             <h2 className="truncate text-base font-semibold tracking-tight">
               {runtimeDisplayName(runtime)}
             </h2>
-            {canEdit && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      onClick={onRename}
-                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      aria-label={t(($) => $.detail.rename_button)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipContent>
-                  {t(($) => $.detail.rename_button)}
-                </TooltipContent>
-              </Tooltip>
-            )}
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
               {t(($) => $.detail.last_seen, { when: lastSeen })}

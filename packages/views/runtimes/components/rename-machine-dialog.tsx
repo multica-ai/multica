@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { AgentRuntime } from "@multica/core/types";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   AlertDialog,
@@ -10,48 +9,43 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { useT } from "../../i18n";
 
-// RenameRuntimeDialog lets a runtime owner (or workspace admin) set a custom
-// display name (MUL-4217). The name overrides the daemon-proposed default for
-// display everywhere; clearing it reverts to the default. When the runtime is
-// a local/remote daemon (has a daemon_id), it can host one runtime per
-// provider, so the dialog offers to apply the name to the whole machine — the
-// common intent behind "name my machine".
-export interface RenameRuntimeDialogProps {
+// RenameMachineDialog names a whole machine (MUL-4217). A machine hosts one
+// runtime per provider, so the name is applied to every runtime on the daemon
+// (apply_to_machine) rather than to a single runtime — that was the confusing
+// part of the first cut. Clearing reverts to the device's default name.
+//
+// `runtimeId` is any runtime on the machine the current user is allowed to
+// edit; the server fans the name out across the daemon (or, for a cloud worker
+// with no daemon_id, just renames that one worker, which is its own machine).
+export interface RenameMachineDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  runtime: AgentRuntime;
   wsId: string;
+  runtimeId: string;
+  /** The machine's current custom name, or "" when it still uses the default. */
+  currentName: string;
 }
 
-export function RenameRuntimeDialog({
+export function RenameMachineDialog({
   open,
   onOpenChange,
-  runtime,
   wsId,
-}: RenameRuntimeDialogProps) {
+  runtimeId,
+  currentName,
+}: RenameMachineDialogProps) {
   const { t } = useT("runtimes");
   const updateRuntime = useUpdateRuntime(wsId);
 
-  // Machine-level naming only makes sense for daemon-backed runtimes; cloud
-  // workers have no shared host to fan out across.
-  const canApplyToMachine =
-    !!runtime.daemon_id && runtime.runtime_mode !== "cloud";
-
-  const [value, setValue] = useState(runtime.custom_name ?? "");
-  const [applyToMachine, setApplyToMachine] = useState(canApplyToMachine);
+  const [value, setValue] = useState(currentName);
   const submitting = updateRuntime.isPending;
 
-  // Reset the form each time the dialog opens so a cancelled edit doesn't
-  // leak into the next one.
+  // Reset the form each time the dialog opens so a cancelled edit doesn't leak
+  // into the next one.
   useEffect(() => {
-    if (open) {
-      setValue(runtime.custom_name ?? "");
-      setApplyToMachine(canApplyToMachine);
-    }
-  }, [open, runtime.custom_name, canApplyToMachine]);
+    if (open) setValue(currentName);
+  }, [open, currentName]);
 
   const handleOpenChange = (next: boolean) => {
     if (submitting) return;
@@ -62,21 +56,17 @@ export function RenameRuntimeDialog({
     const trimmed = value.trim();
     updateRuntime.mutate(
       {
-        runtimeId: runtime.id,
-        // Empty string clears the override server-side.
-        patch: {
-          custom_name: trimmed,
-          ...(canApplyToMachine && applyToMachine
-            ? { apply_to_machine: true }
-            : {}),
-        },
+        runtimeId,
+        // Empty string clears the name (reverts to the default); the machine
+        // fan-out is always on — this dialog only ever names the machine.
+        patch: { custom_name: trimmed, apply_to_machine: true },
       },
       {
         onSuccess: () => {
           toast.success(
             trimmed
-              ? t(($) => $.detail.rename_dialog.toast_saved)
-              : t(($) => $.detail.rename_dialog.toast_cleared),
+              ? t(($) => $.machine.rename_dialog.toast_saved)
+              : t(($) => $.machine.rename_dialog.toast_cleared),
           );
           onOpenChange(false);
         },
@@ -84,7 +74,7 @@ export function RenameRuntimeDialog({
           toast.error(
             err instanceof Error && err.message
               ? err.message
-              : t(($) => $.detail.rename_dialog.toast_failed),
+              : t(($) => $.machine.rename_dialog.toast_failed),
           ),
       },
     );
@@ -98,10 +88,10 @@ export function RenameRuntimeDialog({
       >
         <div className="px-5 pb-4 pt-5">
           <h2 className="text-base font-semibold">
-            {t(($) => $.detail.rename_dialog.title)}
+            {t(($) => $.machine.rename_dialog.title)}
           </h2>
           <p className="mt-1 text-sm leading-5 text-muted-foreground">
-            {t(($) => $.detail.rename_dialog.description)}
+            {t(($) => $.machine.rename_dialog.description)}
           </p>
 
           <Input
@@ -109,7 +99,7 @@ export function RenameRuntimeDialog({
             autoFocus
             value={value}
             maxLength={100}
-            placeholder={runtime.name}
+            placeholder={t(($) => $.machine.rename_dialog.placeholder)}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !submitting) {
@@ -119,22 +109,8 @@ export function RenameRuntimeDialog({
             }}
           />
           <p className="mt-1.5 text-xs text-muted-foreground">
-            {t(($) => $.detail.rename_dialog.hint)}
+            {t(($) => $.machine.rename_dialog.hint)}
           </p>
-
-          {canApplyToMachine && (
-            <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-foreground">
-              <Checkbox
-                className="mt-0.5"
-                checked={applyToMachine}
-                onCheckedChange={(next) => setApplyToMachine(next === true)}
-                disabled={submitting}
-              />
-              <span className="leading-5">
-                {t(($) => $.detail.rename_dialog.apply_to_machine)}
-              </span>
-            </label>
-          )}
         </div>
 
         <div className="border-t bg-muted/25 px-5 py-3">
@@ -146,7 +122,7 @@ export function RenameRuntimeDialog({
               onClick={() => handleOpenChange(false)}
               disabled={submitting}
             >
-              {t(($) => $.detail.rename_dialog.cancel)}
+              {t(($) => $.machine.rename_dialog.cancel)}
             </Button>
             <Button
               type="button"
@@ -155,8 +131,8 @@ export function RenameRuntimeDialog({
               disabled={submitting}
             >
               {submitting
-                ? t(($) => $.detail.rename_dialog.saving)
-                : t(($) => $.detail.rename_dialog.save)}
+                ? t(($) => $.machine.rename_dialog.saving)
+                : t(($) => $.machine.rename_dialog.save)}
             </Button>
           </div>
         </div>

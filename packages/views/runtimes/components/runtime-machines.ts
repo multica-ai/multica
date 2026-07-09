@@ -274,7 +274,7 @@ function runtimeDeviceName(runtime: AgentRuntime): string | null {
 // daemon, so a name shared by all of them is the machine's label. A one-off
 // per-runtime rename (not shared) is deliberately ignored here so it can't
 // masquerade as the whole machine's name.
-function sharedCustomName(runtimes: AgentRuntime[]): string | null {
+export function sharedCustomName(runtimes: AgentRuntime[]): string | null {
   if (runtimes.length === 0) return null;
   const names = runtimes.map((r) => r.custom_name?.trim() ?? "");
   const first = names[0];

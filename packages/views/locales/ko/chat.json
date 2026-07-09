@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "채팅",
+    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요"
+  },
   "fab": {
     "running": "Multica가 작업 중입니다...",
     "unread_other": "읽지 않은 채팅 {{count}}개",
@@ -7,18 +11,29 @@
   "input": {
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
+    "placeholder_archived_agent": "보관된 에이전트입니다",
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
     "send_failed_toast": "메시지를 보내지 못했습니다",
-    "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요."
+    "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+    "add_tooltip": "추가",
+    "upload_file": "이미지 또는 파일"
   },
   "message_list": {
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",
-    "task_failed_fallback": "작업 실패",
+    "failure": {
+      "agent_error": "에이전트에 오류가 발생하여 답변을 완료하지 못했습니다. 다시 시도해 주세요.",
+      "timeout": "시간이 너무 오래 걸려 완료 전에 중단되었습니다. 다시 시도하거나 요청을 더 작게 나눠 보세요.",
+      "codex_semantic_inactivity": "에이전트가 응답하지 않아 완료 전에 중단되었습니다. 다시 시도해 주세요.",
+      "runtime_offline": "에이전트가 현재 오프라인 상태여서 답변할 수 없습니다. 다시 온라인이 되면 시도해 주세요.",
+      "runtime_recovery": "완료 전에 에이전트가 다시 시작되었습니다. 다시 시도해 주세요.",
+      "manual": "이 답변이 취소되었습니다.",
+      "fallback": "문제가 발생하여 에이전트가 답변을 완료하지 못했습니다. 다시 시도해 주세요."
+    },
     "tools_other": "도구 {{count}}개",
     "tool_result_named": "{{tool}} 결과: ",
     "tool_result_unnamed": "결과: ",
@@ -87,7 +102,8 @@
     "first_time_actions": "요약을 요청하거나, 오늘 할 일을 계획하거나, 간단한 작업을 맡겨보세요.",
     "returning_title_named": "안녕하세요, 저는 {{name}}입니다",
     "returning_title_default": "Multica에 오신 것을 환영합니다",
-    "returning_subtitle": "이렇게 요청해 보세요"
+    "returning_subtitle": "이렇게 요청해 보세요",
+    "chat_with_named": "{{name}}와 채팅"
   },
   "starter_prompts": {
     "list_open": "열린 작업을 우선순위별로 정리해 줘",
@@ -95,6 +111,7 @@
     "plan_next": "다음에 할 일을 계획해 줘"
   },
   "no_agent_banner": "채팅을 시작하려면 에이전트가 필요합니다.",
+  "archived_agent_banner": "{{name}}은(는) 보관되었습니다. 이 대화는 읽기 전용입니다.",
   "offline_banner": {
     "fallback_name": "에이전트",
     "unstable": "{{name}}의 연결이 불안정합니다. 답변이 지연될 수 있습니다.",
@@ -118,5 +135,29 @@
       "searching_web": "웹 검색 중",
       "fallback": "작업 중"
     }
+  },
+  "list": {
+    "typing": "입력 중…",
+    "failed": "전송 실패",
+    "you_prefix": "나: ",
+    "no_messages": "아직 메시지가 없습니다",
+    "quick_agents": "자주 쓰는 Agent",
+    "add": "추가",
+    "add_agent": "자주 쓰는 Agent 추가",
+    "unpin_agent": "자주 쓰기에서 제거",
+    "waiting": "답장 대기 중",
+    "pin": "고정",
+    "unpin": "고정 해제",
+    "pinned": "고정됨",
+    "archive": "보관",
+    "unarchive": "보관 해제",
+    "archived_title": "보관됨"
+  },
+  "header": {
+    "view_profile": "Agent 프로필 보기",
+    "rename": "이름 변경",
+    "delete": "채팅 삭제",
+    "archive": "채팅 보관",
+    "unarchive": "채팅 보관 해제"
   }
 }

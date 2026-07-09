@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1086,6 +1087,81 @@ func TestResolveAssignee(t *testing.T) {
 	})
 }
 
+func TestResolveAssigneeRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			if memberHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": "user-1111", "name": "Alice Smith"},
+			})
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssignee should retry transient EOF: %v", err)
+	}
+	if aType != "member" || aID != "user-1111" {
+		t.Fatalf("got (%q, %q), want Alice member", aType, aID)
+	}
+	if memberHits != 2 {
+		t.Fatalf("member endpoint hits = %d, want 2", memberHits)
+	}
+}
+
+func TestResolveAssigneeDoesNotRetryHTTPStatusErrors(t *testing.T) {
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			http.Error(w, "bad workspace", http.StatusBadRequest)
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	_, _, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err == nil {
+		t.Fatal("expected not-found error after non-retryable members fetch")
+	}
+	if memberHits != 1 {
+		t.Fatalf("member endpoint hits = %d, want 1", memberHits)
+	}
+}
+
 func TestNormalizeAssigneeLookupInput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1443,6 +1519,54 @@ func TestResolveAssigneeByIDStrict(t *testing.T) {
 			t.Fatal("expected error for missing workspace ID")
 		}
 	})
+}
+
+func TestResolveAssigneeByIDRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var agentsHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			agentsHits++
+			if agentsHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+			})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssigneeByID(context.Background(), client, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssigneeByID should retry transient EOF: %v", err)
+	}
+	if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+		t.Fatalf("got (%q, %q), want agent J", aType, aID)
+	}
+	if agentsHits != 2 {
+		t.Fatalf("agents endpoint hits = %d, want 2", agentsHits)
+	}
 }
 
 // TestPickAssigneeFromFlags covers the flag-pair picker that backs every
@@ -2518,11 +2642,7 @@ func newIssueListTestCmd() *cobra.Command {
 
 func newIssueReorderTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "reorder"}
-	cmd.Flags().String("before", "", "")
-	cmd.Flags().String("after", "", "")
-	cmd.Flags().Bool("top", false, "")
-	cmd.Flags().Bool("bottom", false, "")
-	cmd.Flags().String("output", "json", "")
+	registerIssueReorderFlags(cmd)
 	return cmd
 }
 
@@ -2677,21 +2797,89 @@ func TestComputeReorderPosition(t *testing.T) {
 	}
 }
 
-func TestRunIssueReorderRejectsModeCount(t *testing.T) {
-	t.Run("zero modes", func(t *testing.T) {
+// TestIssueReorderTargetFlagGroup drives the command through Execute so the real
+// cobra flag group (registerIssueReorderFlags) validates the "exactly one
+// target" rule — zero targets, two bool targets, and --before+--after are all
+// rejected before RunE. A stub RunE that errors proves validation happens first.
+// The assertions match on cobra's canonical flag-group error strings, so they
+// are coupled to cobra's wording (pinned at v1.10.2 in server/go.mod).
+func TestIssueReorderTargetFlagGroup(t *testing.T) {
+	newCmd := func() *cobra.Command {
 		cmd := newIssueReorderTestCmd()
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when no mode flag is set")
+		cmd.Args = exactArgs(1)
+		cmd.RunE = func(*cobra.Command, []string) error {
+			return fmt.Errorf("RunE ran despite an invalid target flag group")
+		}
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		return cmd
+	}
+
+	t.Run("no target flag", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when no target flag is set")
+		}
+		if !strings.Contains(err.Error(), "at least one of the flags in the group") {
+			t.Fatalf("want cobra one-required error, got: %v", err)
 		}
 	})
-	t.Run("two modes", func(t *testing.T) {
-		cmd := newIssueReorderTestCmd()
-		_ = cmd.Flags().Set("top", "true")
-		_ = cmd.Flags().Set("bottom", "true")
-		if err := runIssueReorder(cmd, []string{"MUL-1"}); err == nil {
-			t.Fatal("expected error when two mode flags are set")
+
+	t.Run("two bool targets", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--top", "--bottom"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --top and --bottom are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
 		}
 	})
+
+	t.Run("before and after together", func(t *testing.T) {
+		cmd := newCmd()
+		cmd.SetArgs([]string{"MUL-1", "--before", "MUL-2", "--after", "MUL-3"})
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatal("expected an error when --before and --after are combined")
+		}
+		if !strings.Contains(err.Error(), "none of the others can be") {
+			t.Fatalf("want cobra mutually-exclusive error, got: %v", err)
+		}
+	})
+}
+
+// TestRunIssueReorderRejectsNoOpTargetValues covers the cases the flag group
+// cannot: cobra keys off flag presence (Changed), not value, so an
+// explicitly-passed but empty --before/--after or an explicit --top=false /
+// --bottom=false satisfies the group yet selects no real target. runIssueReorder
+// rejects each up front rather than falling through to a confusing downstream
+// error.
+func TestRunIssueReorderRejectsNoOpTargetValues(t *testing.T) {
+	cases := []struct{ flag, value string }{
+		{"before", ""},
+		{"after", ""},
+		{"top", "false"},
+		{"bottom", "false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.flag, func(t *testing.T) {
+			cmd := newIssueReorderTestCmd()
+			if err := cmd.Flags().Set(tc.flag, tc.value); err != nil {
+				t.Fatalf("set --%s=%q: %v", tc.flag, tc.value, err)
+			}
+			err := runIssueReorder(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected an error when --%s is passed %q", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), "--"+tc.flag) {
+				t.Fatalf("want error naming --%s, got: %v", tc.flag, err)
+			}
+		})
+	}
 }
 
 // reorderTestServer serves a fixed three-issue "todo" column (positions

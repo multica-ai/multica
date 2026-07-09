@@ -4,6 +4,7 @@ import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  sharedCustomName,
   splitRuntimeName,
 } from "./runtime-machines";
 
@@ -347,5 +348,35 @@ describe("splitRuntimeName", () => {
       base: "Codex cloud",
       hostname: null,
     });
+  });
+});
+
+describe("sharedCustomName", () => {
+  it("returns the name when every runtime shares one non-empty custom_name", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "Bohan's MacBook" }),
+        makeRuntime({ id: "b", custom_name: "Bohan's MacBook" }),
+      ]),
+    ).toBe("Bohan's MacBook");
+  });
+
+  it("returns null when only some runtimes are named (a lone per-runtime name is not the machine name)", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "just this one" }),
+        makeRuntime({ id: "b", custom_name: null }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns null when the names disagree, or the set is empty", () => {
+    expect(
+      sharedCustomName([
+        makeRuntime({ id: "a", custom_name: "Air" }),
+        makeRuntime({ id: "b", custom_name: "Pro" }),
+      ]),
+    ).toBeNull();
+    expect(sharedCustomName([])).toBeNull();
   });
 });

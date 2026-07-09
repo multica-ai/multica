@@ -312,6 +312,39 @@ WHERE issue_id = @issue_id
   AND id <> @anchor_id
   AND NOT (author_type = 'agent' AND author_id = @author_id);
 
+-- name: GetLatestMemberCommentForIssueSince :one
+-- MUL-4195 completion reconciliation: the newest MEMBER-authored comment on an
+-- issue created strictly after @since (a run's started_at). Used when a task
+-- completes to detect deliberate user input that landed while the agent was
+-- busy — or that was merged into the running task after its context was
+-- already built — so a single follow-up run can be scheduled for it. Restricted
+-- to author_type = 'member' on purpose: only human input earns the guaranteed
+-- follow-up, which preserves the existing anti-loop guarantees (agent replies,
+-- acknowledgements, and self-triggers never qualify). Returns pgx.ErrNoRows
+-- when nothing newer exists, i.e. the run already covered the latest input.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'member'
+  AND created_at > @since
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: ListMemberCommentsForIssueSince :many
+-- MUL-4195 completion reconciliation: every MEMBER-authored comment on an issue
+-- created strictly after @since (a run's dispatched_at anchor), oldest first.
+-- The reconcile pass replays each undelivered one through the normal trigger
+-- pipeline so a single coalesced follow-up run covers all of them, guaranteeing
+-- at-least-once processing for deliberate user input that landed after the
+-- completing run's claim response was built. Restricted to author_type =
+-- 'member' to preserve the anti-loop guarantees (agent replies /
+-- acknowledgements / self-triggers never qualify). Ordered ASC so replaying in
+-- order lets later comments coalesce onto the follow-up created by the first.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'member'
+  AND created_at > @since
+ORDER BY created_at ASC, id ASC;
+
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;

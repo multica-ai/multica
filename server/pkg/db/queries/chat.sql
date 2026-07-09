@@ -1,6 +1,6 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
-VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5)
 RETURNING *;
 
 -- name: GetChatSession :one
@@ -12,24 +12,87 @@ SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListChatSessionsByCreator :many
--- Returns active sessions with a boolean unread flag. Unread is strictly
--- per-session: either the user has uncleared assistant replies in this
--- session or they don't. Counting messages would be misleading.
+-- IM-style list: each active session with its unread *count* (assistant
+-- messages after the read cursor), a preview of the latest message, and
+-- ordered by most-recent activity so a new reply bumps a session to the top.
 SELECT cs.*,
-       (cs.unread_since IS NOT NULL)::bool AS has_unread
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason
 FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
-ORDER BY cs.updated_at DESC;
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
 SELECT cs.*,
-       (cs.unread_since IS NOT NULL)::bool AS has_unread
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason
 FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
-ORDER BY cs.updated_at DESC;
+ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateChatSessionTitleIfCurrent :one
+-- Compare-and-swap the title: only overwrite it when it still equals the
+-- value the caller observed (@expected_title). This is the idempotency /
+-- no-clobber guard behind LLM auto-titling (MUL-4295): the async generator
+-- captures the session's current (default/original) title before calling the
+-- model, and this write lands only if a manual rename or a competing writer
+-- has not changed the title in the meantime. A mismatch returns pgx.ErrNoRows
+-- (zero rows updated), which the caller treats as "someone renamed it — leave
+-- it alone", NOT as an error.
+UPDATE chat_session SET title = @new_title, updated_at = now()
+WHERE id = @id AND title = @expected_title
+RETURNING *;
+
+-- name: SetChatSessionPinned :one
+-- Pin/unpin a chat. Deliberately does NOT touch updated_at: pinning is a
+-- list-ordering preference, not activity, so it must not bump the session's
+-- last-activity sort key (which would make an unpinned chat jump the list).
+-- pinned = true stamps pinned_at only when it was NULL, so re-pinning keeps
+-- the original pin order; pinned = false clears it.
+UPDATE chat_session
+SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE id = $1
+RETURNING *;
+
+-- name: SetChatSessionArchived :one
+-- Archive/unarchive a chat session by flipping status between 'active' and
+-- 'archived'. Bumps updated_at so the row re-sorts on the receiving list. The
+-- send-message path refuses archived sessions (see SendChatMessage), so the
+-- conversation is effectively read-only until it is unarchived.
+UPDATE chat_session
+SET status = CASE WHEN @archived::bool THEN 'archived' ELSE 'active' END,
+    updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -198,16 +261,9 @@ SELECT EXISTS (
 ) AS has_pending;
 
 -- name: MarkChatSessionRead :exec
--- Clears unread_since, dropping the session's unread count to 0.
-UPDATE chat_session SET unread_since = NULL
+-- Advances the read cursor to now, dropping the session's unread_count to 0.
+UPDATE chat_session SET last_read_at = now()
 WHERE id = $1;
-
--- name: SetUnreadSinceIfNull :exec
--- Atomically stamps the first unread assistant message's arrival time.
--- No-op if the session is already in "has unread" state — keeps the earliest
--- unread boundary stable across multiple incoming replies.
-UPDATE chat_session SET unread_since = now()
-WHERE id = $1 AND unread_since IS NULL;
 
 -- name: GetMostRecentUserChatMessage :one
 -- Returns the most recent role='user' message in a session. Used by the
@@ -219,3 +275,15 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ChatSessionHasUserMessage :one
+-- Reports whether a session has any human (role='user') message yet. Used to
+-- scope the is_agent_intro self-introduction prompt to the very first,
+-- server-driven turn: an intro session starts with zero user messages, so the
+-- opening run gets the "introduce yourself" prompt. Once the creator replies,
+-- later turns in the same session must fall back to the normal reply prompt
+-- instead of repeating the introduction every turn (MUL-4259).
+SELECT EXISTS (
+    SELECT 1 FROM chat_message
+    WHERE chat_session_id = $1 AND role = 'user'
+) AS has_user_message;

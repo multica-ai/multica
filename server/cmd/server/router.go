@@ -22,7 +22,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -176,13 +175,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
+		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
+		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
+		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
-	if opts.FeatureFlags != nil {
-		h.DaemonFeatureFlags = featureflagdispatch.NewEvaluator(opts.FeatureFlags)
-	}
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
@@ -781,6 +780,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 
+		// OpenAI-compatible LLM endpoints (MUL-4238). User-scoped (auth-only,
+		// no workspace context needed): the basic LLM layer is a shared
+		// utility, not a per-workspace resource. Both accept the standard
+		// OpenAI chat-completions request body; model is taken from the request
+		// with a configured default fallback. Return 503 when the LLM layer is
+		// unconfigured (no MULTICA_LLM_API_KEY / MULTICA_LLM_BASE_URL).
+		r.Post("/api/llm/v1/chat/completions", h.LLMChatCompletions)
+		r.Post("/api/llm/v1/chat/completions/stream", h.LLMChatCompletionsStream)
+
 		// Attachment download — user-scoped (auth-only), NOT
 		// workspace-scoped. The handler self-resolves the workspace
 		// from the attachment row and enforces membership inside, so
@@ -844,18 +852,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 
-				// Lark integration. Listing is member-visible (same
-				// rationale as GitHub: the Integrations tab must
-				// render for non-admins so they see "wired up by whom").
-				// Install / revoke require admin to prevent a non-admin
-				// from binding a Bot to a workspace agent or yanking
-				// an installation out from under one.
+				// Lark integration. Every endpoint here only requires
+				// workspace membership at the router; the real authorization
+				// is per-agent and enforced inside each handler via
+				// canManageAgent (agent owner OR workspace owner/admin), so an
+				// agent's owner can bind/manage their own agent's Bot without
+				// being a workspace admin (MUL-4213). The router can't make
+				// that call itself: begin identifies the agent by an
+				// `agent_id` query param and revoke by an installation id,
+				// neither of which is a URL param the role middleware sees.
+				//   - Listing stays member-visible (same rationale as GitHub:
+				//     the Integrations tab must render for non-admins so they
+				//     see "wired up by whom").
+				//   - Begin / status / revoke each load the target agent and
+				//     run canManageAgent (status gates on the session
+				//     initiator or an admin) before doing anything.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
-				})
-				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
@@ -1254,6 +1268,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Patch("/", h.UpdateChatSession)
+					r.Patch("/pin", h.SetChatSessionPinned)
+					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
@@ -1264,6 +1280,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+
+			// Quick-agent bar: per-user pinned agents for one-tap new chats.
+			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)
+			r.Post("/api/chat/pinned-agents", h.PinChatAgent)
+			r.Delete("/api/chat/pinned-agents/{agentId}", h.UnpinChatAgent)
 
 			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
 			// resolves to its own chat session; no session/channel id is passed, so
