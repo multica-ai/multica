@@ -203,3 +203,36 @@ func mustMarshalRaw(v any) json.RawMessage {
 	}
 	return data
 }
+
+// hardenBrowserMcpConfigTemp is the counterpart to writeMcpConfigToTemp for
+// callers that don't write mcp_config to a top-level file of their own (ACP
+// backends send it in-memory; OpenCode injects it via an env var). The
+// Windows hardening pass still needs a directory to write the playwright
+// launchOptions sidecar file to, so this allocates a throwaway one.
+//
+// The returned cleanup func must not run until the child process this
+// config was handed to has exited — not sooner. The child may not launch
+// the playwright/chrome-devtools MCP subprocess (and read the sidecar file)
+// until partway through the run, so cleaning up right after Execute()
+// returns would delete the sidecar out from under it. Callers should
+// schedule cleanup with context.AfterFunc(runCtx, cleanup) using the same
+// runCtx passed to exec.CommandContext.
+//
+// Returns raw unchanged with a no-op cleanup when raw is empty, mirroring
+// hardenBrowserMcpConfig's own no-op contract.
+func hardenBrowserMcpConfigTemp(raw json.RawMessage) (json.RawMessage, func(), error) {
+	noop := func() {}
+	if len(raw) == 0 {
+		return raw, noop, nil
+	}
+	dir, err := os.MkdirTemp("", "multica-mcp-harden-*")
+	if err != nil {
+		return nil, noop, fmt.Errorf("create mcp harden temp dir: %w", err)
+	}
+	hardened, err := hardenBrowserMcpConfig(raw, dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, noop, err
+	}
+	return hardened, func() { _ = os.RemoveAll(dir) }, nil
+}

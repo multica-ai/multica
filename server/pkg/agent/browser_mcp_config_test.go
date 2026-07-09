@@ -187,3 +187,54 @@ func TestWithBrowserMcpTestHostUsesMissingStat(t *testing.T) {
 		t.Fatalf("browserMcpStat missing error = %v, want os.ErrNotExist", err)
 	}
 }
+
+func TestHardenBrowserMcpConfigTempNoopOnEmptyInput(t *testing.T) {
+	hardened, cleanup, err := hardenBrowserMcpConfigTemp(nil)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfigTemp: %v", err)
+	}
+	if len(hardened) != 0 {
+		t.Fatalf("hardened = %q, want empty", hardened)
+	}
+	cleanup() // must not panic even though nothing was allocated
+}
+
+func TestHardenBrowserMcpConfigTempWindowsHardensAndCleansUp(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	raw := json.RawMessage(`{"mcpServers":{
+		"playwright":{"command":"node","args":["@playwright/mcp","--headless","--isolated"]},
+		"chrome-devtools":{"command":"node","args":["chrome-devtools-mcp","--headless","--isolated"]}
+	}}`)
+
+	hardened, cleanup, err := hardenBrowserMcpConfigTemp(raw)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfigTemp: %v", err)
+	}
+	defer cleanup()
+
+	servers := decodeMcpServers(t, hardened)
+	chromeArgs := decodeArgs(t, servers["chrome-devtools"])
+	if !contains(chromeArgs, "--executablePath="+edgePath) {
+		t.Fatalf("chrome-devtools args missing Edge executable fallback:\n%v", chromeArgs)
+	}
+
+	playwrightArgs := decodeArgs(t, servers["playwright"])
+	configIndex := indexOfString(playwrightArgs, "--config")
+	if configIndex < 0 || configIndex+1 >= len(playwrightArgs) {
+		t.Fatalf("playwright args missing --config path: %v", playwrightArgs)
+	}
+	sidecarPath := playwrightArgs[configIndex+1]
+	if _, statErr := os.Stat(sidecarPath); statErr != nil {
+		t.Fatalf("sidecar config file %q does not exist: %v", sidecarPath, statErr)
+	}
+	sidecarDir := filepath.Dir(sidecarPath)
+
+	cleanup()
+	if _, statErr := os.Stat(sidecarDir); !os.IsNotExist(statErr) {
+		t.Fatalf("cleanup did not remove temp dir %q: err=%v", sidecarDir, statErr)
+	}
+}
