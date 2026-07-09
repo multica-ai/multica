@@ -71,6 +71,86 @@ type squadCommentTriggerFixture struct {
 	OtherID  string // second agent in workspace (with runtime), used as a non-leader @mention target
 }
 
+func createRoutingTestIssue(t *testing.T, title string) db.Issue {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create routing issue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, resp.ID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, resp.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, resp.ID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(resp.ID))
+	if err != nil {
+		t.Fatalf("load routing issue: %v", err)
+	}
+	return issue
+}
+
+func createTestSquadWithLeader(t *testing.T, name, leaderID string) string {
+	t.Helper()
+
+	var squadID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, name, leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad %q: %v", name, err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	return squadID
+}
+
+func insertAgentTaskForIssueForTest(t *testing.T, issueID, agentID, status string, isLeader bool, squadID, originatorUserID string, offsetSeconds int) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime for agent %s: %v", agentID, err)
+	}
+	var squadArg any
+	if squadID != "" {
+		squadArg = squadID
+	}
+	var originatorArg any
+	if originatorUserID != "" {
+		originatorArg = originatorUserID
+	}
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, is_leader_task, squad_id,
+			originator_user_id, created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8::int * interval '1 second'))
+		RETURNING id
+	`, agentID, runtimeID, issueID, status, isLeader, squadArg, originatorArg, offsetSeconds).Scan(&taskID); err != nil {
+		t.Fatalf("insert agent task: %v", err)
+	}
+	return taskID
+}
+
+func insertSquadLeaderTaskForIssueForTest(t *testing.T, issueID, leaderID, squadID, status string, offsetSeconds int) string {
+	t.Helper()
+	return insertAgentTaskForIssueForTest(t, issueID, leaderID, status, true, squadID, testUserID, offsetSeconds)
+}
+
 func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -845,5 +925,300 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 	// The squad's leader should have a queued task.
 	if got := countQueued(leaderID); got != 1 {
 		t.Fatalf("after @squad mention: expected 1 leader task, got %d", got)
+	}
+}
+
+func TestCreateComment_CoordinatingSquadWorkerCommentWakesMentionedLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	issue := createRoutingTestIssue(t, "coordinating squad worker result")
+	issueID := uuidToString(issue.ID)
+	var leaderID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&leaderID); err != nil {
+		t.Fatalf("load leader agent: %v", err)
+	}
+	workerID := createHandlerTestAgent(t, "Coordinating Squad Worker", nil)
+	squadID := createTestSquadWithLeader(t, "Coordinating Mention Squad", leaderID)
+
+	countQueuedLeaderTasks := func() int {
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+		`, issueID, leaderID).Scan(&n); err != nil {
+			t.Fatalf("count queued leader tasks: %v", err)
+		}
+		return n
+	}
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Squad](mention://squad/" + squadID + ") please plan this",
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("member @squad CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countQueuedLeaderTasks(); got != 1 {
+		t.Fatalf("after @squad mention: expected 1 queued leader task, got %d", got)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id = $2 AND is_leader_task = TRUE
+	`, issueID, leaderID); err != nil {
+		t.Fatalf("complete initial leader task: %v", err)
+	}
+
+	workerTaskID := insertAgentTaskForIssueForTest(t, issueID, workerID, "running", false, squadID, testUserID, 1)
+	w = httptest.NewRecorder()
+	r = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "done with the worker slice",
+	})
+	r.Header.Set("X-Agent-ID", workerID)
+	r.Header.Set("X-Task-ID", workerTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("worker result CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if got := countQueuedLeaderTasks(); got != 1 {
+		t.Fatalf("after worker result: expected 1 fresh queued leader task, got %d", got)
+	}
+}
+
+func TestResolveCoordinatingSquadForIssue_SelectionRules(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	newIssueAndSquads := func(t *testing.T, name string) (db.Issue, string, string, string, string) {
+		t.Helper()
+		issue := createRoutingTestIssue(t, "coordinating squad selection "+name)
+		leaderA := createHandlerTestAgent(t, "Coordinating Leader A "+name, nil)
+		leaderB := createHandlerTestAgent(t, "Coordinating Leader B "+name, nil)
+		squadA := createTestSquadWithLeader(t, "Coordinating Squad A "+name, leaderA)
+		squadB := createTestSquadWithLeader(t, "Coordinating Squad B "+name, leaderB)
+		return issue, leaderA, squadA, leaderB, squadB
+	}
+
+	t.Run("latest leader task wins", func(t *testing.T) {
+		issue, leaderA, squadA, leaderB, squadB := newIssueAndSquads(t, "latest")
+		issueID := uuidToString(issue.ID)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderA, squadA, "completed", -10)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderB, squadB, "completed", 0)
+
+		got, ok := testHandler.resolveCoordinatingSquadForIssue(ctx, issue)
+		if !ok {
+			t.Fatal("expected coordinating squad")
+		}
+		if uuidToString(got.ID) != squadB {
+			t.Fatalf("coordinating squad = %s, want latest %s", uuidToString(got.ID), squadB)
+		}
+	})
+
+	t.Run("cancelled latest leader task does not fall back", func(t *testing.T) {
+		issue, leaderA, squadA, leaderB, squadB := newIssueAndSquads(t, "cancelled")
+		issueID := uuidToString(issue.ID)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderA, squadA, "completed", -10)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderB, squadB, "cancelled", 0)
+
+		if _, ok := testHandler.resolveCoordinatingSquadForIssue(ctx, issue); ok {
+			t.Fatal("expected no coordinating squad when latest leader task is cancelled")
+		}
+	})
+
+	t.Run("archived latest squad does not fall back", func(t *testing.T) {
+		issue, leaderA, squadA, leaderB, squadB := newIssueAndSquads(t, "archived")
+		issueID := uuidToString(issue.ID)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderA, squadA, "completed", -10)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderB, squadB, "completed", 0)
+		if _, err := testPool.Exec(ctx, `UPDATE squad SET archived_at = now(), archived_by = $1 WHERE id = $2`, testUserID, squadB); err != nil {
+			t.Fatalf("archive latest squad: %v", err)
+		}
+
+		if _, ok := testHandler.resolveCoordinatingSquadForIssue(ctx, issue); ok {
+			t.Fatal("expected no coordinating squad when latest squad is archived")
+		}
+	})
+
+	t.Run("dangling latest squad does not fall back", func(t *testing.T) {
+		issue, leaderA, squadA, leaderB, squadB := newIssueAndSquads(t, "dangling")
+		issueID := uuidToString(issue.ID)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderA, squadA, "completed", -10)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderB, squadB, "completed", 0)
+		if _, err := testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadB); err != nil {
+			t.Fatalf("delete latest squad: %v", err)
+		}
+
+		if _, ok := testHandler.resolveCoordinatingSquadForIssue(ctx, issue); ok {
+			t.Fatal("expected no coordinating squad when latest squad is dangling")
+		}
+	})
+}
+
+func TestComputeCommentAgentTriggers_CoordinatingSquadUsesSharedGates(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issue := createRoutingTestIssue(t, "coordinating squad gate coverage")
+	issueID := uuidToString(issue.ID)
+	leaderID := createHandlerTestAgent(t, "Coordinating Gate Leader", nil)
+	workerID := createHandlerTestAgent(t, "Coordinating Gate Worker", nil)
+	squadID := createTestSquadWithLeader(t, "Coordinating Gate Squad", leaderID)
+
+	clearTasks := func() {
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+			t.Fatalf("clear tasks: %v", err)
+		}
+	}
+	coordinatingTrigger := func(authorID string) (commentAgentTrigger, bool) {
+		triggers := testHandler.computeCommentAgentTriggers(ctx, issue, "worker result", nil, "agent", authorID, commentTriggerComputeOptions{})
+		if len(triggers) == 0 {
+			return commentAgentTrigger{}, false
+		}
+		if len(triggers) != 1 {
+			t.Fatalf("got %d triggers, want 1", len(triggers))
+		}
+		return triggers[0], true
+	}
+
+	t.Run("worker result uses coordinating source", func(t *testing.T) {
+		clearTasks()
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+		trigger, ok := coordinatingTrigger(workerID)
+		if !ok {
+			t.Fatal("expected coordinating leader trigger")
+		}
+		if trigger.Source != commentTriggerSourceCoordinatingSquadLeader {
+			t.Fatalf("source = %q, want %q", trigger.Source, commentTriggerSourceCoordinatingSquadLeader)
+		}
+		if trigger.Squad == nil || uuidToString(trigger.Squad.ID) != squadID {
+			t.Fatalf("trigger squad = %+v, want %s", trigger.Squad, squadID)
+		}
+	})
+
+	t.Run("pending dedup is reused", func(t *testing.T) {
+		clearTasks()
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "queued", 0)
+		trigger, ok := coordinatingTrigger(workerID)
+		if !ok {
+			t.Fatal("expected coordinating leader trigger")
+		}
+		if !trigger.AlreadyPending {
+			t.Fatal("expected coordinating trigger to report AlreadyPending")
+		}
+	})
+
+	t.Run("leader self-trigger is suppressed", func(t *testing.T) {
+		clearTasks()
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+		if _, ok := coordinatingTrigger(leaderID); ok {
+			t.Fatal("expected latest leader task to suppress leader self-trigger")
+		}
+	})
+
+	t.Run("dual-role leader worker comment wakes leader", func(t *testing.T) {
+		clearTasks()
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+		insertAgentTaskForIssueForTest(t, issueID, leaderID, "completed", false, squadID, testUserID, 0)
+		if _, ok := coordinatingTrigger(leaderID); !ok {
+			t.Fatal("expected same-squad worker-role leader comment to wake leader")
+		}
+	})
+
+	t.Run("explicit mention still short-circuits fallback", func(t *testing.T) {
+		clearTasks()
+		insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+		content := "handing to [@Worker](mention://agent/" + workerID + ")"
+		triggers := testHandler.computeCommentAgentTriggers(ctx, issue, content, nil, "agent", workerID, commentTriggerComputeOptions{})
+		for _, trigger := range triggers {
+			if trigger.Source == commentTriggerSourceCoordinatingSquadLeader {
+				t.Fatal("explicit mention unexpectedly also triggered coordinating squad leader")
+			}
+		}
+	})
+}
+
+func TestCreateComment_CoordinatingSquadPrivateLeaderRequiresOriginator(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	privateAgent := func(name string) string {
+		t.Helper()
+		var agentID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent (
+				workspace_id, name, description, runtime_mode, runtime_config,
+				runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
+				instructions, custom_env, custom_args, mcp_config
+			)
+			VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+			RETURNING id
+		`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID).Scan(&agentID); err != nil {
+			t.Fatalf("create private agent %q: %v", name, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		})
+		return agentID
+	}
+
+	issue := createRoutingTestIssue(t, "coordinating private leader originator")
+	issueID := uuidToString(issue.ID)
+	leaderID := privateAgent("Coordinating Private Leader")
+	workerID := privateAgent("Coordinating Private Worker")
+	squadID := createTestSquadWithLeader(t, "Coordinating Private Squad", leaderID)
+	insertSquadLeaderTaskForIssueForTest(t, issueID, leaderID, squadID, "completed", -10)
+
+	countQueuedLeaderTasks := func() int {
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+		`, issueID, leaderID).Scan(&n); err != nil {
+			t.Fatalf("count queued leader tasks: %v", err)
+		}
+		return n
+	}
+	postWorkerResult := func(taskID string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+			"content": "worker done",
+		})
+		r.Header.Set("X-Agent-ID", workerID)
+		r.Header.Set("X-Task-ID", taskID)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("worker result CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	noOriginatorTaskID := insertAgentTaskForIssueForTest(t, issueID, workerID, "running", false, squadID, "", 0)
+	postWorkerResult(noOriginatorTaskID)
+	if got := countQueuedLeaderTasks(); got != 0 {
+		t.Fatalf("private leader woke with no originator: got %d queued tasks, want 0", got)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, noOriginatorTaskID); err != nil {
+		t.Fatalf("complete no-originator task: %v", err)
+	}
+
+	ownerOriginatorTaskID := insertAgentTaskForIssueForTest(t, issueID, workerID, "running", false, squadID, testUserID, 1)
+	postWorkerResult(ownerOriginatorTaskID)
+	if got := countQueuedLeaderTasks(); got != 1 {
+		t.Fatalf("private leader with owner originator: got %d queued tasks, want 1", got)
 	}
 }

@@ -378,6 +378,110 @@ func TestChildDoneSkippedWhenParentMember(t *testing.T) {
 	}
 }
 
+func TestChildDoneCoordinatingSquadFallback_MemberParent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	var userID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT user_id FROM member WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&userID); err != nil {
+		t.Fatalf("locate workspace member: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "member", userID)
+	insertSquadLeaderTaskForIssueForTest(t, fx.parent.ID, sq.LeaderID, sq.SquadID, "completed", -10)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://agent/"+sq.LeaderID) {
+		t.Errorf("expected coordinating leader mention in system comment, got: %s", content)
+	}
+	if strings.Contains(content, "mention://squad/"+sq.SquadID) {
+		t.Errorf("coordinating squad is not the assignee; comment should mention leader agent, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Errorf("expected 1 pending leader task for coordinating squad, got %d", got)
+	}
+	if got := countInboxItems(t, userID, fx.parent.ID); got != 0 {
+		t.Errorf("coordinating fallback should not create member inbox rows, got %d", got)
+	}
+}
+
+func TestChildDoneCoordinatingSquadFallback_UnassignedParent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	insertSquadLeaderTaskForIssueForTest(t, fx.parent.ID, sq.LeaderID, sq.SquadID, "completed", -10)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://agent/"+sq.LeaderID) {
+		t.Errorf("expected coordinating leader mention in system comment, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Errorf("expected 1 pending leader task for coordinating squad, got %d", got)
+	}
+}
+
+func TestChildDoneCoordinatingSquadFallback_DoesNotDoubleSendWithAgentAssignee(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", sq.OtherID)
+	insertSquadLeaderTaskForIssueForTest(t, fx.parent.ID, sq.LeaderID, sq.SquadID, "completed", -10)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://agent/"+sq.OtherID) {
+		t.Errorf("expected parent agent assignee mention in system comment, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.OtherID); got != 1 {
+		t.Errorf("expected 1 pending task for parent agent assignee, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 0 {
+		t.Errorf("coordinating leader should not be double-sent when parent has agent assignee, got %d tasks", got)
+	}
+}
+
+func TestChildDoneCoordinatingSquadFallback_ParentStatusGates(t *testing.T) {
+	for _, status := range []string{"backlog", "done", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			fx := newChildDoneFixture(t, status)
+			sq := newSquadCommentTriggerFixture(t)
+			insertSquadLeaderTaskForIssueForTest(t, fx.parent.ID, sq.LeaderID, sq.SquadID, "completed", -10)
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(),
+					`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+			})
+
+			updateChildStatus(t, fx.child.ID, "done")
+
+			if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+				t.Errorf("parent at %q should not receive coordinating child-done comment, got %d", status, got)
+			}
+			if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 0 {
+				t.Errorf("parent at %q should not enqueue coordinating leader, got %d tasks", status, got)
+			}
+		})
+	}
+}
+
 // TestChildDoneMentionsParentAssignee_Squad verifies the squad branch: the
 // system comment carries a `mention://squad/<id>` link and the squad
 // leader receives a leader-role task. Reuses the squad fixture helper from
