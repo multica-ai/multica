@@ -137,32 +137,44 @@ describe("preprocessLinks — bare filenames are not auto-linked as URLs", () =>
   });
 });
 
-// Read-only react-markdown renderers pass { urls: false } and let remark-gfm
-// autolink URLs in the parse tree instead, so a bare URL can no longer swallow
-// an adjacent markdown delimiter like a closing ** (MUL-4242). File paths, which
-// remark-gfm never linkifies, are still converted.
-describe("preprocessLinks — urls:false (read-only mode)", () => {
-  it("leaves bare URLs untouched so remark-gfm can autolink them", () => {
-    expect(preprocessLinks("see https://example.com/x here", { urls: false })).toBe(
-      "see https://example.com/x here",
+// Trailing markdown emphasis / strikethrough delimiters that linkify-it counts
+// as URL characters must be dropped from the URL, so the closing `**` of
+// `**url**` stays as emphasis instead of being swallowed into the href — that
+// swallow was the MUL-4242 render bug. Mirrors GFM's own autolink trailing trim.
+describe("preprocessLinks — trailing markdown delimiter is not part of the URL", () => {
+  it("keeps the closing ** outside a bold-wrapped bare URL", () => {
+    expect(preprocessLinks("**https://example.com/x**")).toBe(
+      "**[https://example.com/x](https://example.com/x)**",
     );
   });
 
-  it("does not rewrite a bold-wrapped URL into [url**](url**) (the root cause)", () => {
-    expect(preprocessLinks("**PR：https://example.com/x**", { urls: false })).toBe(
-      "**PR：https://example.com/x**",
+  it("handles the original bug shape (bold + fullwidth colon)", () => {
+    expect(preprocessLinks("**PR：https://example.com/x**")).toBe(
+      "**PR：[https://example.com/x](https://example.com/x)**",
     );
   });
 
-  it("still linkifies explicit ./ file paths", () => {
-    expect(preprocessLinks("see ./src/main.go here", { urls: false })).toBe(
-      "see [./src/main.go](./src/main.go) here",
+  it("keeps ** outside when a CJK punctuation immediately follows (variant B)", () => {
+    expect(preprocessLinks("**https://example.com/x**（MUL-4277）")).toBe(
+      "**[https://example.com/x](https://example.com/x)**（MUL-4277）",
     );
   });
 
-  it("default mode still linkifies URLs (editor path unchanged)", () => {
-    expect(preprocessLinks("see https://example.com/x here")).toBe(
-      "see [https://example.com/x](https://example.com/x) here",
+  it("keeps the closing * outside an italic-wrapped bare URL", () => {
+    expect(preprocessLinks("*https://example.com/x*")).toBe(
+      "*[https://example.com/x](https://example.com/x)*",
+    );
+  });
+
+  it("strips a trailing * that really ends a URL — documented tradeoff, matches GFM", () => {
+    expect(preprocessLinks("see https://example.com/glob/* here")).toBe(
+      "see [https://example.com/glob/](https://example.com/glob/)* here",
+    );
+  });
+
+  it("keeps a * in the middle of a URL", () => {
+    expect(preprocessLinks("https://example.com/a*b/c")).toBe(
+      "[https://example.com/a*b/c](https://example.com/a*b/c)",
     );
   });
 });

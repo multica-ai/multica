@@ -61,6 +61,19 @@ UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateChatSessionTitleIfCurrent :one
+-- Compare-and-swap the title: only overwrite it when it still equals the
+-- value the caller observed (@expected_title). This is the idempotency /
+-- no-clobber guard behind LLM auto-titling (MUL-4295): the async generator
+-- captures the session's current (default/original) title before calling the
+-- model, and this write lands only if a manual rename or a competing writer
+-- has not changed the title in the meantime. A mismatch returns pgx.ErrNoRows
+-- (zero rows updated), which the caller treats as "someone renamed it — leave
+-- it alone", NOT as an error.
+UPDATE chat_session SET title = @new_title, updated_at = now()
+WHERE id = @id AND title = @expected_title
+RETURNING *;
+
 -- name: SetChatSessionPinned :one
 -- Pin/unpin a chat. Deliberately does NOT touch updated_at: pinning is a
 -- list-ordering preference, not activity, so it must not bump the session's

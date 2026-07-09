@@ -614,17 +614,20 @@ func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
 	}
 }
 
-// TestDeleteChatSession_PrunesChannelChatSessionBinding verifies the
-// application-layer replacement for the channel_chat_session_binding
-// chat_session-FK cascade (MUL-3515 §4): deleting a chat session prunes its
-// channel binding in the same tx that deletes the session row.
-func TestDeleteChatSession_PrunesChannelChatSessionBinding(t *testing.T) {
+// TestDeleteChatSession_PrunesChannelRows verifies the application-layer
+// replacement for the channel_* chat_session-FK cascade (MUL-3515 §4): deleting a
+// chat session prunes BOTH its channel_chat_session_binding and its
+// channel_outbound_card_message rows in the same tx that deletes the session row.
+// Both are keyed by chat_session_id with no FK and no reaper, so a miss leaves a
+// permanent orphan (Elon's follow-up on #4810).
+func TestDeleteChatSession_PrunesChannelRows(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "ChatDeleteBindingAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID)
 	ctx := context.Background()
 
 	const appID = "cli_chat_delete_binding"
 	const channelChatID = "oc_chat_delete_binding"
+	const cardMsgID = "om_chat_delete_card"
 
 	// channel_* rows have no FK to chat_session/workspace (MUL-3515 §4), so
 	// they outlive the helper's chat_session cleanup; clear by deterministic
@@ -632,6 +635,8 @@ func TestDeleteChatSession_PrunesChannelChatSessionBinding(t *testing.T) {
 	cleanChannel := func() {
 		_, _ = testPool.Exec(context.Background(),
 			`DELETE FROM channel_chat_session_binding WHERE channel_chat_id = $1`, channelChatID)
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_outbound_card_message WHERE channel_card_message_id = $1`, cardMsgID)
 		_, _ = testPool.Exec(context.Background(),
 			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
 	}
@@ -654,6 +659,13 @@ VALUES ($1, $2, 'feishu', $3, 'p2p')
 		t.Fatalf("insert channel_chat_session_binding: %v", err)
 	}
 
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id, status)
+VALUES ($1, 'feishu', $2, $3, 'final')
+`, sessionID, channelChatID, cardMsgID); err != nil {
+		t.Fatalf("insert channel_outbound_card_message: %v", err)
+	}
+
 	req := httptest.NewRequest(http.MethodDelete, "/api/chat/sessions/"+sessionID, nil)
 	req.Header.Set("X-User-ID", testUserID)
 	req = withURLParam(req, "sessionId", sessionID)
@@ -672,5 +684,14 @@ VALUES ($1, $2, 'feishu', $3, 'p2p')
 	}
 	if bindingExists {
 		t.Fatal("deleted chat session's channel_chat_session_binding was not pruned")
+	}
+
+	var cardExists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channel_outbound_card_message WHERE channel_card_message_id = $1)`, cardMsgID).Scan(&cardExists); err != nil {
+		t.Fatalf("query outbound card message: %v", err)
+	}
+	if cardExists {
+		t.Fatal("deleted chat session's channel_outbound_card_message was not pruned (no reaper would ever collect it)")
 	}
 }

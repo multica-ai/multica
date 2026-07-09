@@ -11,11 +11,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
+// A rebind upsert that trips the (channel_type, config->>'app_id') index after
+// the dead-owner reclaim ran means a LIVE owner still holds the slot.
+const pgUniqueViolation = "23505"
 
 // RegistrationSessionStatus is the discriminated state a `begin`
 // session lives in. The HTTP status endpoint serializes the underlying
@@ -571,17 +577,17 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
-	// If the same Feishu app (app_id) was previously bound to a DIFFERENT
-	// agent in this workspace and later revoked, that revoked row still
-	// holds the (channel_type, config->>'app_id') unique index slot and
-	// blocks the UpsertChannelInstallation INSERT below. Remove the
-	// revoked placeholder first — the transaction wraps both the delete
-	// and the upsert so a failure between them rolls back cleanly. The
-	// current agent (sess.agentID) is excluded: re-connecting the SAME
-	// agent reactivates its own revoked row in place via the upsert's
-	// ON CONFLICT, keeping its installation_id and every binding intact.
-	if err := qtx.RemoveRevokedInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
-		s.cfg.Logger.Warn("lark registration: cleanup revoked installation",
+	// If the same Feishu app (app_id) is held by a DEAD prior owner — a revoked
+	// placeholder left by a DIFFERENT agent in this workspace, or an orphan whose
+	// workspace/agent was deleted (#4810) — that row still occupies the
+	// (channel_type, config->>'app_id') unique slot and blocks the
+	// UpsertChannelInstallation INSERT below. Reclaim it first — the transaction
+	// wraps both the delete and the upsert so a failure between them rolls back
+	// cleanly. A live owner is left in place (the SAME agent's own revoked row is
+	// reactivated in place by the upsert; an active/archived agent stays owned),
+	// so the upsert surfaces the conflict below instead of stealing the bot.
+	if err := qtx.ReclaimDeadInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
+		s.cfg.Logger.Warn("lark registration: reclaim dead installation",
 			"session_id", sess.id, "err", err)
 		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
 		return
@@ -600,7 +606,16 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	if err != nil {
 		s.cfg.Logger.Warn("lark registration: upsert installation",
 			"session_id", sess.id, "err", err)
-		sess.markError(RegistrationReasonInstallationConflict, err.Error(), s.gcDeadline())
+		// A unique violation here means the app_id slot is held by a LIVE owner
+		// (the reclaim above already cleared every dead one). Surface who holds
+		// it — another agent in this workspace, an archived agent, or a different
+		// workspace — instead of leaking the raw Postgres error.
+		msg := err.Error()
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			msg = s.liveOwnerConflictMessage(ctx, sess.workspaceID, res.ClientID)
+		}
+		sess.markError(RegistrationReasonInstallationConflict, msg, s.gcDeadline())
 		return
 	}
 
@@ -632,6 +647,28 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		"workspace_id", uuidString(sess.workspaceID),
 		"agent_id", uuidString(sess.agentID),
 		"installation_id", uuidString(inst.ID))
+}
+
+// liveOwnerConflictMessage builds the user-facing copy for a rebind refused
+// because the Feishu app's routing slot is held by a LIVE owner. It names which
+// kind of owner so the user knows how to recover, instead of the old catch-all
+// "connected to a different Multica workspace" that lied when the real owner sat
+// in the SAME workspace (#4810). Looked up on the base pool, not the aborted
+// upsert tx. If the slot turns out free (a concurrent disconnect between the
+// upsert and this read), a generic message is enough — the user can just retry.
+func (s *RegistrationService) liveOwnerConflictMessage(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) string {
+	owner, err := s.queries.InstallationOwnerByAppID(ctx, appID)
+	if err != nil {
+		return "This Feishu app is already connected to another agent. Disconnect it there first, then connect it here."
+	}
+	switch {
+	case owner.WorkspaceID != requestingWorkspaceID:
+		return "This Feishu app is already connected to a different Multica workspace. Disconnect it there before connecting it here."
+	case owner.AgentArchivedAt.Valid:
+		return "This Feishu app is connected to an archived agent in this workspace. Restore that agent, or disconnect its bot, before connecting it here."
+	default:
+		return "This Feishu app is already connected to another agent in this workspace. Disconnect it there first, then connect it here."
+	}
 }
 
 func (s *RegistrationService) gcDeadline() time.Time {

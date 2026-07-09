@@ -481,9 +481,10 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(true);
   });
 
-  // --- cancelled visibility (MUL-4261) ---------------------------------
-  // Cancelled issues are always fetched into the cache, but the surface hides
-  // them unless the status filter explicitly selects "cancelled".
+  // --- cancelled as a default status (MUL-4290) ------------------------
+  // Cancelled is a first-class default lifecycle status: fetched into the
+  // cache, surfaced by default, narrowed (not unlocked) by the status filter,
+  // and hideable like any other status.
 
   function mockListByStatus(byStatus: Partial<Record<IssueStatus, Issue[]>>) {
     listIssues.mockImplementation((params?: ListIssuesParams) => {
@@ -493,7 +494,7 @@ describe("useIssueSurfaceController", () => {
     });
   }
 
-  it("always fetches the cancelled bucket even though it is hidden by default", async () => {
+  it("fetches and surfaces the cancelled bucket as a default status", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -509,11 +510,12 @@ describe("useIssueSurfaceController", () => {
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
-    // …but with no status filter, cancelled is not a visible column.
-    expect(result.current.visibleStatuses).not.toContain("cancelled");
+    // …and with no status filter it is a visible column, ordered last.
+    expect(result.current.visibleStatuses).toContain("cancelled");
+    expect(result.current.visibleStatuses.at(-1)).toBe("cancelled");
   });
 
-  it("keeps cancelled issues out of the default surface and visible statuses", async () => {
+  it("includes cancelled issues in the default surface and visible statuses", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
@@ -530,14 +532,43 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.visibleStatuses).not.toContain("cancelled");
+    expect(result.current.visibleStatuses).toContain("cancelled");
     const surfaceIds = result.current.surfaceIssues.map((i) => i.id);
     expect(surfaceIds).toContain("todo-1");
-    expect(surfaceIds).not.toContain("cancelled-1");
-    expect(result.current.issues.map((i) => i.id)).not.toContain("cancelled-1");
+    expect(surfaceIds).toContain("cancelled-1");
+    expect(result.current.issues.map((i) => i.id)).toContain("cancelled-1");
   });
 
-  it("reveals cancelled issues only when the status filter selects cancelled", async () => {
+  it("narrows the visible set to the selected statuses, dropping cancelled when it is not selected", async () => {
+    mockListByStatus({
+      todo: [makeIssue({ id: "todo-1", status: "todo" })],
+      cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
+    });
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => store.getState().toggleStatusFilter("todo"));
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // The filter narrows the rendered columns and their contents — cancelled
+    // is a normal status the filter can exclude, not an unlockable bucket.
+    expect(result.current.visibleStatuses).toEqual(["todo"]);
+    expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
+    // cancelled participates in show/hide like the rest — hidden here because
+    // the active filter excludes it.
+    expect(result.current.hiddenStatuses).toContain("cancelled");
+  });
+
+  it("treats a cancelled-only filter like any other narrowing status filter", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       cancelled: [makeIssue({ id: "cancelled-1", status: "cancelled" })],
@@ -557,13 +588,11 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // Cancelled becomes the sole visible column, sorted last in ALL_STATUSES.
+    // Cancelled becomes the sole visible column and the surface narrows to it.
     expect(result.current.visibleStatuses).toEqual(["cancelled"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["cancelled-1"]);
     expect(result.current.surfaceIssues.map((i) => i.id)).toContain(
       "cancelled-1",
     );
-    // cancelled is never offered as a hideable/persistent board column.
-    expect(result.current.hiddenStatuses).not.toContain("cancelled");
   });
 });

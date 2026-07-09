@@ -12,7 +12,7 @@ import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
-import { remarkCjkAutolink } from './remark-cjk-autolink'
+import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -80,6 +80,15 @@ export interface MarkdownProps {
    * Custom renderer for multica-artifact tags.
    */
   renderArtifact?: (props: { identifier: string; type: string; title: string; content: string }) => React.ReactNode
+  /**
+   * When true, bare issue identifiers (e.g. `MUL-123`, `TES-1`) are rewritten
+   * to `mention://issue/<identifier>` links so `renderMention` can resolve them
+   * to a navigable issue chip. Off by default — enable only on surfaces whose
+   * `renderMention` knows how to resolve an identifier (see the app wrapper in
+   * packages/views/common/markdown.tsx). Detection is markdown-aware: code,
+   * existing links, URLs, and file/path tokens are skipped.
+   */
+  autolinkIssueIdentifiers?: boolean
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -461,18 +470,17 @@ export function Markdown({
   renderImage,
   renderFileCard,
   renderArtifact,
-  cdnDomain
+  cdnDomain,
+  autolinkIssueIdentifiers
 }: MarkdownProps): React.JSX.Element {
-  // Preprocess: convert mention shortcodes, file paths, and file cards to
-  // renderable content. URLs are intentionally left bare (urls: false) so
-  // remark-gfm autolinks them in the parse tree — a bare URL can then no longer
-  // swallow an adjacent markdown delimiter like a closing `**` (MUL-4242).
-  // remarkCjkAutolink re-applies the CJK boundary on gfm's autolink nodes.
-  // Also extract multica-artifact tags.
+  // Preprocess: convert mention shortcodes, bare issue identifiers, file paths,
+  // and file cards to renderable content. Also extract multica-artifact tags.
+  // Issue-identifier autolinking runs BEFORE linkify/file-card so those passes
+  // treat the rewritten spans as existing markdown links and skip them.
   const { processedContent, artifacts } = React.useMemo(
     () => {
       const parsedArtifacts: { identifier: string; type: string; title: string; content: string }[] = []
-      
+
       // Extract artifacts first, replace with <div data-type="multica-artifact" data-href="index"></div>
       let content = children || ''
       const artifactRegex = /<multica-artifact\s+([^>]+)>([\s\S]*?)<\/multica-artifact>/g
@@ -480,20 +488,21 @@ export function Markdown({
         const identifier = attrStr.match(/identifier=["']([^"']*)["']/)?.[1] || ""
         const type = attrStr.match(/type=["']([^"']*)["']/)?.[1] || ""
         const title = attrStr.match(/title=["']([^"']*)["']/)?.[1] || ""
-        
+
         const index = parsedArtifacts.length
         parsedArtifacts.push({ identifier, type, title, content: artifactContent })
-        
+
         return `<div data-type="multica-artifact" data-href="${index}"></div>`
       })
-      
+
       let result = preprocessMentionShortcodes(content)
-      result = preprocessLinks(result, { urls: false })
+      if (autolinkIssueIdentifiers) result = preprocessIssueIdentifiers(result)
+      result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
-      
+
       return { processedContent: result, artifacts: parsedArtifacts }
     },
-    [children, cdnDomain]
+    [children, cdnDomain, autolinkIssueIdentifiers]
   )
 
   const components = React.useMemo(
@@ -508,7 +517,6 @@ export function Markdown({
           [remarkMath, { singleDollarTextMath: false }],
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
-          remarkCjkAutolink,
         ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}

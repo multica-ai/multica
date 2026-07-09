@@ -202,6 +202,7 @@ export function ChatPage() {
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
         agentName={c.activeAgent?.name}
+        focusRequest={c.focusInputRequest}
       />
     </div>
   );

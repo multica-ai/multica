@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
-import { ALL_STATUSES, BOARD_STATUSES } from "@multica/core/issues/config";
+import { ALL_STATUSES } from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   childIssueProgressOptions,
@@ -108,7 +108,7 @@ export function useIssueSurfaceData({
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
       priorities: priorityFilters,
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
@@ -156,22 +156,13 @@ export function useIssueSurfaceData({
       : (statusIssuesQuery.data ?? EMPTY_ISSUES);
   }, [assigneeGroupsQuery.data?.groups, statusIssuesQuery.data, usesAssigneeBoard]);
 
-  // Cancelled issues are always fetched into the cache (PAGINATED_STATUSES),
-  // but stay hidden until the status filter explicitly selects "cancelled".
-  // Gating the flattened list here means every downstream consumer — list /
+  // `cancelled` is a first-class default status (MUL-4290): it is fetched into
+  // the cache like every other status and flows straight through to list /
   // board / swimlane columns, header facet counts, batch selection, and the
-  // isEmpty check — excludes cancelled by default with no per-view branching.
-  const showCancelled = statusFilters.includes("cancelled");
-  const visibleBucketedIssues = useMemo(
-    () =>
-      showCancelled
-        ? bucketedIssues
-        : bucketedIssues.filter((issue) => issue.status !== "cancelled"),
-    [bucketedIssues, showCancelled],
-  );
-
+  // isEmpty check. The status filter narrows this set like any other status —
+  // it no longer unlocks an otherwise-hidden bucket.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
-  const surfaceIssues = usesGantt ? ganttIssues : visibleBucketedIssues;
+  const surfaceIssues = usesGantt ? ganttIssues : bucketedIssues;
 
   const baseFilterState = useMemo<IssueFilterState>(
     () => ({
@@ -254,20 +245,20 @@ export function useIssueSurfaceData({
   );
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    // Default view shows every lifecycle status, `cancelled` last (its
+    // canonical position in ALL_STATUSES). An active status filter narrows to
+    // the selected subset while preserving that order.
     if (statusFilters.length > 0) {
-      // ALL_STATUSES keeps canonical order and places `cancelled` last, so a
-      // Cancelled section appears (only) when the filter explicitly selects it.
       return ALL_STATUSES.filter((s) => statusFilters.includes(s));
     }
-    // Default view: the six board statuses, cancelled excluded.
-    return BOARD_STATUSES;
+    return ALL_STATUSES;
   }, [statusFilters]);
 
-  // Hidden columns come from the board set only, so `cancelled` is never
-  // offered as a hideable/always-on board column (it is filter-gated, not a
-  // persistent column).
+  // Hidden columns are the lifecycle statuses not currently visible, so
+  // `cancelled` participates in the board show/hide controls exactly like the
+  // rest of the statuses.
   const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
+    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 
