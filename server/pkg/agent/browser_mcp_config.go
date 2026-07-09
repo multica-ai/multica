@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	browserMcpGOOS = runtime.GOOS
-	browserMcpStat = os.Stat
-	browserMcpEnv  = os.Getenv
+	browserMcpGOOS      = runtime.GOOS
+	browserMcpStat      = os.Stat
+	browserMcpEnv       = os.Getenv
+	browserMcpMkdirTemp = os.MkdirTemp
 )
 
 func hardenBrowserMcpConfig(raw json.RawMessage, tempDir string) ([]byte, error) {
@@ -218,14 +219,18 @@ func mustMarshalRaw(v any) json.RawMessage {
 // schedule cleanup with context.AfterFunc(runCtx, cleanup) using the same
 // runCtx passed to exec.CommandContext.
 //
-// Returns raw unchanged with a no-op cleanup when raw is empty, mirroring
-// hardenBrowserMcpConfig's own no-op contract.
+// Returns raw unchanged with a no-op cleanup when raw is empty or the host
+// isn't Windows, mirroring hardenBrowserMcpConfig's own no-op contract —
+// off Windows hardenBrowserMcpConfig never touches tempDir, so allocating
+// one would be pure filesystem churn on every non-empty mcp_config, on
+// every task, on the Linux/macOS hosts the daemon actually runs on in
+// production.
 func hardenBrowserMcpConfigTemp(raw json.RawMessage) (json.RawMessage, func(), error) {
 	noop := func() {}
-	if len(raw) == 0 {
+	if len(raw) == 0 || browserMcpGOOS != "windows" {
 		return raw, noop, nil
 	}
-	dir, err := os.MkdirTemp("", "multica-mcp-harden-*")
+	dir, err := browserMcpMkdirTemp("", "multica-mcp-harden-*")
 	if err != nil {
 		return nil, noop, fmt.Errorf("create mcp harden temp dir: %w", err)
 	}

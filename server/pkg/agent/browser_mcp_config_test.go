@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+// withBrowserMcpTestHost overrides the package-level browserMcpGOOS /
+// browserMcpEnv / browserMcpStat vars for the duration of the calling test.
+//
+// Every test using this helper MUST NOT call t.Parallel(). Go's test
+// scheduler blocks the package's sequential scan on a non-parallel test
+// until it returns (including its t.Cleanup), and only releases the batch
+// of t.Parallel() tests to run concurrently once that whole scan completes
+// — so as long as no caller of this helper is itself parallel, its
+// overrides are always restored before any parallel test's body (which may
+// read these vars through the real, unmocked production path) starts
+// running. Marking a caller t.Parallel() would reopen a genuine data race
+// on these vars across goroutines.
 func withBrowserMcpTestHost(t *testing.T, goos string, env map[string]string, existing map[string]bool) {
 	t.Helper()
 	oldGOOS := browserMcpGOOS
@@ -197,6 +209,27 @@ func TestHardenBrowserMcpConfigTempNoopOnEmptyInput(t *testing.T) {
 		t.Fatalf("hardened = %q, want empty", hardened)
 	}
 	cleanup() // must not panic even though nothing was allocated
+}
+
+func TestHardenBrowserMcpConfigTempNoopOffWindowsSkipsTempDir(t *testing.T) {
+	withBrowserMcpTestHost(t, "linux", nil, nil)
+
+	oldMkdirTemp := browserMcpMkdirTemp
+	t.Cleanup(func() { browserMcpMkdirTemp = oldMkdirTemp })
+	browserMcpMkdirTemp = func(dir, pattern string) (string, error) {
+		t.Fatalf("MkdirTemp must not be called off Windows")
+		return "", nil
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"playwright":{"command":"node","args":["@playwright/mcp","--headless"]}}}`)
+	hardened, cleanup, err := hardenBrowserMcpConfigTemp(raw)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfigTemp: %v", err)
+	}
+	defer cleanup()
+	if string(hardened) != string(raw) {
+		t.Fatalf("non-Windows config changed:\n got %s\nwant %s", hardened, raw)
+	}
 }
 
 func TestHardenBrowserMcpConfigTempWindowsHardensAndCleansUp(t *testing.T) {
