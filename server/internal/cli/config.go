@@ -17,6 +17,45 @@ type CLIConfig struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Token       string `json:"token,omitempty"`
 
+	// DeviceName is the human-readable label shown in the server's Runtimes
+	// UI for the daemon started with this profile. When multiple daemons run
+	// on the same host under different profiles (typical for shared servers
+	// where one Linux user hosts one profile), os.Hostname() collapses them
+	// all onto one indistinguishable "VM-…" row. Setting device_name per
+	// profile — usually to "<host>-<profile>" or the operator's real name —
+	// makes the runtimes list navigable.
+	//
+	// Resolution precedence (highest wins): --device-name flag,
+	// MULTICA_DAEMON_DEVICE_NAME env, this field, os.Hostname().
+	DeviceName string `json:"device_name,omitempty"`
+
+	// RuntimeName is the daemon's own runtime label ("Runtime display name"
+	// in the UI). Same shape as DeviceName but scopes to the runtime row
+	// rather than the host: users who run several distinct daemons per
+	// profile (rare, but supported) can pin different runtime names for
+	// each. Resolution precedence (highest wins): --runtime-name flag,
+	// MULTICA_AGENT_RUNTIME_NAME env, this field, the built-in
+	// DefaultRuntimeName.
+	RuntimeName string `json:"runtime_name,omitempty"`
+
+	// MaxConcurrentTasks caps the number of task executions the daemon
+	// processes in parallel. Persist here to avoid re-passing
+	// --max-concurrent-tasks on every daemon start / auto-restart. 0 means
+	// "not set — use env / built-in default". Resolution precedence
+	// (highest wins): --max-concurrent-tasks flag,
+	// MULTICA_DAEMON_MAX_CONCURRENT_TASKS env, this field, default.
+	MaxConcurrentTasks int `json:"max_concurrent_tasks,omitempty"`
+
+	// PollInterval is how often the daemon polls the server for new tasks
+	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
+	// motivation as MaxConcurrentTasks. Zero-value ("") means "not set —
+	// use env / built-in default". Resolution precedence (highest wins):
+	// --poll-interval flag, MULTICA_DAEMON_POLL_INTERVAL env, this field,
+	// DefaultPollInterval. Parsed lazily by the daemon; an invalid value
+	// here surfaces as a config error at `daemon start`, not at
+	// `config set` time (mirrors env-var behavior).
+	PollInterval string `json:"poll_interval,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

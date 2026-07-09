@@ -177,6 +177,8 @@ The daemon runs on the user's local machine, and its config is read from local e
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Server address (self-host: replace with your domain) |
+| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Human-readable device label shown in the Runtimes UI |
+| `MULTICA_AGENT_RUNTIME_NAME` | built-in default | Runtime display name |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
@@ -185,6 +187,21 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
 
 For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+
+### Persisting daemon settings in `config.json`
+
+The four daemon knobs — `device_name`, `runtime_name`, `max_concurrent_tasks`, `poll_interval` — can also be persisted in the profile's `~/.multica/config.json` (or `~/.multica/profiles/<name>/config.json`) so you don't have to re-pass flags or export env vars on every `daemon start`. Set them with:
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go duration string
+```
+
+Precedence, highest first: `--flag` on `daemon start` > `MULTICA_…` env var > `config.json` value > built-in default. A live env override (typical for systemd units) always wins over the file, and an explicit CLI flag wins over both.
+
+This is especially useful when running multiple daemons on one host via `--profile <name>`: each profile can pin its own `device_name` so the Runtimes UI shows distinct rows instead of collapsing them under the shared hostname.
 
 ### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
 

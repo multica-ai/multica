@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -53,15 +54,23 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runConfigShow: %v", err)
 	}
-	for _, want := range []string{
-		"Profile:      empty",
-		"server_url:   (not set)",
-		"app_url:      (not set)",
-		"workspace_id: (not set)",
+	// Match on "key:" + eventual "(not set)" — the column width is a
+	// formatting detail, not something worth pinning byte-for-byte.
+	for _, key := range []string{
+		"server_url:",
+		"app_url:",
+		"workspace_id:",
+		"device_name:",
+		"runtime_name:",
+		"max_concurrent_tasks:",
+		"poll_interval:",
 	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("runConfigShow output missing %q:\n%s", want, out)
+		if !strings.Contains(out, key) || !strings.Contains(out, "(not set)") {
+			t.Fatalf("runConfigShow output missing %q or defaults:\n%s", key, out)
 		}
+	}
+	if !strings.Contains(out, "Profile:      empty") {
+		t.Fatalf("runConfigShow missing profile header:\n%s", out)
 	}
 }
 
@@ -74,3 +83,105 @@ func TestRunConfigSetRejectsUnknownKey(t *testing.T) {
 		t.Fatalf("runConfigSet error = %v, want unknown key", err)
 	}
 }
+
+// TestApplyConfigSetSupportsDaemonKeys locks in the four new keys added
+// for issue #3824 (device_name, runtime_name, max_concurrent_tasks,
+// poll_interval). applyConfigSet is the split-out validator so tests
+// don't have to touch disk on every case.
+func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	pairs := []struct{ key, val string }{
+		{"device_name", "vm-1-custom-name"},
+		{"runtime_name", "worker-a"},
+		{"max_concurrent_tasks", "4"},
+		{"poll_interval", "10s"},
+	}
+	for _, p := range pairs {
+		if err := applyConfigSet(&cfg, p.key, p.val); err != nil {
+			t.Fatalf("applyConfigSet(%s=%s): %v", p.key, p.val, err)
+		}
+	}
+	if cfg.DeviceName != "vm-1-custom-name" ||
+		cfg.RuntimeName != "worker-a" ||
+		cfg.MaxConcurrentTasks != 4 ||
+		cfg.PollInterval != "10s" {
+		t.Fatalf("cfg after set = %+v", cfg)
+	}
+}
+
+// TestApplyConfigSetRejectsBadValues covers the two typed keys —
+// max_concurrent_tasks (int, non-negative) and poll_interval (Go
+// duration, non-negative). Catching bad values at write time keeps the
+// error next to the user's typo instead of surfacing later at daemon
+// start.
+func TestApplyConfigSetRejectsBadValues(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		key   string
+		value string
+		want  string
+	}{
+		{"max non-int", "max_concurrent_tasks", "many", "integer"},
+		{"max negative", "max_concurrent_tasks", "-1", ">= 0"},
+		{"poll bad duration", "poll_interval", "10", "duration"},
+		{"poll negative", "poll_interval", "-5s", "non-negative"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := cli.CLIConfig{}
+			err := applyConfigSet(&cfg, tc.key, tc.value)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q; want to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyConfigSetEmptyStringClearsTypedKeys — parity with the existing
+// "set server_url ''" clearing behavior. For int and duration keys, ""
+// resets to the zero value rather than surfacing an Atoi/ParseDuration
+// error the user didn't ask for.
+func TestApplyConfigSetEmptyStringClearsTypedKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{MaxConcurrentTasks: 8, PollInterval: "10s"}
+	if err := applyConfigSet(&cfg, "max_concurrent_tasks", ""); err != nil {
+		t.Fatalf("clear max_concurrent_tasks: %v", err)
+	}
+	if err := applyConfigSet(&cfg, "poll_interval", ""); err != nil {
+		t.Fatalf("clear poll_interval: %v", err)
+	}
+	if cfg.MaxConcurrentTasks != 0 || cfg.PollInterval != "" {
+		t.Fatalf("cfg after clear = %+v", cfg)
+	}
+}
+
+// TestPollIntervalRoundTripThroughDuration ensures the string persisted
+// by applyConfigSet parses back to the same Go duration the daemon will
+// consume at start-up. Cheap sanity check — the daemon calls
+// time.ParseDuration on the same string.
+func TestPollIntervalRoundTripThroughDuration(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	if err := applyConfigSet(&cfg, "poll_interval", "1m30s"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, err := time.ParseDuration(cfg.PollInterval)
+	if err != nil {
+		t.Fatalf("re-parse %q: %v", cfg.PollInterval, err)
+	}
+	if want := time.Minute + 30*time.Second; got != want {
+		t.Fatalf("parsed = %v, want %v", got, want)
+	}
+}
+

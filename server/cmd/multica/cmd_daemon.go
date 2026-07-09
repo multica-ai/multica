@@ -337,22 +337,52 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	profile := resolveProfile(cmd)
 
+	// Load the profile config once — several daemon knobs fall back to
+	// values persisted here when both the CLI flag and the env var are
+	// unset. Errors reading the config are non-fatal for anything other
+	// than server URL: an unreadable / missing config only means "no
+	// persisted overrides", not "cannot start".
+	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
-	if serverURL == "" {
-		if c, err := cli.LoadCLIConfigForProfile(profile); err == nil && c.ServerURL != "" {
-			serverURL = c.ServerURL
-		}
+	if serverURL == "" && fileCfg.ServerURL != "" {
+		serverURL = fileCfg.ServerURL
 	}
+	// Each persistable daemon knob follows the same three-tier precedence:
+	//
+	//   --flag  >  MULTICA_… env  >  config.json  >  built-in default
+	//
+	// The flag/env pair is resolved inside daemon.LoadConfig (via
+	// Overrides + envOrDefault). Here we only substitute the config-file
+	// value when BOTH the flag AND the env are unset, so a live env
+	// override (typical for systemd units) always wins over the file. This
+	// matches server_url's precedence above and resolves #3824.
+	deviceNameFlag := resolveDaemonStringOverride(
+		flagString(cmd, "device-name"),
+		"MULTICA_DAEMON_DEVICE_NAME",
+		fileCfg.DeviceName,
+	)
+	runtimeNameFlag := resolveDaemonStringOverride(
+		flagString(cmd, "runtime-name"),
+		"MULTICA_AGENT_RUNTIME_NAME",
+		fileCfg.RuntimeName,
+	)
+
 	overrides := daemon.Overrides{
 		ServerURL:   serverURL,
 		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  flagString(cmd, "device-name"),
-		RuntimeName: flagString(cmd, "runtime-name"),
+		DeviceName:  deviceNameFlag,
+		RuntimeName: runtimeNameFlag,
 		Profile:     profile,
 		HealthPort:  healthPortForProfile(profile),
 	}
-	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
-		overrides.PollInterval = d
+	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
+	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
+	if err != nil {
+		return err
+	}
+	if pollOverride > 0 {
+		overrides.PollInterval = pollOverride
 	}
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		overrides.HeartbeatInterval = d
@@ -366,7 +396,8 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
 		overrides.CodexSemanticInactivityTimeout = d
 	}
-	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
+	maxFlag, _ := cmd.Flags().GetInt("max-concurrent-tasks")
+	if n := resolveDaemonIntOverride(maxFlag, "MULTICA_DAEMON_MAX_CONCURRENT_TASKS", fileCfg.MaxConcurrentTasks); n > 0 {
 		overrides.MaxConcurrentTasks = n
 	}
 	if b, _ := cmd.Flags().GetBool("no-auto-update"); b {
@@ -697,6 +728,78 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 func flagString(cmd *cobra.Command, name string) string {
 	val, _ := cmd.Flags().GetString(name)
 	return val
+}
+
+// envUnset reports whether the given env var is empty or missing entirely.
+// The three-tier precedence for daemon knobs (flag > env > config.json)
+// hinges on this check: config-file substitution only fires when both the
+// flag AND the env are unset. Trimming whitespace matches the behavior of
+// daemon.envOrDefault, so an env exported to " " reads as "not set" for
+// fallback purposes — same as the runtime.
+func envUnset(name string) bool {
+	return strings.TrimSpace(os.Getenv(name)) == ""
+}
+
+// resolveDaemonStringOverride picks the value that goes into
+// daemon.Overrides for a string knob (device_name, runtime_name).
+// Precedence, highest first:
+//
+//  1. flag (already resolved to string; empty means "not passed")
+//  2. env  (if set, we leave overrides empty — daemon.LoadConfig reads env)
+//  3. cfg  (persisted config.json value)
+//  4. ""   (leave overrides empty — daemon.LoadConfig applies its default)
+//
+// Split out so the precedence is testable without spinning up cobra + the
+// full daemon.LoadConfig pipeline. Returns the override value the caller
+// should assign; an empty string means "let daemon.LoadConfig decide".
+func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if !envUnset(envName) {
+		// Env is set — return empty so daemon.LoadConfig's envOrDefault
+		// resolves it. If we returned the env value here we'd double-read
+		// it and quietly diverge if the daemon's own trimming ever changes.
+		return ""
+	}
+	return cfgValue
+}
+
+// resolveDaemonDurationOverride is the numeric counterpart for
+// poll_interval. flagValue > 0 wins; otherwise, if the env var is unset
+// we parse cfgValue. Parse errors are surfaced so a bad config.json
+// value doesn't silently fall through to the default.
+func resolveDaemonDurationOverride(flagValue time.Duration, envName, cfgValue string) (time.Duration, error) {
+	if flagValue > 0 {
+		return flagValue, nil
+	}
+	if !envUnset(envName) || cfgValue == "" {
+		return 0, nil
+	}
+	parsed, err := time.ParseDuration(cfgValue)
+	if err != nil {
+		return 0, fmt.Errorf("config value %q for %s is not a valid duration: %w", cfgValue, envName, err)
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("config value %q for %s must be non-negative", cfgValue, envName)
+	}
+	return parsed, nil
+}
+
+// resolveDaemonIntOverride is the max_concurrent_tasks counterpart to
+// resolveDaemonStringOverride. flagValue > 0 wins; otherwise the config
+// value applies only when the env var is unset.
+func resolveDaemonIntOverride(flagValue int, envName string, cfgValue int) int {
+	if flagValue > 0 {
+		return flagValue
+	}
+	if !envUnset(envName) {
+		return 0
+	}
+	if cfgValue > 0 {
+		return cfgValue
+	}
+	return 0
 }
 
 // --- daemon disk-usage ---

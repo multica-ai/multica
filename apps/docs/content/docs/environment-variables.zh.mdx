@@ -177,6 +177,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | server 地址（self-host 换成你的域名）|
+| `MULTICA_DAEMON_DEVICE_NAME` | 主机名 | 运行时页面显示的设备名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 内置默认 | 运行时显示名 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
@@ -188,6 +190,21 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 把守护进程参数持久化到 `config.json`
+
+上面的四个守护进程键 —— `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval` —— 也可以持久化到 profile 对应的 `~/.multica/config.json`（或 `~/.multica/profiles/<name>/config.json`），这样就不用每次 `daemon start` 都重传 flag 或 export 环境变量。写入方式：
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go 时长字符串
+```
+
+优先级从高到低：`--flag`（`daemon start` 命令行）> `MULTICA_…` 环境变量 > `config.json` > 内置默认。运行时环境变量（如 systemd unit 里设的）优先级高于 config 文件；显式命令行 flag 又高于两者。
+
+当你在同一台机器上用 `--profile <name>` 起多个 daemon 时，尤为好用：给每个 profile 独立设置 `device_name`，运行时页面就能看到独立的机器，而不是全部挤在同一个主机名下。
 
 ### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
 

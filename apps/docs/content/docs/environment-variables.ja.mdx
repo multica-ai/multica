@@ -177,12 +177,29 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | サーバーアドレス（セルフホスト: 自身のドメインに置き換えてください） |
+| `MULTICA_DAEMON_DEVICE_NAME` | ホスト名 | Runtimes 画面に表示されるデバイス名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 組み込みデフォルト | ランタイムの表示名 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | タスクのポーリング間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 最大同時タスク数 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 名に一致 | 各 AI コーディングツールの実行ファイルへのパス（例: `MULTICA_CLAUDE_PATH`） |
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI コーディングツールのデフォルトモデル |
 | `MULTICA_<PROVIDER>_ARGS` | 空 | バックエンドごとのデーモン全体のデフォルト CLI 引数。各タスクに対し、各エージェント自身の `custom_args` より前に適用される。`MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` をサポート |
+
+### デーモン設定を `config.json` に永続化する
+
+上記の 4 つのデーモン用キー — `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval` — は、プロファイルの `~/.multica/config.json`（もしくは `~/.multica/profiles/<name>/config.json`）に永続化することもできます。これにより、`daemon start` のたびにフラグを再指定したり環境変数を export したりする必要がなくなります。
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go の期間文字列
+```
+
+優先順位は上から順に: `daemon start` の `--flag` > `MULTICA_…` 環境変数 > `config.json` > 組み込みデフォルト。systemd unit などで環境変数を設定するとファイルより優先され、明示的な CLI フラグは両者よりさらに優先されます。
+
+`--profile <name>` で同一ホスト上に複数のデーモンを走らせるときに特に有用です。プロファイルごとに `device_name` を独立して設定すれば、Runtimes 画面でも共有ホスト名で潰れることなく別々の行として区別できます。
 
 各パラメータがデーモンの動作にどう影響するかの完全な説明は、[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
