@@ -232,6 +232,12 @@ var userCodexMcpServersTableHeaderRe = regexp.MustCompile(
 // whether to surface or warn — same fail-soft contract the prior argv
 // path had.
 func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *slog.Logger) error {
+	hardenedConfig, err := hardenBrowserMcpConfig(mcpConfig, filepath.Dir(configPath))
+	if err != nil {
+		return fmt.Errorf("harden mcp_config: %w", err)
+	}
+	mcpConfig = hardenedConfig
+
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)
