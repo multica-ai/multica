@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1174,6 +1173,17 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
+	// A new trigger changes what / when the rule fires — a substantive publish, so
+	// the acting member republishes the rule version ATOMICALLY with the trigger
+	// create (MUL-4302 §3.4). Resolved here so both the webhook and schedule create
+	// paths can write the version inside the same tx as the INSERT — a failed
+	// version write must roll the trigger back, never leave future dispatches
+	// attributed to the previous publisher.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	publisherID := parseUUID(userID)
 
 	var req CreateAutopilotTriggerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1272,14 +1282,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
 			return
 		}
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, eventFiltersBytes)
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap, ptrToText(req.Label), provider, eventFiltersBytes, publisherID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
 		}
 		resp := h.triggerToResponse(trigger)
-		userID, _ := requireUserID(w, r)
-		h.recordTriggerRuleVersionBestEffort(r.Context(), ap, userID)
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
 			"trigger":      resp,
@@ -1288,7 +1296,16 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+	// Schedule create: write the trigger and republish the rule version atomically.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
 		AutopilotID:    ap.ID,
 		Kind:           req.Kind,
 		Enabled:        true,
@@ -1302,35 +1319,21 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
 		return
 	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", publisherID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
 
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
-	h.recordTriggerRuleVersionBestEffort(r.Context(), ap, userID)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
 	})
 	writeJSON(w, http.StatusCreated, resp)
-}
-
-// recordTriggerRuleVersionBestEffort republishes an autopilot's rule version for a
-// trigger CREATE (a substantive change to what fires, MUL-4302 §3.4). Unlike the
-// trigger update/delete paths — which wrap the mutation and the version write in one
-// tx — create is best-effort: the webhook create path mints its token with a retry
-// loop that cannot share a single tx, and a create is often part of initial setup
-// (already covered by the autopilot-create v1). A failed version write here is
-// benign: the autopilot's active version stays the current publisher, the new
-// trigger still fires under it, and no immediate daemon claim rides this (unlike the
-// manual-rerun lineage race). Only a member actor publishes; an unresolved user is a
-// no-op rather than a bogus 'system' publish.
-func (h *Handler) recordTriggerRuleVersionBestEffort(ctx context.Context, ap db.Autopilot, userID string) {
-	uid, err := util.ParseUUID(userID)
-	if err != nil {
-		return
-	}
-	if err := h.recordAutopilotRuleVersion(ctx, h.Queries, ap, "member", uid); err != nil {
-		slog.Warn("create trigger: record rule version failed", "autopilot_id", uuidToString(ap.ID), "error", err)
-	}
 }
 
 // createWebhookTriggerWithMintedToken atomically creates a webhook trigger
@@ -1339,22 +1342,34 @@ func (h *Handler) recordTriggerRuleVersionBestEffort(ctx context.Context, ap db.
 // kind=webhook row with NULL webhook_token visible in the UI if the second
 // statement failed.
 //
-// Retries on the unique-index collision case so a vanishingly-rare RNG
+// Each attempt runs in its OWN transaction so the trigger INSERT and the
+// rule-version republish (a webhook trigger is a substantive change to what fires,
+// MUL-4302 §3.4, published by publisherID) commit together — a version-write failure
+// rolls the trigger back rather than leaving future dispatches attributed to the
+// previous publisher. Retries on the unique-index collision case with a fresh token
+// (the collided attempt's tx is already rolled back), so a vanishingly-rare RNG
 // collision turns into a clean retry rather than a 500.
 func (h *Handler) createWebhookTriggerWithMintedToken(
 	r *http.Request,
-	autopilotID pgtype.UUID,
+	ap db.Autopilot,
 	label pgtype.Text,
 	provider string,
 	eventFilters []byte,
+	publisherID pgtype.UUID,
 ) (db.AutopilotTrigger, error) {
+	ctx := r.Context()
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
 		if err != nil {
 			return db.AutopilotTrigger{}, err
 		}
-		trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
-			AutopilotID:  autopilotID,
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		qtx := h.Queries.WithTx(tx)
+		trigger, err := qtx.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+			AutopilotID:  ap.ID,
 			Kind:         "webhook",
 			Enabled:      true,
 			Label:        label,
@@ -1362,12 +1377,21 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
 		})
-		if err == nil {
-			return trigger, nil
-		}
-		if !isUniqueViolation(err) {
+		if err != nil {
+			tx.Rollback(ctx)
+			if isUniqueViolation(err) {
+				continue // token collision: retry with a fresh token
+			}
 			return db.AutopilotTrigger{}, err
 		}
+		if err := h.recordAutopilotRuleVersion(ctx, qtx, ap, "member", publisherID); err != nil {
+			tx.Rollback(ctx)
+			return db.AutopilotTrigger{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.AutopilotTrigger{}, err
+		}
+		return trigger, nil
 	}
 	return db.AutopilotTrigger{}, fmt.Errorf("could not mint unique webhook token")
 }
