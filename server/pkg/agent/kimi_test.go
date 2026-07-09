@@ -335,3 +335,64 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 		t.Fatalf("session/resume.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }
+
+// TestKimiHardensWindowsBrowserMcpConfig mirrors
+// TestHermesHardensWindowsBrowserMcpConfig for the Kimi ACP backend.
+func TestKimiHardensWindowsBrowserMcpConfig(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_resume", `{}`)))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_resume",
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/resume")
+	params := frame["params"].(map[string]any)
+	servers := params["mcpServers"].([]any)
+	if len(servers) != 1 {
+		t.Fatalf("session/resume.mcpServers: got %d entries, want 1", len(servers))
+	}
+	entry := servers[0].(map[string]any)
+	args, ok := entry["args"].([]any)
+	if !ok {
+		t.Fatalf("chrome-devtools entry args: got %T, want []any", entry["args"])
+	}
+	hasExecPath := false
+	for _, a := range args {
+		if s, ok := a.(string); ok && strings.HasPrefix(s, "--executablePath=") {
+			hasExecPath = true
+		}
+	}
+	if !hasExecPath {
+		t.Fatalf("expected hardened chrome-devtools args to include --executablePath=..., got %v", args)
+	}
+}
