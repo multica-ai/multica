@@ -1429,9 +1429,11 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	if err != nil {
 		// Branch names / PR titles keep referencing the pre-move identifier
 		// after an issue moves spaces; the alias keeps auto-linking working.
+		// The alias table's space_key_lower column is always stored
+		// lowercased and this lookup is an exact match, so lowercase here too.
 		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
 			WorkspaceID:   workspaceID,
-			SpaceKeyLower: gotPrefix,
+			SpaceKeyLower: strings.ToLower(gotPrefix),
 			Number:        int32(n),
 		})
 		if err != nil {
