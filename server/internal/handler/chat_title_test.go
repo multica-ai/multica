@@ -360,6 +360,8 @@ func TestSanitizeChatTitle(t *testing.T) {
 		{"label then quotes", `标题："修复登录问题"`, "修复登录问题"},
 		{"prefix wrapped in quotes", `"Title: Fix login"`, "Fix login"},
 		{"prefix wrapped in cjk brackets", "「标题：修复登录问题」", "修复登录问题"},
+		{"prefix in quotes with trailing period", `"Title: Fix login".`, "Fix login"},
+		{"prefix in cjk brackets with trailing period", "「标题：修复登录问题」。", "修复登录问题"},
 		{"trailing period", "Fix login bug.", "Fix login bug"},
 		{"trailing cjk period", "修复登录问题。", "修复登录问题"},
 		{"newlines collapsed", "Fix\nlogin\nbug", "Fix login bug"},

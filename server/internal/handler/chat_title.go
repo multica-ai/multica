@@ -169,10 +169,12 @@ var chatTitleLabelPrefixes = []string{
 // chatSessionTitleMaxLen runes (the same ceiling the manual rename endpoint
 // enforces). Returns "" when nothing meaningful remains.
 //
-// Prefix-stripping and wrapper-stripping run in a loop until the string stops
-// changing: a model may nest the two (e.g. `"Title: Fix login"` or
-// `「标题：修复登录问题」`), where the outer wrapper hides the forbidden prefix
-// on a single pass. Iterating to a fixed point peels both regardless of order.
+// Prefix-stripping, wrapper-stripping, AND trailing-punctuation trimming all
+// run in a single loop until the string stops changing. They interact: a model
+// may nest them (e.g. `"Title: Fix login".` or `「标题：修复登录问题」。`), where a
+// trailing `.` / `。` keeps the closing wrapper from being recognized, which in
+// turn hides the forbidden prefix. Iterating all three to a fixed point peels
+// them in any order.
 func sanitizeChatTitle(raw string) string {
 	// Collapse all internal whitespace (including newlines/tabs the model may
 	// emit) into single spaces so a multi-line reply becomes one clean line.
@@ -181,21 +183,22 @@ func sanitizeChatTitle(raw string) string {
 		return ""
 	}
 
-	// Alternate stripping the leading label prefix and one layer of surrounding
-	// quotes/brackets until neither changes anything. Bounded by the string
-	// only ever getting shorter, so it always terminates.
+	// Alternate stripping the leading label prefix, one layer of surrounding
+	// quotes/brackets, and trailing sentence punctuation until none of them
+	// changes anything. Bounded by the string only ever getting shorter, so it
+	// always terminates.
 	for {
 		before := s
 		s = strings.TrimSpace(stripChatTitleLabelPrefix(s))
 		s = stripSurroundingQuotes(s)
+		// ASCII + common CJK/full-width sentence punctuation. Trailing trim is
+		// inside the loop so removing a trailing "." / "。" re-exposes a closing
+		// wrapper (and the prefix it hides) for the next pass.
+		s = strings.TrimSpace(strings.TrimRight(s, ".。!！?？,，;；:：、 "))
 		if s == before || s == "" {
 			break
 		}
 	}
-
-	// Drop trailing sentence-ending punctuation (ASCII + common CJK/full-width).
-	s = strings.TrimRight(s, ".。!！?？,，;；:：、 ")
-	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
