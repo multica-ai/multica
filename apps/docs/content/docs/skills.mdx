@@ -31,7 +31,7 @@ Workspace skills come from four sources:
 - **From ClawHub** — search and import from the [ClawHub](https://clawhub.io) public marketplace, with version selection
 - **From local** — the daemon scans skill directories on your machine, and you pick which to bring into the workspace
 
-Both individual files and whole skill packs have size caps (single-file cap around 1 MB when importing from GitHub). The exact rules appear in the import dialog — exceeding them returns an error.
+Text files and whole skill packs have size caps (single-file cap around 1 MiB when importing from GitHub). Binary supporting assets such as images, fonts, archives, PDFs, and Office files are skipped during import because workspace skills store text content; oversized text-like files return an error that names the file and cap.
 
 ## Attaching to an agent
 

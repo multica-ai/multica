@@ -1027,6 +1027,116 @@ func TestFetchFromSkillsSh_OversizedSupportingFileFailsImport(t *testing.T) {
 	}
 }
 
+func TestFetchFromGitHub_SkipsOversizedBinaryAsset(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills/commits/main":
+				w.Write([]byte("deadbeef"))
+			case "/repos/acme/skills/contents/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "theme-style-grid.png",
+						Path:        "foo/assets/skill/theme-style-grid.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/foo/assets/skill/theme-style-grid.png",
+					},
+					{
+						Name:        "notes.md",
+						Path:        "foo/references/notes.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/foo/references/notes.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/foo/references/notes.md":
+				w.Write([]byte("notes"))
+			case "/acme/skills/main/foo/assets/skill/theme-style-grid.png":
+				t.Fatalf("binary asset should be skipped before raw download")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/main/foo")
+	if err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/notes.md"}) {
+		t.Fatalf("files = %v, want only text support file", got)
+	}
+	for _, request := range *requests {
+		if strings.Contains(request, "theme-style-grid.png") && strings.HasPrefix(request, "raw.githubusercontent.com ") {
+			t.Fatalf("binary asset should not be fetched: %v", *requests)
+		}
+	}
+}
+
+func TestFetchFromSkillsSh_SkipsOversizedBinaryAsset(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "theme-style-grid.png",
+						Path:        "skills/foo/assets/skill/theme-style-grid.png",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/assets/skill/theme-style-grid.png",
+					},
+					{
+						Name:        "notes.md",
+						Path:        "skills/foo/references/notes.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/references/notes.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/skills/foo/references/notes.md":
+				w.Write([]byte("notes"))
+			case "/acme/skills/main/skills/foo/assets/skill/theme-style-grid.png":
+				t.Fatalf("binary asset should be skipped before raw download")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/foo")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/notes.md"}) {
+		t.Fatalf("files = %v, want only text support file", got)
+	}
+	for _, request := range *requests {
+		if strings.Contains(request, "theme-style-grid.png") && strings.HasPrefix(request, "raw.githubusercontent.com ") {
+			t.Fatalf("binary asset should not be fetched: %v", *requests)
+		}
+	}
+}
+
 // Slash-bearing refs (e.g. release/v2) are now resolved against the API
 // instead of being silently parsed as ref="release", path="v2/...". The
 // resolver must walk longest→shortest and pick the prefix the API
