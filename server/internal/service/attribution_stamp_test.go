@@ -174,3 +174,56 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 		t.Errorf("originator_user_id = %s, want == accountable (actor) %s", util.UUIDToString(originator), util.UUIDToString(accountable))
 	}
 }
+
+// TestEnqueueChatTaskStampsChatEvidence verifies the chat enqueue path is no
+// longer a NULL-source bypass and uses the UNIFORM evidence pair: the sender is a
+// direct_human originator+accountable, and evidence is (kind=chat,
+// ref=chat_session_id) so the attribution UI links to the conversation the same
+// way it does for autopilot_run / issue_assignment (MUL-4302 §2, Elon 2nd-round).
+func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var chatSessionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
+		VALUES ($1, $2, $3) RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
+		ID:      util.MustParseUUID(chatSessionID),
+		AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false)
+	if err != nil {
+		t.Fatalf("EnqueueChatTask: %v", err)
+	}
+
+	var source, evidenceKind pgtype.Text
+	var originator, accountable, evidenceRef pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id, trigger_evidence_kind, trigger_evidence_ref_id
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&source, &originator, &accountable, &evidenceKind, &evidenceRef); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+
+	if source.String != string(attribution.SourceDirectHuman) {
+		t.Errorf("originator_source = %q, want direct_human", source.String)
+	}
+	if !originator.Valid || originator.Bytes != util.MustParseUUID(userID).Bytes {
+		t.Errorf("originator_user_id = %s, want sender %s", util.UUIDToString(originator), userID)
+	}
+	if !accountable.Valid || accountable.Bytes != originator.Bytes {
+		t.Errorf("accountable_user_id = %s, want == originator", util.UUIDToString(accountable))
+	}
+	if evidenceKind.String != string(attribution.EvidenceChat) {
+		t.Errorf("trigger_evidence_kind = %q, want chat", evidenceKind.String)
+	}
+	if !evidenceRef.Valid || evidenceRef.Bytes != util.MustParseUUID(chatSessionID).Bytes {
+		t.Errorf("trigger_evidence_ref_id = %s, want chat session %s", util.UUIDToString(evidenceRef), chatSessionID)
+	}
+}

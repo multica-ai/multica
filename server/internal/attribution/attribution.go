@@ -89,6 +89,11 @@ const (
 	EvidenceAutopilotRun    EvidenceKind = "autopilot_run"
 	EvidenceRuleVersion     EvidenceKind = "rule_version"
 	EvidenceRerun           EvidenceKind = "rerun"
+	// EvidenceChat points the uniform evidence pair at the chat session that
+	// triggered the run — the chat analogue of autopilot_run/issue_assignment.
+	// The dedicated chat_session_id column still exists for its own consumers;
+	// this makes the attribution UI's jump-to-evidence path uniform (MUL-4302 §2).
+	EvidenceChat EvidenceKind = "chat"
 )
 
 // TriggerKind enumerates every path that can enqueue a run. Kept as an explicit

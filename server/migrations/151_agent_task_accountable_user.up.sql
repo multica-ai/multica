@@ -36,9 +36,18 @@
 -- Constraints (MUL-4302 §7 + workspace DB rules): NO foreign key, NO cascade
 -- (integrity is resolved in the application layer). Nullable with no default so the
 -- ALTER is a fast metadata-only change on the hot queue table (no rewrite, no long
--- lock); NULL means "pre-migration row" exactly as with the 150 columns.
+-- lock).
+--
+-- NULL does NOT mean "pre-migration row" here. Unlike originator_source (which
+-- every new enqueue path now stamps non-NULL, migration 150), accountable_user_id
+-- is legitimately NULL on NEW rows too, whenever the row's audit source resolved
+-- no human yet: run_only autopilot writes originator_source='unattributed' with a
+-- NULL accountable until rule_owner lands, and any classified-unattributed path is
+-- the same. So NULL means "no accountable human resolved" — a pre-migration row OR
+-- a new not-yet-resolved / unattributed audit source — and readers must NOT treat
+-- NULL as pre-migration-only when reasoning about the invariant.
 ALTER TABLE agent_task_queue
     ADD COLUMN accountable_user_id UUID NULL;
 
 COMMENT ON COLUMN agent_task_queue.accountable_user_id IS
-    'The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL on pre-migration rows.';
+    'The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.';

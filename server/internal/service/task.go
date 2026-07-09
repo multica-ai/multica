@@ -1063,9 +1063,13 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 
 	// The requester who submitted the quick-create modal is the direct_human
-	// originator and accountable. There is no pre-existing comment/issue row to
-	// point evidence at (the run's job is to create the issue), so evidence stays
-	// NULL; the human is captured on originator/accountable_user_id (MUL-4302 §2).
+	// originator and accountable. Quick-create is the ONE enqueue path with no
+	// antecedent row to point the uniform evidence pair at: the run's whole job is
+	// to CREATE the issue, so at enqueue time there is no comment / issue / session
+	// / run to reference (the issue is linked back later via LinkTaskToIssue).
+	// Evidence is therefore intentionally NULL; the accountable human is captured on
+	// originator/accountable_user_id, so this is not a NULL-source bypass — source
+	// is still stamped direct_human (MUL-4302 §2).
 	attr := attribution.DirectHumanRun(requesterID, "", pgtype.UUID{})
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
@@ -1159,11 +1163,12 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	// The chat sender (initiator) is the direct_human originator and accountable.
-	// The chat_session_id column already identifies the conversation, so no
-	// separate evidence row is stamped; an unresolved sender (some Lark group
-	// messages) degrades to unattributed rather than a NULL-source bypass
-	// (MUL-4302 §2).
-	attr := attribution.DirectHumanRun(initiatorUserID, "", pgtype.UUID{})
+	// Evidence uses the uniform pair (kind=chat, ref=chat_session_id) so the
+	// attribution UI links to the conversation the same way it does for
+	// autopilot_run / issue_assignment — the dedicated chat_session_id column still
+	// exists for its own consumers. An unresolved sender (some Lark group messages)
+	// degrades to unattributed rather than a NULL-source bypass (MUL-4302 §2).
+	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, chatSession.ID)
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
