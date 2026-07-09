@@ -46,7 +46,37 @@ WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
+-- Most of the workspace's rows cascade away through their FK to workspace(id).
+-- The channel_* tables deliberately have NO FK (MUL-3515 §4), so their rows do
+-- NOT cascade — a plain workspace delete would leave each channel_installation
+-- behind, permanently holding the (channel_type, app_id) unique slot, so the IM
+-- bot could never be reconnected to any agent (#4810 / MUL-3937). Delete this
+-- workspace's channel installations and their app-layer dependents explicitly,
+-- in the same atomic statement as the workspace delete. github_pending_check_suite
+-- is likewise cleaned here because it has no workspace FK cascade.
 WITH deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+),
+target_channel_installs AS MATERIALIZED (
+    SELECT channel_installation.id FROM channel_installation WHERE workspace_id = $1
+),
+_channel_sess AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM target_channel_installs)
+),
+_channel_tok AS (
+    DELETE FROM channel_binding_token
+    WHERE installation_id IN (SELECT id FROM target_channel_installs)
+),
+_channel_usr AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM target_channel_installs)
+),
+_channel_aud AS (
+    UPDATE channel_inbound_audit SET installation_id = NULL
+    WHERE installation_id IN (SELECT id FROM target_channel_installs)
+),
+_channel_installs AS (
+    DELETE FROM channel_installation WHERE workspace_id = $1
 )
-DELETE FROM workspace WHERE id = $1;
+DELETE FROM workspace WHERE workspace.id = $1;

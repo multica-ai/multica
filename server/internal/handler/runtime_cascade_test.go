@@ -272,6 +272,84 @@ func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	}
 }
 
+// TestArchiveAgentsAndDeleteRuntime_RemovesChannelInstallations pins the #4810
+// (MUL-3937) fix on the agent hard-delete path: channel_installation has no
+// agent FK (MUL-3515 §4), so tearing a runtime down must explicitly drop its
+// agents' IM bot installations. Otherwise a hard-deleted agent leaves an orphan
+// row holding the (channel_type, app_id) slot forever, and the bot can never be
+// reconnected. A control installation for an agent NOT on this runtime survives.
+func TestArchiveAgentsAndDeleteRuntime_RemovesChannelInstallations(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	const (
+		appID     = "cli_rt_delete_target"
+		ctrlAppID = "cli_rt_delete_control"
+		chatChat  = "oc_rt_del"
+	)
+	cleanup := func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, []string{appID, ctrlAppID})
+		testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE channel_chat_id = $1`, chatChat)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Cascade Channel Runtime")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Cascade Channel Agent")
+
+	var installID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
+RETURNING id
+`, testWorkspaceID, agentID, appID, testUserID).Scan(&installID); err != nil {
+		t.Fatalf("insert channel installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', $3, 'p2p')
+`, "9c000000-0000-4000-8000-0000000000e2", installID, chatChat); err != nil {
+		t.Fatalf("insert chat-session binding: %v", err)
+	}
+	// A control installation for an agent NOT on this runtime must survive.
+	var ctrlInstallID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, '9c000000-0000-4000-8000-0000000000eb', 'feishu', jsonb_build_object('app_id', $2::text), $3, 'active')
+RETURNING id
+`, testWorkspaceID, ctrlAppID, testUserID).Scan(&ctrlInstallID); err != nil {
+		t.Fatalf("insert control channel installation: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+		map[string]any{"expected_active_agent_ids": []string{agentID}})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	count := func(q string, args ...any) int {
+		var n int
+		if err := testPool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1`, installID); n != 0 {
+		t.Fatalf("hard-deleted agent left an orphan channel_installation: %d rows (the bot could never rebind)", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, installID); n != 0 {
+		t.Fatalf("chat-session bindings not cleaned: %d dangling rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1`, ctrlInstallID); n != 1 {
+		t.Fatalf("a control installation for an agent on another runtime was wrongly deleted: %d rows remain", n)
+	}
+}
+
 func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

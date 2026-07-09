@@ -458,6 +458,14 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
 			return
 		}
+		// Same app-layer cascade for channel_installation (no agent FK, MUL-3515
+		// §4): drop the archived agents' IM bot installations so a hard-deleted
+		// agent never leaves an orphan row holding the (channel_type, app_id)
+		// slot, which would block reconnecting that bot to any agent (#4810).
+		if err := qtx.DeleteChannelInstallationsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return

@@ -46,10 +46,43 @@ type fakeInstallQueries struct {
 	upsertParams db.UpsertChannelInstallationParams
 	upsertCalled bool
 	rowID        pgtype.UUID
+	// reclaimCalled records that persistInstall attempted the dead-owner reclaim
+	// before the upsert (#4810).
+	reclaimCalled bool
+	// ownerWorkspaceID is the workspace of the row that currently holds the
+	// app_id slot, returned by GetChannelInstallationByAppID on the conflict
+	// path. When unset it defaults to a distinct workspace, so an unconfigured
+	// conflict reads as cross-workspace (ErrTeamOwnedByAnotherWorkspace).
+	ownerWorkspaceID pgtype.UUID
+	ownerAgentID     pgtype.UUID
 }
 
 // WithTx returns the same fake — the fake tx is a no-op token.
 func (f *fakeInstallQueries) WithTx(_ pgx.Tx) installQueries { return f }
+
+// ReclaimOrphanedChannelInstallationByAppID is a no-op in the fake (no dead-owner
+// row to clear); it just records that persistInstall ran the reclaim step.
+func (f *fakeInstallQueries) ReclaimOrphanedChannelInstallationByAppID(_ context.Context, _ db.ReclaimOrphanedChannelInstallationByAppIDParams) error {
+	f.reclaimCalled = true
+	return nil
+}
+
+// GetChannelInstallationByAppID returns the current owner of the app_id slot so
+// persistInstall can tell "another agent in this workspace" from "another
+// workspace". Defaults to a distinct workspace when ownerWorkspaceID is unset.
+func (f *fakeInstallQueries) GetChannelInstallationByAppID(_ context.Context, _ db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
+	ws := f.ownerWorkspaceID
+	if !ws.Valid {
+		ws = staticUUID("99999999-9999-9999-9999-999999999999")
+	}
+	return db.ChannelInstallation{WorkspaceID: ws, AgentID: f.ownerAgentID, Status: "active"}, nil
+}
+
+// staticUUID parses a UUID for fixtures that cannot take a *testing.T.
+func staticUUID(s string) pgtype.UUID {
+	u, _ := util.ParseUUID(s)
+	return u
+}
 
 func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
 	f.upsertCalled = true

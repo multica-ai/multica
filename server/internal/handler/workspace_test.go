@@ -236,6 +236,118 @@ VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368
 	}
 }
 
+// TestDeleteWorkspace_RemovesChannelInstallations pins the #4810 (MUL-3937) fix:
+// channel_* has no FK to workspace (MUL-3515 §4), so deleting a workspace must
+// explicitly remove its channel installations and their app-layer dependents.
+// Otherwise the installation lingers, permanently holding the (channel_type,
+// app_id) unique slot, and the IM bot can never be reconnected to any agent.
+// A control installation in ANOTHER workspace must be left untouched.
+func TestDeleteWorkspace_RemovesChannelInstallations(t *testing.T) {
+	ctx := context.Background()
+
+	const (
+		slug        = "handler-tests-delete-channel"
+		ctrlSlug    = "handler-tests-delete-channel-ctrl"
+		appID       = "cli_ws_delete_target"
+		ctrlAppID   = "cli_ws_delete_control"
+		tokenHash   = "ws_delete_token_hash"
+		ctrlToken   = "ws_delete_ctrl_token"
+		auditEvent  = "ev_ws_delete_target"
+		userBinding = "ou_ws_delete_user"
+	)
+	member := "9c000000-0000-4000-8000-0000000000d1"
+	chatSess := "9c000000-0000-4000-8000-0000000000d2"
+	agentID := "9c000000-0000-4000-8000-0000000000da"
+	cleanup := func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, []string{appID, ctrlAppID})
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSess)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, member)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_binding_token WHERE token_hash = ANY($1)`, []string{tokenHash, ctrlToken})
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = ANY($1)`, []string{slug, ctrlSlug})
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	var wsID, ctrlWsID string
+	if err := testPool.QueryRow(ctx, `INSERT INTO workspace (name, slug) VALUES ('WS Delete Channel', $1) RETURNING id`, slug).Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `INSERT INTO workspace (name, slug) VALUES ('WS Delete Channel Ctrl', $1) RETURNING id`, ctrlSlug).Scan(&ctrlWsID); err != nil {
+		t.Fatalf("create control workspace: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, wsID, testUserID); err != nil {
+		t.Fatalf("create owner member: %v", err)
+	}
+
+	// The target workspace's installation + its full spread of dependents.
+	var installID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
+RETURNING id
+`, wsID, agentID, appID, testUserID).Scan(&installID); err != nil {
+		t.Fatalf("insert channel installation: %v", err)
+	}
+	seed := func(q string, args ...any) {
+		if _, err := testPool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("seed dependent: %v", err)
+		}
+	}
+	seed(`INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id) VALUES ($1, $2, $3, 'feishu', $4)`, wsID, member, installID, userBinding)
+	seed(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type) VALUES ($1, $2, 'feishu', 'oc_ws_del', 'p2p')`, chatSess, installID)
+	seed(`INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at) VALUES ($1, $2, $3, 'feishu', $4, now() + interval '10 minutes')`, tokenHash, wsID, installID, userBinding)
+	seed(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason) VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'x')`, installID, auditEvent)
+
+	// A control installation owned by a DIFFERENT workspace must survive.
+	var ctrlInstallID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
+RETURNING id
+`, ctrlWsID, agentID, ctrlAppID, testUserID).Scan(&ctrlInstallID); err != nil {
+		t.Fatalf("insert control channel installation: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
+	req = withURLParam(req, "id", wsID)
+	testHandler.DeleteWorkspace(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 from DeleteWorkspace, got %d: %s", w.Code, w.Body.String())
+	}
+
+	count := func(q string, args ...any) int {
+		var n int
+		if err := testPool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1`, installID); n != 0 {
+		t.Fatalf("deleted workspace left an orphan channel_installation: %d rows (the bot could never rebind)", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, installID); n != 0 {
+		t.Fatalf("member links not cleaned: %d dangling rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, installID); n != 0 {
+		t.Fatalf("chat-session bindings not cleaned: %d dangling rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, installID); n != 0 {
+		t.Fatalf("binding tokens not cleaned: %d dangling rows", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE installation_id = $1`, installID); n != 0 {
+		t.Fatalf("audit rows still reference the deleted installation: %d", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id IS NULL`, auditEvent); n != 1 {
+		t.Fatalf("audit row should survive detached (installation_id NULL), got %d", n)
+	}
+	// The other workspace's installation is untouched.
+	if n := count(`SELECT count(*) FROM channel_installation WHERE id = $1`, ctrlInstallID); n != 1 {
+		t.Fatalf("a control installation in another workspace was wrongly deleted: %d rows remain", n)
+	}
+}
+
 // TestUpdateWorkspace_AvatarURL covers the avatar_url field added to
 // UpdateWorkspaceRequest: a PATCH with avatar_url is persisted and surfaced
 // back on the response, and partial updates leave other fields untouched.

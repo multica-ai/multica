@@ -215,6 +215,36 @@ func TestRegisterBYO_AppAlreadyConnected_Rejected(t *testing.T) {
 	)); err != ErrTeamOwnedByAnotherWorkspace {
 		t.Fatalf("app already connected = %v, want ErrTeamOwnedByAnotherWorkspace", err)
 	}
+	if !q.reclaimCalled {
+		t.Error("persistInstall must attempt the dead-owner reclaim before the upsert")
+	}
+}
+
+// TestRegisterBYO_AppOwnedBySameWorkspaceAgent_AccurateError pins the #4810 copy
+// fix: when the app_id slot is held by a DIFFERENT agent in the SAME workspace,
+// the conflict must be ErrTeamOwnedByAnotherAgent — not the old, misleading
+// "another workspace" error — so the user is told to disconnect it from that
+// agent rather than sent chasing a phantom other workspace.
+func TestRegisterBYO_AppOwnedBySameWorkspaceAgent_AccurateError(t *testing.T) {
+	srv := authTestServer(t, true)
+	defer srv.Close()
+	const callerWS = "11111111-1111-1111-1111-111111111111"
+	q := &fakeInstallQueries{
+		rowID:      mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		appIDTaken: true,
+		// The slot's live owner is another agent in the SAME workspace.
+		ownerWorkspaceID: mustUUID(t, callerWS),
+		ownerAgentID:     mustUUID(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+	}
+	svc := newTestInstallService(t, q)
+	svc.apiURL = srv.URL + "/"
+
+	if _, err := svc.RegisterBYO(context.Background(), byoParams(
+		callerWS,
+		"22222222-2222-2222-2222-222222222222",
+	)); err != ErrTeamOwnedByAnotherAgent {
+		t.Fatalf("same-workspace conflict = %v, want ErrTeamOwnedByAnotherAgent", err)
+	}
 }
 
 func TestRegisterBYO_ReconnectSameAgent_UpdatesRowInPlace(t *testing.T) {

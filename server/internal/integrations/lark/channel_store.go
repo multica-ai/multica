@@ -199,6 +199,25 @@ func (s *ChannelStore) RemoveRevokedInstallationByAppID(ctx context.Context, wor
 	return s.Queries.NullChannelInboundAuditInstallationID(ctx, installID)
 }
 
+// ReclaimOrphanedInstallationByAppID clears an installation that holds this
+// app's (channel_type, config->>'app_id') unique slot but whose owning workspace
+// or agent no longer exists — the "dead owner" self-heal for #4810 (MUL-3937).
+// channel_* has no FK/cascade (MUL-3515 §4), so deleting a workspace or hard-
+// deleting an agent leaves the row behind, and it then blocks re-installing the
+// same Feishu Bot against a new agent. Unlike RemoveRevokedInstallationByAppID
+// (which handles a still-live owner that merely disconnected), this targets a
+// genuinely gone owner; an ARCHIVED agent still exists and is left in place. The
+// underlying CTE cleans the reclaimed row's dependents in the same statement, so
+// this composes with the caller's transaction exactly like the revoked cleanup.
+func (s *ChannelStore) ReclaimOrphanedInstallationByAppID(ctx context.Context, workspaceID, agentID pgtype.UUID, appID string) error {
+	return s.Queries.ReclaimOrphanedChannelInstallationByAppID(ctx, db.ReclaimOrphanedChannelInstallationByAppIDParams{
+		ChannelType: channelTypeFeishu,
+		AppID:       appID,
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+	})
+}
+
 func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetInstallationStatusParams) error {
 	return s.Queries.SetChannelInstallationStatus(ctx, db.SetChannelInstallationStatusParams{
 		ID:     arg.ID,

@@ -400,6 +400,47 @@ func (q *Queries) DeleteChannelChatSessionBindingsByInstallation(ctx context.Con
 	return err
 }
 
+const deleteChannelInstallationsByArchivedRuntimeAgents = `-- name: DeleteChannelInstallationsByArchivedRuntimeAgents :exec
+WITH target_installs AS MATERIALIZED (
+    SELECT ci.id
+    FROM channel_installation ci
+    WHERE ci.agent_id IN (
+        SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+    )
+),
+_sess AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM target_installs)
+),
+_tok AS (
+    DELETE FROM channel_binding_token
+    WHERE installation_id IN (SELECT id FROM target_installs)
+),
+_usr AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM target_installs)
+),
+_aud AS (
+    UPDATE channel_inbound_audit SET installation_id = NULL
+    WHERE installation_id IN (SELECT id FROM target_installs)
+)
+DELETE FROM channel_installation
+WHERE id IN (SELECT id FROM target_installs)
+`
+
+// Application-layer replacement for the (deliberately absent, MUL-3515 §4)
+// channel_installation agent_id ON DELETE CASCADE: when a runtime teardown
+// hard-deletes its archived agents, remove those agents' channel installations
+// and their dependents too. Without this the installation row lingers forever,
+// holding the (channel_type, app_id) unique slot, so the bot can never be
+// reconnected to any agent (#4810). MUST run in the same tx as, and BEFORE,
+// DeleteArchivedAgentsByRuntime — mirrors that hard-delete's predicate exactly,
+// alongside DeleteAgentInvocationTargetsByArchivedRuntimeAgents.
+func (q *Queries) DeleteChannelInstallationsByArchivedRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelInstallationsByArchivedRuntimeAgents, runtimeID)
+	return err
+}
+
 const deleteChannelUserBindingsByInstallation = `-- name: DeleteChannelUserBindingsByInstallation :exec
 DELETE FROM channel_user_binding
 WHERE installation_id = $1
@@ -1028,6 +1069,81 @@ WHERE expires_at < $1
 
 func (q *Queries) PurgeExpiredChannelBindingTokens(ctx context.Context, expiresAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, purgeExpiredChannelBindingTokens, expiresAt)
+	return err
+}
+
+const reclaimOrphanedChannelInstallationByAppID = `-- name: ReclaimOrphanedChannelInstallationByAppID :exec
+WITH orphaned AS MATERIALIZED (
+    SELECT ci.id
+    FROM channel_installation ci
+    WHERE ci.channel_type = $1
+      AND ci.config ->> 'app_id' = $2::text
+      AND NOT (ci.workspace_id = $3
+               AND ci.agent_id = $4)
+      AND (
+            NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
+            OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
+      )
+),
+_sess AS (
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM orphaned)
+),
+_tok AS (
+    DELETE FROM channel_binding_token
+    WHERE installation_id IN (SELECT id FROM orphaned)
+),
+_usr AS (
+    DELETE FROM channel_user_binding
+    WHERE installation_id IN (SELECT id FROM orphaned)
+),
+_aud AS (
+    UPDATE channel_inbound_audit SET installation_id = NULL
+    WHERE installation_id IN (SELECT id FROM orphaned)
+)
+DELETE FROM channel_installation
+WHERE id IN (SELECT id FROM orphaned)
+`
+
+type ReclaimOrphanedChannelInstallationByAppIDParams struct {
+	ChannelType string      `json:"channel_type"`
+	AppID       string      `json:"app_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+// Self-heal the "dead owner" case (#4810 / MUL-3937): reclaim the app_id slot
+// held by an installation whose owning workspace or agent no longer exists, so
+// the same IM bot can be reconnected to a NEW agent. channel_* has no FK/cascade
+// (MUL-3515 §4), so deleting a workspace or hard-deleting an agent leaves its
+// channel_installation row behind, permanently occupying the (channel_type,
+// config->>'app_id') unique slot. Without this the bot can never be re-bound —
+// the reporter's "无力回天" — and the only recovery is a manual DB delete.
+//
+// Reclaimed ONLY when the owner is genuinely gone:
+//   - workspace deleted  -> NOT EXISTS (workspace)
+//   - agent hard-deleted -> NOT EXISTS (agent)
+//
+// An ARCHIVED agent still EXISTS here (archived_at is set but the row is present),
+// so it is a LIVE owner and is NOT reclaimed — archival is reversible (unarchive
+// or Disconnect), matching ListActiveChannelInstallations' row-existence guard.
+// The revoked-but-live-owner case is handled by DeleteRevokedChannelInstallation-
+// ByAppID, not here. The caller's own (workspace, agent) row is excluded too:
+// a live installer's workspace + agent always exist (so the existence checks
+// already skip it), but the fence makes the invariant explicit and lets the
+// follow-up upsert reactivate that row in place via its ON CONFLICT.
+//
+// Cleanup mirrors DeleteRevokedChannelInstallationByAppID: dependent rows are
+// cleared and inbound-audit detached (installation_id -> NULL) in the same
+// statement so no dangling rows survive. Kept atomic in one CTE — the reclaim
+// and the dependent cleanup commit or roll back together with the caller's tx.
+func (q *Queries) ReclaimOrphanedChannelInstallationByAppID(ctx context.Context, arg ReclaimOrphanedChannelInstallationByAppIDParams) error {
+	_, err := q.db.Exec(ctx, reclaimOrphanedChannelInstallationByAppID,
+		arg.ChannelType,
+		arg.AppID,
+		arg.WorkspaceID,
+		arg.AgentID,
+	)
 	return err
 }
 

@@ -587,6 +587,19 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		return
 	}
 
+	// Also reclaim a "dead owner" placeholder: if the same Feishu app was bound
+	// to a workspace/agent that has since been deleted (channel_* has no FK
+	// cascade, MUL-3515 §4), its orphaned row still holds the (channel_type,
+	// app_id) unique slot and blocks the upsert below. Clearing it lets the bot
+	// reconnect to a new agent without a manual DB delete (#4810). An archived
+	// agent still exists and is left in place — that stays a live-owner conflict.
+	if err := qtx.ReclaimOrphanedInstallationByAppID(ctx, sess.workspaceID, sess.agentID, res.ClientID); err != nil {
+		s.cfg.Logger.Warn("lark registration: cleanup orphaned installation",
+			"session_id", sess.id, "err", err)
+		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		return
+	}
+
 	inst, err := qtx.UpsertLarkInstallation(ctx, UpsertInstallationParams{
 		WorkspaceID:        sess.workspaceID,
 		AgentID:            sess.agentID,

@@ -145,6 +145,8 @@ func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, slack.ErrInvalidBotToken), errors.Is(err, slack.ErrInvalidAppToken), errors.Is(err, slack.ErrTokenAppMismatch):
 			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, slack.ErrTeamOwnedByAnotherAgent):
+			writeError(w, http.StatusConflict, "this Slack app is already connected to another agent in this workspace; disconnect it from that agent first, then connect it here")
 		case errors.Is(err, slack.ErrTeamOwnedByAnotherWorkspace):
 			writeError(w, http.StatusConflict, "this Slack app is already connected to a different Multica workspace")
 		default:
