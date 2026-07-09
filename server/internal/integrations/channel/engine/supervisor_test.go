@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -24,8 +25,10 @@ type fakeStore struct {
 	listErr        error
 	leaseOwner     map[string]string    // installation_id -> lease token
 	leaseExpiresAt map[string]time.Time // installation_id -> expiry
+	status         map[string]string
 	acquireErr     error
 	releaseErr     error
+	markErr        error
 	now            func() time.Time
 	acquireCount   int32
 
@@ -40,6 +43,7 @@ func newFakeStore() *fakeStore {
 	return &fakeStore{
 		leaseOwner:     make(map[string]string),
 		leaseExpiresAt: make(map[string]time.Time),
+		status:         make(map[string]string),
 		now:            time.Now,
 	}
 }
@@ -102,6 +106,19 @@ func (f *fakeStore) ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) 
 	return nil
 }
 
+func (f *fakeStore) MarkNeedsReauth(ctx context.Context, id pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.markErr != nil {
+		return f.markErr
+	}
+	key := uuidString(id)
+	f.status[key] = "needs_reauth"
+	delete(f.leaseOwner, key)
+	delete(f.leaseExpiresAt, key)
+	return nil
+}
+
 func (f *fakeStore) presetLease(id pgtype.UUID, token string, expires time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -114,6 +131,12 @@ func (f *fakeStore) leaseHolder(id pgtype.UUID) (string, bool) {
 	defer f.mu.Unlock()
 	owner, ok := f.leaseOwner[uuidString(id)]
 	return owner, ok
+}
+
+func (f *fakeStore) installationStatus(id pgtype.UUID) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status[uuidString(id)]
 }
 
 // fakeChannel is a channel.Channel whose Connect behaves per a script
@@ -482,6 +505,60 @@ func TestSupervisorBacksOffOnBuildError(t *testing.T) {
 	}
 	if fc.Connects() != 0 {
 		t.Fatalf("channel should never connect when build fails; connects=%d", fc.Connects())
+	}
+}
+
+func TestSupervisorMarksNeedsReauthOnBuildCredentialError(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "7a777777-7777-7777-7777-777777777777")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, fmt.Errorf("%w: decrypt app token", channel.ErrNeedsReauth))
+
+	sup := NewSupervisor(q, reg, nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(300*time.Millisecond, func() bool { return q.installationStatus(instID) == "needs_reauth" }) {
+		t.Fatalf("expected installation to be marked needs_reauth, status=%q", q.installationStatus(instID))
+	}
+	if owner, ok := q.leaseHolder(instID); ok {
+		t.Fatalf("needs_reauth path must clear lease, got owner %q", owner)
+	}
+	if fc.Connects() != 0 {
+		t.Fatalf("channel should not connect when build needs reauth; connects=%d", fc.Connects())
+	}
+}
+
+func TestSupervisorMarksNeedsReauthOnConnectCredentialError(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "7b777777-7777-7777-7777-777777777777")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	fc := &fakeChannel{
+		typ: channel.TypeFeishu,
+		script: []func(ctx context.Context) error{
+			func(ctx context.Context) error {
+				return fmt.Errorf("%w: decrypt app_secret", channel.ErrNeedsReauth)
+			},
+		},
+	}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	sup := NewSupervisor(q, reg, nil, fastConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(300*time.Millisecond, func() bool { return q.installationStatus(instID) == "needs_reauth" }) {
+		t.Fatalf("expected installation to be marked needs_reauth, status=%q", q.installationStatus(instID))
+	}
+	if owner, ok := q.leaseHolder(instID); ok {
+		t.Fatalf("needs_reauth path must clear lease, got owner %q", owner)
 	}
 }
 

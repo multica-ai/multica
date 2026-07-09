@@ -287,6 +287,19 @@ UPDATE channel_installation
 SET status = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: MarkChannelInstallationNeedsReauth :exec
+-- Supervisor fail-closed path: when a channel adapter cannot use the persisted
+-- credentials after process restart (bad/missing master key, corrupt ciphertext,
+-- expired non-refreshable credential), stop supervising the row and surface a
+-- durable "needs re-auth" state. Re-install/upsert flips it back to 'active'.
+UPDATE channel_installation
+SET status = 'needs_reauth',
+    ws_lease_token = NULL,
+    ws_lease_expires_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'active';
+
 -- name: SetChannelInstallationConfig :exec
 -- Replaces the whole config blob for one installation. Used by the
 -- operator backfills (e.g. setting a freshly-fetched bot_union_id) that

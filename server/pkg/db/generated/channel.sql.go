@@ -1270,6 +1270,25 @@ func (q *Queries) ReleaseChannelWSLease(ctx context.Context, arg ReleaseChannelW
 	return err
 }
 
+const markChannelInstallationNeedsReauth = `-- name: MarkChannelInstallationNeedsReauth :exec
+UPDATE channel_installation
+SET status = 'needs_reauth',
+    ws_lease_token = NULL,
+    ws_lease_expires_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'active'
+`
+
+// Supervisor fail-closed path: when a channel adapter cannot use the persisted
+// credentials after process restart (bad/missing master key, corrupt ciphertext,
+// expired non-refreshable credential), stop supervising the row and surface a
+// durable "needs re-auth" state. Re-install/upsert flips it back to 'active'.
+func (q *Queries) MarkChannelInstallationNeedsReauth(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markChannelInstallationNeedsReauth, id)
+	return err
+}
+
 const setChannelInstallationConfig = `-- name: SetChannelInstallationConfig :exec
 UPDATE channel_installation
 SET config = $2, updated_at = now()
