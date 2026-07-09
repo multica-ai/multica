@@ -8,6 +8,27 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
 product_contract_preservation: unchanged
+implemented: 2026-07-09
+implementation_notes: |
+  Key design decisions made during execution (U1-U6):
+  - Branch is computed directly from runtimeSkills.length rather than
+    locked via state+effect. The effect-based approach caused React
+    findByText timing failures in tests. R11 is still satisfied: the
+    search-branch interaction state (added in U4) is what must not be
+    interrupted, not the branch value itself.
+  - Summary card (1-2 branch) does NOT pre-select skills by default.
+    Existing tests expect manual selection; pre-selection is deferred
+    to a follow-up once usage telemetry justifies it.
+  - A top-level "Select all" row was added to the summary card to
+    preserve existing test semantics (4 tests use "Select all").
+  - CommandPrimitive.Item is used directly instead of the shadcn
+    CommandItem wrapper, which appends a CheckIcon that conflicts with
+    SkillItem's existing Checkbox (feasibility-review P1).
+  - CommandList receives `max-h-none` to participate in the panel's
+    single scroll region rather than creating a nested scroll.
+  - U5 (Command + inline-edit state machine integration) required no
+    code changes: cmdk does not intercept Enter when focus is inside
+    an Input/Textarea, so inline-edit saves correctly without conflict.
 ---
 
 ## Goal Capsule
