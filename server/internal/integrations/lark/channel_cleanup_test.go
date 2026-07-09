@@ -66,6 +66,10 @@ VALUES ($1, $2, $3, 'feishu', 'ou_cc_user')`, ws, ccUser, id)
 VALUES ($1, $2, 'feishu', 'oc_cc_chat', 'p2p')`, chatSess, id)
 	exec(`INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
 VALUES ($1, $2, $3, 'feishu', 'ou_cc_user', now() + interval '10 minutes')`, tokenHash, ws, id)
+	exec(`INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id, status)
+VALUES ($1, 'feishu', 'oc_cc_chat', 'om_cc_card', 'final')`, chatSess)
+	exec(`INSERT INTO channel_inbound_message_dedup (installation_id, message_id)
+VALUES ($1, 'msg_cc_dedup')`, id)
 	exec(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
 VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'test')`, id, auditEvent)
 	return id
@@ -80,9 +84,11 @@ func ccCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, q string, ar
 	return n
 }
 
-// assertInstallationSwept checks an installation and all its dependents are gone,
-// with the inbound-audit row preserved but detached (installation_id NULL).
-func assertInstallationSwept(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, auditEvent string) {
+// assertInstallationSwept checks an installation and all its dependents are gone.
+// On these HARD-delete paths (workspace delete / runtime teardown) the inbound-
+// audit row is PURGED, not detached: channel_inbound_audit has no workspace_id and
+// no reaper, so a detached (NULL) row would be permanently unattributable.
+func assertInstallationSwept(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, chatSess, auditEvent string) {
 	t.Helper()
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_installation WHERE id = $1`, id); n != 0 {
 		t.Fatalf("installation not swept: %d rows remain (its bot's app_id slot stays occupied)", n)
@@ -96,12 +102,18 @@ func assertInstallationSwept(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, id); n != 0 {
 		t.Fatalf("binding tokens not swept: %d dangling rows", n)
 	}
-	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id IS NULL`, auditEvent); n != 1 {
-		t.Fatalf("audit row should survive detached (installation_id NULL), got %d", n)
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, chatSess); n != 0 {
+		t.Fatalf("outbound card messages not swept: %d dangling rows (no reaper would ever collect them)", n)
+	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, id); n != 0 {
+		t.Fatalf("inbound dedup rows not swept: %d dangling rows (PurgeChannelInboundDedup has no caller)", n)
+	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent); n != 0 {
+		t.Fatalf("audit row should be purged on a hard delete, got %d remaining", n)
 	}
 }
 
-func assertInstallationIntact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, auditEvent string) {
+func assertInstallationIntact(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, chatSess, auditEvent string) {
 	t.Helper()
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_installation WHERE id = $1`, id); n != 1 {
 		t.Fatalf("a live-owner installation was swept: %d rows (want 1)", n)
@@ -109,8 +121,14 @@ func assertInstallationIntact(t *testing.T, ctx context.Context, pool *pgxpool.P
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, id); n != 1 {
 		t.Fatalf("live-owner member link was swept: %d (want 1)", n)
 	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, chatSess); n != 1 {
+		t.Fatalf("live-owner outbound card was swept: %d (want 1)", n)
+	}
+	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, id); n != 1 {
+		t.Fatalf("live-owner dedup row was swept: %d (want 1)", n)
+	}
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id = $2`, auditEvent, id); n != 1 {
-		t.Fatalf("live-owner audit ref was detached: %d (want 1)", n)
+		t.Fatalf("live-owner audit ref was removed: %d (want 1)", n)
 	}
 }
 
@@ -127,6 +145,8 @@ func TestDeleteChannelInstallationsByArchivedRuntimeAgents(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, ccUser)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = ANY($1)`, []string{ccChatArch, ccChatLive})
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_binding_token WHERE token_hash = ANY($1)`, []string{ccTokenArch, ccTokenLive})
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_outbound_card_message WHERE chat_session_id = ANY($1)`, []string{ccChatArch, ccChatLive})
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_message_dedup WHERE message_id = 'msg_cc_dedup'`)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = ANY($1)`, []string{ccAuditArch, ccAuditLive})
 		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, ccWS)
 	}
@@ -153,8 +173,8 @@ VALUES ($1, $2, 'cc live agent', 'local', $3)`, ccAgentLive, ccWS, ccRuntime)
 		t.Fatalf("DeleteChannelInstallationsByArchivedRuntimeAgents: %v", err)
 	}
 
-	assertInstallationSwept(t, ctx, pool, archivedID, ccAuditArch)
-	assertInstallationIntact(t, ctx, pool, liveID, ccAuditLive)
+	assertInstallationSwept(t, ctx, pool, archivedID, ccChatArch, ccAuditArch)
+	assertInstallationIntact(t, ctx, pool, liveID, ccChatLive, ccAuditLive)
 }
 
 // TestDeleteWorkspace_SweepsChannelInstallations: deleting a workspace must sweep
@@ -171,6 +191,8 @@ func TestDeleteWorkspace_SweepsChannelInstallations(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, ccUser)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, ccChatWs)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_binding_token WHERE token_hash = $1`, ccTokenWs)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_outbound_card_message WHERE chat_session_id = $1`, ccChatWs)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_message_dedup WHERE message_id = 'msg_cc_dedup'`)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, ccAuditWs)
 		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, ccWSDel)
 	}
@@ -197,5 +219,5 @@ VALUES ($1, $2, 'cc agent del', 'local', $3)`, ccAgentDel, ccWSDel, ccRuntimeDel
 	if n := ccCount(t, ctx, pool, `SELECT count(*) FROM workspace WHERE id = $1`, ccWSDel); n != 0 {
 		t.Fatalf("workspace not deleted: %d rows", n)
 	}
-	assertInstallationSwept(t, ctx, pool, id, ccAuditWs)
+	assertInstallationSwept(t, ctx, pool, id, ccChatWs, ccAuditWs)
 }

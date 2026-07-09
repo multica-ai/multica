@@ -58,9 +58,23 @@ WITH ws_installations AS (
 ),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
+    RETURNING chat_session_id
 ),
-detached_audit AS (
-    UPDATE channel_inbound_audit SET installation_id = NULL WHERE installation_id IN (SELECT id FROM ws_installations)
+cleared_outbound_cards AS (
+    -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
+    -- chat_session rows cascade away with the workspace, so reach the cards through
+    -- the just-removed chat-session bindings, which still carry the id.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_audit AS (
+    -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
+    -- workspace_id and no reaper, so a detached (NULL) row would be permanently
+    -- unattributable. (Reclaim, where the workspace survives, still detaches.)
+    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM ws_installations)
 ),
 cleared_user_bindings AS (
     DELETE FROM channel_user_binding WHERE workspace_id = $1

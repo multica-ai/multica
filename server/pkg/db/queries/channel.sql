@@ -123,8 +123,14 @@ WHERE ci.channel_type = sqlc.arg('channel_type')
 -- (pgx.ErrNoRows when nothing was dead — a no-op the caller treats as success).
 --
 -- "Dead" is exactly one of:
---   1. a REVOKED placeholder left by a DIFFERENT agent in the SAME workspace
---      (Disconnect-then-rebind: agent A revoked, the same bot rebinds to agent B);
+--   1. a REVOKED placeholder held by ANY agent OTHER than the caller's own
+--      (workspace, agent) pair. Disconnect only flips status to 'revoked' — no
+--      product path ever hard-deletes the row — so a revoked row would otherwise
+--      pin the bot's app_id slot forever with no self-serve recovery, even across
+--      workspaces (workspace A disconnects; workspace B, which proves control by
+--      holding the same app credentials, rebinds). Revoke is the owner's explicit
+--      "I'm done with this bot", so any revoked row is reclaimable — only the
+--      caller's OWN revoked row is spared (reactivated in place; see below).
 --   2. an ORPHAN whose owning workspace OR agent row no longer exists — the
 --      workspace was deleted, or the agent was hard-deleted on runtime teardown.
 --      With no FK the installation outlives its owner and keeps occupying the
@@ -150,8 +156,8 @@ WITH dead AS (
       AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text
       AND (
             (ci.status = 'revoked'
-                AND ci.workspace_id = sqlc.arg('workspace_id')
-                AND ci.agent_id <> sqlc.arg('agent_id'))
+                AND NOT (ci.workspace_id = sqlc.arg('workspace_id')
+                         AND ci.agent_id = sqlc.arg('agent_id')))
          OR NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
          OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
       )
@@ -160,6 +166,15 @@ WITH dead AS (
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
+    -- no FK), so it is reached through the just-removed chat-session bindings. On an
+    -- orphan reclaim the chat_session row itself is already cascade-gone, but its
+    -- binding survived and still carries the id — the only reliable link back.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
 ),
 cleared_binding_tokens AS (
     DELETE FROM channel_binding_token
@@ -169,7 +184,14 @@ cleared_user_bindings AS (
     DELETE FROM channel_user_binding
     WHERE installation_id IN (SELECT id FROM dead)
 ),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup
+    WHERE installation_id IN (SELECT id FROM dead)
+),
 detached_audit AS (
+    -- Reclaim keeps the DETACH semantics: the workspace still exists, so a
+    -- NULL-installation audit row stays meaningful for operator triage. The hard-
+    -- delete paths (DeleteWorkspace / runtime teardown) purge audit outright.
     UPDATE channel_inbound_audit SET installation_id = NULL
     WHERE installation_id IN (SELECT id FROM dead)
 )
@@ -192,6 +214,13 @@ WITH doomed AS (
 ),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)
+    -- through the just-removed chat-session bindings, same as the reclaim path.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
 ),
 cleared_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE installation_id IN (SELECT id FROM doomed)
@@ -199,8 +228,13 @@ cleared_binding_tokens AS (
 cleared_user_bindings AS (
     DELETE FROM channel_user_binding WHERE installation_id IN (SELECT id FROM doomed)
 ),
-detached_audit AS (
-    UPDATE channel_inbound_audit SET installation_id = NULL WHERE installation_id IN (SELECT id FROM doomed)
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_audit AS (
+    -- Hard delete: purge audit rows rather than detaching them into permanently
+    -- unattributable NULL rows (channel_inbound_audit has no workspace_id / reaper).
+    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM doomed)
 )
 DELETE FROM channel_installation WHERE id IN (SELECT id FROM doomed);
 

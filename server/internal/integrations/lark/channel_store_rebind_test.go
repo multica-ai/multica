@@ -35,6 +35,7 @@ const (
 	rbAppDiff        = "cli_rb_diff"
 	rbAppActive      = "cli_rb_active"
 	rbAppWsFence     = "cli_rb_wsfence"
+	rbAppWsActive    = "cli_rb_wsactive"
 	rbAppReactivate  = "cli_rb_reactivate"
 	rbAppMove        = "cli_rb_move"
 	rbAppOrphanWS    = "cli_rb_orphan_ws"
@@ -82,16 +83,18 @@ func cleanRebindOwners(ctx context.Context, pool *pgxpool.Pool) {
 
 // TestChannelStore_ReclaimDeadRevokedFences guards the REVOKED branch of the
 // ReclaimDeadChannelInstallationByAppID gate: with live owners seeded, it must
-// claim ONLY a revoked row that belongs to a DIFFERENT agent in the SAME
-// workspace. The same agent's own revoked row, any active row, and a revoked row
-// in another (still-live) workspace must survive. (The orphan branch is covered
-// by TestChannelStore_ReclaimDeadReclaimsOrphansRefusesLiveOwners.)
+// claim EVERY revoked row EXCEPT the caller's own (workspace, agent) pair —
+// including a revoked row in another workspace (#4810: revoke is a self-serve
+// "I'm done", so it must never leave a bot permanently un-rebindable). The same
+// agent's own revoked row and any ACTIVE row (same or other workspace) must
+// survive. (The orphan branch is covered by
+// TestChannelStore_ReclaimDeadReclaimsOrphansRefusesLiveOwners.)
 func TestChannelStore_ReclaimDeadRevokedFences(t *testing.T) {
 	pool := channelScopeTestDB(t)
 	ctx := context.Background()
 	store := NewChannelStore(db.New(pool))
 
-	apps := []string{rbAppSame, rbAppDiff, rbAppActive, rbAppWsFence, rbAppReactivate, rbAppMove}
+	apps := []string{rbAppSame, rbAppDiff, rbAppActive, rbAppWsFence, rbAppWsActive, rbAppReactivate, rbAppMove}
 	clean := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`, apps)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, rbUser)
@@ -163,14 +166,25 @@ RETURNING id
 		}
 	})
 
-	t.Run("other workspace revoked row is preserved", func(t *testing.T) {
+	t.Run("other workspace revoked row is reclaimed", func(t *testing.T) {
 		clean()
 		id := insert(rbAppWsFence, rbWS2, rbAgentA, "revoked")
 		if err := store.ReclaimDeadInstallationByAppID(ctx, wsUUID, agentBUUID, rbAppWsFence); err != nil {
 			t.Fatalf("ReclaimDeadInstallationByAppID: %v", err)
 		}
+		if exists(id) {
+			t.Fatal("a revoked row in another workspace was not reclaimed; a disconnected bot must be rebindable from any workspace that controls it (#4810)")
+		}
+	})
+
+	t.Run("other workspace active row is preserved", func(t *testing.T) {
+		clean()
+		id := insert(rbAppWsActive, rbWS2, rbAgentA, "active")
+		if err := store.ReclaimDeadInstallationByAppID(ctx, wsUUID, agentBUUID, rbAppWsActive); err != nil {
+			t.Fatalf("ReclaimDeadInstallationByAppID: %v", err)
+		}
 		if !exists(id) {
-			t.Fatal("a revoked row in another workspace was deleted; the delete must stay workspace-scoped")
+			t.Fatal("an ACTIVE row in another workspace was reclaimed; only revoked/orphan owners are dead — a live owner must never be stolen")
 		}
 	})
 }
@@ -312,12 +326,15 @@ func TestChannelStore_RebindCleansDependentRows(t *testing.T) {
 		app        = "cli_rb_cleanup"
 		tokenHash  = "rb_token_hash_cleanup"
 		auditEvent = "ev_rb_cleanup"
+		dedupMsg   = "msg_rb_cleanup"
 	)
 	clean := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, app)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_user_binding WHERE multica_user_id = $1`, rbUser)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rbChatSess)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_outbound_card_message WHERE chat_session_id = $1`, rbChatSess)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
+		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_message_dedup WHERE message_id = $1`, dedupMsg)
 		_, _ = pool.Exec(ctx, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEvent)
 	}
 	clean()
@@ -343,8 +360,12 @@ RETURNING id
 VALUES ($1, $2, $3, 'feishu', 'ou_rb_user')`, rbWS, rbUser, oldID)
 	seed(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
 VALUES ($1, $2, 'feishu', 'oc_rb_chat', 'p2p')`, rbChatSess, oldID)
+	seed(`INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id, status)
+VALUES ($1, 'feishu', 'oc_rb_chat', 'om_rb_card', 'final')`, rbChatSess)
 	seed(`INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
 VALUES ($1, $2, $3, 'feishu', 'ou_rb_user', now() + interval '10 minutes')`, tokenHash, rbWS, oldID)
+	seed(`INSERT INTO channel_inbound_message_dedup (installation_id, message_id)
+VALUES ($1, $2)`, oldID, dedupMsg)
 	seed(`INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
 VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'revoked_installation')`, oldID, auditEvent)
 
@@ -372,8 +393,15 @@ VALUES ($1, 'feishu', 'im.message.receive_v1', $2, 'revoked_installation')`, old
 	if n := count(`SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, oldID); n != 0 {
 		t.Fatalf("binding tokens not cleaned: %d redeemable rows into a deleted installation", n)
 	}
+	if n := count(`SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, rbChatSess); n != 0 {
+		t.Fatalf("outbound card messages not cleaned: %d rows keyed on the removed session (no reaper would ever collect them)", n)
+	}
+	if n := count(`SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, oldID); n != 0 {
+		t.Fatalf("inbound dedup rows not cleaned: %d dangling rows (PurgeChannelInboundDedup has no caller)", n)
+	}
 	// Audit history is preserved but detached: no row still points at the
-	// deleted installation, and our audit row survives with a NULL reference.
+	// deleted installation, and our audit row survives with a NULL reference
+	// (reclaim keeps the workspace, so the detached row stays meaningful).
 	if n := count(`SELECT count(*) FROM channel_inbound_audit WHERE installation_id = $1`, oldID); n != 0 {
 		t.Fatalf("audit rows still reference the deleted installation: %d dangling ids", n)
 	}
