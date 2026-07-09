@@ -579,6 +579,17 @@ SET status = $2,
     last_patched_at = now()
 WHERE id = $1;
 
+-- name: DeleteChannelOutboundCardMessagesBySession :exec
+-- Application-layer integrity (channel_* has no FK/cascade, MUL-3515 §4): drop the
+-- outbound card-message rows for a chat_session being deleted. They are keyed by
+-- chat_session_id with no FK and no reaper, so the standalone chat-session delete
+-- path must prune them here alongside DeleteChannelChatSessionBindingBySession —
+-- otherwise deleting a chat session leaves them as permanent orphans (Elon's
+-- follow-up on #4810; the workspace/agent/reclaim sweeps already cover their
+-- paths). A card that survived its session could only mis-route a later patch.
+DELETE FROM channel_outbound_card_message
+WHERE chat_session_id = $1;
+
 -- =====================
 -- channel_binding_token
 -- =====================

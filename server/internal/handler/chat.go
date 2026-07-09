@@ -459,6 +459,13 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
 		return
 	}
+	// channel_outbound_card_message is also keyed by chat_session_id with no FK
+	// and no reaper, so prune it in the same tx or a deleted chat session leaves
+	// permanent orphan card rows (#4810 follow-up).
+	if err := qtx.DeleteChannelOutboundCardMessagesBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session outbound cards")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,

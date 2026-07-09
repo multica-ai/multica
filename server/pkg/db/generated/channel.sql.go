@@ -447,6 +447,23 @@ func (q *Queries) DeleteChannelInstallationsByArchivedRuntimeAgents(ctx context.
 	return err
 }
 
+const deleteChannelOutboundCardMessagesBySession = `-- name: DeleteChannelOutboundCardMessagesBySession :exec
+DELETE FROM channel_outbound_card_message
+WHERE chat_session_id = $1
+`
+
+// Application-layer integrity (channel_* has no FK/cascade, MUL-3515 §4): drop the
+// outbound card-message rows for a chat_session being deleted. They are keyed by
+// chat_session_id with no FK and no reaper, so the standalone chat-session delete
+// path must prune them here alongside DeleteChannelChatSessionBindingBySession —
+// otherwise deleting a chat session leaves them as permanent orphans (Elon's
+// follow-up on #4810; the workspace/agent/reclaim sweeps already cover their
+// paths). A card that survived its session could only mis-route a later patch.
+func (q *Queries) DeleteChannelOutboundCardMessagesBySession(ctx context.Context, chatSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelOutboundCardMessagesBySession, chatSessionID)
+	return err
+}
+
 const deleteChannelUserBindingsByInstallation = `-- name: DeleteChannelUserBindingsByInstallation :exec
 DELETE FROM channel_user_binding
 WHERE installation_id = $1
