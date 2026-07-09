@@ -327,7 +327,9 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 	# parent event loops so they miss the deadline. Run the rest of the suite at
 	# full concurrency and cap only pkg/agent's package- and within-package
 	# parallelism, keeping those tests within budget without slowing the whole suite.
-	cd server && go test -race $$(go list ./... | grep -vE '/pkg/agent(/|$$)')
+	# Build the package list via explicit assignments so a go list failure
+	# fails this target instead of being swallowed by command substitution.
+	cd server && pkgs="$$(go list ./...)" && pkgs="$$(printf '%s\n' "$$pkgs" | grep -vE '/pkg/agent(/|$$)')" && go test -race $$pkgs
 	cd server && go test -race -p 2 -parallel 2 ./pkg/agent/...
 
 # Database
