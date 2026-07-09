@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArrowLeft, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, Search } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { cn } from "@multica/ui/lib/utils";
 import { sanitizeSpaceKeyInput, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
 import { useCreateSpace } from "@multica/core/spaces/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -13,9 +12,9 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { Button } from "@multica/ui/components/ui/button";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -42,18 +41,20 @@ export function CreateSpacePage() {
   const createSpace = useCreateSpace();
 
   const [name, setName] = useState("");
-  const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
   const [icon, setIcon] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Validation is quiet until the user tries to submit — a fresh form should
+  // not flash "name required" just because the field was focused and left.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
-  const nameError = nameTouched && name.trim().length === 0;
+  const nameError = submitAttempted && name.trim().length === 0;
   const keyReserved = RESERVED_SPACE_KEYS.has(key);
   const keyStartsWithDigit = /^[0-9]/.test(key);
-  const keyError = keyTouched && key.length > 0 && !isValidSpaceKey(key);
+  const keyError = (keyTouched || submitAttempted) && key.length > 0 && !isValidSpaceKey(key);
   const canSubmit = name.trim().length > 0 && isValidSpaceKey(key) && !submitting;
 
   // The identifier follows the name until the user edits it directly. Only a
@@ -70,8 +71,7 @@ export function CreateSpacePage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setNameTouched(true);
-    setKeyTouched(true);
+    setSubmitAttempted(true);
     if (!canSubmit) return;
     setSubmitting(true);
     try {
@@ -112,84 +112,94 @@ export function CreateSpacePage() {
         <form
           onSubmit={submit}
           autoComplete="off"
-          className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8"
+          className="mx-auto flex w-full max-w-xl flex-col gap-8 px-6 py-8"
         >
-          {/* Name + icon */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="space-name" className="text-xs font-medium text-muted-foreground">
-              {t(($) => $.form.name)}
-            </Label>
-            <div className="flex items-center gap-2">
-              {/* Icon is emoji-only — picked, never typed. */}
-              <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-                <PopoverTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={t(($) => $.form.icon)}
-                      className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-muted/40 text-xl transition-colors hover:bg-accent"
+          {/* Basics — icon+name and identifier as label-left / control-right rows. */}
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold">{t(($) => $.dialog.section_basics)}</h2>
+            <Card>
+              <CardContent className="divide-y p-0">
+                <div className="flex items-center justify-between gap-6 px-4 py-3">
+                  <span className="text-sm font-medium">{t(($) => $.form.icon_name)}</span>
+                  <div className="flex items-center gap-2">
+                    {/* Icon is emoji-only — picked, never typed. */}
+                    <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+                      <PopoverTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label={t(($) => $.form.icon)}
+                            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-muted/40 text-xl transition-colors hover:bg-accent"
+                          />
+                        }
+                      >
+                        {icon || <SpaceIcon space={{ icon: null }} className="size-4" />}
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-auto p-0">
+                        <EmojiPicker
+                          onSelect={(emoji) => {
+                            setIcon(emoji);
+                            setIconPickerOpen(false);
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <Input
+                      id="space-name"
+                      autoFocus
+                      aria-label={t(($) => $.form.name)}
+                      value={name}
+                      onChange={(event) => handleNameChange(event.target.value)}
+                      aria-invalid={nameError}
+                      placeholder={t(($) => $.form.name_placeholder)}
+                      className="w-60"
                     />
-                  }
-                >
-                  {icon || <SpaceIcon space={{ icon: null }} className="size-4" />}
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-auto p-0">
-                  <EmojiPicker
-                    onSelect={(emoji) => {
-                      setIcon(emoji);
-                      setIconPickerOpen(false);
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-6 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t(($) => $.form.key)}</div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t(($) => $.form.key_hint_short)}
+                    </p>
+                  </div>
+                  <Input
+                    id="space-key"
+                    value={key}
+                    onChange={(event) => {
+                      setKey(sanitizeSpaceKeyInput(event.target.value));
+                      setKeyTouched(true);
                     }}
+                    aria-invalid={keyError}
+                    placeholder="ENG"
+                    maxLength={7}
+                    className="w-40 shrink-0 font-mono"
                   />
-                </PopoverContent>
-              </Popover>
-              <Input
-                id="space-name"
-                autoFocus
-                aria-label={t(($) => $.form.name)}
-                value={name}
-                onChange={(event) => handleNameChange(event.target.value)}
-                onBlur={() => setNameTouched(true)}
-                aria-invalid={nameError}
-                placeholder={t(($) => $.form.name_placeholder)}
-                className="flex-1"
-              />
-            </div>
-            {nameError && (
-              <p className="text-xs text-destructive">{t(($) => $.dialog.name_required)}</p>
+                </div>
+              </CardContent>
+            </Card>
+            {(nameError || keyError) && (
+              <p className="px-1 text-xs text-destructive">
+                {nameError
+                  ? t(($) => $.dialog.name_required)
+                  : keyReserved
+                    ? t(($) => $.form.key_reserved)
+                    : keyStartsWithDigit
+                      ? t(($) => $.form.key_start_letter)
+                      : t(($) => $.form.key_hint)}
+              </p>
             )}
           </div>
 
-          {/* Identifier */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="space-key" className="text-xs font-medium text-muted-foreground">
-              {t(($) => $.form.key)}
-            </Label>
-            <Input
-              id="space-key"
-              value={key}
-              onChange={(event) => {
-                setKey(sanitizeSpaceKeyInput(event.target.value));
-                setKeyTouched(true);
-              }}
-              onBlur={() => setKeyTouched(true)}
-              aria-invalid={keyError}
-              placeholder="ENG"
-              maxLength={7}
-              className="max-w-40 font-mono"
-            />
-            <p className={cn("text-xs", keyError ? "text-destructive" : "text-muted-foreground")}>
-              {keyError && keyReserved
-                ? t(($) => $.form.key_reserved)
-                : keyError && keyStartsWithDigit
-                  ? t(($) => $.form.key_start_letter)
-                  : t(($) => $.form.key_hint)}
-            </p>
+          {/* Members — header + inline picker, mirroring the space detail page's
+              MembersSection (no card wrapper for a single trigger). */}
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold">{t(($) => $.dialog.members_entry)}</h2>
+            <MembersField memberIds={memberIds} onChange={setMemberIds} />
           </div>
 
-          {/* Members — renders its own label. */}
-          <MembersField memberIds={memberIds} onChange={setMemberIds} />
-
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end">
             <Button type="submit" disabled={!canSubmit}>
               {submitting ? t(($) => $.actions.saving) : t(($) => $.actions.save)}
             </Button>
@@ -245,15 +255,13 @@ function MembersField({
 
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium text-muted-foreground">
-        {t(($) => $.dialog.members_entry)}
-      </h3>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
-            <button
+            <Button
               type="button"
-              className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent/60"
+              variant="outline"
+              className="h-auto min-w-48 max-w-full self-start justify-start gap-2 py-1.5 font-normal"
             />
           }
         >
@@ -285,8 +293,11 @@ function MembersField({
             )}
           </span>
           <span className="text-xs text-muted-foreground">
-            {t(($) => $.dialog.member_count, { count: memberIds.length + 1 })}
+            {memberIds.length === 0
+              ? t(($) => $.dialog.member_count_solo)
+              : t(($) => $.dialog.member_count, { count: memberIds.length + 1 })}
           </span>
+          <ChevronDown className="ml-auto size-3 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent align="start" className="flex w-80 flex-col gap-2 p-3">
           <div className="relative shrink-0">
