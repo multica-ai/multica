@@ -1762,25 +1762,34 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if task.ChatSessionID.Valid {
 		var assistantMsg *db.ChatMessage
 		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
-			// Same unescape as the issue-comment path above: literal `\n` from
-			// agent stdout becomes a real newline so the chat panel renders
-			// paragraph breaks instead of one wall of prose.
-			body := util.UnescapeBackslashEscapes(payload.Output)
-			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-				ChatSessionID: task.ChatSessionID,
-				Role:          "assistant",
-				Content:       redact.Text(body),
-				TaskID:        task.ID,
-				ElapsedMs:     computeChatElapsedMs(task),
-			})
-			if err != nil {
-				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
-			} else {
-				assistantMsg = &row
-				// Unread is derived from the read cursor (chat_session.last_read_at)
-				// vs the assistant messages after it — no per-reply stamping needed.
-			}
+		_ = json.Unmarshal(result, &payload)
+		// Always write the assistant row on completion — even when the agent
+		// produced no textual output (tool-only turns, empty final message).
+		// trailingUserMessages (handler/daemon.go) anchors the "already
+		// replied" cursor on the last assistant row and relies on the
+		// invariant that every completed OR failed run writes one. FailTask
+		// already writes unconditionally; gating CompleteTask on a non-empty
+		// output broke the symmetry, so on an empty-output turn the anchor did
+		// not advance and the next run re-delivered the prior turn's user
+		// messages to the resumed session (GitHub #5013).
+		//
+		// Same unescape as the issue-comment path above: literal `\n` from
+		// agent stdout becomes a real newline so the chat panel renders
+		// paragraph breaks instead of one wall of prose.
+		body := util.UnescapeBackslashEscapes(payload.Output)
+		row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: task.ChatSessionID,
+			Role:          "assistant",
+			Content:       redact.Text(body),
+			TaskID:        task.ID,
+			ElapsedMs:     computeChatElapsedMs(task),
+		})
+		if err != nil {
+			slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
+		} else {
+			assistantMsg = &row
+			// Unread is derived from the read cursor (chat_session.last_read_at)
+			// vs the assistant messages after it — no per-reply stamping needed.
 		}
 		s.broadcastChatDone(ctx, task, assistantMsg)
 	}

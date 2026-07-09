@@ -76,6 +76,20 @@ func TestTrailingUserMessages(t *testing.T) {
 			in:   []db.ChatMessage{msg("user", "hi")},
 			want: []string{"hi"},
 		},
+		{
+			// Regression guard for GitHub #5013. A run that completes with empty
+			// output still writes an (empty) assistant anchor row — see
+			// CompleteTask in service/task.go. That advances the anchor so the
+			// next turn only delivers the genuinely new message. If the anchor
+			// row is skipped on empty output, this slice would wrongly include
+			// the already-answered "看上海天气" and re-deliver it to the agent.
+			name: "empty assistant reply still anchors the turn",
+			in: []db.ChatMessage{
+				msg("user", "看上海天气"), msg("assistant", ""),
+				msg("user", "还有青岛"),
+			},
+			want: []string{"还有青岛"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
