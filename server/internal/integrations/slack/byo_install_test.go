@@ -196,15 +196,17 @@ func TestRegisterBYO_AuthTestFailure(t *testing.T) {
 	}
 }
 
-func TestRegisterBYO_AppAlreadyConnected_Rejected(t *testing.T) {
+func TestRegisterBYO_AppConnectedToAnotherWorkspace_Rejected(t *testing.T) {
 	srv := authTestServer(t, true)
 	defer srv.Close()
-	// The pasted app is already connected to another agent / workspace, so the
-	// (channel_type, app_id) routing index rejects the upsert (unique violation).
-	// We must refuse, not steal it.
+	// The pasted app is live-owned by an agent in a DIFFERENT Multica workspace,
+	// so after the dead-owner reclaim the (channel_type, app_id) routing index
+	// still rejects the upsert. We must refuse, not steal it — and name the real
+	// case (another workspace), not the old catch-all.
 	q := &fakeInstallQueries{
-		rowID:      mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		appIDTaken: true,
+		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		appIDTaken:       true,
+		ownerWorkspaceID: mustUUID(t, "99999999-9999-9999-9999-999999999999"),
 	}
 	svc := newTestInstallService(t, q)
 	svc.apiURL = srv.URL + "/"
@@ -214,6 +216,55 @@ func TestRegisterBYO_AppAlreadyConnected_Rejected(t *testing.T) {
 		"22222222-2222-2222-2222-222222222222",
 	)); err != ErrTeamOwnedByAnotherWorkspace {
 		t.Fatalf("app already connected = %v, want ErrTeamOwnedByAnotherWorkspace", err)
+	}
+	if !q.reclaimCalled {
+		t.Error("install must attempt a dead-owner reclaim before the upsert")
+	}
+}
+
+func TestRegisterBYO_AppConnectedToAnotherAgentSameWorkspace_Rejected(t *testing.T) {
+	srv := authTestServer(t, true)
+	defer srv.Close()
+	// The pasted app is live-owned by a DIFFERENT (non-archived) agent in the
+	// SAME workspace. The old catch-all wrongly blamed "another workspace"; this
+	// must surface the same-workspace sentinel so the UI points at the Disconnect
+	// the user can actually reach (#4810).
+	q := &fakeInstallQueries{
+		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		appIDTaken:       true,
+		ownerWorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
+	}
+	svc := newTestInstallService(t, q)
+	svc.apiURL = srv.URL + "/"
+
+	if _, err := svc.RegisterBYO(context.Background(), byoParams(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	)); err != ErrTeamOwnedBySameWorkspace {
+		t.Fatalf("app owned by another agent in this workspace = %v, want ErrTeamOwnedBySameWorkspace", err)
+	}
+}
+
+func TestRegisterBYO_AppConnectedToArchivedAgent_Rejected(t *testing.T) {
+	srv := authTestServer(t, true)
+	defer srv.Close()
+	// The pasted app's owning agent is archived — a live-but-reversible owner —
+	// so the reclaim leaves it in place and the upsert is refused. The user is
+	// told to restore the agent or disconnect its bot, not that it's gone.
+	q := &fakeInstallQueries{
+		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		appIDTaken:       true,
+		ownerWorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
+		ownerArchived:    true,
+	}
+	svc := newTestInstallService(t, q)
+	svc.apiURL = srv.URL + "/"
+
+	if _, err := svc.RegisterBYO(context.Background(), byoParams(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	)); err != ErrTeamOwnedByArchivedAgent {
+		t.Fatalf("app owned by an archived agent = %v, want ErrTeamOwnedByArchivedAgent", err)
 	}
 }
 

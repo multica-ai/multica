@@ -22,6 +22,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
+  runtimeDisplayName,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
 import {
@@ -157,7 +158,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         segments={[{ href: paths.runtimes(), label: t(($) => $.page.title) }]}
         leaf={
           <span className="truncate font-mono text-xs text-foreground">
-            {runtime.name}
+            {runtimeDisplayName(runtime)}
           </span>
         }
         actions={
@@ -273,7 +274,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {runtimeDisplayName(runtime)}
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">

@@ -116,7 +116,8 @@ describe("applyIssueChange", () => {
     qc.setQueryData<ListIssuesCache>(wsKey, bucketed([issue()]));
     // p1 list loaded but the card is beyond its loaded window — the change
     // is certain (old + new status known, membership definite), so the two
-    // bucket totals shift arithmetically with zero requests.
+    // bucket totals shift arithmetically right away; the list is then marked
+    // stale so the server can place the row in the target bucket's window.
     qc.setQueryData<ListIssuesCache>(projectP1Key, bucketed([], 3));
     // p2 list loaded; the issue was never a member — untouched.
     qc.setQueryData<ListIssuesCache>(projectP2Key, bucketed([]));
@@ -154,13 +155,18 @@ describe("applyIssueChange", () => {
     ).toBe("in_progress");
 
     // Off-window count arithmetic: todo 3 → 2, in_progress 0 → 1, loaded
-    // arrays untouched, and no refetch needed.
+    // arrays untouched (never hard-insert).
     expect(total(qc, projectP1Key, "todo")).toBe(2);
     expect(total(qc, projectP1Key, "in_progress")).toBe(1);
     expect(ids(qc, projectP1Key, "todo")).toEqual([]);
 
     const staleHashes = result.staleKeys.map(hashKey);
-    expect(staleHashes).not.toContain(hashKey(projectP1Key));
+    // The moved list IS flagged stale: the row now counted in in_progress
+    // can only be placed into that bucket's loaded window by the server,
+    // and with staleTime: Infinity no other channel triggers that reconcile.
+    expect(staleHashes).toContain(hashKey(projectP1Key));
+    // Never-a-member p2 and the surgically-rebucketed workspace list have
+    // nothing to reconcile — no stale keys.
     expect(staleHashes).not.toContain(hashKey(projectP2Key));
     expect(staleHashes).not.toContain(hashKey(wsKey));
   });

@@ -2249,6 +2249,31 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		originType = pgtype.Text{String: *req.OriginType, Valid: true}
 		originID = oid
+	} else if creatorType == "agent" {
+		// MUL-4305: an agent creating an issue via the ordinary create path
+		// carries no explicit origin, which historically left the new issue
+		// unattributed. Any run later derived from it (agent assignment,
+		// squad-leader trigger) then lost the top-of-chain human originator,
+		// so A2A @-mentions from those runs failed the canInvokeAgent gate
+		// against private agents. Stamp the acting task as the issue's origin
+		// so resolveOriginatorForIssueTask can inherit its originator — the
+		// same trick CreateComment uses with comment.source_task_id (MUL-4015).
+		//
+		// The task id is taken from the SERVER-trusted X-Task-ID: resolveActor
+		// only returns creatorType=="agent" when either X-Actor-Source=task_token
+		// (the auth middleware bound X-Agent-ID/X-Task-ID from the mat_ token and
+		// stripped any client value) or the X-Agent-ID/X-Task-ID pair was
+		// validated against the DB. A member-forged X-Task-ID never reaches here
+		// because it would have resolved to creatorType=="member". We still
+		// re-check the task belongs to the acting agent before trusting it.
+		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
+			if taskUUID, perr := util.ParseUUID(taskIDHeader); perr == nil {
+				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {
+					originType = pgtype.Text{String: "agent_create", Valid: true}
+					originID = taskUUID
+				}
+			}
+		}
 	}
 
 	// Prefix is workspace-level; pre-compute once so both the broadcast

@@ -255,6 +255,9 @@
     "runtime_cloud_badge": "Cloud",
     "runtime_private_badge": "Private",
     "runtime_private_locked_tooltip": "Private runtime — only its owner or a workspace admin can create agents on it. Ask the owner to switch it to Public to share.",
+    "runtime_search_placeholder": "Search machines…",
+    "runtime_no_results": "No matching machines",
+    "runtime_group_online": "{{online}}/{{total}} online",
     "duplicate_copy_suffix": " (Copy)",
     "create": "Create",
     "creating": "Creating...",
@@ -488,7 +491,9 @@
     "runtime_label": "Runtime",
     "skills_label": "Skills",
     "owner_label": "Owner",
-    "unknown_runtime": "Unknown runtime"
+    "unknown_runtime": "Unknown runtime",
+    "model_label": "Model",
+    "model_unset": "Runtime default"
   },
   "live_peek": {
     "current_issue_label": "Now on",

@@ -372,7 +372,10 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 	originID := util.UUIDToString(issue.OriginID)
 	switch issue.OriginType.String {
-	case "quick_create":
+	case "quick_create", "agent_create":
+		// Both link the issue back to the agent_task_queue row that created it
+		// (agent_create is the ordinary agent `issue create` path, MUL-4305);
+		// surface that task id and keep the manual source label.
 		return analytics.SourceManual, originID, ""
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID

@@ -462,6 +462,36 @@ describe("onIssueUpdated — off-screen status change reconciles column counts",
     expectInvalidated(qc, issueKeys.myAll(WS_ID));
   });
 
+  it("moves the bucket counts AND refetches when the off-screen issue's base entity is known", () => {
+    // The detail cache knows the pre-change entity, so the coordinator moves
+    // one unit of total between the buckets instantly — but the row itself
+    // can only be placed into done's loaded window by the server, and with
+    // staleTime: Infinity this invalidation is the only reconcile channel.
+    // (Before the fix this branch moved counts with no stale key: an open
+    // board showed "done 61" with 60 visible rows until something else
+    // happened to invalidate the list.)
+    const offScreen: Issue = { ...baseIssue, id: "off-screen", status: "in_review" };
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, "off-screen"), offScreen);
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...offScreen, status: "done" },
+      { statusChanged: true },
+    );
+
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.done?.total).toBe(61);
+    expectInvalidated(qc, issueKeys.list(WS_ID));
+  });
+
   it("does NOT refetch when the status-changed issue is loaded (surgical patch suffices)", () => {
     const loaded: Issue = { ...baseIssue, id: "loaded", status: "in_review" };
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
