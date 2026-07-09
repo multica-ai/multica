@@ -326,6 +326,7 @@ type ChatSession struct {
 	Status       string             `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince  pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID    pgtype.UUID        `json:"runtime_id"`
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`
