@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
-	"github.com/spf13/cobra"
 )
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
@@ -175,6 +175,186 @@ func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
 	}
 	if elapsed > 10*time.Second {
 		t.Fatalf("runDaemonStart took %s, want fail-fast before the readiness wait", elapsed)
+	}
+}
+
+// TestReadLogTailSince pins the log-excerpt helper used when the daemon child
+// dies during startup: only content appended after the recorded offset is
+// shown, capped to the last maxLines lines.
+func TestReadLogTailSince(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	if err := os.WriteFile(logPath, []byte("old line 1\nold line 2\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat log: %v", err)
+	}
+	offset := info.Size()
+
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	for i := 1; i <= 5; i++ {
+		fmt.Fprintf(f, "new line %d\n", i)
+	}
+	f.Close()
+
+	lines := readLogTailSince(logPath, offset, 3)
+	want := []string{"new line 3", "new line 4", "new line 5"}
+	if len(lines) != len(want) {
+		t.Fatalf("readLogTailSince = %q, want %q", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("readLogTailSince[%d] = %q, want %q", i, lines[i], want[i])
+		}
+	}
+
+	if got := readLogTailSince(logPath, 1<<40, 3); len(got) != 0 {
+		t.Fatalf("readLogTailSince(past EOF) = %q, want empty", got)
+	}
+}
+
+// TestDaemonStartupFailureError pins the friendly classification of a daemon
+// child that died during startup: the two failure modes users actually hit
+// (token rejected, server unreachable) get a one-line reason plus an
+// actionable next step instead of a raw log dump; only unrecognized failures
+// fall back to a log excerpt, and even that excerpt drops DBG/INF noise.
+// Classification reads both sinks: structured slog lines land in daemon.log,
+// while the child's final cobra "Error: ..." line and panics land in the
+// crash sink (daemon.err.log).
+func TestDaemonStartupFailureError(t *testing.T) {
+	t.Parallel()
+
+	writeLog := func(t *testing.T, name, content string) string {
+		t.Helper()
+		logPath := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+		return logPath
+	}
+
+	t.Run("token rejected", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", `18:29:58.416 INF authenticated component=daemon
+18:29:58.425 WRN auth token rejected by server — run 'multica login' to re-authenticate component=daemon error="POST /api/tokens/current/renew returned 401: {\"error\":\"invalid token\"}"
+list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
+`)
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "rejected your login token") || !strings.Contains(msg, "multica login") {
+			t.Fatalf("error = %q, want token-rejected reason with login hint", msg)
+		}
+		if strings.Contains(msg, "component=daemon") {
+			t.Fatalf("error = %q, want no raw log lines for a classified failure", msg)
+		}
+	})
+
+	t.Run("token rejected with profile", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", "WRN auth token rejected by server error=\"returned 401\"\n")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "staging", "http://localhost:8080")
+		if !strings.Contains(err.Error(), "multica login --profile staging") {
+			t.Fatalf("error = %q, want profile-scoped login hint", err)
+		}
+	})
+
+	t.Run("server unreachable via crash sink", func(t *testing.T) {
+		t.Parallel()
+		// The detached child routes slog into daemon.log, but its final cobra
+		// error line goes to raw stderr — the crash sink. The "connection
+		// refused" reason may therefore exist ONLY there.
+		logPath := writeLog(t, "daemon.log", `18:40:46.588 DBG token renewal failed; will retry on next cycle component=daemon error="Post \"http://localhost:8080/api/tokens/current/renew\": dial tcp [::1]:8080: connect: connection refused"
+`)
+		errLogPath := writeLog(t, "daemon.err.log", `Error: list workspaces: Get "http://localhost:8080/api/workspaces": dial tcp [::1]:8080: connect: connection refused
+`)
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath, errLogPath: errLogPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "cannot reach the Multica server at http://localhost:8080") {
+			t.Fatalf("error = %q, want server-unreachable reason with URL", msg)
+		}
+		if strings.Contains(msg, "dial tcp") || strings.Contains(msg, "component=daemon") {
+			t.Fatalf("error = %q, want no raw log lines for a classified failure", msg)
+		}
+	})
+
+	t.Run("unrecognized failure keeps filtered excerpt plus crash output", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", `18:00:00.001 DBG some debug detail component=daemon
+18:00:00.002 INF starting daemon component=daemon
+18:00:00.003 ERR something exploded component=daemon
+`)
+		errLogPath := writeLog(t, "daemon.err.log", "open /nope: permission denied\n")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath, errLogPath: errLogPath}, nil, "", "http://localhost:8080")
+		msg := err.Error()
+		if !strings.Contains(msg, "something exploded") || !strings.Contains(msg, "permission denied") {
+			t.Fatalf("error = %q, want WRN/ERR and crash lines kept", msg)
+		}
+		if strings.Contains(msg, "some debug detail") || strings.Contains(msg, "starting daemon") {
+			t.Fatalf("error = %q, want DBG/INF noise dropped", msg)
+		}
+		if !strings.Contains(msg, errLogPath) {
+			t.Fatalf("error = %q, want pointer to the crash sink", msg)
+		}
+	})
+
+	t.Run("empty logs", func(t *testing.T) {
+		t.Parallel()
+		logPath := writeLog(t, "daemon.log", "")
+		err := daemonStartupFailureError(daemonStartupLogs{logPath: logPath}, nil, "", "")
+		if !strings.Contains(err.Error(), "daemon exited during startup") || !strings.Contains(err.Error(), logPath) {
+			t.Fatalf("error = %q, want generic failure pointing at the log file", err)
+		}
+	})
+}
+
+// TestDaemonStartBackgroundReportsEarlyChildExit pins the fail-fast contract
+// for an authenticated `daemon start` whose child dies during preflight
+// (unreachable server, token rejected with 401, ...): the parent must notice
+// the exit and report failure immediately instead of polling the health port
+// for the full 45s readiness window and ending with a vague "check logs"
+// warning and exit code 0.
+//
+// The spawned child is stubbed to `false` via daemonExecutable so it dies
+// immediately with a non-zero status, the same shape as a failed preflight.
+func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	falseBin, err := exec.LookPath("false")
+	if err != nil {
+		t.Skipf("false binary unavailable: %v", err)
+	}
+	orig := daemonExecutable
+	daemonExecutable = func() (string, error) { return falseBin, nil }
+	t.Cleanup(func() { daemonExecutable = orig })
+
+	const profile = "child-exit-test"
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake"}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	start := time.Now()
+	err = runDaemonStart(cmd, nil)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "daemon exited during startup") {
+		t.Fatalf("runDaemonStart() = %v, want startup failure error", err)
+	}
+	if elapsed > 15*time.Second {
+		t.Fatalf("runDaemonStart took %s, want early-exit detection well before the 45s readiness window", elapsed)
 	}
 }
 
