@@ -167,7 +167,7 @@ func TestPrepareCodexHomeDoesNotExposeWholeCodexHome(t *testing.T) {
 		t.Fatalf("write shared hooks.json: %v", err)
 	}
 	// A private, non-hook file that must never leak into the per-task home.
-	if err := os.WriteFile(filepath.Join(sharedHome, "secret.txt"), []byte("flux-cookie"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sharedHome, "secret.txt"), []byte("private-secret-value"), 0o600); err != nil {
 		t.Fatalf("write shared secret: %v", err)
 	}
 
