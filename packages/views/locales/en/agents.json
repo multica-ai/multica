@@ -491,7 +491,9 @@
     "runtime_label": "Runtime",
     "skills_label": "Skills",
     "owner_label": "Owner",
-    "unknown_runtime": "Unknown runtime"
+    "unknown_runtime": "Unknown runtime",
+    "model_label": "Model",
+    "model_unset": "Runtime default"
   },
   "live_peek": {
     "current_issue_label": "Now on",

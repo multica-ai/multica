@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "聊天",
+    "select_prompt": "选择一个对话，或点 + 新建"
+  },
   "fab": {
     "running": "Multica 正在工作...",
     "unread_other": "{{count}} 条未读对话",
@@ -7,12 +11,15 @@
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
+    "placeholder_archived_agent": "该智能体已归档",
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败",
-    "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。"
+    "attachment_bind_failed_toast": "消息已发送，但文件未能附加。请稍后重试。",
+    "add_tooltip": "添加",
+    "upload_file": "图片或文件"
   },
   "message_list": {
     "show_details": "查看详情",
@@ -95,7 +102,8 @@
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
     "returning_title_default": "欢迎使用 Multica",
-    "returning_subtitle": "试试问"
+    "returning_subtitle": "试试问",
+    "chat_with_named": "与 {{name}} 对话"
   },
   "starter_prompts": {
     "list_open": "按优先级列出我未完成的任务",
@@ -103,6 +111,7 @@
     "plan_next": "规划接下来该做什么"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
+  "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
   "offline_banner": {
     "fallback_name": "智能体",
     "unstable": "{{name}} 的连接不稳定——回复可能延迟。",
@@ -126,5 +135,29 @@
       "searching_web": "搜索网页",
       "fallback": "处理中"
     }
+  },
+  "list": {
+    "typing": "正在输入…",
+    "failed": "发送失败",
+    "you_prefix": "你：",
+    "no_messages": "还没有消息",
+    "quick_agents": "常用 Agent",
+    "add": "添加",
+    "add_agent": "添加常用 Agent",
+    "unpin_agent": "移出常用",
+    "waiting": "等待回复",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "pinned": "已置顶",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "archived_title": "已归档"
+  },
+  "header": {
+    "view_profile": "查看 Agent 资料",
+    "rename": "重命名会话",
+    "delete": "删除会话",
+    "archive": "归档会话",
+    "unarchive": "取消归档"
   }
 }

@@ -409,12 +409,9 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 		}
 	}
 
-	// Not parallel: the slim subtest toggles a process-wide feature flag.
-	t.Run("legacy", func(t *testing.T) { run(t, "legacy") })
-	t.Run("slim", func(t *testing.T) {
-		withSlimBrief(t)
-		run(t, "slim")
-	})
+	// The `runtime_brief_slim` flag was retired (MUL-4297); there is now a
+	// single brief.
+	run(t, "brief")
 }
 
 // The sub-issue creation rule must reach top-level parents that have no
@@ -583,11 +580,7 @@ func TestConnectedAppsRenderedAcrossBriefModes(t *testing.T) {
 		}
 	}
 
-	t.Run("legacy", func(t *testing.T) { run(t, "legacy") })
-	t.Run("slim", func(t *testing.T) {
-		withSlimBrief(t)
-		run(t, "slim")
-	})
+	run(t, "brief")
 }
 
 func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {

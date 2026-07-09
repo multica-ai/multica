@@ -1,5 +1,20 @@
 import type { AgentTask } from "./agent";
 
+/** A user's pinned "quick agent" for the Chat list top bar. */
+export interface ChatPinnedAgent {
+  agent_id: string;
+  position: number;
+}
+
+/** Preview of a session's most recent message, for the IM-style list. */
+export interface ChatLastMessage {
+  content: string;
+  role: "user" | "assistant";
+  created_at: string;
+  /** Present when the last message is a failed assistant reply. */
+  failure_reason?: string | null;
+}
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -7,8 +22,17 @@ export interface ChatSession {
   creator_id: string;
   title: string;
   status: "active" | "archived";
-  /** True when the session has any unread assistant replies. List-only. */
+  /** True when the session has any unread assistant replies. List-only.
+   *  Convenience for `unread_count > 0`. */
   has_unread: boolean;
+  /** Number of unread assistant messages (after the read cursor). List-only;
+   *  optional so older clients / non-list payloads stay valid. */
+  unread_count?: number;
+  /** Latest message in the session, or null when empty. List-only. */
+  last_message?: ChatLastMessage | null;
+  /** True when the user has pinned this chat to the top of the list.
+   *  Optional so older clients / non-list payloads stay valid. */
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
 }

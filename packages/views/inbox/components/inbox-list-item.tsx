@@ -44,14 +44,14 @@ export function InboxListItem({
     <button
       type="button"
       onClick={onClick}
-      className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+      className={`group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors ${
         isSelected ? "bg-accent" : "hover:bg-accent/50"
       }`}
     >
       <ActorAvatar
         actorType={item.actor_type ?? item.recipient_type}
         actorId={item.actor_id ?? item.recipient_id}
-        size={28}
+        size={32}
         enableHoverCard
       />
       <div className="min-w-0 flex-1">

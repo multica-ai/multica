@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing } from "@multica/core/utils";
 import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -17,7 +16,7 @@ import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -52,6 +51,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { ContentEditor } from "../../editor/content-editor";
 import {
   PickerItem,
@@ -259,7 +259,6 @@ export function SquadDetailPage() {
           leaderName={getEntityName("agent", squad.leader_id)}
           creatorName={getEntityName("member", squad.creator_id)}
           canManage={canManage}
-          uploadingAvatar={updateSquadMut.isPending}
           onUploadAvatar={(url) => updateSquadMut.mutateAsync({ avatar_url: url })}
           onRename={async (next) => { await updateSquadMut.mutateAsync({ name: next.trim() }); }}
           onUpdateDescription={async (next) => { await updateSquadMut.mutateAsync({ description: next }); }}
@@ -396,81 +395,9 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
   );
 }
 
-// Large click-to-upload avatar editor. Mirrors AvatarEditor in
-// agent-detail-inspector.tsx — square (rounded-md) treatment is reserved
-// for non-human actors (agent, squad), circles for humans.
-function SquadAvatarEditor({
-  squad,
-  initials,
-  uploading,
-  onUpload,
-}: {
-  squad: Squad;
-  initials: string;
-  uploading: boolean;
-  onUpload: (url: string) => Promise<unknown>;
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const { upload, uploading: fileUploading } = useFileUpload(api);
-  const busy = uploading || fileUploading;
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    try {
-      const result = await upload(file);
-      if (!result) return;
-      await onUpload(result.link);
-      toast.success("Avatar updated");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={busy}
-        aria-label="Change squad avatar"
-      >
-        {squad.avatar_url ? (
-          <ActorAvatarBase
-            name={squad.name}
-            initials={initials}
-            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-            size={64}
-            className="rounded-none"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-            <Users className="h-7 w-7" />
-          </div>
-        )}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-          {busy ? (
-            <Loader2 className="h-4 w-4 animate-spin text-white" />
-          ) : (
-            <Camera className="h-4 w-4 text-white" />
-          )}
-        </div>
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFile}
-      />
-    </>
-  );
-}
-
 // Read-only 64px avatar for viewers who can't manage the squad — same visual
-// as SquadAvatarEditor's resting state but without the click/upload affordance.
+// as the editable control's resting state but without the click/upload
+// affordance.
 function SquadStaticAvatar({ squad, initials }: { squad: Squad; initials: string }) {
   return (
     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
@@ -837,7 +764,6 @@ function SquadDetailInspector({
   leaderName,
   creatorName,
   canManage,
-  uploadingAvatar,
   onUploadAvatar,
   onRename,
   onUpdateDescription,
@@ -850,7 +776,6 @@ function SquadDetailInspector({
   // no rename/description popovers) — the viewer can read the squad but not
   // edit it. Mirrors the agent inspector's `canEdit` read-only treatment.
   canManage: boolean;
-  uploadingAvatar: boolean;
   onUploadAvatar: (url: string) => Promise<unknown>;
   onRename: (next: string) => Promise<void>;
   onUpdateDescription: (next: string) => Promise<void>;
@@ -870,11 +795,12 @@ function SquadDetailInspector({
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
         {canManage ? (
           <>
-            <SquadAvatarEditor
-              squad={squad}
-              initials={initials}
-              uploading={uploadingAvatar}
-              onUpload={onUploadAvatar}
+            <AvatarUploadControl
+              variant="squad"
+              value={squad.avatar_url ?? null}
+              name={squad.name}
+              size={64}
+              onUploaded={onUploadAvatar}
             />
             <div className="flex flex-col gap-1">
               <SquadNameEditor value={squad.name} onSave={onRename} />

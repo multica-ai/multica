@@ -142,61 +142,39 @@ func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertIns
 	return installationFromRow(row)
 }
 
-// RemoveRevokedInstallationByAppID clears a revoked installation that belongs to
-// a DIFFERENT agent in the same workspace and holds the (channel_type,
-// config->>'app_id') unique slot, so the caller can re-install the same
-// Lark/Feishu app against a new agent without tripping the functional unique
-// index. The guarded DELETE is the atomic gate: it removes the row only when it
-// is still (this workspace, another agent, revoked) at delete time and RETURNS
-// its id. Only when a row is actually claimed do we clean its dependents.
-//
-//   - the SAME agent's revoked row (agent_id = agentID) never matches, so the
-//     upsert reactivates it in place (installation_id + all bindings preserved);
-//   - an ACTIVE row (bot still connected) never matches, so the install surfaces
-//     as a conflict instead of silently stealing it;
-//   - a row in ANOTHER workspace never matches.
-//
-// Keying cleanup off the RETURNING id — rather than a prior read — closes the
-// read-then-delete race: a concurrent same-agent reconnect that flips the row
-// to 'active' between a read and the delete would previously still trigger the
-// dependent cleanup on a stale id and wipe a since-reactivated installation's
-// bindings. Under READ COMMITTED the DELETE re-checks status='revoked' against
-// the live row, so it claims nothing in that case and we touch no dependents.
-//
-// channel_* has no FK/cascade (MUL-3515 §4), so every application-owned row that
-// referenced the deleted installation is cleared explicitly — chat-session
-// bindings, pending binding tokens, member links — and inbound-audit rows are
-// detached by NULLing installation_id (the app-layer stand-in for the old
-// ON DELETE SET NULL). With no FK the order is free, so cleanup runs after the
-// claiming delete; all of it is on the caller's transaction-bound queries, so
-// delete + cleanup + the follow-up upsert commit (or roll back) atomically.
-func (s *ChannelStore) RemoveRevokedInstallationByAppID(ctx context.Context, workspaceID, agentID pgtype.UUID, appID string) error {
-	installID, err := s.Queries.DeleteRevokedChannelInstallationByAppID(ctx, db.DeleteRevokedChannelInstallationByAppIDParams{
+// ReclaimDeadInstallationByAppID frees the (feishu, config->>'app_id') routing
+// slot before a rebind by removing a DEAD prior owner of the same Lark/Feishu
+// app — a revoked placeholder left by a DIFFERENT agent in this workspace, or an
+// ORPHAN whose owning workspace/agent has been deleted (#4810) — together with
+// every dependent row of that installation, in a single statement. A live owner
+// is deliberately left in place: the SAME agent's own revoked row (reactivated by
+// the follow-up upsert), and any ACTIVE owner whose agent still exists — including
+// an ARCHIVED agent, since archiving is reversible — so the upsert surfaces a
+// conflict instead of silently stealing the bot. See the full contract, and the
+// TOCTOU / EvalPlanQual reasoning, on ReclaimDeadChannelInstallationByAppID.
+func (s *ChannelStore) ReclaimDeadInstallationByAppID(ctx context.Context, workspaceID, agentID pgtype.UUID, appID string) error {
+	_, err := s.Queries.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
 		ChannelType: channelTypeFeishu,
 		AppID:       appID,
 		WorkspaceID: workspaceID,
 		AgentID:     agentID,
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // no blocking row claimed (same agent / active / other workspace / none)
-		}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
 		return err
 	}
+	return nil
+}
 
-	if err := s.Queries.DeleteChannelChatSessionBindingsByInstallation(ctx, db.DeleteChannelChatSessionBindingsByInstallationParams{
-		InstallationID: installID,
-		ChannelType:    channelTypeFeishu,
-	}); err != nil {
-		return err
-	}
-	if err := s.Queries.DeleteChannelBindingTokensByInstallation(ctx, installID); err != nil {
-		return err
-	}
-	if err := s.Queries.DeleteChannelUserBindingsByInstallation(ctx, installID); err != nil {
-		return err
-	}
-	return s.Queries.NullChannelInboundAuditInstallationID(ctx, installID)
+// InstallationOwnerByAppID returns the current owner of the (feishu, app_id)
+// routing slot so the caller can build an accurate rebind-conflict message.
+// Called after ReclaimDeadInstallationByAppID, so a row here is a live owner;
+// pgx.ErrNoRows means the slot is free.
+func (s *ChannelStore) InstallationOwnerByAppID(ctx context.Context, appID string) (db.GetChannelInstallationOwnerByAppIDRow, error) {
+	return s.Queries.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
+		ChannelType: channelTypeFeishu,
+		AppID:       appID,
+	})
 }
 
 func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetInstallationStatusParams) error {

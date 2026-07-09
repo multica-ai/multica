@@ -158,58 +158,14 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 	if triggerCommentID == "" {
 		return ""
 	}
-	if useSlimBrief() {
-		return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID)
-	}
-	if runtimeGOOS == "windows" {
-		return fmt.Sprintf(
-			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
-				"do NOT reuse --parent values from previous turns in this session.\n\n"+
-				"On Windows, write the reply body to a UTF-8 file with your file-write tool, then post it with `--content-file`. "+
-				"Do NOT pipe via `--content-stdin` — Windows PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to native commands and silently drops non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) as `?` before the bytes reach `multica.exe`. "+
-				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
-				"Use this form, preserving the same issue ID and --parent value:\n\n"+
-				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
-				"    # 2. Post the comment:\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
-				"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
-				"    Remove-Item ./reply.md\n\n"+
-				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
-			issueID, triggerCommentID,
-		)
-	}
-	// Linux/macOS, any provider: `--content-file`. Switched from `--content-stdin` +
-	// HEREDOC to converge with the Windows path and close GitHub #4182. The
-	// HEREDOC pattern was safe for the trivial single-flag case, but as soon as
-	// the model wrapped extra flags around the heredoc (assignee, project on
-	// `issue create` / `issue update`) it became fragile to flag/heredoc
-	// boundary mistakes — flags either got swallowed into the body or executed
-	// as separate failing shell statements while the create succeeded with
-	// nulls. The file path eliminates that class of error: all flags live on
-	// one command line, the body never reaches the shell.
-	return fmt.Sprintf(
-		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
-			"do NOT reuse --parent values from previous turns in this session.\n\n"+
-			"Write the reply body to a UTF-8 file with your file-write tool first, then post it with `--content-file`. "+
-			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them. "+
-			"Do NOT use `--content-stdin` with a HEREDOC either — when extra flags (e.g. `--assignee`, `--project` on `multica issue create`) accompany the command, the bash heredoc/flag boundary is fragile and flags can be silently swallowed into the stdin stream while the command still exits 0 (see GitHub #4182, OXY-78 / OXY-76). "+
-			"It is also easy to lose formatting or compress a structured reply into one line with inline forms.\n\n"+
-			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
-			"    # 2. Post the comment:\n"+
-			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
-			"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
-			"    rm ./reply.md\n\n"+
-			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
-		issueID, triggerCommentID,
-	)
+	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID)
 }
 
-
-// buildCommentReplyInstructionsSlim is the post-MUL-3560 compressed
-// reply-instructions block. Selected by BuildCommentReplyInstructions when
-// the `runtime_brief_slim` feature flag is on; the legacy verbose form
-// above stays the default in production.
+// buildCommentReplyInstructionsSlim is the compressed reply-instructions
+// block used by BuildCommentReplyInstructions. It was introduced in
+// MUL-3560 as the slim alternative to a legacy verbose form; the
+// `runtime_brief_slim` flag has since been retired (MUL-4297) and this is
+// now the only form.
 //
 // The slim block carries only the trigger-specific cookbook (the exact
 // `--parent` UUID, the file path, the cleanup line) plus the two
