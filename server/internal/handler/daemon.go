@@ -2452,15 +2452,20 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // a delivered one.
 //
 // Scope + loop safety:
-//   - MEMBER comments qualify as before. AGENT comments now also qualify, but
-//     ONLY through their explicit routing: computeCommentAgentTriggers run under
-//     author_type = 'agent' produces triggers solely for explicit @agent/@squad
-//     mentions (plus the narrow assigned-squad-leader fallback). A plain agent
-//     reply / acknowledgement / self-trigger with no mention yields nothing, so
-//     the anti-loop boundary the old member-only filter protected is preserved.
+//   - MEMBER comments qualify as before, with their full routing. AGENT comments
+//     now also qualify, but ONLY through an explicit @agent/@squad mention
+//     (keepExplicitMentionTriggers). Every non-mention agent route — the
+//     assigned-squad-leader fallback, thread-parent / conversation continuation
+//     — is intentionally excluded, so a plain agent reply / acknowledgement
+//     earns no follow-up here regardless of issue assignment. That is the
+//     anti-loop boundary the old member-only filter protected.
 //     This closes MUL-4304: an explicit agent→agent @mention that landed while
-//     the target had a dispatched/running task (merge only folds into a QUEUED
-//     task, so it was deferred here) is now compensated instead of dropped.
+//     the target already had a DISPATCHED task is dropped by the create-time
+//     enqueue path — merge only folds a comment into a QUEUED task, so a
+//     dispatched target hits the merge-miss + active-task `continue` and is
+//     deferred here — and was then never replayed because agent comments were
+//     excluded. (A target with only a RUNNING/queued task does not hit that
+//     drop: queued merges in, running-only takes the normal fresh-enqueue path.)
 //   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
 //     an `@other-agent` comment is left to that agent's own creation-time
 //     trigger, so a completion never re-wakes an unrelated agent.
@@ -2530,11 +2535,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// originator. For an agent author, the originator is the human at the
 		// top of that agent's trigger chain (resolved from the comment's source
 		// task); canInvokeAgent judges an agent→agent (A2A) mention by that
-		// originator, not the immediate agent principal (MUL-3963). Agent-authored
-		// comments only ever route via an explicit @agent/@squad mention (or the
-		// narrow assigned-squad-leader fallback), so a plain agent reply /
-		// acknowledgement contributes nothing here — the anti-loop boundary the
-		// old member-only filter protected is preserved (MUL-4304).
+		// originator, not the immediate agent principal (MUL-3963).
 		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
@@ -2545,6 +2546,18 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			ExcludeTriggerCommentID: c.ID,
 			OriginatorUserID:        originatorUserID,
 		})
+		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
+		// computeCommentAgentTriggers can also return the assigned-squad-leader
+		// fallback (Source = issue-assignee) for a plain worker-agent reply on a
+		// squad-assigned issue; that conversational routing is intentionally NOT
+		// replayed here. Restricting to the explicit-mention sources keeps the
+		// invariant unconditional — a plain agent reply / acknowledgement earns
+		// no follow-up regardless of issue assignment — which is the anti-loop
+		// boundary the old member-only filter protected (MUL-4304). Member
+		// comments are unaffected: they keep their full routing.
+		if actorType != "member" {
+			triggers = keepExplicitMentionTriggers(triggers)
+		}
 		scoped := make([]commentAgentTrigger, 0, 1)
 		for _, trigger := range triggers {
 			if uuidToString(trigger.Agent.ID) == agentID {
@@ -2567,6 +2580,28 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"agent_id", agentID,
 			"undelivered_comments", scheduled)
 	}
+}
+
+// keepExplicitMentionTriggers filters a computed trigger set down to the ones
+// produced by an EXPLICIT @agent / @squad mention (MUL-4304). It is applied to
+// agent-authored comments during completion reconcile so that only a
+// deliberately-targeted mention earns a replay — the assigned-squad-leader
+// fallback, thread-parent / conversation continuation, and issue-assignee
+// routing (all non-mention sources) are intentionally excluded, so a plain
+// agent reply or acknowledgement never earns a follow-up here. Member comments
+// are never passed through this filter; they keep their full routing.
+func keepExplicitMentionTriggers(triggers []commentAgentTrigger) []commentAgentTrigger {
+	if len(triggers) == 0 {
+		return triggers
+	}
+	filtered := make([]commentAgentTrigger, 0, len(triggers))
+	for _, trigger := range triggers {
+		switch trigger.Source {
+		case commentTriggerSourceMentionAgent, commentTriggerSourceMentionSquadLeader:
+			filtered = append(filtered, trigger)
+		}
+	}
+	return filtered
 }
 
 // buildCoalescedCommentData loads the full detail of each comment that was

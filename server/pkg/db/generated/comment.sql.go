@@ -679,21 +679,23 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 //
 // Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
 // That left a gap — an explicit agent→agent @mention (agent A comments
-// `@agent B`) that landed while B already had a dispatched/running task was
-// dropped by the enqueue path (merge only folds into a QUEUED task) and then
-// never compensated here, because agent-authored comments were excluded. We now
-// also return 'agent' comments so those explicit mentions can be replayed.
+// `@agent B`) that landed while B already had a DISPATCHED task was dropped by
+// the create-time enqueue path (merge only folds into a QUEUED task, so a
+// dispatched target hits the merge-miss + active-task continue) and then never
+// compensated here, because agent-authored comments were excluded. We now also
+// return 'agent' comments so those explicit mentions can be replayed.
 //
 // This does NOT reopen the anti-loop guarantees the member-only filter was
-// protecting: the reconcile pass runs each returned comment through
-// computeCommentAgentTriggers with the comment's OWN author_type, and for an
-// agent author that function only ever produces triggers for explicit
-// @agent/@squad mentions (plus the narrow assigned-squad-leader fallback) — a
-// plain agent reply / acknowledgement with no mention yields nothing. The
-// reconcile pass further keeps only triggers routing to the agent that just
-// completed, so an agent comment can never fan out to an unrelated agent.
-// Ordered ASC so replaying in order lets later comments coalesce onto the
-// follow-up created by the first.
+// protecting. The reconcile pass runs each returned comment through
+// computeCommentAgentTriggers under its OWN author_type, and for an agent author
+// it then keeps ONLY explicit @agent/@squad mention triggers
+// (keepExplicitMentionTriggers) — the assigned-squad-leader fallback and all
+// other conversational routing are dropped, so a plain agent reply /
+// acknowledgement yields nothing regardless of issue assignment. The reconcile
+// pass further keeps only triggers routing to the agent that just completed, so
+// an agent comment can never fan out to an unrelated agent. Ordered ASC so
+// replaying in order lets later comments coalesce onto the follow-up created by
+// the first.
 func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg ListReconcilableCommentsForIssueSinceParams) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince, arg.IssueID, arg.Since)
 	if err != nil {
