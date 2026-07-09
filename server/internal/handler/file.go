@@ -436,6 +436,37 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			}
 			params.ChatSessionID = session.ID
 		}
+		// task_id upload: an agent producing an image/file for its chat reply.
+		// The row is tagged with the producing task and its chat session so
+		// CompleteTask can bind it to the assistant message it synthesizes.
+		// Gate: caller must be the task's agent, the task must live in this
+		// workspace, and it must be a chat task (has a chat_session_id).
+		if taskID := r.FormValue("task_id"); taskID != "" {
+			taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+			if !ok {
+				return
+			}
+			task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+				ID:          taskUUID,
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid task_id")
+				return
+			}
+			if uploaderType != "agent" || uuidToString(task.AgentID) != uploaderID {
+				writeError(w, http.StatusForbidden, "task_id upload requires the task's own agent")
+				return
+			}
+			if !task.ChatSessionID.Valid {
+				writeError(w, http.StatusBadRequest, "task_id upload requires a chat task")
+				return
+			}
+			params.TaskID = task.ID
+			// Bind the session too so reads (groupChatMessageAttachments) and
+			// GC classify the row consistently before it gains a message id.
+			params.ChatSessionID = task.ChatSessionID
+		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {

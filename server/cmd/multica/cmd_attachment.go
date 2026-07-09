@@ -30,10 +30,75 @@ var attachmentDownloadCmd = &cobra.Command{
 	RunE: runAttachmentDownload,
 }
 
+var attachmentUploadCmd = &cobra.Command{
+	Use:   "upload <path>",
+	Short: "Upload a file to attach to your chat reply",
+	Long: `Upload a local file so it appears attached to the reply of the current chat task.
+
+Intended for agents running inside a chat task: the file is tagged with the
+task and, when the task completes, the server binds it to the assistant reply
+it produces. The command prints the attachment id, a durable markdown_url, and
+a ready-to-paste markdown snippet — embed the snippet in your reply to place
+the image inline, or omit it and the file still shows as an attachment card
+below the reply.
+
+The task id is read from MULTICA_TASK_ID (set by the daemon inside a task);
+override it with --task when needed.`,
+	Example: `  # Attach an image to the current chat reply
+  $ multica attachment upload ./chart.png`,
+	Args: exactArgs(1),
+	RunE: runAttachmentUpload,
+}
+
 func init() {
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
+	attachmentCmd.AddCommand(attachmentUploadCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
+	attachmentUploadCmd.Flags().String("task", "", "Chat task id to attach to (defaults to MULTICA_TASK_ID)")
+}
+
+func runAttachmentUpload(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	taskID, _ := cmd.Flags().GetString("task")
+	if taskID == "" {
+		taskID = client.TaskID
+	}
+	if taskID == "" {
+		return fmt.Errorf("no chat task in context: run inside a chat task (MULTICA_TASK_ID set) or pass --task <id>")
+	}
+
+	path := args[0]
+	if isHTTPURL(path) {
+		return fmt.Errorf("upload accepts a local file path, not a URL: %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", path, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+	defer cancel()
+
+	att, err := client.UploadChatAttachment(ctx, data, path, taskID)
+	if err != nil {
+		return fmt.Errorf("upload attachment: %w", err)
+	}
+
+	filename := filepath.Base(path)
+	markdown := fmt.Sprintf("![%s](%s)", filename, att.MarkdownURL)
+	fmt.Fprintln(os.Stderr, "Uploaded:", filename)
+
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"id":           att.ID,
+		"filename":     filename,
+		"markdown_url": att.MarkdownURL,
+		"markdown":     markdown,
+	})
 }
 
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {

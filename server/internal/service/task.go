@@ -1762,11 +1762,33 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if task.ChatSessionID.Valid {
 		var assistantMsg *db.ChatMessage
 		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
-			// Same unescape as the issue-comment path above: literal `\n` from
-			// agent stdout becomes a real newline so the chat panel renders
-			// paragraph breaks instead of one wall of prose.
-			body := util.UnescapeBackslashEscapes(payload.Output)
+		_ = json.Unmarshal(result, &payload)
+		// Same unescape as the issue-comment path above: literal `\n` from
+		// agent stdout becomes a real newline so the chat panel renders
+		// paragraph breaks instead of one wall of prose.
+		body := ""
+		if payload.Output != "" {
+			body = util.UnescapeBackslashEscapes(payload.Output)
+		}
+
+		// Attachments the agent uploaded during this chat task (tagged with
+		// task_id, not yet bound to any owner) become part of this reply. We
+		// need the count up front so an image-only reply — empty text output
+		// but files produced — still gets a message to hang them on.
+		wsUUID, _ := util.ParseUUID(s.ResolveTaskWorkspaceID(ctx, task))
+		var pendingAttachments int64
+		if wsUUID.Valid {
+			if n, err := s.Queries.CountUnboundChatAttachmentsForTask(ctx, db.CountUnboundChatAttachmentsForTaskParams{
+				WorkspaceID: wsUUID,
+				TaskID:      task.ID,
+			}); err != nil {
+				slog.Error("failed to count chat attachments", "task_id", util.UUIDToString(task.ID), "error", err)
+			} else {
+				pendingAttachments = n
+			}
+		}
+
+		if body != "" || pendingAttachments > 0 {
 			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
 				Role:          "assistant",
@@ -1780,6 +1802,22 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				assistantMsg = &row
 				// Unread is derived from the read cursor (chat_session.last_read_at)
 				// vs the assistant messages after it — no per-reply stamping needed.
+				if pendingAttachments > 0 && wsUUID.Valid {
+					bound, err := s.Queries.BindChatAttachmentsToMessage(ctx, db.BindChatAttachmentsToMessageParams{
+						ChatMessageID: row.ID,
+						WorkspaceID:   wsUUID,
+						TaskID:        task.ID,
+					})
+					if err != nil {
+						slog.Error("failed to bind chat attachments to assistant reply", "task_id", util.UUIDToString(task.ID), "error", err)
+					} else if len(bound) > 0 {
+						slog.Info("bound chat attachments to assistant reply",
+							"task_id", util.UUIDToString(task.ID),
+							"message_id", util.UUIDToString(row.ID),
+							"count", len(bound),
+						)
+					}
+				}
 			}
 		}
 		s.broadcastChatDone(ctx, task, assistantMsg)

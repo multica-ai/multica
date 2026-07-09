@@ -311,6 +311,12 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
+	// Outbound attachments: how the agent puts an image/file INTO its reply.
+	// Web/mobile chat only — for IM-channel chats the reply is delivered to
+	// that platform, not the Multica chat UI, so this binding does not apply.
+	if task.ChatChannelType == "" {
+		b.WriteString("\nTo include an image or file in your reply, run `multica attachment upload <local-path>`. It returns a `markdown` snippet — paste it where you want the image inline, or skip it and the file still appears as an attachment card under your reply. Upload files you produced locally; do not paste raw URLs.\n")
+	}
 	return b.String()
 }
 

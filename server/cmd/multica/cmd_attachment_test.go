@@ -73,6 +73,95 @@ func TestRunAttachmentDownloadWritesBasenameIntoOutputDir(t *testing.T) {
 	}
 }
 
+func newAttachmentUploadTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "upload"}
+	cmd.Flags().String("task", "", "")
+	return cmd
+}
+
+func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
+	const taskID = "task-abc"
+	var gotTaskID string
+	var gotFile string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/upload-file" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		gotTaskID = r.FormValue("task_id")
+		if f, _, err := r.FormFile("file"); err == nil {
+			_ = f.Close()
+			gotFile = "present"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "att-999",
+			"filename":     "chart.png",
+			"url":          "https://cdn.example/chart.png",
+			"download_url": "https://signed.example/chart.png?sig=x",
+			"markdown_url": "https://public.example/api/attachments/att-999/download",
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	// An agent upload always carries a task-scoped mat_ token; set one so the
+	// daemon-managed-context gate in newAPIClient admits the request.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "chart.png")
+	if err := os.WriteFile(imgPath, []byte("\x89PNG\r\n\x1a\nbytes"), 0o644); err != nil {
+		t.Fatalf("write temp image: %v", err)
+	}
+
+	cmd := newAttachmentUploadTestCmd()
+	_ = cmd.Flags().Set("task", taskID)
+
+	out, err := captureStdout(t, func() error { return runAttachmentUpload(cmd, []string{imgPath}) })
+	if err != nil {
+		t.Fatalf("runAttachmentUpload: %v", err)
+	}
+	if gotTaskID != taskID {
+		t.Fatalf("server task_id = %q, want %q", gotTaskID, taskID)
+	}
+	if gotFile != "present" {
+		t.Fatalf("server did not receive a file part")
+	}
+	// Output contract: id, markdown_url, and a ready-to-paste markdown snippet.
+	if !strings.Contains(out, `"id": "att-999"`) {
+		t.Fatalf("stdout missing id: %q", out)
+	}
+	if !strings.Contains(out, `"markdown_url": "https://public.example/api/attachments/att-999/download"`) {
+		t.Fatalf("stdout missing markdown_url: %q", out)
+	}
+	if !strings.Contains(out, `![chart.png](https://public.example/api/attachments/att-999/download)`) {
+		t.Fatalf("stdout missing markdown snippet: %q", out)
+	}
+}
+
+func TestRunAttachmentUploadRequiresTask(t *testing.T) {
+	t.Setenv("MULTICA_TASK_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "chart.png")
+	if err := os.WriteFile(imgPath, []byte("bytes"), 0o644); err != nil {
+		t.Fatalf("write temp image: %v", err)
+	}
+
+	cmd := newAttachmentUploadTestCmd() // no --task, no MULTICA_TASK_ID
+	if err := runAttachmentUpload(cmd, []string{imgPath}); err == nil || !strings.Contains(err.Error(), "no chat task in context") {
+		t.Fatalf("runAttachmentUpload error = %v, want no-chat-task error", err)
+	}
+}
+
 func TestRunAttachmentDownloadRequiresDownloadURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/attachments/att-no-url" {
