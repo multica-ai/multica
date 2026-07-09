@@ -654,6 +654,21 @@ describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
     expect(container.textContent).toContain("。后面还有字");
   });
 
+  it("keeps every URL in a CJK-separated run linked, not just the first", () => {
+    // Regression: gfm glues `url1、url2` into one autolink; trimming only at the
+    // first 、 left url2 as plain text. The tail must be rescanned so both link.
+    const { container } = render(
+      <ReadonlyContent content={"两个地址 https://a.com/x、https://b.com/y"} />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("https://a.com/x");
+    expect(hrefs).toContain("https://b.com/y");
+    // The 、 separator stays as text between the two links.
+    expect(container.textContent).toContain("、");
+  });
+
   it("leaves an explicit link's destination untouched even when it ends in CJK", () => {
     const { container } = render(
       <ReadonlyContent content={"[看](https://example.com/x。)后文"} />,

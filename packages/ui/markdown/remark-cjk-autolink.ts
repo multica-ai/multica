@@ -1,4 +1,4 @@
-import { CJK_URL_TERMINATOR_REGEX } from './linkify'
+import { CJK_URL_TERMINATOR_REGEX, detectLinks } from './linkify'
 
 /**
  * remark-cjk-autolink — trim CJK punctuation that remark-gfm's autolink literal
@@ -8,9 +8,11 @@ import { CJK_URL_TERMINATOR_REGEX } from './linkify'
  * adjacent markdown delimiter (e.g. a closing `**`) is never absorbed into the
  * href — that was MUL-4242. gfm's autolink literal, however, shares linkify-it's
  * CJK weakness: `https://x/a。后面` extends the link across the ideographic full
- * stop and the run after it. preprocessLinks used to trim this before parsing;
- * since URLs are no longer preprocessed in read-only mode, we re-apply the same
- * boundary on the parsed tree.
+ * stop and the run after it, and `url1、url2` gets glued into one link.
+ * preprocessLinks used to trim this before parsing; since URLs are no longer
+ * preprocessed in read-only mode, we re-derive the real segments on the parsed
+ * tree with the same CJK-aware detector, which rescans the tail so every URL in
+ * a CJK-separated run stays linked.
  *
  * Only autolink *literals* are touched — links whose href was derived from the
  * visible text (`https://…`, `www.…` → `http://…`, `a@b` → `mailto:a@b`).
@@ -35,26 +37,36 @@ function autolinkSchemePrefix(url: string, text: string): string | null {
   return null
 }
 
-// If `node` is an autolink literal whose text runs past a CJK terminator, return
-// [trimmed link, trailing text] to splice in its place; otherwise null.
+// If `node` is an autolink literal whose text ran past a CJK terminator, rebuild
+// it: gfm glued everything up to the next whitespace into one link, so re-derive
+// the real segments and return the [link, text, link, …] sequence to splice in.
+// Returns null (leave the node alone) when it is not an autolink literal or its
+// boundary was already correct.
 function splitCjkAutolink(node: MdNode): MdNode[] | null {
   if (node.type !== 'link' || !node.url || node.children?.length !== 1) return null
   const child = node.children[0]
   if (!child || child.type !== 'text' || typeof child.value !== 'string') return null
 
   const text = child.value
-  if (autolinkSchemePrefix(node.url, text) === null) return null
+  if (autolinkSchemePrefix(node.url, text) === null) return null // not an autolink literal
+  if (!CJK_URL_TERMINATOR_REGEX.test(text)) return null // gfm's boundary was already correct
 
-  const cut = text.search(CJK_URL_TERMINATOR_REGEX)
-  if (cut <= 0) return null // no CJK punctuation, or the text starts with it
+  // detectLinks reuses collectLinkifyMatches, which truncates each URL at the
+  // first CJK terminator AND rescans the tail — so multiple URLs separated by
+  // CJK punctuation (`url1、url2`) each come back as their own segment instead
+  // of only the first staying linked.
+  const links = detectLinks(text, true).filter((link) => link.type !== 'file')
+  if (links.length === 0) return null
 
-  const rest = text.slice(cut)
-  const trimmed: MdNode = {
-    ...node,
-    url: node.url.slice(0, node.url.length - rest.length),
-    children: [{ type: 'text', value: text.slice(0, cut) }],
+  const out: MdNode[] = []
+  let pos = 0
+  for (const link of links) {
+    if (link.start > pos) out.push({ type: 'text', value: text.slice(pos, link.start) })
+    out.push({ ...node, url: link.url, children: [{ type: 'text', value: link.text }] })
+    pos = link.end
   }
-  return [trimmed, { type: 'text', value: rest }]
+  if (pos < text.length) out.push({ type: 'text', value: text.slice(pos) })
+  return out
 }
 
 function transform(node: MdNode): void {
