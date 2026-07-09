@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Skill Import Search & Discovery — Multica</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f7f7f5;
+    --bg-softer: #efeee9;
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-muted: #7a7a7a;
+    --line: #d9d7d0;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --accent-ink: #1e40af;
+    --warn: #d97706;
+    --warn-soft: #fef3c7;
+    --warn-ink: #924006;
+    --good: #16a34a;
+    --good-soft: #dcfce7;
+    --good-ink: #166534;
+    --info: #0891b2;
+    --info-soft: #cffafe;
+    --info-ink: #155e75;
+    --violet: #7c3aed;
+    --violet-soft: #ede9fe;
+    --violet-ink: #5b21b6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171717;
+      --bg-soft: #1f1f1f;
+      --bg-softer: #262626;
+      --ink: #f0f0f0;
+      --ink-soft: #c2c2c2;
+      --ink-muted: #8a8a8a;
+      --line: #3a3a3a;
+      --accent: #60a5fa;
+      --accent-soft: #1e3a5f;
+      --accent-ink: #93c5fd;
+      --warn: #fbbf24;
+      --warn-soft: #3f2f0d;
+      --warn-ink: #fcd34d;
+      --good: #4ade80;
+      --good-soft: #14332a;
+      --good-ink: #86efac;
+      --info: #22d3ee;
+      --info-soft: #0c3541;
+      --info-ink: #67e8f9;
+      --violet: #a78bfa;
+      --violet-soft: #2e1e54;
+      --violet-ink: #c4b5fd;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 920px;
+    margin-inline: auto;
+    padding: 48px 28px 80px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 8px;
+  }
+  h1.title {
+    font-size: 30px;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+  }
+  .lede {
+    font-size: 16px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 28px;
+  }
+  .meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 14px 16px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 40px;
+  }
+  .meta-strip .meta-row { display: flex; gap: 6px; align-items: baseline; }
+  .meta-strip .meta-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .meta-strip .meta-value { color: var(--ink); font-weight: 500; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-softer);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .pill.accent { background: var(--accent-soft); color: var(--accent-ink); }
+  .pill.merge { background: var(--violet-soft); color: var(--violet-ink); }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    padding: 14px 16px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .stat .stat-num { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+  .stat .stat-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); margin-top: 2px; }
+  section { margin-bottom: 48px; }
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 24px 0 8px;
+  }
+  p { margin: 0 0 12px; max-width: 70ch; }
+  p:last-child { margin-bottom: 0; }
+  ul { padding-left: 22px; margin: 0 0 12px; }
+  li { margin-bottom: 4px; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--bg-softer);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .axis-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 16px 0 0;
+  }
+  @media (max-width: 640px) { .axis-list { grid-template-columns: 1fr; } }
+  .axis-item {
+    padding: 10px 14px;
+    background: var(--bg-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+  }
+  .axis-item .axis-name { font-weight: 600; font-size: 13px; }
+  .axis-item .axis-desc { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .sub-nav {
+    padding: 14px 16px;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 24px;
+  }
+  .sub-nav .sub-nav-title {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 8px;
+  }
+  .sub-nav ol {
+    margin: 0;
+    padding-left: 22px;
+  }
+  .sub-nav li { margin-bottom: 4px; font-size: 13.5px; }
+  .sub-nav a { color: var(--accent); text-decoration: none; font-weight: 500; }
+  .sub-nav a:hover { text-decoration: underline; }
+  article.idea {
+    padding: 20px 22px;
+    margin-bottom: 18px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    scroll-margin-top: 20px;
+  }
+  article.idea:hover { border-color: var(--accent); }
+  .idea-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+    margin-bottom: 12px;
+  }
+  .idea-rank {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    padding: 2px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.02em;
+  }
+  .idea-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0;
+    flex: 1;
+  }
+  .idea-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .chip.axis { background: var(--violet-soft); color: var(--violet-ink); }
+  .chip.conf-high { background: var(--good-soft); color: var(--good-ink); }
+  .chip.conf-med { background: var(--warn-soft); color: var(--warn-ink); }
+  .chip.conf-low { background: var(--info-soft); color: var(--info-ink); }
+  .chip.cplx-sm { background: var(--bg-softer); color: var(--ink-soft); }
+  .chip.cplx-md { background: var(--bg-softer); color: var(--ink-soft); }
+  .chip.cplx-lg { background: var(--bg-softer); color: var(--ink-soft); }
+  .chip.merge-tag { background: var(--violet-soft); color: var(--violet-ink); border: 1px dashed var(--violet); }
+  .idea-desc {
+    font-size: 14.5px;
+    color: var(--ink);
+    max-width: 70ch;
+    margin-bottom: 14px;
+  }
+  .idea-fields {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 6px 12px;
+    font-size: 13.5px;
+    margin-top: 10px;
+  }
+  @media (max-width: 540px) { .idea-fields { grid-template-columns: 1fr; } }
+  .idea-fields dt {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    padding-top: 3px;
+    font-weight: 600;
+  }
+  .idea-fields dd { margin: 0; color: var(--ink-soft); max-width: 70ch; }
+  .basis-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-softer);
+    color: var(--ink-soft);
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    margin-right: 4px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .basis-tag.direct { background: var(--good-soft); color: var(--good-ink); }
+  .basis-tag.external { background: var(--info-soft); color: var(--info-ink); }
+  .basis-tag.reasoned { background: var(--violet-soft); color: var(--violet-ink); }
+  .illustration {
+    margin: 16px 0 8px;
+    padding: 18px;
+    background: var(--bg-soft);
+    border-radius: 8px;
+    border: 1px dashed var(--line);
+  }
+  .illustration .illus-caption {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 10px;
+  }
+  .illustration svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  table.reject {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    margin-top: 8px;
+  }
+  table.reject th, table.reject td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.reject th {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    font-weight: 600;
+    background: var(--bg-soft);
+  }
+  table.reject tr:last-child td { border-bottom: none; }
+  table.reject td.id-col { font-family: "SF Mono", Menlo, Consolas, monospace; color: var(--ink-muted); font-size: 12px; white-space: nowrap; }
+  .merge-note {
+    padding: 10px 14px;
+    background: var(--violet-soft);
+    border-left: 3px solid var(--violet);
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: var(--violet-ink);
+    margin-bottom: 16px;
+  }
+  footer.composition-signal {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  footer.composition-signal code {
+    background: transparent;
+    padding: 0;
+    color: var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="eyebrow">Ideation · Repo-Grounded</div>
+  <h1 class="title">Skill Import Search &amp; Discovery</h1>
+  <p class="lede">The Multica frontend's "new skill (copy from runtime)" dialog shows a long unsorted list of skills with no search or filter. Five directions — from an adaptive UI that switches on decision complexity, to a structural rethinking of the dialog around intent declaration — address discovery, organization, ranking, and layout.</p>
+
+  <div class="meta-strip">
+    <div class="meta-row"><span class="meta-label">Date</span> <span class="meta-value"><time datetime="2026-07-09">2026-07-09</time></span></div>
+    <div class="meta-row"><span class="meta-label">Topic</span> <span class="meta-value">skill-import-search</span></div>
+    <div class="meta-row"><span class="meta-label">Mode</span> <span class="pill accent">repo-grounded</span></div>
+    <div class="meta-row"><span class="meta-label">Focus</span> <span class="meta-value">add search/filter to the skill-selection list</span></div>
+    <div class="meta-row"><span class="meta-label">Refined</span> <span class="pill merge">R1+R3 merged</span></div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-num">37</div><div class="stat-label">Raw ideas</div></div>
+    <div class="stat"><div class="stat-num">20</div><div class="stat-label">After dedupe</div></div>
+    <div class="stat"><div class="stat-num">5</div><div class="stat-label">Survivors</div></div>
+    <div class="stat"><div class="stat-num">4/4</div><div class="stat-label">Axes covered</div></div>
+  </div>
+
+  <!-- ============ GROUNDING CONTEXT ============ -->
+  <section id="grounding-context">
+    <h2>Grounding Context</h2>
+    <p><strong>Affected component.</strong> <code>packages/views/skills/components/runtime-local-skill-import-panel.tsx</code> — lines 1012–1048 render a plain <code>.map()</code> over <code>runtimeSkills</code> with no search, filter, sort, or grouping. The dialog's height is <code>!h-[min(600px,85vh)]</code>; the scroll region is <code>flex-1 overflow-y-auto</code>. Data comes from <code>useQuery(runtimeLocalSkillsOptions(...))</code> with poll-based discovery (500ms interval, 30s timeout).</p>
+    <p><strong>Data model.</strong> <code>RuntimeLocalSkillSummary</code> exposes <code>key</code>, <code>name</code>, <code>description?</code>, <code>source_path</code>, <code>provider</code>, <code>root?</code> ("provider" | "universal"), and <code>file_count</code>. The <code>root</code> field is a natural facet for grouping but currently unused in the UI.</p>
+    <p><strong>Reusable patterns.</strong> The subscriber picker (<code>issue-detail.tsx:128-178</code>) uses inline <code>Command</code> + <code>shouldFilter={false}</code> + <code>CommandGroup</code> + checkboxes inside <code>CommandItem</code> — the closest analog. The property-picker (<code>property-picker.tsx:111-144</code>) already ships full keyboard navigation with <code>isImeComposing</code> guard and auto-select-when-one. <code>mention-recency.ts:54-80</code> and <code>recent-issues-store.ts:37-42</code> provide LRU patterns that would extend naturally to import-recency tracking.</p>
+    <p><strong>Critical constraint.</strong> <code>CommandDialog</code> cannot nest inside the already-open dialog — any search UI must use inline <code>Command</code>. The multi-select checkbox + single-select inline-edit state machine is unique to this panel and must be preserved.</p>
+  </section>
+
+  <!-- ============ TOPIC AXES ============ -->
+  <section id="topic-axes">
+    <h2>Topic Axes</h2>
+    <p>The topic decomposes into four orthogonal surfaces — each survivor targets at least one, and the set as a whole covers all four:</p>
+    <div class="axis-list">
+      <div class="axis-item"><div class="axis-name">Discovery mechanisms</div><div class="axis-desc">How users find the target skill — text search (fuzzy/substring), faceted filter, keyboard navigation</div></div>
+      <div class="axis-item"><div class="axis-name">List organization</div><div class="axis-desc">How the list is structured — alphabetical sort, grouping, section headers, virtualization</div></div>
+      <div class="axis-item"><div class="axis-name">Relevance &amp; ranking</div><div class="axis-desc">Signals beyond text match — recency, frequency, favorites</div></div>
+      <div class="axis-item"><div class="axis-name">Interaction &amp; layout</div><div class="axis-desc">How search composes into the dialog — input placement, empty states, preserved checkbox+inline-edit</div></div>
+    </div>
+  </section>
+
+  <!-- ============ RANKED IDEAS ============ -->
+  <section id="ranked-ideas">
+    <h2>Ranked Ideas</h2>
+
+    <div class="sub-nav">
+      <div class="sub-nav-title">Jump to</div>
+      <ol>
+        <li><a href="#idea1">Adaptive Skill Discovery (merged R1+R3)</a></li>
+        <li><a href="#idea2">Recency LRU Pinning</a></li>
+        <li><a href="#idea3">Scoped Select-All + Conflict Preview</a></li>
+        <li><a href="#idea4">Hit / Non-Hit Partition with Dimming</a></li>
+        <li><a href="#idea5">Smart Defaults Layer</a></li>
+      </ol>
+    </div>
+
+    <!-- Idea 1: merged R1+R3 -->
+    <article class="idea" id="idea1">
+      <div class="idea-head">
+        <span class="idea-rank">R1</span>
+        <h3 class="idea-title">Adaptive Skill Discovery — UI branches on decision complexity</h3>
+        <div class="idea-chips">
+          <span class="chip axis">discovery · list-org · interaction</span>
+          <span class="chip conf-high">Confidence 92%</span>
+          <span class="chip cplx-md">Complexity Med</span>
+          <span class="chip merge-tag">merged from R1+R3</span>
+        </div>
+      </div>
+      <p class="idea-desc">The dialog recognizes the decision's complexity and adapts its UI accordingly, branching on <code>runtimeSkills.length</code>:
+        <br>· <strong>0 skills</strong> → existing empty state.
+        <br>· <strong>1–5 skills</strong> → single "Import" summary card with skill previews. The <code>root</code> facet becomes two compact buttons — "Import N provider skills" / "Import N universal skills" — plus inline descriptions. No search needed; the list is a confirmation tool, not a discrimination tool.
+        <br>· <strong>6+ skills</strong> → full inline <code>Command</code> (<code>shouldFilter={false}</code>) + root grouping via <code>CommandGroup</code> + alphabetical sort + full keyboard navigation (<code>↑↓</code>, <code>Enter</code>, <code>Esc</code>, <code>isImeComposing</code> guard, auto-select-when-one).
+      </p>
+      <p class="idea-desc">Key insight: the <code>root</code> field is the shared skeleton of both branches. In the summary branch, it becomes two bulk-import buttons; in the full-list branch, it becomes two <code>CommandGroup</code>s. Same data dimension, different visual density.</p>
+
+      <div class="illustration">
+        <div class="illus-caption">Directional overview — three branches on skill count</div>
+        <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three branches: 0 skills (empty), 1-5 (summary card), 6+ (full search).">
+          <!-- Branch 0 -->
+          <g transform="translate(10,20)">
+            <rect x="0" y="0" width="220" height="260" rx="8" fill="none" stroke="#8a8a8a" stroke-dasharray="3 3"/>
+            <text x="14" y="20" font-size="11" fill="#7a7a7a" font-family="sans-serif" letter-spacing="1">0 SKILLS</text>
+            <text x="14" y="130" font-size="12" fill="#7a7a7a" font-family="sans-serif" text-anchor="start">No skills available</text>
+            <text x="14" y="148" font-size="11" fill="#8a8a8a" font-family="sans-serif">from this runtime.</text>
+            <text x="14" y="240" font-size="10" fill="#8a8a8a" font-family="sans-serif">existing empty state</text>
+          </g>
+          <!-- Branch 1-5 -->
+          <g transform="translate(250,20)">
+            <rect x="0" y="0" width="240" height="260" rx="8" fill="none" stroke="#2563eb"/>
+            <text x="14" y="20" font-size="11" fill="#2563eb" font-family="sans-serif" letter-spacing="1">1–5 SKILLS · summary mode</text>
+            <text x="14" y="46" font-size="12" fill="#1a1a1a" font-family="sans-serif" font-weight="600">Import 3 skills</text>
+            <rect x="14" y="58" width="212" height="40" rx="4" fill="#dcfce7" stroke="#16a34a"/>
+            <text x="22" y="76" font-size="11" fill="#166534" font-family="sans-serif" font-weight="600">2 provider skills</text>
+            <text x="22" y="90" font-size="10" fill="#166534" font-family="sans-serif">code-review · commit-msg</text>
+            <rect x="14" y="104" width="212" height="32" rx="4" fill="#ede9fe" stroke="#7c3aed"/>
+            <text x="22" y="124" font-size="11" fill="#5b21b6" font-family="sans-serif" font-weight="600">1 universal skill</text>
+            <text x="14" y="160" font-size="10" fill="#7a7a7a" font-family="sans-serif">description previews</text>
+            <rect x="120" y="220" width="106" height="26" rx="4" fill="#16a34a"/>
+            <text x="134" y="237" font-size="12" fill="#ffffff" font-family="sans-serif" font-weight="600">Import All</text>
+            <text x="14" y="250" font-size="10" fill="#2563eb" font-family="sans-serif">list = confirmation, not search</text>
+          </g>
+          <!-- Branch 6+ -->
+          <g transform="translate(510,20)">
+            <rect x="0" y="0" width="240" height="260" rx="8" fill="none" stroke="#2563eb" stroke-width="1.5"/>
+            <text x="14" y="20" font-size="11" fill="#2563eb" font-family="sans-serif" letter-spacing="1">6+ SKILLS · search mode</text>
+            <rect x="14" y="30" width="212" height="22" rx="4" fill="#ffffff" stroke="#d9d7d0"/>
+            <text x="22" y="45" font-size="11" fill="#7a7a7a" font-family="sans-serif">🔍 dep</text>
+            <text x="14" y="72" font-size="10" fill="#7a7a7a" font-family="sans-serif" letter-spacing="0.5">PROVIDER SKILLS</text>
+            <rect x="14" y="78" width="212" height="22" rx="3" fill="#dbeafe"/>
+            <text x="22" y="93" font-size="11" fill="#1a1a1a" font-family="sans-serif">deploy-check  ← kb highlight</text>
+            <rect x="14" y="104" width="212" height="22" rx="3" fill="#ffffff"/>
+            <text x="22" y="119" font-size="11" fill="#1a1a1a" font-family="sans-serif">deploy-staging</text>
+            <text x="14" y="146" font-size="10" fill="#7a7a7a" font-family="sans-serif" letter-spacing="0.5">UNIVERSAL SKILLS</text>
+            <rect x="14" y="152" width="212" height="22" rx="3" fill="#ffffff"/>
+            <text x="22" y="167" font-size="11" fill="#1a1a1a" font-family="sans-serif">code-review</text>
+            <text x="14" y="200" font-size="10" fill="#16a34a" font-family="sans-serif">↑↓ navigate · Enter toggle</text>
+            <text x="14" y="214" font-size="10" fill="#16a34a" font-family="sans-serif">Esc clear · auto-select-single</text>
+            <text x="14" y="250" font-size="10" fill="#2563eb" font-family="sans-serif">Command + root grouping + keyboard</text>
+          </g>
+        </svg>
+      </div>
+
+      <dl class="idea-fields">
+        <dt>Basis</dt>
+        <dd>
+          <span class="basis-tag direct">direct</span> subscriber picker at <code>issue-detail.tsx:128-178</code> uses the exact <code>Command</code> + checkbox pattern; <code>agent.ts:867-874</code> defines <code>root</code> as a natural 2-group facet; <code>property-picker.tsx:111-144</code> ships the keyboard handler verbatim; the panel already branches on <code>runtimeSkills.length</code> at lines 1000–1010 (existing empty-state pattern).
+          <br><span class="basis-tag reasoned">reasoned</span> The two original ideas (R1: search + grouping + keyboard; R3: progressive disclosure for small runtimes) were not alternatives — they addressed disjoint regions of the same decision surface. Merging them produces a single coherent principle: <em>adapt the UI to the decision's complexity</em>.
+        </dd>
+        <dt>Rationale</dt>
+        <dd>Most dialog systems treat all list sizes the same way, forcing power users through scrolling AND trivial decisions through unnecessary UI. This merge solves both with a single, small branching rule. The <code>root</code> field unifies both branches — a rare case where two strong ideas turn out to be one idea seen from different angles.</dd>
+        <dt>Downsides</dt>
+        <dd>Three render paths to maintain (vs one today). Threshold values (5, 6) are judgement calls that may need tuning. Inline-edit state machine must coexist with <code>CommandItem</code> highlight in the 6+ branch.</dd>
+      </dl>
+    </article>
+
+    <!-- Idea 2 (was R2, unchanged) -->
+    <article class="idea" id="idea2">
+      <div class="idea-head">
+        <span class="idea-rank">R2</span>
+        <h3 class="idea-title">Recency LRU Pinning — "Recently Imported"</h3>
+        <div class="idea-chips">
+          <span class="chip axis">relevance</span>
+          <span class="chip conf-high">Confidence 88%</span>
+          <span class="chip cplx-sm">Complexity Low</span>
+        </div>
+      </div>
+      <p class="idea-desc">Create a small session-scoped Zustand store mirroring <code>mention-recency.ts</code>. On each successful import, record <code>{ key, timestamp }</code> to <code>localStorage</code> under a workspace-scoped key (cap 50 entries, head-insert + LRU eviction). Partition the list into "Recently Imported" (up to 5, LRU order) at the top and "Available" (alphabetical) below. The "Recently Imported" group only renders when non-empty. Search filters across both groups but the recency group always pins first.</p>
+      <dl class="idea-fields">
+        <dt>Basis</dt>
+        <dd>
+          <span class="basis-tag direct">direct</span> <code>mention-recency.ts:54-80</code> implements <code>recordMentionUsage</code> + <code>sortUserItemsByRecency</code> with LRU eviction; <code>recent-issues-store.ts:37-42</code> shows the per-workspace LRU pattern.
+          <br><span class="basis-tag external">external</span> Raycast "Pinned" section and Linear "Recent" — both reduce list length by surfacing frequently-used items.
+        </dd>
+        <dt>Rationale</dt>
+        <dd>This is the compounding bet. Once the recency store exists, it later powers default-checked suggestions, a "quick import" mode, and cross-runtime intelligence. The first commit is ~40 lines; every subsequent feature reuses it.</dd>
+        <dt>Downsides</dt>
+        <dd>Introduces <code>localStorage</code> state for the first time in this panel. Workspace-scoping must be correct or recency leaks across workspaces.</dd>
+      </dl>
+    </article>
+
+    <!-- Idea 3 (was R4, renumbered) -->
+    <article class="idea" id="idea3">
+      <div class="idea-head">
+        <span class="idea-rank">R3</span>
+        <h3 class="idea-title">Scoped Select-All + Multi-Field Search + Conflict Preview</h3>
+        <div class="idea-chips">
+          <span class="chip axis">interaction · discovery</span>
+          <span class="chip conf-med">Confidence 75%</span>
+          <span class="chip cplx-md">Complexity Med</span>
+        </div>
+      </div>
+      <p class="idea-desc">Three improvements to the search + selection flow. <strong>(a)</strong> When a search query is active, "select all" only selects the <em>filtered</em> skills — show "Select all 3 (of 12)" next to the checkbox. <strong>(b)</strong> Extend search to match on <code>name</code> + <code>description</code> + <code>source_path</code>, with pinyin support. When the match is on path or description but not name, render a small indicator and highlight the matched substring. <strong>(c)</strong> Preview name conflicts inline with a warning icon on each conflicting row <em>before</em> import — move conflict resolution from a reactive error state to a proactive preview state.</p>
+      <dl class="idea-fields">
+        <dt>Basis</dt>
+        <dd>
+          <span class="basis-tag direct">direct</span> <code>runtime-local-skill-import-panel.tsx:580-589</code> already computes <code>pendingConflicts</code> and <code>conflictResolutions</code>; the data is available to surface earlier. <code>property-picker.tsx:166-167</code> ties search state to selection state. <code>issue-detail.tsx:122-123</code> substring + pinyin pattern.
+          <br><span class="basis-tag external">external</span> Linear Cmd+K scopes "select all" to the visible filtered set.
+        </dd>
+        <dt>Rationale</dt>
+        <dd>A search bar without selection-scope awareness creates a trap: the user filters to "auth", hits "Select All", and gets 47 skills instead of 3. Multi-field search + conflict preview closes the two most common post-search surprises.</dd>
+        <dt>Downsides</dt>
+        <dd>Three changes in one idea; the conflict-preview may require backend cooperation to detect collisions cheaply. Scope risk if tackled all at once.</dd>
+      </dl>
+    </article>
+
+    <!-- Idea 4 (was R5, renumbered) -->
+    <article class="idea" id="idea4">
+      <div class="idea-head">
+        <span class="idea-rank">R4</span>
+        <h3 class="idea-title">Hit / Non-Hit Partition with Visual Dimming</h3>
+        <div class="idea-chips">
+          <span class="chip axis">relevance · interaction</span>
+          <span class="chip conf-med">Confidence 70%</span>
+          <span class="chip cplx-sm">Complexity Low</span>
+        </div>
+      </div>
+      <p class="idea-desc">When the search box is non-empty, matching skills render at full opacity at the top; non-matching skills remain visible below at ~40% opacity, still selectable, rather than disappearing entirely. This preserves spatial memory of the list and avoids the <code>CommandEmpty</code> dead-end — a common failure mode of pure-filter search is the user typing slightly wrong and seeing "no results" with no path back.</p>
+
+      <div class="illustration">
+        <div class="illus-caption">Directional overview — matches prominent, non-matches dimmed but present</div>
+        <svg viewBox="0 0 520 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Matches at top full opacity, non-matches below dimmed.">
+          <g transform="translate(20,20)">
+            <rect x="0" y="0" width="480" height="200" rx="8" fill="none" stroke="#d9d7d0"/>
+            <rect x="14" y="14" width="452" height="24" rx="4" fill="#ffffff" stroke="#d9d7d0"/>
+            <text x="22" y="30" font-size="11" fill="#7a7a7a" font-family="sans-serif">🔍 konw  (typo)</text>
+            <text x="14" y="60" font-size="10" fill="#16a34a" font-family="sans-serif" letter-spacing="0.5">MATCHES</text>
+            <rect x="14" y="68" width="452" height="24" rx="3" fill="#dcfce7"/>
+            <text x="22" y="84" font-size="12" fill="#1a1a1a" font-family="sans-serif" font-weight="600">knowledge-base</text>
+            <text x="410" y="84" font-size="10" fill="#16a34a" font-family="sans-serif">name match</text>
+            <text x="14" y="112" font-size="10" fill="#7a7a7a" font-family="sans-serif" letter-spacing="0.5">OTHER SKILLS · still selectable</text>
+            <g opacity="0.45">
+              <rect x="14" y="120" width="452" height="22" rx="3" fill="#efeee9"/>
+              <text x="22" y="135" font-size="11" fill="#1a1a1a" font-family="sans-serif">commit-msg</text>
+              <rect x="14" y="146" width="452" height="22" rx="3" fill="#ffffff"/>
+              <text x="22" y="161" font-size="11" fill="#1a1a1a" font-family="sans-serif">deploy-check</text>
+              <rect x="14" y="172" width="452" height="22" rx="3" fill="#efeee9"/>
+              <text x="22" y="187" font-size="11" fill="#1a1a1a" font-family="sans-serif">code-review</text>
+            </g>
+          </g>
+        </svg>
+      </div>
+
+      <dl class="idea-fields">
+        <dt>Basis</dt>
+        <dd>
+          <span class="basis-tag direct">direct</span> today's <code>CommandEmpty</code> state at <code>issue-detail.tsx:137-139</code> is a dead end when spelling is wrong. The <code>.map()</code> is a single render pass, trivially partitionable into <code>[matches, rest]</code>.
+          <br><span class="basis-tag external">external</span> gene promoters upregulate target genes without silencing the rest of the genome — a natural analogy.
+        </dd>
+        <dt>Rationale</dt>
+        <dd>Dim-but-present preserves spatial memory of the list and lets users correct their query by seeing what almost-matched. Mechanically trivial on the existing render.</dd>
+        <dt>Downsides</dt>
+        <dd>Unconventional UX — users may not expect partially-dimmed results. For very long lists the dimmed tail adds visual noise. Need to tune the opacity threshold.</dd>
+      </dl>
+    </article>
+
+    <!-- Idea 5 (was R6, renumbered) -->
+    <article class="idea" id="idea5">
+      <div class="idea-head">
+        <span class="idea-rank">R5</span>
+        <h3 class="idea-title">Smart Defaults Layer — Presets + Two-Zone + Auto-Collapse</h3>
+        <div class="idea-chips">
+          <span class="chip axis">relevance · interaction</span>
+          <span class="chip conf-low">Confidence 60%</span>
+          <span class="chip cplx-lg">Complexity High</span>
+        </div>
+      </div>
+      <p class="idea-desc">A three-part composition that reframes the dialog from "pick a skill from a list" to "declare your intent": <strong>(a)</strong> Above the searchable list, render 3–5 preset rows for common actions — "New blank skill", "Import all provider skills", "Import all universal skills" — each single-click. <strong>(b)</strong> Split the dialog into two zones: top = "Available skills" (click to add), bottom = "Will import (N)" (selected chips with inline edit when exactly one is focused) — decoupling "browse" from "edit". <strong>(c)</strong> After bulk import completes, imported skills collapse into a single summary row ("✓ 5 skills imported") with a "Show imported" toggle, keeping the working set focused on what still needs attention.</p>
+
+      <div class="illustration">
+        <div class="illus-caption">Directional overview — three zones stacked</div>
+        <svg viewBox="0 0 520 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three zones: preset actions at top, available skills in middle, selected tray at bottom.">
+          <g transform="translate(20,10)">
+            <rect x="0" y="0" width="480" height="280" rx="8" fill="none" stroke="#d9d7d0"/>
+            <text x="14" y="20" font-size="10" fill="#7c3aed" font-family="sans-serif" letter-spacing="0.5">QUICK PRESETS</text>
+            <rect x="14" y="28" width="140" height="22" rx="4" fill="#ede9fe"/>
+            <text x="22" y="43" font-size="10" fill="#5b21b6" font-family="sans-serif">+ Blank skill</text>
+            <rect x="160" y="28" width="160" height="22" rx="4" fill="#ede9fe"/>
+            <text x="168" y="43" font-size="10" fill="#5b21b6" font-family="sans-serif">Import all provider</text>
+            <rect x="326" y="28" width="140" height="22" rx="4" fill="#ede9fe"/>
+            <text x="334" y="43" font-size="10" fill="#5b21b6" font-family="sans-serif">Import all universal</text>
+            <text x="14" y="74" font-size="10" fill="#7a7a7a" font-family="sans-serif" letter-spacing="0.5">AVAILABLE</text>
+            <g font-family="sans-serif" font-size="11">
+              <rect x="14" y="82" width="452" height="20" rx="3" fill="#ffffff"/>
+              <text x="22" y="96">code-review</text>
+              <rect x="14" y="106" width="452" height="20" rx="3" fill="#efeee9"/>
+              <text x="22" y="120">deploy-check</text>
+              <rect x="14" y="130" width="452" height="20" rx="3" fill="#ffffff"/>
+              <text x="22" y="144">commit-msg</text>
+            </g>
+            <text x="14" y="174" font-size="10" fill="#2563eb" font-family="sans-serif" letter-spacing="0.5">WILL IMPORT (2)</text>
+            <rect x="14" y="182" width="452" height="74" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-dasharray="3 3"/>
+            <rect x="24" y="194" width="110" height="26" rx="13" fill="#ffffff" stroke="#2563eb"/>
+            <text x="34" y="211" font-size="11" fill="#1e40af" font-family="sans-serif">code-review ×</text>
+            <rect x="140" y="194" width="110" height="26" rx="13" fill="#ffffff" stroke="#2563eb"/>
+            <text x="150" y="211" font-size="11" fill="#1e40af" font-family="sans-serif">commit-msg ×</text>
+            <rect x="340" y="228" width="126" height="24" rx="4" fill="#2563eb"/>
+            <text x="360" y="244" font-size="12" fill="#ffffff" font-family="sans-serif" font-weight="600">Import 2 skills</text>
+          </g>
+        </svg>
+      </div>
+
+      <dl class="idea-fields">
+        <dt>Basis</dt>
+        <dd>
+          <span class="basis-tag direct">direct</span> <code>toggleAll</code> at 569–574 makes bulk-by-root natural; <code>singleSelectedSkill</code> at 545–548 already gates inline edit on <code>selectedKeys.size === 1</code>; <code>bulkState.phase</code> transitions at 836–840 make post-import collapse a natural extension.
+          <br><span class="basis-tag reasoned">reasoned</span> Many users don't want to pick individual skills — they want "all of them" or "none." Presets compress the multi-click flow into one click. Decoupling browse from edit addresses the current tension between checkbox rows and inline editing.
+        </dd>
+        <dt>Rationale</dt>
+        <dd>This is the ambitious "phase 2" vision — a full rethinking of the dialog around intent declaration rather than list scanning. It composes naturally with R1 and R2, building toward a coherent product direction.</dd>
+        <dt>Downsides</dt>
+        <dd>High complexity — three interacting features. The two-zone layout is a structural change that affects the state machine. Should be tackled incrementally: presets first, then tray, then collapse.</dd>
+      </dl>
+    </article>
+  </section>
+
+  <!-- ============ REJECTION SUMMARY ============ -->
+  <section id="rejection-summary">
+    <h2>Rejection Summary</h2>
+    <p>37 raw ideas → 20 after dedupe → 6 initial survivors → <strong>5 after merging R1+R3</strong>. 14 cut, 2 merged.</p>
+
+    <div class="merge-note">
+      <strong>Merge note.</strong> R1 (Command Search + Root Grouping + Keyboard Nav) and R3 (Progressive Disclosure for Small Runtimes) were merged into the new R1 "Adaptive Skill Discovery." The two ideas addressed disjoint regions of the same decision surface (small lists vs large lists) and shared the <code>root</code> facet as their structural skeleton. Merging them produced a single coherent principle: <em>adapt the UI to the decision's complexity</em>.
+    </div>
+
+    <table class="reject">
+      <thead>
+        <tr><th style="width:60px;">ID</th><th>Idea</th><th>Reason Rejected</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="id-col">C-02</td><td>Plain input + useMemo filter (minimal surface)</td><td>Duplicates R1 — a weaker variant that avoids Command despite the repo's clear convention.</td></tr>
+        <tr><td class="id-col">C-04</td><td>Collapsible sections by root with search-aware collapse</td><td>Inaccurate basis citation (cited code is a checkbox+avatar row, not a Collapsible pattern); overlaps with R1's root grouping.</td></tr>
+        <tr><td class="id-col">C-05</td><td>Path-based grouping by source_path directories</td><td><code>source_path</code> is arbitrary filesystem location, not a controlled taxonomy — grouping by directory segments produces fragile, user-unfriendly labels.</td></tr>
+        <tr><td class="id-col">C-09</td><td>Filter chips (faceted by provider/root)</td><td>Redundant with text search for a typically small list. Multi-select chips + text input adds significant surface for marginal gain.</td></tr>
+        <tr><td class="id-col">C-10</td><td>Auto-select by description match (describe-and-confirm)</td><td>Basis cites only <code>description</code> field existence — proves nothing about natural-language similarity ranking. Disproportionate complexity for this context.</td></tr>
+        <tr><td class="id-col">C-12</td><td>file_count + description density badges</td><td><code>file_count</code> already rendered at SkillItem:191-192; description at 182-185. Nothing to add.</td></tr>
+        <tr><td class="id-col">C-13</td><td>Multi-field search with match highlighting</td><td>Multi-field core was merged into R3 (new numbering); the standalone "mark highlight + matched-field Badge" is incremental polish, not a survivor.</td></tr>
+        <tr><td class="id-col">C-18</td><td>Zero-typing quick pick (type-first mode)</td><td>Hiding the list until first keystroke breaks discoverability for users who want to scan and click. Behavioral assumption, not UX improvement.</td></tr>
+        <tr><td class="id-col">C-19</td><td>Sort toggle (name A-Z / Z-A / file count desc)</td><td>Redundant — R1's alphabetical sort within root groups covers the same need at lower cost.</td></tr>
+        <tr><td class="id-col">C-20</td><td>Typeahead overlay (no permanent chrome)</td><td>Intercepting raw keydown on a scroll region with a floating overlay is an accessibility + IME hazard. Solves a non-problem — clear dialog space exists for a search input.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="composition-signal">
+    Composed <time datetime="2026-07-09">2026-07-09</time> by <code>ce-ideate</code> · focus: <em>add search/filter to Multica's "new skill (copy from runtime)" skill-selection list</em> · run id <code>8eb130e0</code> · refined: R1+R3 merged
+  </footer>
+</div>
+</body>
+</html>
