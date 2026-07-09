@@ -107,7 +107,21 @@ export function StepWorkspace({
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
+  // Blur-driven "required" validation, separate from `slugTouched` (which
+  // tracks whether the user manually edited the slug). We only flag an empty
+  // field as an error once it has been focused and left, so the form never
+  // greets the user in red — the normal required-field UX.
+  const [nameBlurred, setNameBlurred] = useState(false);
+  const [slugBlurred, setSlugBlurred] = useState(false);
 
+  const nameError =
+    nameBlurred && name.trim().length === 0
+      ? t(($) => $.step_workspace.name_required)
+      : null;
+  const slugRequiredError =
+    slugBlurred && slug.trim().length === 0
+      ? t(($) => $.step_workspace.slug_required)
+      : null;
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
       ? t(($) => $.step_workspace.slug_format_error)
@@ -116,7 +130,8 @@ export function StepWorkspace({
     slug.length > 0 && isReservedSlug(slug)
       ? t(($) => $.step_workspace.slug_reserved_error)
       : null;
-  const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
+  const slugError =
+    slugRequiredError ?? slugValidationError ?? slugReservedError ?? slugServerError;
   const canCreate =
     name.trim().length > 0 && slug.trim().length > 0 && !slugError;
 
@@ -224,12 +239,15 @@ export function StepWorkspace({
           type="text"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
+          onBlur={() => setNameBlurred(true)}
+          aria-invalid={!!nameError}
           placeholder={t(($) => $.step_workspace.name_placeholder)}
           onKeyDown={(e) => {
             if (isImeComposing(e)) return;
             if (e.key === "Enter") handleCreate();
           }}
         />
+        {nameError && <p className="text-xs text-destructive">{nameError}</p>}
       </div>
       <div className="flex flex-col gap-1.5">
         <Label
@@ -238,7 +256,12 @@ export function StepWorkspace({
         >
           {t(($) => $.step_workspace.url_label)}
         </Label>
-        <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
+        <div
+          className={cn(
+            "flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground",
+            slugError && "border-destructive focus-within:border-destructive",
+          )}
+        >
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
             {`${urlHost}/`}
           </span>
@@ -247,6 +270,7 @@ export function StepWorkspace({
             type="text"
             value={slug}
             onChange={(e) => handleSlugChange(e.target.value)}
+            onBlur={() => setSlugBlurred(true)}
             placeholder={t(($) => $.step_workspace.slug_placeholder)}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             onKeyDown={(e) => {

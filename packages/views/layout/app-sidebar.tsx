@@ -100,12 +100,13 @@ import {
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useAppForeground } from "../common/use-app-foreground";
 
-// Top-level nav items stay active when the user is on a child route
-// (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
-// strict equality elsewhere — a pinned project shouldn't highlight on
-// sub-pages of itself.
+// A nav item is active only on its own exact route. Drilling into a child
+// route — a project detail at /:slug/projects/:id, or a space's issues at
+// /:slug/space/:key/issues — no longer keeps the parent list nav (or the space
+// row) lit; only the page you're actually on highlights. Detail pages carry
+// their own context in the header/breadcrumb, so the sidebar stays quiet.
 function isNavActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(href + "/");
+  return pathname === href;
 }
 
 // Stable empty arrays for query defaults. Using an inline `= []` default on
@@ -235,9 +236,10 @@ function SortableSpaceGroup({
   useEffect(() => {
     if (isDragging) wasDragged.current = true;
   }, [isDragging]);
-  // The row itself is the space's home (detail page). It stays highlighted
-  // anywhere inside the space (issues/projects/autopilots too) so the sidebar
-  // always shows which space you're in.
+  // The row links to the space's home (detail page) and highlights only there.
+  // On the space's sub-pages (issues/projects/autopilots) the active child row
+  // carries the highlight instead — the expanded group already shows which
+  // space you're in, so lighting both read as noise.
   const isSpaceActive = isNavActive(pathname, detailHref);
   return (
     <div

@@ -24,6 +24,13 @@ var spaceListCmd = &cobra.Command{
 	RunE:  runSpaceList,
 }
 
+var spaceGetCmd = &cobra.Command{
+	Use:   "get <space-id-or-key>",
+	Short: "Show a single space, including its description",
+	Args:  exactArgs(1),
+	RunE:  runSpaceGet,
+}
+
 var spaceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new space",
@@ -65,12 +72,15 @@ type spaceCLIListResponse struct {
 
 func init() {
 	spaceCmd.AddCommand(spaceListCmd)
+	spaceCmd.AddCommand(spaceGetCmd)
 	spaceCmd.AddCommand(spaceCreateCmd)
 	spaceCmd.AddCommand(spaceUpdateCmd)
 	spaceCmd.AddCommand(spaceArchiveCmd)
 
 	spaceListCmd.Flags().String("output", "table", "Output format: table or json")
 	spaceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
+	spaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	spaceCreateCmd.Flags().String("name", "", "Space name (required)")
 	spaceCreateCmd.Flags().String("key", "", "Space key / issue prefix")
@@ -130,6 +140,30 @@ func runSpaceList(cmd *cobra.Command, _ []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func runSpaceGet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	ref := strings.TrimSpace(args[0])
+	if ref == "" {
+		return fmt.Errorf("space reference is required")
+	}
+	var result spaceCLIListResponse
+	if err := client.GetJSON(ctx, spaceCollectionPath(client), &result); err != nil {
+		return fmt.Errorf("list spaces: %w", err)
+	}
+	for _, space := range result.Spaces {
+		if space.ID == ref || strings.EqualFold(space.Key, ref) {
+			return printSpaceResult(cmd, space)
+		}
+	}
+	return fmt.Errorf("space %q not found", ref)
 }
 
 func runSpaceCreate(cmd *cobra.Command, _ []string) error {

@@ -10,3 +10,14 @@ JOIN issue i ON i.id = a.issue_id
 WHERE a.workspace_id = $1
   AND a.space_key_lower = $2
   AND a.number = $3;
+
+-- name: BackfillSpaceKeyAliases :exec
+-- Record an alias under the given (old) space key for every issue currently in
+-- the space, so pre-rename identifiers (OLDKEY-N) keep resolving after a key
+-- change. Per-space numbers are unique, so there are no in-batch conflicts;
+-- ON CONFLICT DO NOTHING preserves any alias already recorded for that number.
+INSERT INTO issue_identifier_alias (workspace_id, space_key_lower, number, issue_id)
+SELECT i.workspace_id, @space_key_lower::text, i.number, i.id
+FROM issue i
+WHERE i.workspace_id = @workspace_id AND i.space_id = @space_id
+ON CONFLICT DO NOTHING;

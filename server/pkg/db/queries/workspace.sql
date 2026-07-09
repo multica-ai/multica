@@ -47,6 +47,7 @@ RETURNING *;
 -- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
+    slug = COALESCE(sqlc.narg('slug'), slug),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
     settings = COALESCE(sqlc.narg('settings'), settings),

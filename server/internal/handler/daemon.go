@@ -2543,6 +2543,7 @@ func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTask
 	resp.SpaceID = uuidToString(space.ID)
 	resp.SpaceKey = space.Key
 	resp.SpaceName = space.Name
+	resp.SpaceDescription = space.Description
 }
 
 type resolveSkillBundlesRequest struct {

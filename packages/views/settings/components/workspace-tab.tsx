@@ -24,9 +24,10 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import {
+  paths,
   resolvePostAuthDestination,
   useCurrentWorkspace,
   useHasOnboarded,
@@ -128,9 +129,14 @@ export function WorkspaceTab() {
   };
 
   const [name, setName] = useState(workspace?.name ?? "");
+  const [slug, setSlug] = useState(workspace?.slug ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
-  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [issuePrefix, setIssuePrefix] = useState(
+    workspace?.issue_prefix ?? "",
+  );
+  const [slugSaveStatus, setSlugSaveStatus] =
+    useState<SettingsSaveStatus>("idle");
   const [prefixSaveStatus, setPrefixSaveStatus] =
     useState<SettingsSaveStatus>("idle");
   const [actionId, setActionId] = useState<string | null>(null);
@@ -153,28 +159,29 @@ export function WorkspaceTab() {
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
 
+  const normalizeSlug = (raw: string) => raw.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const normalizedSlug = normalizeSlug(slug);
+  const slugChanged = !!workspace && normalizedSlug !== workspace.slug;
+  const slugInvalid = !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug);
+  const normalizePrefix = (raw: string) =>
+    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  const normalizedPrefix = normalizePrefix(issuePrefix);
+  const prefixChanged =
+    !!workspace && normalizedPrefix !== workspace.issue_prefix;
+  const prefixInvalid = normalizedPrefix.length === 0;
+
   // Reset form state only when the user switches to a different workspace.
   // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
   // when an unrelated mutation — e.g. avatar/logo upload — replaces the
   // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
+    setSlug(workspace?.slug ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
-
-  // Letters + digits only, uppercase, capped at 10 chars. The backend
-  // uppercases and trims on its side too — this is purely a UX guardrail
-  // so the value the user sees in the input matches what gets persisted.
-  const normalizePrefix = (raw: string) =>
-    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-
-  const normalizedPrefix = normalizePrefix(issuePrefix);
-  const prefixChanged =
-    !!workspace && normalizedPrefix !== workspace.issue_prefix;
-  const prefixInvalid = normalizedPrefix.length === 0;
 
   const detailsDraft = useMemo(
     () => ({ name, description, context }),
@@ -216,6 +223,46 @@ export function WorkspaceTab() {
     isEqual: workspaceDetailsEqual,
   });
 
+  const performSlugSave = async (nextSlug: string) => {
+    if (!workspace) return;
+    setSlugSaveStatus("saving");
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        slug: nextSlug,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setCurrentWorkspace(updated.slug, updated.id);
+      navigation.replace(paths.workspace(updated.slug).settings());
+      setSlugSaveStatus("saved");
+      toast.success(t(($) => $.workspace.toast_saved), {
+        id: "settings-auto-save",
+      });
+    } catch (error) {
+      setSlugSaveStatus("error");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.workspace.toast_save_failed),
+      );
+    }
+  };
+
+  const handleSlugBlur = () => {
+    if (!workspace || slugInvalid || !slugChanged) return;
+    const nextSlug = normalizedSlug;
+    setConfirmAction({
+      title: t(($) => $.workspace.slug_confirm_title),
+      description: t(($) => $.workspace.slug_confirm_description, {
+        oldSlug: workspace.slug,
+        newSlug: nextSlug,
+      }),
+      variant: "destructive",
+      onConfirm: () => performSlugSave(nextSlug),
+    });
+  };
+
   const performPrefixSave = async (nextPrefix: string) => {
     if (!workspace) return;
     setPrefixSaveStatus("saving");
@@ -226,8 +273,6 @@ export function WorkspaceTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      // Issue identifiers are computed from the workspace prefix at read time,
-      // so every cached issue key is stale after this confirmed change.
       await qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
       setPrefixSaveStatus("saved");
       toast.success(t(($) => $.workspace.toast_saved), {
@@ -307,10 +352,14 @@ export function WorkspaceTab() {
         action={
           <SettingsSaveState
             status={
-              prefixSaveStatus === "saving" || prefixSaveStatus === "error"
-                ? prefixSaveStatus
-                : detailsAutoSave.status === "idle"
+              slugSaveStatus === "saving" || slugSaveStatus === "error"
+                ? slugSaveStatus
+                : prefixSaveStatus === "saving" || prefixSaveStatus === "error"
                   ? prefixSaveStatus
+                : detailsAutoSave.status === "idle"
+                  ? slugSaveStatus === "saved"
+                    ? slugSaveStatus
+                    : prefixSaveStatus
                   : detailsAutoSave.status
             }
             savingLabel={t(($) => $.auto_save.saving)}
@@ -414,17 +463,26 @@ export function WorkspaceTab() {
 
           <SettingsRow
             label={t(($) => $.workspace.slug_label)}
+            description={t(($) => $.workspace.slug_hint)}
             size="text"
           >
             <Input
               type="text"
               name="workspace-slug"
               autoComplete="off"
+              autoCapitalize="none"
               spellCheck={false}
               aria-label={t(($) => $.workspace.slug_label)}
-              value={workspace.slug}
-              readOnly
-              className="bg-muted/50 font-mono text-muted-foreground dark:bg-muted/50"
+              value={slug}
+              onChange={(event) => {
+                setSlugSaveStatus("idle");
+                setSlug(normalizeSlug(event.target.value));
+              }}
+              onBlur={handleSlugBlur}
+              disabled={!canManageWorkspace}
+              aria-invalid={slugChanged && slugInvalid}
+              className="font-mono"
+              placeholder={workspace.slug}
             />
           </SettingsRow>
 
@@ -435,25 +493,25 @@ export function WorkspaceTab() {
             })}
             size="code"
           >
-              <Input
-                type="text"
-                name="workspace-issue-prefix"
-                autoComplete="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                aria-label={t(($) => $.workspace.issue_prefix_label)}
-                value={issuePrefix}
-                onChange={(event) => {
-                  setPrefixSaveStatus("idle");
-                  setIssuePrefix(normalizePrefix(event.target.value));
-                }}
-                onBlur={handlePrefixBlur}
-                disabled={!canManageWorkspace}
-                maxLength={10}
-                aria-invalid={prefixInvalid}
-                className="font-mono uppercase"
-                placeholder={workspace.issue_prefix}
-              />
+            <Input
+              type="text"
+              name="workspace-issue-prefix"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              aria-label={t(($) => $.workspace.issue_prefix_label)}
+              value={issuePrefix}
+              onChange={(event) => {
+                setPrefixSaveStatus("idle");
+                setIssuePrefix(normalizePrefix(event.target.value));
+              }}
+              onBlur={handlePrefixBlur}
+              disabled={!canManageWorkspace}
+              maxLength={10}
+              aria-invalid={prefixInvalid}
+              className="font-mono uppercase"
+              placeholder={workspace.issue_prefix}
+            />
           </SettingsRow>
 
             {!canManageWorkspace && (

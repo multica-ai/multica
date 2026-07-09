@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,8 +15,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-var errSpaceKeyFrozen = errors.New("space identifier cannot be changed after issues have been created")
 
 type SpaceResponse struct {
 	ID           string  `json:"id"`
@@ -480,10 +479,6 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 
 	space, err := updateWorkspaceSpaceLocked(r.Context(), qtx, params)
 	if err != nil {
-		if errors.Is(err, errSpaceKeyFrozen) {
-			writeError(w, http.StatusConflict, "space identifier cannot be changed after issues have been created")
-			return
-		}
 		if isUniqueViolation(err) || isCheckViolation(err) {
 			writeError(w, http.StatusBadRequest, "space identifier is invalid or already used")
 			return
@@ -529,8 +524,18 @@ func updateWorkspaceSpaceLocked(ctx context.Context, qtx *db.Queries, params db.
 	if err != nil {
 		return db.WorkspaceSpace{}, err
 	}
+	// When the identifier changes on a space that already holds issues, every
+	// existing OLDKEY-N would stop resolving (identifiers are derived from the
+	// space key at read time). Record an alias per issue under the old key
+	// first, so GitHub/CLI/link references keep landing on the issue.
 	if params.Key.Valid && params.Key.String != locked.Key && locked.IssueCounter > 0 {
-		return db.WorkspaceSpace{}, errSpaceKeyFrozen
+		if err := qtx.BackfillSpaceKeyAliases(ctx, db.BackfillSpaceKeyAliasesParams{
+			WorkspaceID:   params.WorkspaceID,
+			SpaceID:       params.ID,
+			SpaceKeyLower: strings.ToLower(locked.Key),
+		}); err != nil {
+			return db.WorkspaceSpace{}, fmt.Errorf("backfill identifier aliases: %w", err)
+		}
 	}
 	return qtx.UpdateWorkspaceSpace(ctx, params)
 }
