@@ -558,6 +558,69 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 	}
 }
 
+// TestRecordAutopilotRuleVersionRepublishReattributes verifies the final Phase 1
+// item (MUL-4302 §3.4): republishing a rule (as a trigger edit / archive / system
+// pause does) appends a new version, the LATEST version is the active one, and
+// dispatch attribution follows it. So editing member A's autopilot as member B
+// re-attributes subsequent runs to B; a system pause records a 'system' publisher.
+func TestRecordAutopilotRuleVersionRepublishReattributes(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, memberA, agentID, _ := seedAttributionFixture(t, pool)
+	autopilotID, _ := seedRunOnlyAutopilot(t, pool, workspaceID, agentID, memberA)
+
+	var memberB string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Editor', $1) RETURNING id`,
+		fmt.Sprintf("editor-%d@multica.test", time.Now().UnixNano())).Scan(&memberB); err != nil {
+		t.Fatalf("seed member B: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberB) })
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		workspaceID, memberB); err != nil {
+		t.Fatalf("seed member B membership: %v", err)
+	}
+
+	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("get autopilot: %v", err)
+	}
+	verParams := db.GetActiveAutopilotRuleVersionParams{WorkspaceID: ap.WorkspaceID, AutopilotID: ap.ID}
+
+	// v1: creator (member A) publishes; active + dispatch attribute to A.
+	if err := RecordAutopilotRuleVersion(ctx, q, ap, "member", util.MustParseUUID(memberA)); err != nil {
+		t.Fatalf("record v1: %v", err)
+	}
+	active, err := q.GetActiveAutopilotRuleVersion(ctx, verParams)
+	if err != nil || active.PublishedByType != "member" || active.PublishedByID.Bytes != util.MustParseUUID(memberA).Bytes {
+		t.Fatalf("v1 active = %+v (err %v), want member A", active, err)
+	}
+
+	// v2: member B republishes (e.g. edited a trigger) → latest wins.
+	if err := RecordAutopilotRuleVersion(ctx, q, ap, "member", util.MustParseUUID(memberB)); err != nil {
+		t.Fatalf("record v2: %v", err)
+	}
+	attr := ruleOwnerAttribution(ctx, q, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, ap.ID)
+	if attr.Source != attribution.SourceRuleOwner || attr.AccountableUserID.Bytes != util.MustParseUUID(memberB).Bytes {
+		t.Errorf("after republish, dispatch attribution = %+v, want rule_owner accountable = member B", attr)
+	}
+
+	// v3: system auto-pause records a 'system' publisher (no member id).
+	if err := RecordAutopilotRuleVersion(ctx, q, ap, "system", pgtype.UUID{}); err != nil {
+		t.Fatalf("record v3 (system): %v", err)
+	}
+	active, err = q.GetActiveAutopilotRuleVersion(ctx, verParams)
+	if err != nil || active.PublishedByType != "system" || active.PublishedByID.Valid {
+		t.Errorf("v3 active = %+v (err %v), want system publisher with NULL id", active, err)
+	}
+	// A system-published version has no member → dispatch degrades to unattributed
+	// (never fabricates a human).
+	sysAttr := ruleOwnerAttribution(ctx, q, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, ap.ID)
+	if sysAttr.Source != attribution.SourceUnattributed || sysAttr.AccountableUserID.Valid {
+		t.Errorf("system-published version must yield unattributed, got %+v", sysAttr)
+	}
+}
+
 // TestApplyAttributionFallbackRefusesOnMissingOwner: an unattributed run in an
 // OPEN (non-fail-closed) workspace whose agent has no valid owner cannot resolve an
 // accountable human via owner_fallback, so the enqueue is refused rather than

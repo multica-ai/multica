@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -938,24 +939,12 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// autopilotRuleConfigSummary captures the substantive (accountability-bearing)
-// config of an autopilot at publish time, stored on each rule-version snapshot for
-// audit display (MUL-4302 §7). Cosmetic fields (title / description / issue title
-// template) are intentionally excluded — changing them does not transfer
-// accountability, so they neither appear here nor trigger a new version.
-type autopilotRuleConfigSummary struct {
-	AssigneeType  string `json:"assignee_type"`
-	AssigneeID    string `json:"assignee_id"`
-	Status        string `json:"status"`
-	ExecutionMode string `json:"execution_mode"`
-}
-
 // autopilotRuleSubstantiveChange reports whether a substantive (publish-worthy)
 // field of the autopilot ROW changed between prev and next: the execution target
 // (assignee), enabled-state (status: active/paused/archived), or execution mode
 // (MUL-4302 §3.4). Trigger-table edits (cron / webhook / event_filters) are also
-// substantive per the design but are not yet wired here — see the PR description's
-// remaining-work note.
+// substantive and republish the rule version in the trigger CRUD handlers
+// (Create/Update/Delete trigger); archive and system-pause do so in their own paths.
 func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
 	return prev.AssigneeType != next.AssigneeType ||
 		prev.AssigneeID != next.AssigneeID ||
@@ -964,30 +953,11 @@ func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
 }
 
 // recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
-// publish (MUL-4302 §3.4), recording the publisher and the effective config. Runs
-// inside the caller's tx so the version is atomic with the autopilot write; a
-// failure surfaces to the caller rather than leaving a version-less publish that
-// would degrade every future run to unattributed.
+// publish (MUL-4302 §3.4). Thin handler wrapper over service.RecordAutopilotRuleVersion
+// (shared with the failure monitor); callers pass their tx-scoped Queries so the
+// version is atomic with the autopilot write.
 func (h *Handler) recordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
-	summary, err := json.Marshal(autopilotRuleConfigSummary{
-		AssigneeType:  ap.AssigneeType,
-		AssigneeID:    uuidToString(ap.AssigneeID),
-		Status:        ap.Status,
-		ExecutionMode: ap.ExecutionMode,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal rule version config summary: %w", err)
-	}
-	if _, err := q.CreateAutopilotRuleVersion(ctx, db.CreateAutopilotRuleVersionParams{
-		AutopilotID:     ap.ID,
-		WorkspaceID:     ap.WorkspaceID,
-		PublishedByType: publishedByType,
-		PublishedByID:   publishedByID,
-		ConfigSummary:   summary,
-	}); err != nil {
-		return fmt.Errorf("create autopilot rule version: %w", err)
-	}
-	return nil
+	return service.RecordAutopilotRuleVersion(ctx, q, ap, publishedByType, publishedByID)
 }
 
 func (h *Handler) parseAutopilotProjectID(
@@ -1046,7 +1016,26 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 	// Product "delete" is archival: stop future triggers and hide the
 	// autopilot from default lists while preserving runs, tasks, webhook
 	// deliveries, subscribers, and collaborators as execution history.
-	if err := h.Queries.ArchiveAutopilot(r.Context(), idUUID); err != nil {
+	// Archiving is a substantive status change (MUL-4302 §3.4), so republish the
+	// rule version with this member as publisher, atomically with the archive.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.ArchiveAutopilot(r.Context(), idUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	ap.Status = "archived" // reflect the post-archive state in the version snapshot
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
@@ -1290,6 +1279,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		}
 		resp := h.triggerToResponse(trigger)
 		userID, _ := requireUserID(w, r)
+		h.recordTriggerRuleVersionBestEffort(r.Context(), ap, userID)
 		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
 			"trigger":      resp,
@@ -1315,11 +1305,32 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 
 	resp := h.triggerToResponse(trigger)
 	userID, _ := requireUserID(w, r)
+	h.recordTriggerRuleVersionBestEffort(r.Context(), ap, userID)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
 	})
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// recordTriggerRuleVersionBestEffort republishes an autopilot's rule version for a
+// trigger CREATE (a substantive change to what fires, MUL-4302 §3.4). Unlike the
+// trigger update/delete paths — which wrap the mutation and the version write in one
+// tx — create is best-effort: the webhook create path mints its token with a retry
+// loop that cannot share a single tx, and a create is often part of initial setup
+// (already covered by the autopilot-create v1). A failed version write here is
+// benign: the autopilot's active version stays the current publisher, the new
+// trigger still fires under it, and no immediate daemon claim rides this (unlike the
+// manual-rerun lineage race). Only a member actor publishes; an unresolved user is a
+// no-op rather than a bogus 'system' publish.
+func (h *Handler) recordTriggerRuleVersionBestEffort(ctx context.Context, ap db.Autopilot, userID string) {
+	uid, err := util.ParseUUID(userID)
+	if err != nil {
+		return
+	}
+	if err := h.recordAutopilotRuleVersion(ctx, h.Queries, ap, "member", uid); err != nil {
+		slog.Warn("create trigger: record rule version failed", "autopilot_id", uuidToString(ap.ID), "error", err)
+	}
 }
 
 // createWebhookTriggerWithMintedToken atomically creates a webhook trigger
@@ -1556,14 +1567,37 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	trigger, err := h.Queries.UpdateAutopilotTrigger(r.Context(), params)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	// Editing a trigger changes what / when the rule fires — a substantive publish
+	// (MUL-4302 §3.4) — so republish the rule version with this member as publisher,
+	// atomically with the trigger update (mirrors CreateAutopilot / UpdateAutopilot).
+	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	trigger, err := qtx.UpdateAutopilotTrigger(r.Context(), params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}
 
 	resp := h.triggerToResponse(trigger)
-	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      resp,
@@ -1612,7 +1646,26 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.Queries.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+	// Removing a trigger changes what fires — a substantive publish (MUL-4302 §3.4).
+	// Republish the rule version with this member as publisher, atomically with the
+	// delete.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeleteAutopilotTrigger(r.Context(), triggerUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete trigger")
 		return
 	}

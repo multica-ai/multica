@@ -47,6 +47,50 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
 
+// autopilotRuleConfigSummary captures the substantive (accountability-bearing)
+// config of an autopilot at publish time, stored on each rule-version snapshot for
+// audit display (MUL-4302 §7). Cosmetic fields (title / description / issue title
+// template) are intentionally excluded — changing them does not transfer
+// accountability. Trigger config (cron / webhook / event_filters) lives in a
+// separate table and is not inlined here; a trigger edit still republishes the
+// rule (recording the editing member + timestamp), the summary just carries the
+// autopilot row's core config.
+type autopilotRuleConfigSummary struct {
+	AssigneeType  string `json:"assignee_type"`
+	AssigneeID    string `json:"assignee_id"`
+	Status        string `json:"status"`
+	ExecutionMode string `json:"execution_mode"`
+}
+
+// RecordAutopilotRuleVersion appends one rule-version snapshot for a substantive
+// publish (MUL-4302 §3.4), recording the publisher and the effective config. Shared
+// by the handler publish paths (create / update / trigger edits / archive, run in
+// their tx) and the failure monitor's system-pause (a different package). q is the
+// caller's *db.Queries (tx-scoped where the caller wants atomicity). publishedByType
+// is "member" (with the acting member id) or "system" (with an invalid id, e.g. the
+// auto-pause monitor).
+func RecordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
+	summary, err := json.Marshal(autopilotRuleConfigSummary{
+		AssigneeType:  ap.AssigneeType,
+		AssigneeID:    util.UUIDToString(ap.AssigneeID),
+		Status:        ap.Status,
+		ExecutionMode: ap.ExecutionMode,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal rule version config summary: %w", err)
+	}
+	if _, err := q.CreateAutopilotRuleVersion(ctx, db.CreateAutopilotRuleVersionParams{
+		AutopilotID:     ap.ID,
+		WorkspaceID:     ap.WorkspaceID,
+		PublishedByType: publishedByType,
+		PublishedByID:   publishedByID,
+		ConfigSummary:   summary,
+	}); err != nil {
+		return fmt.Errorf("create autopilot rule version: %w", err)
+	}
+	return nil
+}
+
 // DispatchAutopilot is the core execution entry point.
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
