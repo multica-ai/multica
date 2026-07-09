@@ -176,7 +176,7 @@ if [ -d "$TMPDIR" ]; then
 else
   tmpdir_exists=no
 fi
-printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" > "$CAPTURE_FILE"
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\nDESKTOP_ENV_PROBE=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" "$DESKTOP_ENV_PROBE" > "$CAPTURE_FILE"
 IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
@@ -219,10 +219,11 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 			ID:   "agent-private-temp",
 			Name: "test-agent",
 			CustomEnv: map[string]string{
-				"CAPTURE_FILE": captureFile,
-				"TMPDIR":       "/shared/tmp",
-				"TMP":          "/shared/tmp",
-				"TEMP":         "/shared/tmp",
+				"CAPTURE_FILE":      captureFile,
+				"DESKTOP_ENV_PROBE": "from-saved-agent-env",
+				"TMPDIR":            "/shared/tmp",
+				"TMP":               "/shared/tmp",
+				"TEMP":              "/shared/tmp",
 			},
 		},
 	}
@@ -258,6 +259,9 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 	if got["TMPDIR_EXISTS"] != "yes" {
 		t.Fatalf("fake agent saw TMPDIR_EXISTS=%q, want yes", got["TMPDIR_EXISTS"])
+	}
+	if got["DESKTOP_ENV_PROBE"] != "from-saved-agent-env" {
+		t.Fatalf("DESKTOP_ENV_PROBE = %q, want saved custom env value", got["DESKTOP_ENV_PROBE"])
 	}
 	taskTempDir := got["TMPDIR"]
 	if strings.HasPrefix(taskTempDir, envRoot) {
