@@ -71,3 +71,6 @@ server/server
 data/
 .kilo
 .idea
+
+# Compound Engineering local config (machine-specific preferences)
+.compound-engineering/*.local.yaml
