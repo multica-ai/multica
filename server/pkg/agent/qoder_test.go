@@ -791,3 +791,62 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *test
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+// TestQoderHardensWindowsBrowserMcpConfig mirrors
+// TestHermesHardensWindowsBrowserMcpConfig for the Qoder ACP backend, using
+// this file's own RPC-capture convention instead of findRecordedFrame.
+func TestQoderHardensWindowsBrowserMcpConfig(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	rpcFile := filepath.Join(tempDir, "rpc.txt")
+	fakePath := filepath.Join(tempDir, "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptCapturingRPC()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_RPC_FILE": rpcFile},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest"]}}}`)
+	session, err := backend.Execute(ctx, "hi", ExecOptions{
+		Timeout:   30 * time.Second,
+		McpConfig: mcpConfig,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(rpcFile)
+	if err != nil {
+		t.Fatalf("read rpc file: %v", err)
+	}
+	var sessionNew string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"method":"session/new"`) {
+			sessionNew = line
+			break
+		}
+	}
+	if sessionNew == "" {
+		t.Fatalf("no session/new request captured; rpc log:\n%s", raw)
+	}
+	if !strings.Contains(sessionNew, "--executablePath=") {
+		t.Fatalf("expected hardened chrome-devtools --executablePath= in session/new payload:\n%s", sessionNew)
+	}
+}
