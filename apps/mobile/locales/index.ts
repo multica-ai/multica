@@ -4,6 +4,7 @@ import enCommon from "./en/common.json";
 import enInbox from "./en/inbox.json";
 import enIssues from "./en/issues.json";
 import enProjects from "./en/projects.json";
+import enRuntimes from "./en/runtimes.json";
 import enSettings from "./en/settings.json";
 import enSkills from "./en/skills.json";
 import enWorkspace from "./en/workspace.json";
@@ -13,6 +14,7 @@ import zhHansCommon from "./zh-Hans/common.json";
 import zhHansInbox from "./zh-Hans/inbox.json";
 import zhHansIssues from "./zh-Hans/issues.json";
 import zhHansProjects from "./zh-Hans/projects.json";
+import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansSettings from "./zh-Hans/settings.json";
 import zhHansSkills from "./zh-Hans/skills.json";
 import zhHansWorkspace from "./zh-Hans/workspace.json";
@@ -27,6 +29,7 @@ export const RESOURCES = {
     inbox: enInbox,
     issues: enIssues,
     projects: enProjects,
+    runtimes: enRuntimes,
     settings: enSettings,
     skills: enSkills,
     workspace: enWorkspace,
@@ -38,6 +41,7 @@ export const RESOURCES = {
     inbox: zhHansInbox,
     issues: zhHansIssues,
     projects: zhHansProjects,
+    runtimes: zhHansRuntimes,
     settings: zhHansSettings,
     skills: zhHansSkills,
     workspace: zhHansWorkspace,
