@@ -40,4 +40,4 @@ images:
     newTag: "0dd81b29"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "65d322f7"
+    newTag: "0dd81b29"
