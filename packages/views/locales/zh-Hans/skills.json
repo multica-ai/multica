@@ -299,11 +299,11 @@
     "conflict_apply_button": "应用决策",
     "conflict_missing_resolution": "请选择如何处理这个冲突。",
     "conflict_name_still_exists": "这个名称仍然已存在。请换一个名称或跳过。",
-    "provider_group_heading": "Provider 技能",
-    "universal_group_heading": "通用技能",
-    "other_group_heading": "其他技能",
-    "search_empty": "没有匹配「{{query}}」的技能",
-    "group_count": "{{count}}"
+    "provider_group_heading": "Provider skill",
+    "universal_group_heading": "通用 skill",
+    "other_group_heading": "其他 skill",
+    "search_empty": "没有匹配 \"{{query}}\" 的 skill",
+    "group_count": "{{count}} 个 skill"
   },
   "file_tree": {
     "no_files": "无文件"
