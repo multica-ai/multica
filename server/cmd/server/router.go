@@ -176,6 +176,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
+		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
+		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
+		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
@@ -780,6 +783,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
+
+		// OpenAI-compatible LLM endpoints (MUL-4238). User-scoped (auth-only,
+		// no workspace context needed): the basic LLM layer is a shared
+		// utility, not a per-workspace resource. Both accept the standard
+		// OpenAI chat-completions request body; model is taken from the request
+		// with a configured default fallback. Return 503 when the LLM layer is
+		// unconfigured (no MULTICA_LLM_API_KEY / MULTICA_LLM_BASE_URL).
+		r.Post("/api/llm/v1/chat/completions", h.LLMChatCompletions)
+		r.Post("/api/llm/v1/chat/completions/stream", h.LLMChatCompletionsStream)
 
 		// Attachment download — user-scoped (auth-only), NOT
 		// workspace-scoped. The handler self-resolves the workspace
