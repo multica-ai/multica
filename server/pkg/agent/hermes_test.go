@@ -2263,3 +2263,63 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 		t.Fatalf("session/new.mcpServers: got %d entries, want 3", len(servers))
 	}
 }
+
+// TestHermesHardensWindowsBrowserMcpConfig pins that a playwright entry in
+// agent.mcp_config gets the same Windows phantom-window hardening (a
+// --config sidecar forcing --disable-gpu) before it reaches session/new,
+// matching what claude.go/codebuddy.go already do for their own
+// --mcp-config file.
+func TestHermesHardensWindowsBrowserMcpConfig(t *testing.T) {
+	withBrowserMcpTestHost(t, "windows", nil, nil)
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 30 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"playwright":{"command":"npx","args":["@playwright/mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/new")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok || len(servers) != 1 {
+		t.Fatalf("session/new.mcpServers: got %v, want 1 entry", params["mcpServers"])
+	}
+	entry := servers[0].(map[string]any)
+	args, ok := entry["args"].([]any)
+	if !ok {
+		t.Fatalf("playwright entry args: got %T, want []any", entry["args"])
+	}
+	hasConfig := false
+	for i, a := range args {
+		if a == "--config" && i+1 < len(args) {
+			hasConfig = true
+		}
+	}
+	if !hasConfig {
+		t.Fatalf("expected hardened playwright args to include --config <path>, got %v", args)
+	}
+}
