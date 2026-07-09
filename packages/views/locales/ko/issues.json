@@ -371,7 +371,19 @@
     "status_running": "작업 중",
     "status_completed": "완료됨",
     "status_failed": "실패함",
-    "status_cancelled": "취소됨"
+    "status_cancelled": "취소됨",
+    "attribution": {
+      "on_behalf_of": "{{name}} 님을 대신하여",
+      "someone": "어떤 멤버",
+      "unattributed": "책임 멤버 없음",
+      "source_direct_human": "멤버 직접 작업",
+      "source_delegation": "다른 실행에서 위임됨",
+      "source_comment_source": "댓글 스레드에서",
+      "source_rule_owner": "오토파일럿 규칙 게시자",
+      "source_owner_fallback": "정확한 담당자 없음 — 에이전트 소유자에게 귀속",
+      "source_backfill": "백필된 귀속",
+      "source_unattributed": "책임 멤버를 확인할 수 없음"
+    }
   },
   "terminate_dialog": {
     "title": "이 작업을 중지할까요?",

@@ -387,7 +387,19 @@
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "attribution": {
+      "on_behalf_of": "on behalf of {{name}}",
+      "someone": "someone",
+      "unattributed": "No responsible member",
+      "source_direct_human": "Direct member action",
+      "source_delegation": "Delegated from another run",
+      "source_comment_source": "From a comment thread",
+      "source_rule_owner": "Autopilot rule publisher",
+      "source_owner_fallback": "No precise owner — attributed to the agent owner",
+      "source_backfill": "Backfilled attribution",
+      "source_unattributed": "No responsible member resolved"
+    }
   },
   "terminate_dialog": {
     "title": "Stop this task?",

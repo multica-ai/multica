@@ -371,7 +371,19 @@
     "status_running": "作業中",
     "status_completed": "完了",
     "status_failed": "失敗",
-    "status_cancelled": "キャンセル済み"
+    "status_cancelled": "キャンセル済み",
+    "attribution": {
+      "on_behalf_of": "{{name}} の代理として",
+      "someone": "あるメンバー",
+      "unattributed": "責任メンバーなし",
+      "source_direct_human": "メンバーの直接操作",
+      "source_delegation": "別の実行から委任",
+      "source_comment_source": "コメントスレッドから",
+      "source_rule_owner": "オートパイロットのルール公開者",
+      "source_owner_fallback": "正確な責任者なし — エージェント所有者に帰属",
+      "source_backfill": "バックフィルされた帰属",
+      "source_unattributed": "責任メンバーを解決できません"
+    }
   },
   "terminate_dialog": {
     "title": "このタスクを停止しますか？",

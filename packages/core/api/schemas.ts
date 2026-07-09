@@ -531,6 +531,34 @@ export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 // a message from cache or restores text into the input.
 // ---------------------------------------------------------------------------
 
+// Human attribution (MUL-4302 §9): who an agent run is accountable to, and how
+// that human was resolved. Every field is defensive so a departed member, an
+// autopilot run (no originator), or an older backend degrades to a partial
+// object instead of a parse failure.
+const AttributionUserSchema = z.object({
+  id: z.string().default(""),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  avatar_url: z.string().optional(),
+}).loose();
+
+const TaskEvidenceSchema = z.object({
+  kind: z.string().default(""),
+  ref_id: z.string().default(""),
+}).loose();
+
+const TaskAttributionSchema = z.object({
+  source: z.string().default("unattributed"),
+  precise: z.boolean().default(false),
+  initiator: AttributionUserSchema.optional(),
+  originator: AttributionUserSchema.optional(),
+  evidence: TaskEvidenceSchema.optional(),
+  rule_version_id: z.string().optional(),
+  delegated_from_task_id: z.string().optional(),
+  retry_of_task_id: z.string().optional(),
+  rerun_of_task_id: z.string().optional(),
+}).loose();
+
 const AgentTaskResponseSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
@@ -555,6 +583,7 @@ const AgentTaskResponseSchema = z.object({
   kind: z.string().optional(),
   work_dir: z.string().optional(),
   relative_work_dir: z.string().optional(),
+  attribution: TaskAttributionSchema.optional(),
 }).loose();
 
 const CancelledChatMessageSchema = z.object({

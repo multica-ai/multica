@@ -371,7 +371,19 @@
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
-    "status_cancelled": "已取消"
+    "status_cancelled": "已取消",
+    "attribution": {
+      "on_behalf_of": "代表 {{name}}",
+      "someone": "某位成员",
+      "unattributed": "无责任成员",
+      "source_direct_human": "成员直接操作",
+      "source_delegation": "由其他运行委托",
+      "source_comment_source": "来自评论线程",
+      "source_rule_owner": "Autopilot 规则发布者",
+      "source_owner_fallback": "无精确责任人 —— 归到 agent 所有者",
+      "source_backfill": "回填的归因",
+      "source_unattributed": "未解析到责任成员"
+    }
   },
   "terminate_dialog": {
     "title": "确定停止该 task？",

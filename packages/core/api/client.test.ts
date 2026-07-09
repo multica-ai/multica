@@ -616,6 +616,55 @@ describe("ApiClient", () => {
       });
     });
 
+    it("parses task attribution when the backend enriches it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            ...taskResponse,
+            attribution: {
+              source: "direct_human",
+              precise: true,
+              initiator: { id: "user-1", name: "Ada", avatar_url: "https://x/a.png" },
+              originator: { id: "user-1", name: "Ada" },
+              evidence: { kind: "comment", ref_id: "comment-1" },
+            },
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.attribution).toEqual({
+        source: "direct_human",
+        precise: true,
+        initiator: { id: "user-1", name: "Ada", avatar_url: "https://x/a.png" },
+        originator: { id: "user-1", name: "Ada" },
+        evidence: { kind: "comment", ref_id: "comment-1" },
+      });
+    });
+
+    it("leaves attribution absent on servers that predate it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(taskResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.attribution).toBeUndefined();
+    });
+
     it("treats a null cancelled chat message as absent", async () => {
       vi.stubGlobal(
         "fetch",

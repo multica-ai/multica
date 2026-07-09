@@ -18,6 +18,7 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { AttributionBadge } from "./attribution-badge";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // Right-panel section that lists every agent run for this issue. Active
@@ -305,6 +306,7 @@ export function ActiveTaskRow({
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
+      <AttributionBadge attribution={task.attribution} className="shrink-0" />
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
@@ -398,6 +400,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
+      <AttributionBadge attribution={task.attribution} className="shrink-0" />
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">{failureLabel ?? label}</span>
