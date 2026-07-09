@@ -24,11 +24,41 @@ import (
 // precede closing the stdout pipe (#4533).
 var opencodeTerminateGraceNanos atomic.Int64
 
+const (
+	defaultOpencodeRunTimeout = 30 * time.Minute
+	opencodeRunTimeoutEnv     = "MULTICA_OPENCODE_RUN_TIMEOUT"
+)
+
 func opencodeTerminateGrace() time.Duration {
 	if n := opencodeTerminateGraceNanos.Load(); n > 0 {
 		return time.Duration(n)
 	}
 	return 5 * time.Second
+}
+
+func (b *opencodeBackend) runTimeout(explicit time.Duration) time.Duration {
+	if explicit > 0 {
+		return explicit
+	}
+
+	raw := strings.TrimSpace(b.cfg.Env[opencodeRunTimeoutEnv])
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv(opencodeRunTimeoutEnv))
+	}
+	if raw == "" {
+		return defaultOpencodeRunTimeout
+	}
+	if raw == "0" {
+		return 0
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout < 0 {
+		if b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("invalid opencode run timeout; using default", "env", opencodeRunTimeoutEnv, "value", raw, "default", defaultOpencodeRunTimeout.String())
+		}
+		return defaultOpencodeRunTimeout
+	}
+	return timeout
 }
 
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
@@ -63,7 +93,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	execPath = resolved
 
-	timeout := opts.Timeout
+	timeout := b.runTimeout(opts.Timeout)
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
@@ -169,7 +199,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 
-	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model, "timeout", timeout)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)

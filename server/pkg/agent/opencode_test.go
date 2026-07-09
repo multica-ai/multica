@@ -24,6 +24,59 @@ func TestNewReturnsOpencodeBackend(t *testing.T) {
 	}
 }
 
+func TestOpencodeRunTimeoutResolution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		env      string
+		explicit time.Duration
+		want     time.Duration
+	}{
+		{
+			name:     "explicit global timeout wins",
+			env:      "45m",
+			explicit: 2 * time.Minute,
+			want:     2 * time.Minute,
+		},
+		{
+			name: "opencode env override",
+			env:  "45m",
+			want: 45 * time.Minute,
+		},
+		{
+			name: "zero disables opencode cap",
+			env:  "0",
+			want: 0,
+		},
+		{
+			name: "zero duration disables opencode cap",
+			env:  "0s",
+			want: 0,
+		},
+		{
+			name: "invalid env falls back to default",
+			env:  "-1s",
+			want: defaultOpencodeRunTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			b := &opencodeBackend{cfg: Config{
+				Env:    map[string]string{opencodeRunTimeoutEnv: tt.env},
+				Logger: slog.Default(),
+			}}
+
+			if got := b.runTimeout(tt.explicit); got != tt.want {
+				t.Fatalf("runTimeout() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 // ── Text event tests ──
 
 func TestOpencodeHandleTextEvent(t *testing.T) {

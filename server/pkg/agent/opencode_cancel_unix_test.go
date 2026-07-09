@@ -60,6 +60,60 @@ func TestOpencodeCancellationEscalatesToSIGKILL(t *testing.T) {
 	runOpencodeCancellationTest(t, opencodeCancelFakeScript(true))
 }
 
+// TestOpencodeRunTimeoutTerminatesProcessGroup verifies the #4551 safety net:
+// when the daemon leaves the global agent timeout unset, OpenCode still gets a
+// provider-level wall-clock cap so a CLI process that keeps stdout open forever
+// cannot leave the task stuck in progress.
+func TestOpencodeRunTimeoutTerminatesProcessGroup(t *testing.T) {
+	tempDir := t.TempDir()
+	pidFile := filepath.Join(tempDir, "pids")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(opencodeCancelFakeScript(false)))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_PID_FILE":   pidFile,
+			opencodeRunTimeoutEnv: "1s",
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: tempDir})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	pids := waitForPids(t, pidFile)
+
+	select {
+	case res := <-session.Result:
+		if res.Status != "timeout" {
+			t.Fatalf("status = %q, error = %q; want timeout", res.Status, res.Error)
+		}
+		if !strings.Contains(res.Error, "1s") {
+			t.Fatalf("timeout error = %q, want configured timeout", res.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute did not return after provider run timeout")
+	}
+
+	for _, pid := range pids {
+		waitProcessGone(t, pid)
+	}
+}
+
 func runOpencodeCancellationTest(t *testing.T, script string) {
 	t.Helper()
 
