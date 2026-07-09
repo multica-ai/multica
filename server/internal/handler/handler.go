@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -769,10 +770,13 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	})
 	if err != nil {
 		// The identifier may be pre-move: moving an issue between spaces
-		// renumbers it but records the old identifier as an alias.
+		// renumbers it but records the old identifier as an alias. Unlike
+		// GetIssueBySpaceKeyAndNumber (which lower()s both sides in SQL),
+		// the alias table's lookup is an exact match against a column that
+		// is always stored lowercased, so the caller must lowercase too.
 		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
 			WorkspaceID:   wsUUID,
-			SpaceKeyLower: parts.prefix,
+			SpaceKeyLower: strings.ToLower(parts.prefix),
 			Number:        parts.number,
 		})
 		if err != nil {
