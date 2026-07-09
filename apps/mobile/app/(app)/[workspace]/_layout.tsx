@@ -344,6 +344,13 @@ export default function WorkspaceLayout() {
           }}
         />
         <Stack.Screen
+          name="more/skills/[id]/file/[...path]"
+          options={{
+            title: tSkills("file.header_default_title"),
+            headerBackTitle: tSkills("detail.header_default_title"),
+          }}
+        />
+        <Stack.Screen
           name="more/settings"
           options={{
             title: tSettings("header_title"),
