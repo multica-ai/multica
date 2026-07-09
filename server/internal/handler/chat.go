@@ -580,6 +580,17 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Detect whether this is the very first human message in the session,
+	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
+	// the opening turn: we upgrade the default/original title exactly once, off
+	// the first user message, and never re-run it on every subsequent send. A
+	// query error here is treated as "not first" so we simply skip generation
+	// (best-effort — never block the send).
+	hadUserMessage := true
+	if existed, err := h.Queries.ChatSessionHasUserMessage(r.Context(), session.ID); err == nil {
+		hadUserMessage = existed
+	}
+
 	// Create the user message first so the daemon can always find it.
 	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
@@ -667,6 +678,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		TaskID:        uuidToString(task.ID),
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
+
+	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
+	// Fire-and-forget and non-blocking: the response below is written whether
+	// or not a title is ever generated, and a disabled/failing LLM layer
+	// silently keeps the original first-message-derived title. session.Title
+	// is the default/original title observed here and drives the CAS so a
+	// manual rename mid-generation is never clobbered.
+	if !hadUserMessage {
+		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, session.Title, req.Content)
+	}
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),

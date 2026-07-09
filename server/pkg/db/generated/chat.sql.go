@@ -799,8 +799,9 @@ FOR UPDATE
 // their FK check after we commit the delete.
 func (q *Queries) LockChatSessionForDelete(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockChatSessionForDelete, id)
-	err := row.Scan(&id)
-	return id, err
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const markChatSessionRead = `-- name: MarkChatSessionRead :exec
@@ -946,6 +947,48 @@ type UpdateChatSessionTitleParams struct {
 
 func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSessionTitleParams) (ChatSession, error) {
 	row := q.db.QueryRow(ctx, updateChatSessionTitle, arg.ID, arg.Title)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+	)
+	return i, err
+}
+
+const updateChatSessionTitleIfCurrent = `-- name: UpdateChatSessionTitleIfCurrent :one
+UPDATE chat_session SET title = $1, updated_at = now()
+WHERE id = $2 AND title = $3
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, runtime_id, last_read_at, is_agent_intro, pinned_at
+`
+
+type UpdateChatSessionTitleIfCurrentParams struct {
+	NewTitle      string      `json:"new_title"`
+	ID            pgtype.UUID `json:"id"`
+	ExpectedTitle string      `json:"expected_title"`
+}
+
+// Compare-and-swap the title: only overwrite it when it still equals the
+// value the caller observed (@expected_title). This is the idempotency /
+// no-clobber guard behind LLM auto-titling (MUL-4295): the async generator
+// captures the session's current (default/original) title before calling the
+// model, and this write lands only if a manual rename or a competing writer
+// has not changed the title in the meantime. A mismatch returns pgx.ErrNoRows
+// (zero rows updated), which the caller treats as "someone renamed it — leave
+// it alone", NOT as an error.
+func (q *Queries) UpdateChatSessionTitleIfCurrent(ctx context.Context, arg UpdateChatSessionTitleIfCurrentParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, updateChatSessionTitleIfCurrent, arg.NewTitle, arg.ID, arg.ExpectedTitle)
 	var i ChatSession
 	err := row.Scan(
 		&i.ID,
