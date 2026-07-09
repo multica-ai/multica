@@ -236,6 +236,28 @@ func healthPortForProfile(profile string) int {
 
 // --- daemon start ---
 
+// requireDaemonAuth fails fast when the user never ran `multica login`. The
+// daemon child performs the same check (resolveAuth) and dies immediately,
+// but the background parent can't see that exit — it would poll the health
+// port for the full 45s readiness window and then print a vague "check logs"
+// warning. Checking before spawning turns that silent stall into an
+// immediate, actionable error. Mirrors daemon.resolveAuth: the daemon only
+// authenticates via the stored config token, never MULTICA_TOKEN.
+func requireDaemonAuth(profile string) error {
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return fmt.Errorf("load CLI config: %w", err)
+	}
+	if cfg.Token == "" {
+		loginHint := "multica login"
+		if profile != "" {
+			loginHint = fmt.Sprintf("multica login --profile %s", profile)
+		}
+		return fmt.Errorf("you are not logged in. Run '%s' first, then start the daemon", loginHint)
+	}
+	return nil
+}
+
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
 	foreground, _ := cmd.Flags().GetBool("foreground")
 	if foreground {
@@ -259,6 +281,10 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		}
 		pid, _ := health["pid"].(float64)
 		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
+	}
+
+	if err := requireDaemonAuth(profile); err != nil {
+		return err
 	}
 
 	// Resolve current executable so the foreground child reuses this binary.
@@ -593,6 +619,13 @@ func runDaemonForeground(cmd *cobra.Command) error {
 func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
+
+	// Check auth BEFORE the stop phase, not just inside the start phase:
+	// an unauthenticated restart would otherwise kill the running daemon
+	// and then fail to start a replacement, leaving no daemon at all.
+	if err := requireDaemonAuth(profile); err != nil {
+		return err
+	}
 
 	// Stop if running.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -2,12 +2,18 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/spf13/cobra"
 )
@@ -109,6 +115,117 @@ func TestPrintDaemonStatusOmitsVersionWhenMissing(t *testing.T) {
 				t.Fatalf("daemon status output = %q, want no Version line", out.String())
 			}
 		})
+	}
+}
+
+// TestRequireDaemonAuth pins the fail-fast contract for `daemon start`: a
+// user who never ran `multica login` must get an immediate, actionable error
+// from the parent process instead of a 45s health poll against a child that
+// already died with "not authenticated".
+func TestRequireDaemonAuth(t *testing.T) {
+	t.Run("not logged in", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		err := requireDaemonAuth("")
+		if err == nil || !strings.Contains(err.Error(), "multica login") {
+			t.Fatalf("requireDaemonAuth() = %v, want error mentioning 'multica login'", err)
+		}
+	})
+
+	t.Run("not logged in with profile", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		err := requireDaemonAuth("staging")
+		if err == nil || !strings.Contains(err.Error(), "multica login --profile staging") {
+			t.Fatalf("requireDaemonAuth(staging) = %v, want error mentioning profile login hint", err)
+		}
+	})
+
+	t.Run("authenticated", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_test_token"}); err != nil {
+			t.Fatalf("SaveCLIConfig: %v", err)
+		}
+		if err := requireDaemonAuth(""); err != nil {
+			t.Fatalf("requireDaemonAuth() = %v, want nil", err)
+		}
+	})
+}
+
+// TestDaemonStartBackgroundUnauthenticatedFailsFast exercises the real
+// `daemon start` background path: without a stored token it must error out
+// before spawning the child (and long before the 45s readiness wait).
+func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cmd := &cobra.Command{Use: "start"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	// A named profile keeps the pre-spawn health probe off the default port,
+	// so a daemon running on the developer machine can't turn this into an
+	// "already running" error.
+	if err := cmd.Flags().Set("profile", "authtest-fail-fast"); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	start := time.Now()
+	err := runDaemonStart(cmd, nil)
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "multica login --profile authtest-fail-fast") {
+		t.Fatalf("runDaemonStart() = %v, want not-logged-in error with login hint", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("runDaemonStart took %s, want fail-fast before the readiness wait", elapsed)
+	}
+}
+
+// TestDaemonRestartUnauthenticatedFailsBeforeStopping pins the ordering that
+// makes `daemon restart` safe when the user is not logged in: the auth check
+// must run BEFORE the stop phase. Otherwise restart kills the running daemon
+// and only then discovers it cannot start a replacement, leaving the user
+// with no daemon at all.
+func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	const profile = "restart-authtest"
+	port := healthPortForProfile(profile)
+
+	// Fake running daemon on the profile's health port. Any shutdown attempt
+	// (HTTP /shutdown; the PID in /health is our own so a kill-fallback would
+	// be visible too) means restart touched the daemon before checking auth.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Skipf("health port %d unavailable: %v", port, err)
+	}
+	stopped := make(chan struct{}, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":"running","pid":%d}`, os.Getpid())))
+		case "/shutdown":
+			select {
+			case stopped <- struct{}{}:
+			default:
+			}
+		}
+	})}
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	cmd := &cobra.Command{Use: "restart"}
+	cmd.Flags().Bool("foreground", false, "")
+	cmd.Flags().String("profile", "", "")
+	if err := cmd.Flags().Set("profile", profile); err != nil {
+		t.Fatalf("set profile flag: %v", err)
+	}
+
+	err = runDaemonRestart(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "multica login --profile restart-authtest") {
+		t.Fatalf("runDaemonRestart() = %v, want not-logged-in error with login hint", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down before the auth check")
+	default:
 	}
 }
 
