@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,10 +19,27 @@ var codexSymlinkedDirs = []string{
 	"sessions",
 }
 
+// Optional directories to symlink from the shared ~/.codex/ into the per-task
+// CODEX_HOME. Unlike codexSymlinkedDirs, a missing source is NOT created —
+// environments without Codex hooks must not sprout empty hook directories.
+// A missing or non-directory source instead clears any stale per-task residue
+// so a removed ~/.codex/hooks/ does not survive workspace reuse (RAS-50).
+var codexOptionalSymlinkedDirs = []string{
+	"hooks",
+}
+
 // Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Symlinks share state (e.g. auth tokens) so changes propagate automatically.
 var codexSymlinkedFiles = []string{
 	"auth.json",
+}
+
+// Optional files to symlink from the shared ~/.codex/ into the per-task
+// CODEX_HOME. A missing or non-regular source clears any stale per-task
+// copy/link so removed hook configuration does not linger across workspace
+// reuse and get loaded by a later Codex session (RAS-50).
+var codexOptionalSymlinkedFiles = []string{
+	"hooks.json",
 }
 
 // Files to copy from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -74,12 +92,34 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Expose optional shared directories (hooks/) only when the source is a
+	// valid directory; otherwise clear stale per-task residue. See
+	// ensureExistingDirSymlink.
+	for _, name := range codexOptionalSymlinkedDirs {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if err := ensureExistingDirSymlink(src, dst); err != nil {
+			logger.Warn("execenv: codex-home optional dir symlink failed", "dir", name, "error", err)
+		}
+	}
+
 	// Symlink shared files (auth).
 	for _, name := range codexSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureSymlink(src, dst); err != nil {
 			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
+		}
+	}
+
+	// Expose optional shared files (hooks.json) only when the source is a
+	// valid regular file; otherwise clear stale per-task residue. See
+	// ensureOptionalFileSymlink.
+	for _, name := range codexOptionalSymlinkedFiles {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if err := ensureOptionalFileSymlink(src, dst); err != nil {
+			logger.Warn("execenv: codex-home optional file symlink failed", "file", name, "error", err)
 		}
 	}
 
@@ -138,6 +178,31 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// codex_memory.go for the full rationale and escape hatch.
 	if err := ensureCodexMemoryConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
 		logger.Warn("execenv: codex-home ensure memory config failed", "error", err)
+	}
+
+	// Mirror Codex hook trust state LAST, after every other config.toml
+	// mutation (sanitize / sandbox / multi-agent / memory) has settled (design
+	// D4). Codex keys hook trust by the hooks.json *source* path, but the
+	// per-task home loads codex-home/hooks.json — so trust the user accepted
+	// for the shared ~/.codex/hooks.json must be re-keyed onto that per-task
+	// source ID. Running this last means it reads the final config and cannot
+	// be clobbered by, nor clobber, the managed blocks above.
+	hookTrustResult, err := syncCodexHookTrustStateWithResult(
+		filepath.Join(sharedHome, "config.toml"),
+		filepath.Join(codexHome, "config.toml"),
+		filepath.Join(sharedHome, "hooks.json"),
+		filepath.Join(codexHome, "hooks.json"),
+	)
+	if err != nil {
+		logger.Warn("execenv: codex-home hook trust sync failed", "error", err)
+	} else {
+		// Log paths and counts only — never hook contents, tokens, or secrets.
+		logger.Info("execenv: codex-home hook trust sync",
+			"codex_home", codexHome,
+			"shared_hooks", hookTrustResult.SharedHooksCount,
+			"mapped_hooks", hookTrustResult.MappedHooksCount,
+			"stale_hooks", hookTrustResult.StaleHooksCount,
+			"changed", hookTrustResult.Changed)
 	}
 
 	return nil
@@ -284,6 +349,129 @@ func ensureDirSymlink(src, dst string) error {
 	}
 
 	return createDirLink(src, dst)
+}
+
+// ensureExistingDirSymlink links dst → src only when src is an existing
+// directory. It is the optional-resource counterpart of ensureDirSymlink: the
+// source is NEVER created, and a missing / non-directory / unreadable source
+// clears any stale dst residue (design action 1 + D2/D5).
+//
+//   - src missing (ENOENT):     clear stale dst, no-op.
+//   - src stat non-ENOENT error: clear stale dst, then surface the error
+//     (D2 fail closed — never leave a stale hooks link loadable when we can't
+//     verify the shared source).
+//   - src not a directory:      clear stale dst (type mismatch).
+//   - src is a directory:       keep a correct dst symlink; otherwise drop the
+//     stale dst (via removeOptionalPath, which is junction-safe — D5) and
+//     recreate the link.
+func ensureExistingDirSymlink(src, dst string) error {
+	fi, err := os.Stat(src)
+	if os.IsNotExist(err) {
+		return removeOptionalPath(dst)
+	}
+	if err != nil {
+		// D2: fail closed. Clear any stale dst first so a removed/unreadable
+		// source can never keep an old hook loadable, then surface the error.
+		statErr := fmt.Errorf("stat shared dir %s: %w", src, err)
+		if rmErr := removeOptionalPath(dst); rmErr != nil {
+			return errors.Join(statErr, rmErr)
+		}
+		return statErr
+	}
+	if !fi.IsDir() {
+		return removeOptionalPath(dst)
+	}
+
+	if lfi, err := os.Lstat(dst); err == nil {
+		if lfi.Mode()&os.ModeSymlink != 0 {
+			if target, rlErr := os.Readlink(dst); rlErr == nil && target == src {
+				return nil // already the correct link
+			}
+		}
+		if err := removeOptionalPath(dst); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat optional dir dst %s: %w", dst, err)
+	}
+
+	return createDirLink(src, dst)
+}
+
+// ensureOptionalFileSymlink links/copies dst → src only when src is an existing
+// regular file. Missing / non-regular / unreadable sources clear any stale
+// per-task copy/link so workspace reuse reflects the shared home lifecycle
+// (design action 1 + D2/D5). Same branch semantics as ensureExistingDirSymlink,
+// specialized to a regular file and createFileLink.
+func ensureOptionalFileSymlink(src, dst string) error {
+	fi, err := os.Stat(src)
+	if os.IsNotExist(err) {
+		return removeOptionalPath(dst)
+	}
+	if err != nil {
+		// D2: fail closed — clear stale dst then surface the error.
+		statErr := fmt.Errorf("stat shared file %s: %w", src, err)
+		if rmErr := removeOptionalPath(dst); rmErr != nil {
+			return errors.Join(statErr, rmErr)
+		}
+		return statErr
+	}
+	if !fi.Mode().IsRegular() {
+		return removeOptionalPath(dst)
+	}
+
+	if lfi, err := os.Lstat(dst); err == nil {
+		if lfi.Mode()&os.ModeSymlink != 0 {
+			if target, rlErr := os.Readlink(dst); rlErr == nil && target == src {
+				return nil // already the correct link
+			}
+		}
+		if err := removeOptionalPath(dst); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat optional file dst %s: %w", dst, err)
+	}
+
+	return createFileLink(src, dst)
+}
+
+// removeOptionalPath removes a per-task optional resource (hooks.json or
+// hooks/) without EVER following a symlink or a Windows junction into its
+// shared target (design D5).
+//
+// os.Remove drops a symlink, a Windows junction reparse point, a regular file,
+// or an empty directory in place — it never recurses through a link into the
+// shared ~/.codex/hooks target. os.RemoveAll is reached only as a fallback for
+// a genuine, non-empty real directory; the per-task home never builds a real
+// hooks directory itself, so that branch is purely defensive. This is why we
+// must not blindly os.RemoveAll a non-symlink dst as the reference PR did: on
+// Windows a junction is not always reported as a symlink, and RemoveAll would
+// delete the shared hooks contents through it.
+func removeOptionalPath(path string) error {
+	fi, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lstat optional dst %s: %w", path, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove optional dst link %s: %w", path, err)
+		}
+		return nil
+	}
+	// Regular file, empty dir, or Windows junction: os.Remove handles all of
+	// these in place, deleting the entry (or reparse point) without touching a
+	// link target. Only a non-empty real directory makes os.Remove fail.
+	if err := os.Remove(path); err == nil {
+		return nil
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("remove optional dst path %s: %w", path, err)
+	}
+	return nil
 }
 
 // ensureSymlink ensures dst tracks src. If src doesn't exist, it's a no-op.
