@@ -144,7 +144,14 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// workdir is reused across turns for the same (agent, issue), and any
 	// agent- or user-written model / tools / permission settings in it must
 	// survive across runs.
-	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	hardenedMcpConfig, mcpTempCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("opencode: harden mcp_config: %w", err)
+	}
+	context.AfterFunc(runCtx, mcpTempCleanup)
+
+	mcpContent, err := buildOpenCodeMCPConfigContent(hardenedMcpConfig)
 	if err != nil {
 		cancel()
 		return nil, err

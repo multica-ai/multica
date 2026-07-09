@@ -609,3 +609,58 @@ func parseJSONString(t *testing.T, s string) map[string]any {
 	}
 	return out
 }
+
+// TestOpencodeBackendHardensWindowsBrowserMcpConfig pins that a
+// chrome-devtools entry in agent.mcp_config gets the Windows phantom-window
+// hardening (--executablePath pinned to the discovered system Edge) before
+// it reaches OPENCODE_CONFIG_CONTENT.
+func TestOpencodeBackendHardensWindowsBrowserMcpConfig(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
+
+	workDir := t.TempDir()
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_CAPTURE_FILE": captureFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	captured := readCapturedEnv(t, captureFile)
+	got := captured["OPENCODE_CONFIG_CONTENT"]
+	if !strings.Contains(got, "--executablePath=") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT missing hardened chrome-devtools --executablePath=:\n%s", got)
+	}
+}
