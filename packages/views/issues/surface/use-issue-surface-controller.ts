@@ -2,9 +2,13 @@
 
 import { useEffect, useMemo } from "react";
 import type { QueryKey } from "@tanstack/react-query";
-import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
+import type {
+  Issue,
+  IssueAssigneeGroup,
+  IssueStatus,
+  Project,
+} from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
@@ -59,8 +63,8 @@ export interface IssueSurfaceController {
   loadMoreFilter?: MyIssuesFilter;
   sort: IssueSortParam;
   ganttIssues: Issue[];
-  visibleStatuses: typeof BOARD_STATUSES;
-  hiddenStatuses: typeof BOARD_STATUSES;
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
   activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   activity: IssueSurfaceActivity;
   actions: IssueSurfaceActions;

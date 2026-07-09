@@ -14,6 +14,9 @@ import { configStore } from "@multica/core/config";
  * 2. Raw URLs → markdown links via linkify-it (so they render as clickable Link nodes)
  * 3. File card syntax (new !file[name](url) + legacy [name](cdnUrl)) → HTML div for
  *    fileCard node parsing
+ *
+ * Shared by the Tiptap editor and the read-only react-markdown renderer so both
+ * linkify identically.
  */
 export function preprocessMarkdown(markdown: string): string {
   if (!markdown) return "";

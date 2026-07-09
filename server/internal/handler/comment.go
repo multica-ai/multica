@@ -1397,67 +1397,180 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 	for _, trigger := range triggers {
 		if trigger.AlreadyPending {
-			continue
+			// MUL-4195: a queued/dispatched task for this (issue, agent)
+			// already exists. Historically we DROPPED the comment here, losing
+			// the user's follow-up instruction. Instead try to fold it into the
+			// queued (not-yet-claimed) task so a single run still covers every
+			// comment, re-stamping the run's originator/overlay to the new
+			// comment (mergeCommentIntoPendingTask).
+			if h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID) {
+				continue
+			}
+			// The merge found no queued task to fold into: the existing task
+			// is already dispatched/running (its claim response is built), or
+			// the queued row was just claimed. We must NOT enqueue a
+			// fresh queued task in that case — a dispatched sibling would trip
+			// the idx_one_pending_task_per_issue_agent unique index (dropping
+			// the comment again) and even where the index allows it we'd risk a
+			// duplicate concurrent run. When an active task exists, its
+			// completion reconcile (reconcileCommentsOnCompletion) is what
+			// guarantees this comment earns a bounded follow-up. Only when NO
+			// active task exists is a fresh enqueue both safe and necessary.
+			if h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID) {
+				continue
+			}
 		}
-		switch trigger.Source {
-		case commentTriggerSourceIssueAssignee:
-			if trigger.Squad != nil {
-				if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
-					slog.Warn("enqueue squad leader task failed",
-						"issue_id", uuidToString(issue.ID),
-						"squad_id", uuidToString(trigger.Squad.ID),
-						"leader_id", uuidToString(trigger.Agent.ID),
-						"error", err)
-				}
-				continue
-			}
-			if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
-				slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
-			}
-		case commentTriggerSourceMentionSquadLeader:
+		h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay)
+	}
+}
+
+// hasActiveTaskForIssueAndAgent reports whether the (issue, agent) pair has any
+// non-terminal task whose completion will drive completion reconciliation. Used
+// by the comment enqueue path to decide, after a merge miss, between deferring
+// to reconcile (an active task exists) and enqueuing a fresh follow-up (none
+// does). Fail-closed: on a DB error we return true so the caller does NOT
+// enqueue a possibly-colliding duplicate — worst case the comment is caught by
+// reconcile rather than double-run.
+func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		slog.Warn("has active task for issue+agent check failed",
+			"issue_id", uuidToString(issueID), "agent_id", uuidToString(agentID), "error", err)
+		return true
+	}
+	return active
+}
+
+// mergeCommentIntoPendingTask folds a newly-arrived comment into an existing
+// not-yet-started task for (issue, agent) instead of dropping it (MUL-4195).
+// Returns true when the comment was HANDLED — either merged, or a non-fatal DB
+// error we deliberately do not convert into a duplicate task. Returns false
+// only when no pending task exists anymore (pgx.ErrNoRows: it was
+// claimed/started between the dedup check and now), so the caller enqueues a
+// fresh task and the deliberate comment is never lost.
+//
+// The merge is GATED on the originator being unchanged (MUL-4195 review
+// mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
+// QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
+// (MUL-4195). Returns true when the comment was handled (merged, or a
+// non-fatal DB error we deliberately do not turn into a duplicate). Returns
+// false only when no queued task exists to merge into (pgx.ErrNoRows) — the
+// existing task is already dispatched/running, or was just claimed — in which
+// case the caller decides between deferring to completion reconcile and a fresh
+// enqueue.
+//
+// Recompute-on-merge (MUL-4195 review must-fix #1): the run's
+// originator_user_id, runtime_mcp_overlay and runtime_connected_apps are
+// re-stamped to the NEW trigger comment's originator, and trigger_summary is
+// refreshed. This is what lets a different member's comment safely fold into a
+// task another member created: the single coalescing run then carries the
+// latest instruction's originator and the matching connected-app overlay,
+// instead of answering the new comment under the original user's capabilities
+// and audit identity. It also replaces the earlier originator gate + fresh
+// fallback, which could not create a second pending task anyway (the
+// one-pending-per-(issue,agent) unique index) and so silently dropped the
+// mismatched-originator comment.
+func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
+	originator := h.TaskService.ResolveOriginatorFromTriggerComment(ctx, newTriggerCommentID)
+	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, originator, trigger.Agent)
+	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:                 issue.ID,
+		AgentID:                 trigger.Agent.ID,
+		NewTriggerCommentID:     newTriggerCommentID,
+		NewOriginatorUserID:     originator,
+		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, newTriggerCommentID),
+		NewRuntimeMcpOverlay:    overlay,
+		NewRuntimeConnectedApps: connectedApps,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			// No pre-claim (queued/deferred) task to merge into. The caller
+			// defers to completion reconcile when an active task exists, or
+			// enqueues fresh when none does.
+			return false
+		}
+		// Unknown error: the pending task most likely still exists, so do NOT
+		// risk enqueuing a duplicate. Log and treat as handled.
+		slog.Warn("merge comment into pending task failed",
+			"issue_id", uuidToString(issue.ID),
+			"agent_id", uuidToString(trigger.Agent.ID),
+			"error", err)
+		return true
+	}
+	slog.Info("merged comment into pending task",
+		"task_id", uuidToString(row.ID),
+		"issue_id", uuidToString(issue.ID),
+		"agent_id", uuidToString(trigger.Agent.ID),
+		"new_trigger_comment_id", uuidToString(newTriggerCommentID),
+		"coalesced_count", len(row.CoalescedCommentIds))
+	return true
+}
+
+// enqueueSingleCommentTrigger creates a fresh task for one computed trigger.
+// Split out of enqueueCommentAgentTriggers so the merge-not-drop path
+// (MUL-4195) can fall back to it when a pending task vanished mid-flight.
+func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger, getEscalationDelay func() time.Duration) {
+	switch trigger.Source {
+	case commentTriggerSourceIssueAssignee:
+		if trigger.Squad != nil {
 			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
-				slog.Warn("enqueue squad leader mention task failed",
+				slog.Warn("enqueue squad leader task failed",
 					"issue_id", uuidToString(issue.ID),
-					"agent_id", uuidToString(trigger.Agent.ID),
+					"squad_id", uuidToString(trigger.Squad.ID),
+					"leader_id", uuidToString(trigger.Agent.ID),
 					"error", err)
 			}
-		case commentTriggerSourceMentionAgent:
-			if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
-				slog.Warn("enqueue mention agent task failed",
-					"issue_id", uuidToString(issue.ID),
-					"agent_id", uuidToString(trigger.Agent.ID),
-					"error", err)
-			}
-		case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
-			var task db.AgentTaskQueue
-			var err error
-			if trigger.Source == commentTriggerSourceConversation && trigger.Squad != nil {
-				task, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
-			} else {
-				task, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
-			}
-			if err != nil {
-				slog.Warn("enqueue routed comment agent task failed",
-					"issue_id", uuidToString(issue.ID),
-					"agent_id", uuidToString(trigger.Agent.ID),
-					"source", trigger.Source,
-					"error", err)
-				continue
-			}
-			if trigger.EscalationFallback == nil || getEscalationDelay() <= 0 {
-				continue
-			}
-			var squadID pgtype.UUID
-			if trigger.EscalationFallback.Squad != nil {
-				squadID = trigger.EscalationFallback.Squad.ID
-			}
-			if _, err := h.TaskService.EnqueueDeferredAssigneeFallback(ctx, issue, trigger.EscalationFallback.Agent.ID, squadID, task.ID, triggerCommentID, time.Now().Add(escalationDelay)); err != nil {
-				slog.Warn("enqueue deferred assignee fallback failed",
-					"issue_id", uuidToString(issue.ID),
-					"primary_agent_id", uuidToString(trigger.Agent.ID),
-					"fallback_agent_id", uuidToString(trigger.EscalationFallback.Agent.ID),
-					"error", err)
-			}
+			return
+		}
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
+			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
+		}
+	case commentTriggerSourceMentionSquadLeader:
+		if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+			slog.Warn("enqueue squad leader mention task failed",
+				"issue_id", uuidToString(issue.ID),
+				"agent_id", uuidToString(trigger.Agent.ID),
+				"error", err)
+		}
+	case commentTriggerSourceMentionAgent:
+		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+			slog.Warn("enqueue mention agent task failed",
+				"issue_id", uuidToString(issue.ID),
+				"agent_id", uuidToString(trigger.Agent.ID),
+				"error", err)
+		}
+	case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
+		var task db.AgentTaskQueue
+		var err error
+		if trigger.Source == commentTriggerSourceConversation && trigger.Squad != nil {
+			task, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID)
+		} else {
+			task, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
+		}
+		if err != nil {
+			slog.Warn("enqueue routed comment agent task failed",
+				"issue_id", uuidToString(issue.ID),
+				"agent_id", uuidToString(trigger.Agent.ID),
+				"source", trigger.Source,
+				"error", err)
+			return
+		}
+		if trigger.EscalationFallback == nil || getEscalationDelay() <= 0 {
+			return
+		}
+		var squadID pgtype.UUID
+		if trigger.EscalationFallback.Squad != nil {
+			squadID = trigger.EscalationFallback.Squad.ID
+		}
+		if _, err := h.TaskService.EnqueueDeferredAssigneeFallback(ctx, issue, trigger.EscalationFallback.Agent.ID, squadID, task.ID, triggerCommentID, time.Now().Add(getEscalationDelay())); err != nil {
+			slog.Warn("enqueue deferred assignee fallback failed",
+				"issue_id", uuidToString(issue.ID),
+				"primary_agent_id", uuidToString(trigger.Agent.ID),
+				"fallback_agent_id", uuidToString(trigger.EscalationFallback.Agent.ID),
+				"error", err)
 		}
 	}
 }

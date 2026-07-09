@@ -158,6 +158,44 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+		// MUL-4195: comments that arrived before this run started were folded
+		// into it rather than dropped. The trigger above is the newest; the
+		// agent must ALSO address these earlier ones so no deliberate user
+		// instruction is silently lost. Prefer the embedded detail so the agent
+		// does not have to guess which thread each folded comment lives in
+		// (they may span multiple threads — review should-fix #3); fall back to
+		// a thread-agnostic issue-wide fetch hint for old servers that only send
+		// the ids.
+		if len(task.CoalescedComments) > 0 {
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
+			for _, cc := range task.CoalescedComments {
+				authorLabel := "A user"
+				if cc.AuthorType == "agent" {
+					name := cc.AuthorName
+					if name == "" {
+						name = "another agent"
+					}
+					authorLabel = fmt.Sprintf("Another agent (%s)", name)
+				} else if cc.AuthorName != "" {
+					authorLabel = cc.AuthorName
+				}
+				fmt.Fprintf(&b, "- comment %s", cc.ID)
+				if cc.CreatedAt != "" {
+					fmt.Fprintf(&b, " (%s, %s)", authorLabel, cc.CreatedAt)
+				} else {
+					fmt.Fprintf(&b, " (%s)", authorLabel)
+				}
+				if cc.ThreadID != "" {
+					fmt.Fprintf(&b, " [thread %s]", cc.ThreadID)
+				}
+				b.WriteString(":\n")
+				fmt.Fprintf(&b, "  > %s\n", strings.ReplaceAll(strings.TrimSpace(cc.Content), "\n", "\n  > "))
+			}
+			fmt.Fprintf(&b, "\nIf you need the surrounding discussion for any of them, fetch its thread with `multica issue comment list %s --thread <thread-id> --tail 30 --output json` using the thread id shown above.\n\n", task.IssueID)
+		} else if len(task.CoalescedCommentIDs) > 0 {
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above: %s. These may be in DIFFERENT threads, so do not assume they share the triggering thread; fetch each by pulling the issue-wide discussion with `multica issue comment list %s --recent 30 --output json` (expand with `--full` if a thread is folded) and locate the ids above.\n\n",
+				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "), task.IssueID)
+		}
 		if task.TriggerAuthorType == "agent" {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}

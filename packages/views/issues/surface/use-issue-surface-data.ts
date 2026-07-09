@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { ALL_STATUSES } from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   childIssueProgressOptions,
@@ -47,8 +47,8 @@ export interface IssueSurfaceData {
   loadMoreScope?: string;
   loadMoreFilter?: MyIssuesFilter;
   ganttIssues: Issue[];
-  visibleStatuses: typeof BOARD_STATUSES;
-  hiddenStatuses: typeof BOARD_STATUSES;
+  visibleStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatus[];
   activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   activity: IssueSurfaceActivity;
   childProgressMap: Map<string, ChildProgress>;
@@ -108,7 +108,7 @@ export function useIssueSurfaceData({
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
       priorities: priorityFilters,
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
@@ -156,6 +156,11 @@ export function useIssueSurfaceData({
       : (statusIssuesQuery.data ?? EMPTY_ISSUES);
   }, [assigneeGroupsQuery.data?.groups, statusIssuesQuery.data, usesAssigneeBoard]);
 
+  // `cancelled` is a first-class default status (MUL-4290): it is fetched into
+  // the cache like every other status and flows straight through to list /
+  // board / swimlane columns, header facet counts, batch selection, and the
+  // isEmpty check. The status filter narrows this set like any other status —
+  // it no longer unlocks an otherwise-hidden bucket.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
   const surfaceIssues = usesGantt ? ganttIssues : bucketedIssues;
 
@@ -239,15 +244,21 @@ export function useIssueSurfaceData({
     [projects],
   );
 
-  const visibleStatuses = useMemo(() => {
+  const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    // Default view shows every lifecycle status, `cancelled` last (its
+    // canonical position in ALL_STATUSES). An active status filter narrows to
+    // the selected subset while preserving that order.
     if (statusFilters.length > 0) {
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+      return ALL_STATUSES.filter((s) => statusFilters.includes(s));
     }
-    return BOARD_STATUSES;
+    return ALL_STATUSES;
   }, [statusFilters]);
 
-  const hiddenStatuses = useMemo(
-    () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
+  // Hidden columns are the lifecycle statuses not currently visible, so
+  // `cancelled` participates in the board show/hide controls exactly like the
+  // rest of the statuses.
+  const hiddenStatuses = useMemo<IssueStatus[]>(
+    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 

@@ -2341,6 +2341,37 @@ var (
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
 )
 
+var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func getAssigneeJSON(ctx context.Context, client *cli.APIClient, path string, out any) error {
+	delays := []time.Duration{100 * time.Millisecond, 250 * time.Millisecond}
+	var err error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err = client.GetJSON(ctx, path, out)
+		if err == nil || !isRetryableAssigneeResolveError(err) || attempt == len(delays) {
+			return err
+		}
+		if assigneeResolveRetrySleep(ctx, delays[attempt]) {
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func isRetryableAssigneeResolveError(err error) bool {
+	var netErr *cli.NetworkError
+	return errors.As(err, &netErr)
+}
+
 func (k assigneeKinds) describe() string {
 	parts := make([]string, 0, 3)
 	if k.member {
@@ -2404,7 +2435,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.member {
 		fetchAttempts++
 		var members []map[string]any
-		if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
@@ -2418,7 +2449,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		fetchAttempts++
 		var agents []map[string]any
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		if err := client.GetJSON(ctx, agentPath, &agents); err != nil {
+		if err := getAssigneeJSON(ctx, client, agentPath, &agents); err != nil {
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
@@ -2437,7 +2468,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.squad {
 		fetchAttempts++
 		var squads []map[string]any
-		if err := client.GetJSON(ctx, "/api/squads", &squads); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/squads", &squads); err != nil {
 			errs = append(errs, fmt.Errorf("fetch squads: %w", err))
 		} else {
 			for _, s := range squads {
@@ -2512,20 +2543,20 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 	var members []map[string]any
 	var memberErr error
 	if kinds.member {
-		memberErr = client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+		memberErr = getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
 	}
 
 	var agents []map[string]any
 	var agentErr error
 	if kinds.agent {
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		agentErr = client.GetJSON(ctx, agentPath, &agents)
+		agentErr = getAssigneeJSON(ctx, client, agentPath, &agents)
 	}
 
 	var squads []map[string]any
 	var squadErr error
 	if kinds.squad {
-		squadErr = client.GetJSON(ctx, "/api/squads", &squads)
+		squadErr = getAssigneeJSON(ctx, client, "/api/squads", &squads)
 	}
 
 	allFailed := true

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1086,6 +1087,81 @@ func TestResolveAssignee(t *testing.T) {
 	})
 }
 
+func TestResolveAssigneeRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			if memberHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"user_id": "user-1111", "name": "Alice Smith"},
+			})
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssignee should retry transient EOF: %v", err)
+	}
+	if aType != "member" || aID != "user-1111" {
+		t.Fatalf("got (%q, %q), want Alice member", aType, aID)
+	}
+	if memberHits != 2 {
+		t.Fatalf("member endpoint hits = %d, want 2", memberHits)
+	}
+}
+
+func TestResolveAssigneeDoesNotRetryHTTPStatusErrors(t *testing.T) {
+	var memberHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			memberHits++
+			http.Error(w, "bad workspace", http.StatusBadRequest)
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	_, _, err := resolveAssignee(context.Background(), client, "Alice", issueAssigneeKinds)
+	if err == nil {
+		t.Fatal("expected not-found error after non-retryable members fetch")
+	}
+	if memberHits != 1 {
+		t.Fatalf("member endpoint hits = %d, want 1", memberHits)
+	}
+}
+
 func TestNormalizeAssigneeLookupInput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1443,6 +1519,54 @@ func TestResolveAssigneeByIDStrict(t *testing.T) {
 			t.Fatal("expected error for missing workspace ID")
 		}
 	})
+}
+
+func TestResolveAssigneeByIDRetriesTransientNetworkErrors(t *testing.T) {
+	origSleep := assigneeResolveRetrySleep
+	assigneeResolveRetrySleep = func(context.Context, time.Duration) bool { return false }
+	t.Cleanup(func() { assigneeResolveRetrySleep = origSleep })
+
+	var agentsHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/ws-1/members":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			agentsHits++
+			if agentsHits == 1 {
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Fatal("response writer does not support hijacking")
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Fatalf("hijack: %v", err)
+				}
+				_ = conn.Close()
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", "name": "J"},
+			})
+		case "/api/squads":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	aType, aID, err := resolveAssigneeByID(context.Background(), client, "5fb87ac7-23b5-4a7a-81fa-ed295a54545d", issueAssigneeKinds)
+	if err != nil {
+		t.Fatalf("resolveAssigneeByID should retry transient EOF: %v", err)
+	}
+	if aType != "agent" || aID != "5fb87ac7-23b5-4a7a-81fa-ed295a54545d" {
+		t.Fatalf("got (%q, %q), want agent J", aType, aID)
+	}
+	if agentsHits != 2 {
+		t.Fatalf("agents endpoint hits = %d, want 2", agentsHits)
+	}
 }
 
 // TestPickAssigneeFromFlags covers the flag-pair picker that backs every

@@ -124,7 +124,7 @@ VALUES (
     $8,
     $9
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids
 `
 
 type CreateChatTaskParams struct {
@@ -188,6 +188,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.FireAt,
 		&i.OriginatorUserID,
 		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
 	)
 	return i, err
 }
@@ -946,6 +947,48 @@ type UpdateChatSessionTitleParams struct {
 
 func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSessionTitleParams) (ChatSession, error) {
 	row := q.db.QueryRow(ctx, updateChatSessionTitle, arg.ID, arg.Title)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+	)
+	return i, err
+}
+
+const updateChatSessionTitleIfCurrent = `-- name: UpdateChatSessionTitleIfCurrent :one
+UPDATE chat_session SET title = $1, updated_at = now()
+WHERE id = $2 AND title = $3
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, runtime_id, last_read_at, is_agent_intro, pinned_at
+`
+
+type UpdateChatSessionTitleIfCurrentParams struct {
+	NewTitle      string      `json:"new_title"`
+	ID            pgtype.UUID `json:"id"`
+	ExpectedTitle string      `json:"expected_title"`
+}
+
+// Compare-and-swap the title: only overwrite it when it still equals the
+// value the caller observed (@expected_title). This is the idempotency /
+// no-clobber guard behind LLM auto-titling (MUL-4295): the async generator
+// captures the session's current (default/original) title before calling the
+// model, and this write lands only if a manual rename or a competing writer
+// has not changed the title in the meantime. A mismatch returns pgx.ErrNoRows
+// (zero rows updated), which the caller treats as "someone renamed it — leave
+// it alone", NOT as an error.
+func (q *Queries) UpdateChatSessionTitleIfCurrent(ctx context.Context, arg UpdateChatSessionTitleIfCurrentParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, updateChatSessionTitleIfCurrent, arg.NewTitle, arg.ID, arg.ExpectedTitle)
 	var i ChatSession
 	err := row.Scan(
 		&i.ID,

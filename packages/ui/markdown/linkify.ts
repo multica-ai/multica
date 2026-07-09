@@ -38,6 +38,15 @@ const BARE_FILENAME_REGEX = new RegExp(`^[\\w.-]+\\.(?:${FILE_EXTENSIONS})$`, 'i
 const CJK_URL_TERMINATOR_REGEX =
   /[！-／：-＠［-｀｛-～、。「-】]/
 
+// Markdown inline-formatting delimiters that linkify-it counts as URL characters
+// but which, at the very end of a bare URL, are almost always the author closing
+// an emphasis / strikethrough span (`**url**`, `*url*`, `~~url~~`) rather than
+// part of the URL. We drop a trailing run of them so the surrounding markdown
+// still parses — mirroring GFM's own autolink trailing-punctuation trim. A URL
+// that genuinely ends in `*` / `~` loses that character from the link, exactly
+// as it does on GitHub (MUL-4242).
+const TRAILING_MD_DELIMITER = /[*~]+$/
+
 interface DetectedLink {
   type: 'url' | 'email' | 'file'
   text: string
@@ -223,9 +232,11 @@ function rangesOverlap(
 
 /**
  * Run linkify-it on `text` and push normalized link records into `out`,
- * shifted by `offset`. When linkify-it merges multiple URLs into one match
- * because they are separated only by CJK punctuation (which it doesn't treat
- * as a URL boundary), we truncate at that punctuation and re-scan the tail.
+ * shifted by `offset`. Two boundary corrections linkify-it doesn't make itself:
+ * - CJK punctuation ends a URL (linkify-it only breaks on ASCII); when it merged
+ *   several URLs across CJK punctuation we truncate and re-scan the tail; and
+ * - a trailing run of markdown delimiters (`*`, `~`) is dropped from the URL so
+ *   `**url**` keeps its closing emphasis marker outside the link.
  */
 function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]): void {
   const matches = linkify.match(text)
@@ -236,33 +247,40 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
     if (cjkIdx === 0) continue // match starts with CJK punct — skip
 
     const truncate = cjkIdx > 0
-    const matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
-    const matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
+    // URL text up to the first CJK terminator, then minus a trailing markdown
+    // delimiter run (e.g. the closing `**` of `**url**`). matchText stays a
+    // prefix of match.text, so the link end is just its length past match.index.
+    const matchText = (truncate ? match.text.slice(0, cjkIdx) : match.text).replace(
+      TRAILING_MD_DELIMITER,
+      ''
+    )
 
     // Bare filenames such as "plan.md" or "README.md" are fuzzy-matched as
     // domains because their extension is also a valid TLD. They are file
     // references, not URLs — leave them as plain text rather than link to a
     // dead external site. Only schemeless (fuzzy) matches are suppressed; an
     // explicit "https://plan.md" the author typed is still honored.
-    if (!(match.schema === '' && BARE_FILENAME_REGEX.test(matchText))) {
-      // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
-      // while leaving text as the raw substring. Preserve that prefix.
+    if (matchText.length > 0 && !(match.schema === '' && BARE_FILENAME_REGEX.test(matchText))) {
+      // When we trimmed the raw match, rebuild the href from the scheme prefix
+      // linkify-it added (e.g. "http://" / "mailto:") plus the trimmed text;
+      // otherwise keep linkify-it's normalized url as-is.
+      const trimmed = matchText.length !== match.text.length
       const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
-      const matchUrl = truncate ? schemePrefix + matchText : match.url
+      const matchUrl = trimmed ? schemePrefix + matchText : match.url
 
       out.push({
         type: match.schema === 'mailto:' ? 'email' : 'url',
         text: matchText,
         url: matchUrl,
         start: match.index + offset,
-        end: matchEnd + offset
+        end: match.index + matchText.length + offset
       })
     }
 
     if (truncate) {
       // Rescan the tail after the CJK punct — linkify-it had greedily swallowed
       // it, so any additional URLs after the punct were never emitted.
-      const tailStart = matchEnd + 1
+      const tailStart = match.index + cjkIdx + 1
       collectLinkifyMatches(text.slice(tailStart), offset + tailStart, out)
       return
     }
@@ -270,12 +288,12 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
 }
 
 /**
- * Detect all links (URLs, emails, file paths) in text
+ * Detect all links (URLs, emails, file paths) in text.
  */
 export function detectLinks(text: string): DetectedLink[] {
   const links: DetectedLink[] = []
 
-  // 1. Detect URLs and emails with linkify-it, applying CJK boundary handling.
+  // 1. Detect URLs and emails with linkify-it, applying boundary corrections.
   collectLinkifyMatches(text, 0, links)
 
   // 2. Detect file paths with custom regex
@@ -310,8 +328,13 @@ export function detectLinks(text: string): DetectedLink[] {
 }
 
 /**
- * Preprocess text to convert raw URLs and file paths into markdown links
- * Skips code blocks and already-linked content
+ * Preprocess text to convert raw URLs and file paths into markdown links.
+ * Skips code blocks and already-linked content.
+ *
+ * Shared by the Tiptap editor and the read-only react-markdown renderers, so
+ * both surfaces linkify identically. Trailing markdown delimiters are excluded
+ * from the URL (see collectLinkifyMatches), which keeps `**url**` bold and its
+ * link clean (MUL-4242).
  */
 export function preprocessLinks(text: string): string {
   // Quick check - if no potential links, return early

@@ -85,6 +85,11 @@ interface ChatInputProps {
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
+  /** Monotonic nonce bumped by the owner whenever the compose box should grab
+   *  keyboard focus — currently on "new chat" so the user can type right away.
+   *  0 (the initial value) is inert, so a plain deep-link open never steals
+   *  focus; only an explicit bump does. */
+  focusRequest?: number;
 }
 
 export function ChatInput({
@@ -100,6 +105,7 @@ export function ChatInput({
   agentName,
   leftAdornment,
   contextItems,
+  focusRequest,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -167,6 +173,15 @@ export function ChatInput({
   // `onSend` call would silently drop `attachment_ids` so the
   // attachment never binds to the chat message.
   const uploadMapRef = useRef<Map<string, string>>(new Map());
+
+  // Grab keyboard focus when the owner bumps `focusRequest` (a new chat was
+  // started) so the user can type immediately. The editor's `focus()` latches
+  // through to `onCreate` when it isn't mounted yet, so this works even on the
+  // first render of a freshly-mounted compose box. `0` is inert on purpose.
+  useEffect(() => {
+    if (!focusRequest) return;
+    editorRef.current?.focus();
+  }, [focusRequest]);
 
   useEffect(() => {
     if (!restoreDraftRequest) {

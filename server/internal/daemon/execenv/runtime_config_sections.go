@@ -7,9 +7,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
-// This file holds the slim runtime brief — the post-MUL-3560 path that
-// `buildMetaSkillContent` routes to when the `runtime_brief_slim` feature
-// flag is enabled. The legacy path lives untouched in runtime_config.go.
+// This file holds the runtime brief assembler — the post-MUL-3560 path
+// that `buildMetaSkillContent` delegates to. It used to be one of two
+// paths gated by the `runtime_brief_slim` feature flag against a legacy
+// verbose brief; the flag was retired in MUL-4297 and this is now the
+// only brief.
 //
 // Layout:
 //
@@ -20,7 +22,7 @@ import (
 //   - Each section is its own writer so the matrix of "which kind gets
 //     which section" lives at a single dispatch site.
 //
-// The slim path applies two orthogonal optimisations:
+// The brief applies two orthogonal optimisations:
 //
 //  1. Section gating per task kind — quick-create / chat / autopilot
 //     skip sections they have no use for (Mentions, Comment Formatting,
@@ -31,10 +33,8 @@ import (
 //     Repositories, Output are all tightened. Every test-asserted phrase
 //     stays.
 //
-// Background Task Safety still lives in runtime_config.go because the
-// helper there (`writeBackgroundTaskSafetyInstructions`) is the legacy
-// implementation. The slim path emits its own compressed version via
-// `writeBackgroundTaskSafetySlim` below.
+// Background Task Safety is emitted by `writeBackgroundTaskSafetySlim`
+// below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
 func writeHeader(b *strings.Builder) {
@@ -42,9 +42,9 @@ func writeHeader(b *strings.Builder) {
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 }
 
-// writeBackgroundTaskSafetySlim is the slim analogue of
-// writeBackgroundTaskSafetyInstructions (legacy). Drops the verbose
-// preamble but keeps the same hard behaviour pins the tests assert:
+// writeBackgroundTaskSafetySlim emits the Background Task Safety section.
+// Drops the verbose preamble but keeps the same hard behaviour pins the
+// tests assert:
 // "Do NOT end your turn while background tasks", "wait for a future
 // notification/reminder", "run the work synchronously instead", the
 // no-background-and-yield rule, and the no-"standing by" sign-off rule.
@@ -490,9 +490,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	}
 }
 
-// buildMetaSkillContentSlim is the post-MUL-3560 slim brief assembler.
-// Gated by the `runtime_brief_slim` feature flag; only called from
-// buildMetaSkillContent (runtime_config.go) when the flag is on.
+// buildMetaSkillContentSlim is the post-MUL-3560 brief assembler.
+// Called from buildMetaSkillContent (runtime_config.go). The
+// `runtime_brief_slim` flag that once gated it was retired in MUL-4297.
 //
 // The Section × Kind matrix encoded below (skip = elide section, keep
 // = always emit, △ = data-driven inside the helper):
