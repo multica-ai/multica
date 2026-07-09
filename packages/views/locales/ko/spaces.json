@@ -44,13 +44,10 @@
     "key_rename_confirm_title": "식별자를 변경할까요?",
     "key_rename_confirm_body": "이 Space에는 {{count}}개의 이슈가 있습니다. 식별자가 {{oldKey}}-N에서 {{newKey}}-N으로 바뀝니다. 기존 {{oldKey}}-N 링크는 계속 정상적으로 연결됩니다.",
     "icon": "아이콘",
-    "description": "설명",
-    "description_placeholder": "설명 추가…",
     "members": "멤버",
     "members_placeholder": "멤버 추가…",
     "members_selected": "{{count}}명 선택됨",
-    "icon_name": "아이콘 및 이름",
-    "description_limit": "최대 {{max}}자(현재 {{count}}자)"
+    "icon_name": "아이콘 및 이름"
   },
   "picker": {
     "placeholder": "Space",

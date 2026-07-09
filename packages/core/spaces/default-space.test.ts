@@ -8,7 +8,6 @@ function space(overrides: Partial<Space>): Space {
     workspace_id: "ws-1",
     name: "Space",
     key: "SPC",
-    description: "",
     icon: null,
     issue_counter: 0,
     archived_at: null,

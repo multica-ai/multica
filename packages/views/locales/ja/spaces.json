@@ -44,13 +44,10 @@
     "key_rename_confirm_title": "識別子を変更しますか？",
     "key_rename_confirm_body": "この Space には {{count}} 件の issue があります。識別子は {{oldKey}}-N から {{newKey}}-N に変わります。既存の {{oldKey}}-N リンクは引き続き解決されます。",
     "icon": "アイコン",
-    "description": "説明",
-    "description_placeholder": "説明を追加…",
     "members": "メンバー",
     "members_placeholder": "メンバーを追加…",
     "members_selected": "{{count}} 人を選択済み",
-    "icon_name": "アイコンと名前",
-    "description_limit": "最大 {{max}} 文字（現在 {{count}}）"
+    "icon_name": "アイコンと名前"
   },
   "picker": {
     "placeholder": "Space",

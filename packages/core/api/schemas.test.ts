@@ -522,7 +522,6 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     workspace_id: "ws-1",
     name: "Frontend",
     key: "FE",
-    description: "",
     icon: null,
     issue_counter: 3,
     archived_at: null,
@@ -541,7 +540,6 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     const parsed = SpaceSchema.parse({ id: "space-2", workspace_id: "ws-1" });
     expect(parsed.name).toBe("");
     expect(parsed.key).toBe("");
-    expect(parsed.description).toBe("");
     expect(parsed.icon).toBeNull();
     expect(parsed.issue_counter).toBe(0);
     expect(parsed.archived_at).toBeNull();

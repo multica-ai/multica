@@ -992,7 +992,6 @@ type WorkspaceSpace struct {
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
 	Name         string             `json:"name"`
 	Key          string             `json:"key"`
-	Description  string             `json:"description"`
 	Icon         pgtype.Text        `json:"icon"`
 	IssueCounter int32              `json:"issue_counter"`
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`

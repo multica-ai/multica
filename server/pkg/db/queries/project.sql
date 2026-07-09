@@ -64,7 +64,7 @@ WHERE pt.workspace_id = $1
 ORDER BY wt.name ASC, wt.created_at ASC;
 
 -- name: ListProjectSpacesByProjects :many
-SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
+SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key,
        wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by,
        wt.created_by, wt.created_at, wt.updated_at
 FROM project_space pt

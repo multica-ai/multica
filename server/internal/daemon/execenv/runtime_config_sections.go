@@ -267,11 +267,6 @@ func writeSpaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.SpaceName != "" && ctx.SpaceKey != "" {
 		fmt.Fprintf(b, "This issue belongs to the **%s** Space (key `%s`) — it owns this issue's identifier namespace (`%s-N`).\n\n", ctx.SpaceName, ctx.SpaceKey, ctx.SpaceKey)
 	}
-	if desc := strings.TrimSpace(ctx.SpaceDescription); desc != "" {
-		b.WriteString("Space description — durable context the Space owner set; treat it as the long-lived working domain this issue lives in:\n\n")
-		b.WriteString(desc)
-		b.WriteString("\n\n")
-	}
 	b.WriteString("Pass `--space <space-id-or-key>` on `multica issue create` to file a new issue under a specific Space instead of the workspace default. `multica issue update <id> --space <space-id-or-key>` moves an existing issue to another Space — it is renumbered under the target Space, and the old identifier is recorded as an alias that keeps resolving forever, so this is always safe.\n\n")
 }
 

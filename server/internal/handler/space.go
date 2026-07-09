@@ -21,7 +21,6 @@ type SpaceResponse struct {
 	WorkspaceID  string  `json:"workspace_id"`
 	Name         string  `json:"name"`
 	Key          string  `json:"key"`
-	Description  string  `json:"description"`
 	Icon         *string `json:"icon"`
 	IssueCounter int32   `json:"issue_counter"`
 	ArchivedAt   *string `json:"archived_at"`
@@ -41,7 +40,6 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 		WorkspaceID:  uuidToString(t.WorkspaceID),
 		Name:         t.Name,
 		Key:          t.Key,
-		Description:  t.Description,
 		Icon:         textToPtr(t.Icon),
 		IssueCounter: t.IssueCounter,
 		ArchivedAt:   timestampToPtr(t.ArchivedAt),
@@ -54,7 +52,6 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 type CreateSpaceRequest struct {
 	Name        string  `json:"name"`
 	Key         string  `json:"key"`
-	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
 	// MemberIDs invites workspace members into the new space alongside the
 	// creator (who always joins as lead). Minimal v1 membership loop —
@@ -64,10 +61,9 @@ type CreateSpaceRequest struct {
 }
 
 type UpdateSpaceRequest struct {
-	Name        *string `json:"name"`
-	Key         *string `json:"key"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
+	Name *string `json:"name"`
+	Key  *string `json:"key"`
+	Icon *string `json:"icon"`
 }
 
 func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +146,6 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Key:         key,
-		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
 		CreatedBy:   creatorUUID,
 	})
@@ -461,9 +456,6 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		params.Key = pgtype.Text{String: key, Valid: true}
-	}
-	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
 	if req.Icon != nil {
 		params.Icon = pgtype.Text{String: *req.Icon, Valid: true}
