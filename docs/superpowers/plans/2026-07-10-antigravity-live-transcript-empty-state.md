@@ -118,7 +118,7 @@ it("keeps waiting for live events from other runtimes", async () => {
 Run:
 
 ```bash
-pnpm --filter @multica/views test -- common/task-transcript/agent-transcript-dialog.test.tsx
+pnpm --filter @multica/views exec vitest run common/task-transcript/agent-transcript-dialog.test.tsx
 ```
 
 Expected: FAIL only in `explains unavailable live events for an empty Antigravity transcript` because the provider-specific sentence is not rendered; the non-Antigravity assertion and four pre-existing tests pass.
@@ -129,11 +129,13 @@ Expected: FAIL only in `explains unavailable live events for an empty Antigravit
 - Modify: `packages/views/common/task-transcript/agent-transcript-dialog.tsx`
 - Modify: `packages/views/locales/en/agents.json`
 - Modify: `packages/views/locales/zh-Hans/agents.json`
+- Modify: `packages/views/locales/ja/agents.json`
+- Modify: `packages/views/locales/ko/agents.json`
 - Test: `packages/views/common/task-transcript/agent-transcript-dialog.test.tsx`
 
 - [ ] **Step 1: Add the localized transcript message**
 
-Add the same `antigravity_live_unavailable` key beside `waiting_events` in both locale files:
+Add the same `antigravity_live_unavailable` key beside `waiting_events` in every supported locale. Locale parity tests require Japanese and Korean coverage whenever the English key set grows:
 
 ```json
 // packages/views/locales/en/agents.json
@@ -147,6 +149,20 @@ Add the same `antigravity_live_unavailable` key beside `waiting_events` in both 
 "waiting_events": "等待事件中...",
 "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
 "no_data": "未记录执行数据。"
+```
+
+```json
+// packages/views/locales/ja/agents.json
+"waiting_events": "イベントを待機中...",
+"antigravity_live_unavailable": "Antigravity は現在、リアルタイム実行イベントを提供していません。タスク完了後に実行記録を確認できます。",
+"no_data": "記録された実行データがありません。"
+```
+
+```json
+// packages/views/locales/ko/agents.json
+"waiting_events": "이벤트를 기다리는 중...",
+"antigravity_live_unavailable": "Antigravity는 현재 실시간 실행 이벤트를 제공하지 않습니다. 작업이 완료되면 실행 기록을 확인할 수 있습니다.",
+"no_data": "기록된 실행 데이터가 없습니다."
 ```
 
 - [ ] **Step 2: Derive the exact provider-aware condition**
@@ -183,7 +199,7 @@ Inside the existing `displayItems.length === 0` container, replace the current `
 Run:
 
 ```bash
-pnpm --filter @multica/views test -- common/task-transcript/agent-transcript-dialog.test.tsx
+pnpm --filter @multica/views exec vitest run common/task-transcript/agent-transcript-dialog.test.tsx
 ```
 
 Expected: PASS with 1 test file and 6 tests passing, with no React warnings or unhandled errors.
@@ -194,7 +210,9 @@ Expected: PASS with 1 test file and 6 tests passing, with no React warnings or u
 git add packages/views/common/task-transcript/agent-transcript-dialog.test.tsx \
   packages/views/common/task-transcript/agent-transcript-dialog.tsx \
   packages/views/locales/en/agents.json \
-  packages/views/locales/zh-Hans/agents.json
+  packages/views/locales/zh-Hans/agents.json \
+  packages/views/locales/ja/agents.json \
+  packages/views/locales/ko/agents.json
 git commit -m "fix(transcript): explain unavailable Antigravity live events"
 ```
 
@@ -205,6 +223,8 @@ git commit -m "fix(transcript): explain unavailable Antigravity live events"
 - Review: `packages/views/common/task-transcript/agent-transcript-dialog.tsx`
 - Review: `packages/views/locales/en/agents.json`
 - Review: `packages/views/locales/zh-Hans/agents.json`
+- Review: `packages/views/locales/ja/agents.json`
+- Review: `packages/views/locales/ko/agents.json`
 
 - [ ] **Step 1: Run the complete views test suite**
 
@@ -248,10 +268,12 @@ git diff origin/main...HEAD -- \
   packages/views/common/task-transcript/agent-transcript-dialog.test.tsx \
   packages/views/common/task-transcript/agent-transcript-dialog.tsx \
   packages/views/locales/en/agents.json \
-  packages/views/locales/zh-Hans/agents.json
+  packages/views/locales/zh-Hans/agents.json \
+  packages/views/locales/ja/agents.json \
+  packages/views/locales/ko/agents.json
 ```
 
-Expected: no whitespace errors; only the approved design, implementation plan, component test, component, and two locale files differ from `origin/main`; every implementation line traces to issue #5181.
+Expected: no whitespace errors; only the approved design, implementation plan, component test, component, and four locale files differ from `origin/main`; every implementation line traces to issue #5181.
 
 - [ ] **Step 5: Push the branch and open the official PR**
 
