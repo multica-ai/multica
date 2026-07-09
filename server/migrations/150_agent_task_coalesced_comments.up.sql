@@ -17,4 +17,4 @@
 -- Default '{}' (empty array, never NULL) so existing rows and every non-merge
 -- enqueue path keep working untouched.
 ALTER TABLE agent_task_queue
-    ADD COLUMN coalesced_comment_ids UUID[] NOT NULL DEFAULT '{}';
+    ADD COLUMN IF NOT EXISTS coalesced_comment_ids UUID[] NOT NULL DEFAULT '{}';
