@@ -23,6 +23,7 @@ import type {
 } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import {
   runtimeListOptions,
   runtimeLocalSkillsKeys,
@@ -1235,6 +1236,24 @@ export function RuntimeLocalSkillImportPanel({
           placeholder={t(($) => $.page.search_placeholder)}
           value={searchQuery}
           onValueChange={setSearchQuery}
+          onKeyDown={(e) => {
+            // Don't intercept keys while the user is composing CJK input.
+            if (isImeComposing(e)) return;
+            // Auto-select-when-one (R9): when the filter narrows the list to
+            // exactly one skill, Enter toggles that skill's checkbox without
+            // requiring the user to navigate to it first.
+            if (
+              e.key === "Enter" &&
+              filteredSkills.length === 1 &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey
+            ) {
+              e.preventDefault();
+              toggleSkill(filteredSkills[0]!.key);
+            }
+          }}
         />
         <CommandList className="max-h-none flex-1">
           {filteredSkills.length === 0 && (
