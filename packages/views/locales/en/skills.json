@@ -307,7 +307,13 @@
     "conflict_footer": "{{count}} conflict decisions pending.",
     "conflict_apply_button": "Apply decisions",
     "conflict_missing_resolution": "Choose how to resolve this conflict.",
-    "conflict_name_still_exists": "That name already exists. Choose another name or skip."
+    "conflict_name_still_exists": "That name already exists. Choose another name or skip.",
+    "provider_group_heading": "Provider Skills",
+    "universal_group_heading": "Universal Skills",
+    "other_group_heading": "Other Skills",
+    "search_empty": "No skills match \"{{query}}\"",
+    "group_count": "{{count}}",
+    "summary_import_all": "Import all"
   },
   "file_tree": {
     "no_files": "No files"

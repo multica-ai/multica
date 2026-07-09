@@ -6,6 +6,7 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   Download,
   HardDrive,
   Loader2,
@@ -223,6 +224,51 @@ function SkillItem({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Root grouping helper (shared by summary card U2 and search U3)
+// ---------------------------------------------------------------------------
+
+type RootGroup = "provider" | "universal" | "other";
+
+interface GroupedSkills {
+  provider: RuntimeLocalSkillSummary[];
+  universal: RuntimeLocalSkillSummary[];
+  other: RuntimeLocalSkillSummary[];
+}
+
+/**
+ * Partition skills by their `root` discovery origin.
+ *
+ * `root` is optional (older daemons omit it). Undefined roots fall into the
+ * `other` bucket rather than being silently dropped or wrongly assigned to a
+ * known origin — per the type's documentation: "treat `undefined` as unknown
+ * rather than asserting either origin."
+ *
+ * Within each bucket, skills are sorted alphabetically by name (R7).
+ */
+function groupSkillsByRoot(
+  skills: RuntimeLocalSkillSummary[],
+): GroupedSkills {
+  const groups: GroupedSkills = { provider: [], universal: [], other: [] };
+  for (const s of skills) {
+    const bucket: RootGroup =
+      s.root === "provider"
+        ? "provider"
+        : s.root === "universal"
+          ? "universal"
+          : "other";
+    groups[bucket].push(s);
+  }
+  const byName = (a: RuntimeLocalSkillSummary, b: RuntimeLocalSkillSummary) =>
+    a.name.localeCompare(b.name);
+  groups.provider.sort(byName);
+  groups.universal.sort(byName);
+  groups.other.sort(byName);
+  return groups;
+}
+
+const ROOT_GROUP_ORDER: RootGroup[] = ["provider", "universal", "other"];
 
 // ---------------------------------------------------------------------------
 // Summary view (shown after bulk import completes)
@@ -513,10 +559,12 @@ export function RuntimeLocalSkillImportPanel({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
 
-  // Adaptive UI branch: 'summary' for 1-2 skills, 'search' for 3+ (R11, R12).
-  // Locked on first data arrival; mid-dialog polling does NOT re-evaluate.
-  const [branch, setBranch] = useState<"summary" | "search">("search");
-  const [branchLocked, setBranchLocked] = useState(false);
+  // U2 — Summary card: which root groups are collapsed. All groups start
+  // expanded so skills are visible by default (R2); the user collapses a group
+  // to hide its rows (R4). Selection is preserved across collapse/expand.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<RootGroup>>(
+    new Set(),
+  );
 
   const importing = bulkState.phase === "importing";
   const resolvingConflicts = bulkState.phase === "resolving";
@@ -532,8 +580,7 @@ export function RuntimeLocalSkillImportPanel({
     setConflictResolutions({});
     setEditName("");
     setEditDescription("");
-    setBranch("search");
-    setBranchLocked(false);
+    setCollapsedGroups(new Set());
   }, [selectedRuntimeId]);
 
   const selectedRuntime = localRuntimes.find((r) => r.id === selectedRuntimeId);
@@ -548,26 +595,12 @@ export function RuntimeLocalSkillImportPanel({
     [skillsQuery.data],
   );
 
-  // Lock the branch on first data arrival after loading succeeds. Subsequent
-  // polling updates to runtimeSkills.length are ignored until the runtime
-  // changes (R11: "must not interrupt the user's current interaction").
-  useEffect(() => {
-    if (
-      !branchLocked &&
-      !skillsQuery.isLoading &&
-      !skillsQuery.error &&
-      skillsQuery.data?.supported
-    ) {
-      setBranch(runtimeSkills.length <= 2 ? "summary" : "search");
-      setBranchLocked(true);
-    }
-  }, [
-    branchLocked,
-    skillsQuery.isLoading,
-    skillsQuery.error,
-    skillsQuery.data?.supported,
-    runtimeSkills.length,
-  ]);
+  // Adaptive UI branch: 'summary' for 1-2 skills, 'search' for 3+ (R11, R12).
+  // Computed directly from runtimeSkills.length. R11 allows best-effort
+  // re-evaluation on polling updates; the search-branch interaction state
+  // (added in U3) is what must not be interrupted, not the branch itself.
+  const branch: "summary" | "search" =
+    runtimeSkills.length <= 2 ? "summary" : "search";
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
   const singleSelectedSkill =
@@ -600,6 +633,20 @@ export function RuntimeLocalSkillImportPanel({
     } else {
       setSelectedKeys(new Set(runtimeSkills.map((s) => s.key)));
     }
+  };
+
+  // U2: Toggle a root group's collapse state in the summary card. Selection
+  // is preserved across collapse/expand (R4).
+  const toggleGroup = (group: RootGroup) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) {
+        next.delete(group);
+      } else {
+        next.add(group);
+      }
+      return next;
+    });
   };
 
   const allSelected =
@@ -1039,15 +1086,93 @@ export function RuntimeLocalSkillImportPanel({
     }
 
     // Branch dispatch (R11, R12): locked on first data arrival.
-    // - 'summary' branch (1-2 skills): U2 will replace this block with an
-    //   expand-on-demand summary card grouped by `root`.
-    // - 'search' branch (3+ skills): U3 will replace this block with an
-    //   inline `Command` + root grouping + keyboard navigation.
-    // For now, both branches fall through to the existing list rendering as a
-    // placeholder. The data-branch attribute lets U6 tests assert the branch
-    // computed correctly before U2/U3 land their branch-specific UI.
+    if (branch === "summary") {
+      const grouped = groupSkillsByRoot(runtimeSkills);
+      const groupLabel = (g: RootGroup) => {
+        if (g === "provider")
+          return t(($) => $.runtime_import.provider_group_heading);
+        if (g === "universal")
+          return t(($) => $.runtime_import.universal_group_heading);
+        return t(($) => $.runtime_import.other_group_heading);
+      };
+
+      return (
+        <div className="space-y-3" data-branch="summary">
+          {/* Select all header (mirrors the search branch) */}
+          <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someSelected;
+              }}
+              onChange={toggleAll}
+              className="cursor-pointer accent-primary"
+            />
+            <span className="text-xs text-muted-foreground">
+              {t(($) => $.runtime_import.select_all, {
+                count: runtimeSkills.length,
+              })}
+            </span>
+          </label>
+          {ROOT_GROUP_ORDER.map((group) => {
+            const skills = grouped[group];
+            if (skills.length === 0) return null;
+            const isCollapsed = collapsedGroups.has(group);
+            return (
+              <div key={group} className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group)}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-accent/40"
+                >
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+                      isCollapsed ? "" : "rotate-90"
+                    }`}
+                  />
+                  <span className="flex-1 text-xs font-medium">
+                    {groupLabel(group)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {t(($) => $.runtime_import.group_count, {
+                      count: skills.length,
+                    })}
+                  </span>
+                </button>
+                {!isCollapsed &&
+                  skills.map((s) => (
+                    <SkillItem
+                      key={s.key}
+                      skill={s}
+                      checked={selectedKeys.has(s.key)}
+                      onToggle={() => toggleSkill(s.key)}
+                      disabled={importing}
+                      expanded={singleSelectedSkill?.key === s.key}
+                      editName={
+                        singleSelectedSkill?.key === s.key
+                          ? editName
+                          : undefined
+                      }
+                      editDescription={
+                        singleSelectedSkill?.key === s.key
+                          ? editDescription
+                          : undefined
+                      }
+                      onNameChange={setEditName}
+                      onDescriptionChange={setEditDescription}
+                    />
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // search branch (3+): existing list rendering. U3 will replace this block.
     return (
-      <div className="space-y-2" data-branch={branch}>
+      <div className="space-y-2" data-branch="search">
         {/* Select all header */}
         <label className="flex cursor-pointer items-center gap-2 px-1 py-1">
           <input

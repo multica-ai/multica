@@ -88,6 +88,7 @@ const MOCK_SKILL_A = {
   provider: "claude",
   source_path: "~/.claude/skills/review-helper",
   file_count: 2,
+  root: "provider",
 };
 
 const MOCK_SKILL_B = {
@@ -97,6 +98,7 @@ const MOCK_SKILL_B = {
   provider: "claude",
   source_path: "~/.claude/skills/code-gen",
   file_count: 3,
+  root: "provider",
 };
 
 const MOCK_IMPORTED_SKILL_A = {
