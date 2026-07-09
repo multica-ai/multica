@@ -1,7 +1,7 @@
 -- Human Attribution, Phase 1 — split the accountable human off originator_user_id
 -- (MUL-4302, decided by Bohan on the MUL-4302 thread).
 --
--- Migration 150 stamped provenance (originator_source, evidence, lineage) ONTO
+-- Migration 157 stamped provenance (originator_source, evidence, lineage) ONTO
 -- originator_user_id, treating that one column as both "who authorized this run"
 -- and "who is accountable for it". Those are two different questions with two
 -- different lifetimes, and collapsing them onto one column is a latent hazard:
@@ -39,7 +39,7 @@
 -- lock).
 --
 -- NULL does NOT mean "pre-migration row" here. Unlike originator_source (which
--- every new enqueue path now stamps non-NULL, migration 150), accountable_user_id
+-- every new enqueue path now stamps non-NULL, migration 157), accountable_user_id
 -- is legitimately NULL on NEW rows too, whenever the row's audit source resolved
 -- no human yet: run_only autopilot writes originator_source='unattributed' with a
 -- NULL accountable until rule_owner lands, and any classified-unattributed path is
