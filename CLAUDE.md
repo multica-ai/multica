@@ -2,6 +2,13 @@
 
 Guidance for Claude Code when working in this repository. Keep this file short and authoritative: rules here should be hard to infer from code or easy to get wrong.
 
+## 用户偏好
+
+- **语言要求**：不论用户使用什么语言交互，始终使用简体中文回复和沟通。
+- **项目背景**：Multica 是由 Multica-ai 团队开发的产品，官方 GitHub 仓库位于 https://github.com/multica-ai/multica 。当前目录是用户本地 self-host 的 Multica 服务实例，包含了用户的一些定制化改动。
+- **官方文档**：https://multica.ai/docs
+- **开发者规范**：对 Multica 进行定制化改动时，必须遵循 https://multica.ai/docs/developers/conventions 中的规范。
+
 ## Conventions
 
 The source of truth for code naming, i18n glossary, and Chinese product voice is:
