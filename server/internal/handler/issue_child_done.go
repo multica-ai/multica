@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -126,7 +127,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	}
 	staged := siblingsAreStaged(children)
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	prefix := issueidentifier.PrefixForIssue(ctx, h.Queries, issue)
 	identifier := prefix + "-" + strconv.Itoa(int(issue.Number))
 	childID := uuidToString(issue.ID)
 	title := sanitizeChildTitleForSystemComment(issue.Title)

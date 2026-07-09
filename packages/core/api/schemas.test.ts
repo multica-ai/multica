@@ -12,6 +12,12 @@ import {
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  ListSpacesResponseSchema,
+  ProjectSpaceConflictResponseSchema,
+  SpaceSchema,
+  EMPTY_LIST_SPACES_RESPONSE,
+  SearchProjectsResponseSchema,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -269,6 +275,62 @@ describe("DuplicateIssueErrorBodySchema", () => {
   });
 });
 
+// The "move issues before removing a space" dialog feeds ApiError.body
+// (typed as `unknown`) through this schema when PUT /api/projects/:id
+// returns 409. A future server drift that loses the contract MUST fail the
+// parse so the UI falls back to a normal error toast instead of rendering a
+// broken reassignment picker.
+describe("ProjectSpaceConflictResponseSchema", () => {
+  const valid = {
+    code: "project_space_has_issues",
+    error: "project has issues in a space being removed",
+    spaces_with_issues: [
+      { space_id: "11111111-1111-1111-1111-111111111111", space_key: "ENG", issue_count: 3 },
+    ],
+  };
+
+  it("accepts a well-formed body", () => {
+    expect(ProjectSpaceConflictResponseSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts unknown extra fields via .loose()", () => {
+    const forwardCompat = {
+      ...valid,
+      spaces_with_issues: [{ ...valid.spaces_with_issues[0], archived: false }],
+    };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(forwardCompat).success).toBe(true);
+  });
+
+  it("rejects a renamed code (so renames degrade to the generic toast)", () => {
+    const renamed = { ...valid, code: "project_has_issues" };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(renamed).success).toBe(false);
+  });
+
+  it("rejects a missing spaces_with_issues array", () => {
+    const { spaces_with_issues: _omit, ...without } = valid;
+    expect(ProjectSpaceConflictResponseSchema.safeParse(without).success).toBe(false);
+  });
+
+  it("rejects a non-numeric issue_count", () => {
+    const broken = {
+      ...valid,
+      spaces_with_issues: [{ ...valid.spaces_with_issues[0], issue_count: "3" }],
+    };
+    expect(ProjectSpaceConflictResponseSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it("accepts an empty spaces_with_issues array", () => {
+    expect(
+      ProjectSpaceConflictResponseSchema.safeParse({ ...valid, spaces_with_issues: [] }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a missing error field (it is optional)", () => {
+    const { error: _omit, ...without } = valid;
+    expect(ProjectSpaceConflictResponseSchema.safeParse(without).success).toBe(true);
+  });
+});
+
 // `user.timezone` (Viewing tz) was added in the timezone-architecture RFC.
 // A desktop build older than the server — or a server predating the
 // `user.timezone` migration — will return a `/api/me` body with no
@@ -507,5 +569,125 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/spaces" };
+  const baseSpace = {
+    id: "space-1",
+    workspace_id: "ws-1",
+    name: "Frontend",
+    key: "FE",
+    description: "",
+    icon: null,
+    issue_counter: 3,
+    archived_at: null,
+    created_by: "user-1",
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+  };
+
+  it("parses a well-formed space and tolerates extra fields", () => {
+    const parsed = SpaceSchema.parse({ ...baseSpace, future_field: "ignored" });
+    expect(parsed.id).toBe("space-1");
+    expect(parsed.key).toBe("FE");
+  });
+
+  it("defaults scalar fields when an older backend omits them", () => {
+    const parsed = SpaceSchema.parse({ id: "space-2", workspace_id: "ws-1" });
+    expect(parsed.name).toBe("");
+    expect(parsed.key).toBe("");
+    expect(parsed.description).toBe("");
+    expect(parsed.icon).toBeNull();
+    expect(parsed.issue_counter).toBe(0);
+    expect(parsed.archived_at).toBeNull();
+  });
+
+  it("parses a list response and coerces total", () => {
+    const parsed = parseWithFallback(
+      { spaces: [baseSpace], total: 1 },
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.spaces).toHaveLength(1);
+    expect(parsed.total).toBe(1);
+  });
+
+  it("defaults spaces and total when the body omits them", () => {
+    const parsed = parseWithFallback(
+      {},
+      ListSpacesResponseSchema,
+      EMPTY_LIST_SPACES_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.spaces).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("falls back to empty when a space row has a wrong-typed id", () => {
+    expect(
+      parseWithFallback(
+        { spaces: [{ ...baseSpace, id: 42 }], total: 1 },
+        ListSpacesResponseSchema,
+        EMPTY_LIST_SPACES_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
+  });
+
+  it("falls back to empty for a non-object body", () => {
+    expect(
+      parseWithFallback(null, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_LIST_SPACES_RESPONSE);
+  });
+});
+
+describe("ProjectSchema space_ids drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/projects/search" };
+  const baseProject = {
+    id: "proj-1",
+    workspace_id: "ws-1",
+    title: "Website",
+    description: null,
+    icon: null,
+    status: "active",
+    priority: "medium",
+    lead_type: null,
+    lead_id: null,
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+    match_source: "title",
+  };
+
+  it("preserves a populated space_ids array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, space_ids: ["space-1", "space-2"] }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual(["space-1", "space-2"]);
+  });
+
+  it("defaults space_ids to an empty array when the field is missing", () => {
+    const parsed = parseWithFallback(
+      { projects: [baseProject], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
+  });
+
+  it("coerces a null space_ids to an empty array", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, space_ids: null }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.space_ids).toEqual([]);
   });
 });

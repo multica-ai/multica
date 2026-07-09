@@ -321,7 +321,9 @@
       "thursday": "木曜日",
       "friday": "金曜日",
       "saturday": "土曜日"
-    }
+    },
+    "title_required": "タイトルが必要です",
+    "assignee_required": "実行者が必要です — エージェントまたはスクワッドを選択"
   },
   "trigger_config": {
     "frequencies": {

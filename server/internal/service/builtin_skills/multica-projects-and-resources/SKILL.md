@@ -31,13 +31,38 @@ Common resource types:
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
 
+## Spaces
+
+A workspace is organized into spaces. A space owns an issue-key prefix and its own
+issue-number counter, so issue identifiers read `SPACE_KEY-NUMBER` (e.g. `MUL-42`).
+Every workspace has a default space whose key is the legacy workspace prefix;
+commands that omit `--space` fall back to it.
+
+Projects belong to one or more spaces. `project create` and `project update` take a
+repeatable `--space <space-id-or-key>` (UUID or key); on `update` the flag
+**replaces** the project's space set. `project list --space <space-id-or-key>` filters
+a listing to one space.
+
+```bash
+multica space list --output json
+multica space create --name "<name>" --key <PREFIX> --output json
+multica space update <space-id-or-key> --name "<name>" --key <PREFIX> --output json
+multica space archive <space-id-or-key> --output json
+```
+
+`space create` requires `--name`; `--key` sets the issue prefix and is optional.
+`--description` and `--icon` are optional on both `create` and `update`. `archive`
+resolves a space by id or key.
+
 ## CLI
 
 ```bash
 multica project list --output json
+multica project list --space <space-id-or-key> --output json
 multica project get <project-id> --output json
-multica project create --title "<title>" --repo <github-url> --output json
+multica project create --title "<title>" --space <space-id-or-key> --repo <github-url> --output json
 multica project update <project-id> --title "<title>" --output json
+multica project update <project-id> --space <space-id-or-key> --output json
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json

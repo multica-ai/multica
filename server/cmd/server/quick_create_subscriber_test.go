@@ -38,6 +38,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		"please file a bug",
 		pgtype.UUID{},
 		pgtype.UUID{},
+		pgtype.UUID{},
 		nil,
 	)
 	if err != nil {
@@ -57,12 +58,26 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		t.Fatalf("StartAgentTask: %v", err)
 	}
 
-	number, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
+	var spaceID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&spaceID); err != nil {
+		t.Fatalf("load fixture default space: %v", err)
+	}
+
+	// Mint the number from the Space counter (not the workspace counter) so this
+	// test cannot hand out a number that overlaps a space-aware create.
+	number, err := queries.IncrementSpaceIssueCounter(ctx, db.IncrementSpaceIssueCounterParams{
+		ID:          parseUUID(spaceID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
 	if err != nil {
-		t.Fatalf("IncrementIssueCounter: %v", err)
+		t.Fatalf("IncrementSpaceIssueCounter: %v", err)
 	}
 	issue, err := queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
+		SpaceID:     parseUUID(spaceID),
 		Title:       "agent-filed bug",
 		Status:      "todo",
 		Priority:    "none",
@@ -111,6 +126,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		parseUUID(agentID),
 		pgtype.UUID{},
 		"another bug",
+		pgtype.UUID{},
 		pgtype.UUID{},
 		pgtype.UUID{},
 		nil,

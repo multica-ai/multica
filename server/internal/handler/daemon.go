@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -1493,6 +1494,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			h.attachSpaceToTaskResponse(r.Context(), &resp, issue.WorkspaceID, issue.SpaceID)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1828,6 +1830,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
 				resp.ThreadName = ap.Title
+				h.attachSpaceToTaskResponse(r.Context(), &resp, ap.WorkspaceID, ap.SpaceID)
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -1862,6 +1865,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			resp.SpaceID = qc.SpaceID
+			resp.SpaceKey = qc.SpaceKey
+			resp.SpaceName = qc.SpaceName
+			if qc.SpaceID != "" && (resp.SpaceKey == "" || resp.SpaceName == "") {
+				if spaceUUID, err := util.ParseUUID(qc.SpaceID); err == nil {
+					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
+						h.attachSpaceToTaskResponse(r.Context(), &resp, wsUUID, spaceUUID)
+					}
+				}
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
@@ -1936,9 +1949,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							WorkspaceID: wsUUID,
 						})
 						if perr == nil && parent.ID.Valid {
-							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
-								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
-							}
+							resp.ParentIssueIdentifier = issueidentifier.PrefixForIssue(r.Context(), h.Queries, parent) + "-" + strconv.Itoa(int(parent.Number))
 						}
 					}
 				}
@@ -2086,6 +2097,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTaskResponse, workspaceID, spaceID pgtype.UUID) {
+	if !spaceID.Valid {
+		return
+	}
+	space, err := h.Queries.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return
+	}
+	resp.SpaceID = uuidToString(space.ID)
+	resp.SpaceKey = space.Key
+	resp.SpaceName = space.Name
 }
 
 type resolveSkillBundlesRequest struct {

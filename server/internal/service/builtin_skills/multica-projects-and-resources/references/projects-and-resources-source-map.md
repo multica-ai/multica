@@ -1,6 +1,10 @@
 # Projects and resources source map
 
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
+- `project list --space` (single UUID or key) sets `space_id`; `project create`/`project update` take a repeatable `--space` (`StringArray`, UUID or key) resolved via `resolveSpaceRefs` into `space_ids`. On `update` the resolved list **replaces** the project's space set.
+- `server/cmd/multica/cmd_space.go` registers space `list`, `create`, `update`, and `archive`. `create` requires `--name`; `--key` (issue prefix), `--description`, `--icon` are optional; `update` accepts the same optional flags. The CLI maps to `/api/spaces` (GET/POST) and `/api/spaces/{id}` (PATCH/PUT update, DELETE archive), routes registered at `server/cmd/server/router.go:951`.
+- `resolveSpaceRef`/`resolveSpaceRefs` (`cmd_space.go`) resolve a `--space` value by exact UUID or case-insensitive key against `GET /api/spaces`. `spaceCLIResponse` carries `key`, `issue_counter`, and `is_default`.
+- A space owns the issue-key prefix and its own issue-number counter, so identifiers read `SPACE_KEY-NUMBER`. Each workspace has a default space whose key is the legacy workspace prefix; omitting `--space` uses that default space.
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`), or generic JSON `--ref '<json>'`.

@@ -121,12 +121,14 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
       },
     });
 
-    // Auto-focus after mount — delay to wait for Dialog open animation
+    // Auto-focus after mount — delayed past the Dialog open animation so the
+    // focus manager's initial-focus (first tabbable, e.g. a header pill)
+    // can't steal it back after we take it.
     useEffect(() => {
       if (autoFocus && editor) {
         const timer = setTimeout(() => {
           editor.commands.focus("end");
-        }, 50);
+        }, 180);
         return () => clearTimeout(timer);
       }
       return undefined;

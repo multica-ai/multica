@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -888,6 +889,9 @@ type QuickCreateContext struct {
 	RequesterID   string   `json:"requester_id"`
 	WorkspaceID   string   `json:"workspace_id"`
 	ProjectID     string   `json:"project_id,omitempty"`
+	SpaceID       string   `json:"space_id,omitempty"`
+	SpaceKey      string   `json:"space_key,omitempty"`
+	SpaceName     string   `json:"space_name,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// ParentIssueID is the optional UUID of the parent issue the new issue
@@ -921,7 +925,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, spaceID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -941,6 +945,16 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
+	}
+	if spaceID.Valid {
+		payload.SpaceID = util.UUIDToString(spaceID)
+		if space, err := s.Queries.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+			ID:          spaceID,
+			WorkspaceID: workspaceID,
+		}); err == nil {
+			payload.SpaceKey = space.Key
+			payload.SpaceName = space.Name
+		}
 	}
 	if squadID.Valid {
 		payload.SquadID = util.UUIDToString(squadID)
@@ -2220,7 +2234,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							// it here too. Without it the board / status-filter
 							// caches keep showing the issue as in_progress until
 							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
+							s.broadcastIssueUpdated(ctx, updatedIssue, issue.Status)
 						}
 					}
 				}
@@ -2654,8 +2668,8 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // emit status-change activity / notifications. That is intentional for the
 // realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
 // would mean unifying the payload type and is left as a follow-up.
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
-	prefix := s.getIssuePrefix(issue.WorkspaceID)
+func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -2667,14 +2681,6 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 			"prev_status":    prevStatus,
 		},
 	})
-}
-
-func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
-	ws, err := s.Queries.GetWorkspace(context.Background(), workspaceID)
-	if err != nil {
-		return ""
-	}
-	return ws.IssuePrefix
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
@@ -2779,6 +2785,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
+		"space_id":        util.UUIDToPtr(issue.SpaceID),
+		"space_key":       issuePrefix,
 		"number":          issue.Number,
 		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
 		"title":           issue.Title,
@@ -2903,7 +2911,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			},
 		})
 	}
-	prefix := s.getIssuePrefix(workspaceID)
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),

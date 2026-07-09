@@ -126,6 +126,7 @@ export function useIssueSurfaceController({
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const spaceFilter = useViewStore((s) => s.spaceFilter);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
@@ -160,8 +161,14 @@ export function useIssueSurfaceController({
       sort_by: sortBy,
       sort_direction: sortBy !== "position" ? sortDirection : undefined,
       ...dateParams,
+      // space_id is a cross-scope server filter, not a sort. It rides the
+      // sort param bag (like the date filter) so it threads through every
+      // repository path — workspace list, scoped list, and assignee-grouped —
+      // and forks the query-key cache per space without the query plan (built
+      // from scope alone) needing to know about the view store.
+      ...(spaceFilter ? { space_id: spaceFilter } : {}),
     }),
-    [dateParams, sortBy, sortDirection],
+    [dateParams, sortBy, sortDirection, spaceFilter],
   );
 
   const selection = useCreateIssueSurfaceSelection(

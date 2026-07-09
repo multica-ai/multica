@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -712,12 +713,25 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := h.Queries.GetIssueBySpaceKeyAndNumber(ctx, db.GetIssueBySpaceKeyAndNumberParams{
 		WorkspaceID: wsUUID,
+		Lower:       parts.prefix,
 		Number:      parts.number,
 	})
 	if err != nil {
-		return db.Issue{}, false
+		// The identifier may be pre-move: moving an issue between spaces
+		// renumbers it but records the old identifier as an alias. Unlike
+		// GetIssueBySpaceKeyAndNumber (which lower()s both sides in SQL),
+		// the alias table's lookup is an exact match against a column that
+		// is always stored lowercased, so the caller must lowercase too.
+		issue, err = h.Queries.GetIssueByIdentifierAlias(ctx, db.GetIssueByIdentifierAliasParams{
+			WorkspaceID:   wsUUID,
+			SpaceKeyLower: strings.ToLower(parts.prefix),
+			Number:        parts.number,
+		})
+		if err != nil {
+			return db.Issue{}, false
+		}
 	}
 	return issue, true
 }
@@ -750,20 +764,6 @@ func splitIdentifier(id string) *identifierParts {
 		return nil
 	}
 	return &identifierParts{prefix: id[:idx], number: int32(num)}
-}
-
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
-func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
-	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		return ""
-	}
-	if ws.IssuePrefix != "" {
-		return ws.IssuePrefix
-	}
-	return generateIssuePrefix(ws.Name)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

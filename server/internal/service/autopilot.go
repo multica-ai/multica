@@ -15,7 +15,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
-	"github.com/multica-ai/multica/server/internal/issueposition"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -32,6 +31,7 @@ type AutopilotService struct {
 	TxStarter TxStarter
 	Bus       *events.Bus
 	TaskSvc   *TaskService
+	issueSvc  *IssueService
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -43,7 +43,17 @@ const DefaultAutopilotTriggerTimezone = "UTC"
 const autopilotRecentDuplicateWindow = 60 * time.Second
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
-	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+	return &AutopilotService{
+		Queries:   q,
+		TxStarter: tx,
+		Bus:       bus,
+		TaskSvc:   taskSvc,
+		// nil analytics is deliberate: the autopilot dispatch path captures the
+		// IssueCreated event itself via captureIssueCreatedFromAutopilot (using
+		// TaskSvc.Analytics). Passing nil here keeps IssueService.Create from
+		// also capturing it, avoiding a double count.
+		issueSvc: NewIssueService(q, tx, bus, nil, taskSvc),
+	}
 }
 
 // DispatchAutopilot is the core execution entry point.
@@ -169,8 +179,10 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 //   - It is in-flight in a state whose downstream side effect is
 //     observable:
 //
-//   - issue_created with a valid issue_id — the issue exists and
-//     the issue-event listener owns task creation from here.
+//   - issue_created with a valid issue_id — the issue exists and its
+//     agent task was enqueued inline by IssueService.Create during
+//     dispatchCreateIssue (an enqueue failure would have flipped the run
+//     to failed before it reached this state).
 //
 //   - running with a valid task_id — the task is queued, the
 //     listener will close the run when the task terminates.
@@ -290,114 +302,95 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-
-	tx, err := s.TxStarter.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+	// Fail-closed invocation gate: verify the autopilot creator may still
+	// invoke the leader under the permission model. Catches configs that
+	// predate the save-time gate, and admin-created configs that no longer
+	// pass (MUL-3963).
+	if ap.AssigneeType == "squad" && !s.canCreatorInvokeAgent(ctx, ap, leader) {
+		return fmt.Errorf("autopilot creator cannot access private squad leader")
 	}
-	defer tx.Rollback(ctx)
-
-	qtx := s.Queries.WithTx(tx)
 
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
-	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
-		ctx, qtx, ap.WorkspaceID, ap.ID, ap.ProjectID, title, autopilotRecentDuplicateWindow,
-	); err != nil {
-		return fmt.Errorf("recent duplicate guard: %w", err)
-	} else if found {
-		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID)}
-	}
-
-	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
-	if err != nil {
-		return fmt.Errorf("increment issue counter: %w", err)
-	}
-
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
-	if err != nil {
-		return fmt.Errorf("get next issue position: %w", err)
-	}
-
-	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-		WorkspaceID:  ap.WorkspaceID,
-		Title:        title,
-		Description:  description,
-		Status:       "todo",
-		Priority:     "none",
-		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
-		AssigneeID:   ap.AssigneeID,
-		// The agent that the autopilot dispatches to is the issue's creator,
-		// not the human who originally configured the autopilot. The latter
-		// is captured separately via origin_type=autopilot + origin_id. For
-		// squad-assigned autopilots, the creator is the resolved leader —
-		// the same agent the issue listener will end up enqueueing.
-		CreatorType:   "agent",
-		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
-		Position:      newPosition,
-		StartDate:     pgtype.Date{},
-		DueDate:       pgtype.Date{},
-		Number:        issueNumber,
-		ProjectID:     ap.ProjectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
+	var templateSubs []db.AutopilotSubscriber
+	var linkedRun db.AutopilotRun
+	result, err := s.issueSvc.Create(ctx, IssueCreateParams{
+		WorkspaceID:    ap.WorkspaceID,
+		SpaceID:        ap.SpaceID,
+		Title:          title,
+		Description:    description,
+		Status:         "todo",
+		Priority:       "none",
+		AssigneeType:   pgtype.Text{String: ap.AssigneeType, Valid: true},
+		AssigneeID:     ap.AssigneeID,
+		CreatorType:    "agent",
+		CreatorID:      leader.ID,
+		ParentIssueID:  pgtype.UUID{},
+		ProjectID:      ap.ProjectID,
+		StartDate:      pgtype.Date{},
+		DueDate:        pgtype.Date{},
+		OriginType:     pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:       ap.ID,
+		AllowDuplicate: true,
+	}, IssueCreateOpts{
+		ActorID:          util.UUIDToString(leader.ID),
+		AnalyticsAgentID: util.UUIDToString(leader.ID),
+		Platform:         "autopilot",
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, spaceKey string) map[string]any {
+			return map[string]any{"issue": issueToMap(issue, spaceKey)}
+		},
+		// Recent-duplicate guard (WS-1465). Runs inside the create tx so its
+		// advisory lock is held until commit: concurrent dispatches of the
+		// same autopilot+title serialize, and the loser sees the winner's
+		// committed issue with its run link already in place.
+		PreCreate: func(ctx context.Context, qtx *db.Queries) error {
+			if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
+				ctx, qtx, ap.WorkspaceID, ap.ID, ap.ProjectID, title, autopilotRecentDuplicateWindow,
+			); err != nil {
+				return fmt.Errorf("recent duplicate guard: %w", err)
+			} else if found {
+				return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID)}
+			}
+			return nil
+		},
+		BeforeCommit: func(ctx context.Context, qtx *db.Queries, issue db.Issue) error {
+			subs, err := qtx.ListAutopilotSubscribers(ctx, ap.ID)
+			if err != nil {
+				return fmt.Errorf("list autopilot subscribers: %w", err)
+			}
+			templateSubs = subs
+			for _, sub := range subs {
+				if err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+					IssueID:  issue.ID,
+					UserType: sub.UserType,
+					UserID:   sub.UserID,
+					Reason:   "autopilot",
+				}); err != nil {
+					return fmt.Errorf("add autopilot subscriber to issue: %w", err)
+				}
+			}
+			// Link the run inside the same tx as the issue insert (WS-1465):
+			// the recent-duplicate guard only counts issues with a linked
+			// run, and same-tx linking avoids a crash window where recovery
+			// would see an orphan issue but no linked run.
+			updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+				ID:      run.ID,
+				IssueID: issue.ID,
+			})
+			if err != nil {
+				return fmt.Errorf("link run to issue: %w", err)
+			}
+			linkedRun = updatedRun
+			return nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
 	}
+	issue := result.Issue
+	*run = linkedRun
 
-	// Fan out the default subscriber template inside the same tx as the
-	// issue insert, before EventIssueCreated fires — so notification
-	// listeners see the full subscriber set on the first event instead of
-	// racing the listener that would otherwise hydrate the template.
-	templateSubs, err := qtx.ListAutopilotSubscribers(ctx, ap.ID)
-	if err != nil {
-		return fmt.Errorf("list autopilot subscribers: %w", err)
-	}
-	for _, sub := range templateSubs {
-		if err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
-			IssueID:  issue.ID,
-			UserType: sub.UserType,
-			UserID:   sub.UserID,
-			Reason:   "autopilot",
-		}); err != nil {
-			return fmt.Errorf("add autopilot subscriber to issue: %w", err)
-		}
-	}
-
-	// Link the run inside the same tx as the issue insert. This makes the
-	// recent-duplicate guard count only fully observable autopilot issues and
-	// avoids a crash window where recovery would see an orphan issue but no
-	// linked run.
-	updatedRun, err := qtx.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
-		ID:      run.ID,
-		IssueID: issue.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("link run to issue: %w", err)
-	}
-	*run = updatedRun
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-
-	// Publish issue:created so the existing event chain fires
-	// (subscriber listeners, activity listeners, notification listeners). For
-	// squad autopilots, this is what triggers shouldEnqueueSquadLeaderOnAssign
-	// → enqueueSquadLeaderTask — no separate squad-routing code needed here.
-	prefix := s.getIssuePrefix(ap.WorkspaceID)
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventIssueCreated,
-		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
-		ActorType:   "agent",
-		ActorID:     util.UUIDToString(leader.ID),
-		Payload: map[string]any{
-			"issue": issueToMap(issue, prefix),
-		},
-	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
 
 	// The issue:created notification listener only handles handler.IssueResponse
@@ -411,27 +404,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// roll back the issue itself.
 	s.notifyAutopilotSubscribersOnCreate(ctx, ap, issue, leader.ID, templateSubs)
 
-	// Enqueue agent task via the existing flow. Squad-assigned autopilots
-	// route to the resolved leader as the executing agent (Path A from
-	// MUL-2429); agent-assigned autopilots go through the standard issue
-	// path. Both code paths land in agent_task_queue with agent_id = leader.
-	if ap.AssigneeType == "squad" {
-		// Fail-closed invocation gate: verify the autopilot creator may still
-		// invoke the leader under the permission model. Catches configs that
-		// predate the save-time gate, and admin-created configs that no longer
-		// pass (MUL-3963).
-		if !s.canCreatorInvokeAgent(ctx, ap, leader) {
-			return fmt.Errorf("autopilot creator cannot access private squad leader")
-		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
-			return fmt.Errorf("enqueue squad leader task: %w", err)
-		}
-	} else {
-		if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-			return fmt.Errorf("enqueue task for issue: %w", err)
-		}
-	}
-
 	slog.Info("autopilot dispatched (create_issue)",
 		"autopilot_id", util.UUIDToString(ap.ID),
 		"assignee_type", ap.AssigneeType,
@@ -439,6 +411,16 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"leader_id", util.UUIDToString(leader.ID),
 		"run_id", util.UUIDToString(run.ID),
 	)
+
+	// The issue exists and the run is linked to it, but the agent task the run
+	// was supposed to drive was never enqueued. Surface this as a run failure so
+	// it is retried / visible instead of being recorded as a success with no
+	// downstream work. The issue_id stays linked (failRun only flips status), so
+	// the created issue remains discoverable; the message makes the ordering
+	// explicit so operators are not misled into thinking no issue was created.
+	if result.EnqueueErr != nil {
+		return fmt.Errorf("issue created but task enqueue failed: %w", result.EnqueueErr)
+	}
 	return nil
 }
 
@@ -1379,14 +1361,6 @@ func isSupportedIssueTitleVariable(name string) bool {
 	return false
 }
 
-func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
-	ws, err := s.Queries.GetWorkspace(context.Background(), workspaceID)
-	if err != nil {
-		return ""
-	}
-	return ws.IssuePrefix
-}
-
 // canCreatorInvokeAgent checks whether the autopilot's creator may invoke the
 // target agent under the invocation-permission model (MUL-3963). It mirrors
 // handler.canInvokeAgent with the autopilot creator as the effective user:
@@ -1394,7 +1368,7 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 //   - private agent -> only the owner (NO admin bypass, NO agent-created bypass)
 //   - public_to agent -> workspace target admits any workspace-member creator
 //     (and agent-created autopilots as workspace principals); member target
-//     admits the matching creator; team targets are inert.
+//     admits the matching creator; space targets are inert.
 //
 // Fail-closed on any lookup error.
 func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Autopilot, agent db.Agent) bool {

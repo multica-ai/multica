@@ -12,9 +12,9 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// noRowsDBTX makes every read return pgx.ErrNoRows so getIssuePrefix's
-// GetWorkspace lookup falls back to an empty prefix without needing a DB. The
-// helper under test still publishes regardless of the prefix result.
+// noRowsDBTX makes every read return pgx.ErrNoRows so the identifier prefix
+// lookup falls back to an empty prefix without needing a DB. The helper under
+// test still publishes regardless of the prefix result.
 type noRowsDBTX struct{}
 
 func (noRowsDBTX) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
@@ -51,7 +51,7 @@ func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 		Number:      7,
 		Status:      "todo",
 	}
-	svc.broadcastIssueUpdated(issue, "in_progress")
+	svc.broadcastIssueUpdated(context.Background(), issue, "in_progress")
 
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 published event, got %d", len(got))
@@ -104,7 +104,7 @@ func TestBroadcastIssueUpdated_NoStatusChange(t *testing.T) {
 		WorkspaceID: testUUID(2),
 		Status:      "todo",
 	}
-	svc.broadcastIssueUpdated(issue, "todo")
+	svc.broadcastIssueUpdated(context.Background(), issue, "todo")
 
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 published event, got %d", len(got))

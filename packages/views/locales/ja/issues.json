@@ -41,10 +41,12 @@
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
     "no_project": "プロジェクトなし",
+    "all_spaces": "すべての Space",
     "section_status": "ステータス",
     "section_priority": "優先度",
     "section_assignee": "担当者",
     "section_creator": "作成者",
+    "section_space": "Space",
     "section_project": "プロジェクト",
     "section_label": "ラベル",
     "section_date": "日付",
@@ -196,6 +198,7 @@
     "pull_request_card_files_count_other": "{{count}} ファイル",
     "pull_request_card_show_more": "他 {{count}} 件を表示",
     "pull_request_card_show_less": "折りたたむ",
+    "prop_space": "Space",
     "prop_status": "ステータス",
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
@@ -400,6 +403,7 @@
     "updated_ago": "{{time}} に更新"
   },
   "actions": {
+    "space": "Space",
     "status": "ステータス",
     "priority": "優先度",
     "assignee": "担当者",

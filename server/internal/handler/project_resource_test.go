@@ -589,9 +589,10 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO issue (
 			workspace_id, creator_type, creator_id, title, status, priority,
-			project_id, number, position
+			project_id, number, position, space_id
 		)
-		VALUES ($1, 'member', $2, 'Project update stats breadcrumb', 'done', 'none', $3, $4, 0)
+		VALUES ($1, 'member', $2, 'Project update stats breadcrumb', 'done', 'none', $3, $4, 0,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, project.ID, number).Scan(&issueID); err != nil {
 		t.Fatalf("create project issue: %v", err)

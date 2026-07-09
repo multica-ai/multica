@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -111,11 +112,13 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	}
 
 	var workspaceID string
+	var workspaceCounter int32
+	var workspacePrefix string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description)
-		VALUES ($1, $2, $3)
-		RETURNING id
-	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests").Scan(&workspaceID); err != nil {
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, issue_counter, issue_prefix
+	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests", "INT").Scan(&workspaceID, &workspaceCounter, &workspacePrefix); err != nil {
 		return "", "", err
 	}
 
@@ -123,6 +126,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
+		return "", "", err
+	}
+
+	// Seed the default Space so space-aware issue creates resolve a Space the same
+	// way migration 131 backfills production workspaces. Without this every
+	// space-aware create fails "space not found in this workspace". The space's
+	// issue_counter mirrors the workspace counter so the two never hand out
+	// overlapping numbers.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Default', $2, $3, $4)
+	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
 
@@ -158,6 +173,22 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 		return err
 	}
 	return nil
+}
+
+// defaultSpaceUUID returns the seeded default workspace_space for the given
+// workspace. Direct issue/autopilot inserts that bypass the space-aware service
+// layer must carry this so the NOT NULL space_id (migration 132) is satisfied
+// the same way a real create would resolve it via ResolveSpace.
+func defaultSpaceUUID(t *testing.T, ctx context.Context, workspaceID string) pgtype.UUID {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM workspace_space WHERE workspace_id = $1 LIMIT 1`,
+		workspaceID,
+	).Scan(&id); err != nil {
+		t.Fatalf("load default space: %v", err)
+	}
+	return parseUUID(id)
 }
 
 // Helper to make authenticated requests
@@ -857,8 +888,8 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
-		VALUES ($1, 'Dedup fixture', 'member', $2)
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'Dedup fixture', 'member', $2)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("failed to seed issue: %v", err)

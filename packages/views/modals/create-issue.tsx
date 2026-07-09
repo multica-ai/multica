@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -39,14 +39,20 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { SpacePicker } from "../spaces/components/space-picker";
+import { SpaceProjectConflictDialog } from "../spaces/components/space-project-conflict-dialog";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -192,7 +198,6 @@ export function ManualCreatePanel({
   const { t } = useT("modals");
   const router = useNavigation();
   const p = useWorkspacePaths();
-  const workspaceName = useCurrentWorkspace()?.name;
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -229,6 +234,9 @@ export function ManualCreatePanel({
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
+  const [spaceId, setSpaceId] = useState<string | undefined>(
+    (data?.space_id as string) || undefined,
+  );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -264,6 +272,23 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  // Every issue belongs to exactly one space, so the picker always resolves to
+  // a value. Associations are creation-time defaults, never constraints:
+  // explicit pick → parent's space → single-space project → last used → personal default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
+  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
+  const projectSpaceId =
+    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId });
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -320,6 +345,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setLabelIds([]);
     setProjectId(undefined);
+    setSpaceId(undefined);
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
@@ -339,7 +365,29 @@ export function ManualCreatePanel({
     setFormResetKey((key) => key + 1);
   };
 
+  // Linear-style interception: space ∉ project's space set pauses the submit
+  // behind a resolution dialog. "Add to project" proceeds unchanged (the
+  // server adds the association), "move" retargets the issue's space first.
+  const spaceProjectConflict = useMemo(() => {
+    if (!selectedProject || !effectiveSpaceId) return null;
+    const ids = selectedProject.space_ids ?? [];
+    if (ids.length === 0 || ids.includes(effectiveSpaceId)) return null;
+    const space = spaces.find((tm) => tm.id === effectiveSpaceId);
+    if (!space) return null;
+    return { space, projectSpaces: spaces.filter((tm) => ids.includes(tm.id)) };
+  }, [selectedProject, effectiveSpaceId, spaces]);
+  const [conflictOpen, setConflictOpen] = useState(false);
+
   const handleSubmit = async () => {
+    if (!title.trim() || submitting) return;
+    if (spaceProjectConflict) {
+      setConflictOpen(true);
+      return;
+    }
+    await doSubmit(effectiveSpaceId);
+  };
+
+  const doSubmit = async (finalSpaceId: string | undefined) => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
@@ -358,10 +406,12 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        space_id: finalSpaceId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
+      setLastSpaceId(finalSpaceId ?? null);
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
@@ -551,6 +601,7 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(effectiveSpaceId ? { space_id: effectiveSpaceId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -563,7 +614,14 @@ export function ManualCreatePanel({
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-muted-foreground">{workspaceName}</span>
+                {/* The issue's space namespace — leads the breadcrumb like the
+                    workspace name used to, but as a required single-select. */}
+                <SpacePicker
+                  spaceId={effectiveSpaceId ?? null}
+                  onChange={setSpaceId}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
@@ -900,6 +958,24 @@ export function ManualCreatePanel({
                 )}
               </div>
             </div>
+      {spaceProjectConflict && (
+        <SpaceProjectConflictDialog
+          open={conflictOpen}
+          spaceName={spaceProjectConflict.space.name}
+          projectName={selectedProject?.title ?? ""}
+          projectSpaces={spaceProjectConflict.projectSpaces}
+          onAddSpace={() => {
+            setConflictOpen(false);
+            void doSubmit(effectiveSpaceId);
+          }}
+          onMoveToSpace={(tid) => {
+            setConflictOpen(false);
+            setSpaceId(tid);
+            void doSubmit(tid);
+          }}
+          onCancel={() => setConflictOpen(false)}
+        />
+      )}
     </>
   );
 }

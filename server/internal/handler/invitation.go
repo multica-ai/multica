@@ -427,6 +427,24 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every system-placed member joins the default space: the sidebar shows
+	// joined spaces only, and issue creation needs a per-user default. Hard
+	// failure (rolls the whole accept back) — a missing default space is data
+	// corruption, and silently skipping would mint a space-less member.
+	defSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), accepted.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
+		return
+	}
+	spaceRole := "member"
+	if accepted.Role == "owner" || accepted.Role == "admin" {
+		spaceRole = "lead"
+	}
+	if _, err := addSpaceMember(r.Context(), qtx, accepted.WorkspaceID, defSpace.ID, user.ID, spaceRole); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join default space")
+		return
+	}
+
 	// Accepting an invite marks the invitee as onboarded. The web /
 	// desktop workspace layout has a hard onboarded_at gate; without
 	// this mark, an invitee landing on their first workspace would be

@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -32,6 +33,9 @@ import (
 type IssueResponse struct {
 	ID            string  `json:"id"`
 	WorkspaceID   string  `json:"workspace_id"`
+	SpaceID       *string `json:"space_id,omitempty"`
+	SpaceKey      *string `json:"space_key,omitempty"`
+	SpaceName     *string `json:"space_name,omitempty"`
 	Number        int32   `json:"number"`
 	Identifier    string  `json:"identifier"`
 	Title         string  `json:"title"`
@@ -87,9 +91,12 @@ func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []str
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	spaceKey := issuePrefix
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		SpaceID:       uuidToPtr(i.SpaceID),
+		SpaceKey:      &spaceKey,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -114,10 +121,21 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 
 // issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
+	if i.SpaceKey != "" {
+		issuePrefix = i.SpaceKey
+	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	spaceKey := issuePrefix
+	var spaceName *string
+	if i.SpaceName != "" {
+		spaceName = &i.SpaceName
+	}
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		SpaceID:       uuidToPtr(i.SpaceID),
+		SpaceKey:      &spaceKey,
+		SpaceName:     spaceName,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -172,10 +190,21 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
+	if i.SpaceKey != "" {
+		issuePrefix = i.SpaceKey
+	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	spaceKey := issuePrefix
+	var spaceName *string
+	if i.SpaceName != "" {
+		spaceName = &i.SpaceName
+	}
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		SpaceID:       uuidToPtr(i.SpaceID),
+		SpaceKey:      &spaceKey,
+		SpaceName:     spaceName,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -351,29 +380,33 @@ func splitSearchTerms(q string) []string {
 	return terms
 }
 
-// identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
-var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
+// identifierNumberRe matches Space-scoped identifiers like "MUL-123" or "ABC-45".
+var identifierNumberRe = regexp.MustCompile(`(?i)^([a-z][a-z0-9]{0,6})-(\d+)$`)
 
 // parseQueryNumber extracts an issue number from the query if it looks like
-// an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
-func parseQueryNumber(q string) (int, bool) {
+// an identifier (e.g. "MUL-123") or a bare number (e.g. "123"). When an
+// identifier is supplied, the Space key must be preserved so search does not
+// collapse Space namespaces back to workspace+number.
+func parseQueryNumber(q string) (int, string, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
 	if m := identifierNumberRe.FindStringSubmatch(q); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-			return n, true
+		if n, err := strconv.Atoi(m[2]); err == nil && n > 0 {
+			return n, m[1], true
 		}
 	}
 	// Check for bare number
 	if n, err := strconv.Atoi(q); err == nil && n > 0 {
-		return n, true
+		return n, "", true
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // searchResult holds a raw row from the dynamic search query.
 type searchResult struct {
 	issue                 db.Issue
+	spaceKey              string
+	spaceName             string
 	totalCount            int64
 	matchSource           string
 	matchedCommentContent string
@@ -383,7 +416,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, querySpaceKey string, hasNum bool, includeClosed bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -457,9 +490,19 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Number match
 	numParam := ""
+	spaceKeyParam := ""
+	// identifierKeyExpr is the Space key an identifier search ("MUL-123") matches
+	// against. issue.space_id is NOT NULL as of migration 132, so wt.key (the
+	// issue's own Space) is always present via the wt join.
+	identifierKeyExpr := "wt.key"
 	if hasNum {
 		numParam = nextArg(queryNum)
-		whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
+		if querySpaceKey != "" {
+			spaceKeyParam = nextArg(querySpaceKey)
+			whereParts = append(whereParts, fmt.Sprintf("(i.number = %s AND lower(%s) = lower(%s))", numParam, identifierKeyExpr, spaceKeyParam))
+		} else {
+			whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
+		}
 	}
 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
@@ -474,7 +517,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Tier 0: Identifier exact match
 	if hasNum {
-		rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+		if querySpaceKey != "" {
+			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s AND lower(%s) = lower(%s) THEN 0", numParam, identifierKeyExpr, spaceKeyParam))
+		} else {
+			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+		}
 	}
 
 	// Tier 1: Exact title match
@@ -590,14 +637,17 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	limitParam := nextArg(nil)  // placeholder
 	offsetParam := nextArg(nil) // placeholder
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		COALESCE(wt.key, '')::text AS space_key,
+		COALESCE(wt.name, '')::text AS space_name,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
+	LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 	WHERE i.workspace_id = %s AND %s
 	ORDER BY %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
@@ -647,9 +697,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	terms := splitSearchTerms(q)
-	queryNum, hasNum := parseQueryNumber(q)
+	queryNum, querySpaceKey, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, querySpaceKey, hasNum, includeClosed)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -662,6 +712,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(
 				&sr.issue.ID,
 				&sr.issue.WorkspaceID,
+				&sr.issue.SpaceID,
 				&sr.issue.Title,
 				&sr.issue.Description,
 				&sr.issue.Status,
@@ -680,6 +731,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.UpdatedAt,
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
+				&sr.spaceKey,
+				&sr.spaceName,
 				&sr.totalCount,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
@@ -714,12 +767,19 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, sr := range results {
+		prefix := sr.spaceKey
+		if prefix == "" {
+			prefix = identifiers.PrefixForIssue(ctx, sr.issue)
+		}
 		sir := SearchIssueResponse{
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
+		}
+		if sr.spaceName != "" {
+			sir.SpaceName = &sr.spaceName
 		}
 		// Always populate comment snippet when a matching comment exists
 		if sr.matchedCommentContent != "" {
@@ -799,6 +859,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	var spaceFilter pgtype.UUID
+	if t := r.URL.Query().Get("space_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "space_id")
+		if !ok {
+			return
+		}
+		spaceFilter = id
+	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
 	// to / lead / have an agent inside). Direct member-assignment is excluded
@@ -826,6 +894,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:    wsUUID,
+			SpaceID:        spaceFilter,
 			Priority:       priorityFilter,
 			AssigneeID:     assigneeFilter,
 			AssigneeIds:    assigneeIdsFilter,
@@ -839,7 +908,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		prefix := h.getIssuePrefix(ctx, wsUUID)
+		prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 		ids := make([]pgtype.UUID, len(issues))
 		for i, issue := range issues {
 			ids[i] = issue.ID
@@ -963,6 +1032,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if projectFilter.Valid {
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
 	}
+	if spaceFilter.Valid {
+		where = append(where, fmt.Sprintf("i.space_id = %s::uuid", addArg(spaceFilter)))
+	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
@@ -1021,10 +1093,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata,
+       COALESCE(wt.key, '')::text AS space_key, COALESCE(wt.name, '')::text AS space_name
 FROM issue i
+LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE %s
 ORDER BY %s
 LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
@@ -1043,6 +1117,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		if err := rows.Scan(
 			&row.ID,
 			&row.WorkspaceID,
+			&row.SpaceID,
 			&row.Title,
 			&row.Description,
 			&row.Status,
@@ -1060,6 +1135,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.SpaceKey,
+			&row.SpaceName,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1082,7 +1159,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		total = int64(len(issues))
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 	ids := make([]pgtype.UUID, len(issues))
 	for i, issue := range issues {
 		ids[i] = issue.ID
@@ -1331,6 +1408,22 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
 	}
+	if raw := r.URL.Query().Get("space_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "space_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.space_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("space_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "space_ids")
+		if !ok {
+			return
+		}
+		if len(ids) > 0 {
+			where = append(where, fmt.Sprintf("i.space_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
 	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
 		return
 	} else if filter != nil {
@@ -1518,22 +1611,26 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+		i.space_id,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
 		i.number, i.project_id, i.metadata,
+		COALESCE(wt.key, '')::text AS space_key,
+		COALESCE(wt.name, '')::text AS space_name,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
 			ORDER BY %s
 		) AS rn
 	FROM issue i
+	LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 	WHERE %s
 )
 SELECT
-	id, workspace_id, title, description, status, priority,
+	id, workspace_id, space_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	number, project_id, metadata, space_key, space_name, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1561,6 +1658,7 @@ ORDER BY
 		if err := rows.Scan(
 			&row.ID,
 			&row.WorkspaceID,
+			&row.SpaceID,
 			&row.Title,
 			&row.Description,
 			&row.Status,
@@ -1577,6 +1675,8 @@ ORDER BY
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.SpaceKey,
+			&row.SpaceName,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -1596,7 +1696,7 @@ ORDER BY
 		ids[i] = row.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 
 	groups := []IssueAssigneeGroupResponse{}
 	groupIndex := map[string]int{}
@@ -1633,7 +1733,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 	resp := issueToResponse(issue, prefix)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
@@ -1676,10 +1776,10 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := make([]IssueResponse, len(children))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, identifiers.PrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1745,10 +1845,10 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]IssueResponse, len(children))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, identifiers.PrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1813,6 +1913,7 @@ type QuickCreateIssueRequest struct {
 	AgentID       string   `json:"agent_id,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	Prompt        string   `json:"prompt"`
+	SpaceID       string   `json:"space_id,omitempty"`
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -1973,6 +2074,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// issue" entry, but the handler re-checks so a forged request can't
 	// smuggle a foreign parent UUID through.
 	var parentIssueUUID pgtype.UUID
+	var parentIssue db.Issue
 	if strings.TrimSpace(req.ParentIssueID) != "" {
 		pid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
 		if !ok {
@@ -1986,10 +2088,34 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 			return
 		}
+		parentIssue = parent
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
+	var requestedSpaceUUID pgtype.UUID
+	if strings.TrimSpace(req.SpaceID) != "" {
+		tid, ok := parseUUIDOrBadRequest(w, req.SpaceID, "space_id")
+		if !ok {
+			return
+		}
+		requestedSpaceUUID = tid
+	}
+	// A sub-issue seeds its Space from the parent when the caller didn't pick
+	// one — a creation-time default, not a constraint; an explicit space_id
+	// always wins and parent/child may diverge afterwards.
+	spaceUUID := requestedSpaceUUID
+	if !spaceUUID.Valid && parentIssueUUID.Valid && parentIssue.SpaceID.Valid {
+		spaceUUID = parentIssue.SpaceID
+	}
+	space, err := service.ResolveSpace(r.Context(), h.Queries, wsUUID, spaceUUID, projectUUID)
+	if err != nil {
+		if !writeSpaceResolveError(w, err) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, space.ID, attachmentIDs)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2090,6 +2216,7 @@ func readRuntimeCLIVersion(metadata []byte) string {
 type CreateIssueRequest struct {
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
+	SpaceID       *string  `json:"space_id"`
 	Status        string   `json:"status"`
 	Priority      string   `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
@@ -2178,6 +2305,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
+	var spaceID pgtype.UUID
+	if req.SpaceID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.SpaceID, "space_id")
+		if !ok {
+			return
+		}
+		spaceID = id
+	}
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -2251,10 +2386,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
-	// Prefix is workspace-level; pre-compute once so both the broadcast
-	// payload builder and the HTTP response share the same value.
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
-
 	// Analytics agent ID: assignee agent when the issue is being assigned
 	// to an agent, otherwise the creator agent for agent-authored issues.
 	// Resolved here (not in the service) because creator identity is HTTP-side.
@@ -2279,6 +2410,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID:    wsUUID,
+		SpaceID:        spaceID,
 		Title:          req.Title,
 		Description:    ptrToText(req.Description),
 		Status:         status,
@@ -2300,8 +2432,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
-			payload := issueToResponse(issue, prefix)
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, spaceKey string) map[string]any {
+			payload := issueToResponse(issue, spaceKey)
 			payload.Attachments = buildAttachmentResponses(atts)
 			return map[string]any{"issue": payload}
 		},
@@ -2309,7 +2441,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	if errors.Is(err, service.ErrActiveDuplicate) {
 		dup := *res.DuplicateIssue
-		existing := issueToResponse(dup, h.getIssuePrefix(r.Context(), dup.WorkspaceID))
+		existing := issueToResponse(dup, issueidentifier.PrefixForIssue(r.Context(), h.Queries, dup))
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"code":  "active_duplicate_issue",
 			"error": duplicateIssueMessage(existing),
@@ -2325,6 +2457,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if writeSpaceResolveError(w, err) {
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2334,7 +2469,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
-	resp := issueToResponse(issue, prefix)
+	resp := issueToResponse(issue, res.SpaceKey)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2351,7 +2486,10 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	// SpaceID moves the issue to another space. Numbers are per-space, so the
+	// move renumbers the issue and records the old identifier as an alias.
+	SpaceID *string `json:"space_id"`
+	Stage   *int32  `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2486,7 +2624,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "an issue cannot be its own parent")
 				return
 			}
-			// Validate parent exists in the same workspace.
+			// Validate parent exists in the same workspace. Cross-space
+			// parent/child is allowed — space only binds at creation time.
 			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
@@ -2512,15 +2651,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
 		}
 	}
+	finalProjectID := prevIssue.ProjectID
+	projectTouched := false
 	if _, ok := rawFields["project_id"]; ok {
+		projectTouched = true
 		if req.ProjectID != nil {
 			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 			if !ok {
 				return
 			}
+			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+				ID:          projectUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "project not found in this workspace")
+				return
+			}
 			params.ProjectID = projectUUID
+			finalProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
+			finalProjectID = pgtype.UUID{Valid: false}
 		}
 	}
 	if _, ok := rawFields["stage"]; ok {
@@ -2552,18 +2703,85 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
-	if err != nil {
-		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
-		return
+	// space_id — moving an issue between spaces renumbers it (numbers are
+	// per-space). Runs in its own tx before the field update: allocate the
+	// next number in the destination space, take a fresh top position in the
+	// destination column, and record the old identifier as an alias so
+	// external references (CLI/API lookups, GitHub branch/PR auto-linking)
+	// keep resolving. Everything else (project, parent, labels) is left
+	// untouched — those associations only bind at creation time.
+	spaceChanged := false
+	finalSpaceID := prevIssue.SpaceID
+	if _, ok := rawFields["space_id"]; ok {
+		if req.SpaceID == nil {
+			writeError(w, http.StatusBadRequest, "space_id cannot be null")
+			return
+		}
+		newSpaceID, ok := parseUUIDOrBadRequest(w, *req.SpaceID, "space_id")
+		if !ok {
+			return
+		}
+		finalSpaceID = newSpaceID
+		if newSpaceID != prevIssue.SpaceID {
+			if _, err := service.ValidateActiveSpace(r.Context(), h.Queries, prevIssue.WorkspaceID, newSpaceID); err != nil {
+				if !writeSpaceResolveError(w, err) {
+					writeError(w, http.StatusBadRequest, err.Error())
+				}
+				return
+			}
+			spaceChanged = true
+		}
+	}
+
+	var issue db.Issue
+	if projectTouched || spaceChanged {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update issue")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+
+		if spaceChanged {
+			if _, err := service.MoveIssueToSpace(r.Context(), qtx, tx, prevIssue.WorkspaceID, prevIssue, finalSpaceID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to move issue to space")
+				return
+			}
+		}
+
+		issue, err = qtx.UpdateIssue(r.Context(), params)
+		if err != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+			return
+		}
+		// Ensure exactly the final issue/project pair is represented. For combined
+		// project+space patches this avoids adding old-space→new-project or
+		// new-space→old-project associations.
+		if err := service.EnsureProjectHasSpace(r.Context(), qtx, prevIssue.WorkspaceID, finalProjectID, finalSpaceID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project spaces")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update issue")
+			return
+		}
+	} else {
+		var err error
+		issue, err = h.Queries.UpdateIssue(r.Context(), params)
+		if err != nil {
+			slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+			return
+		}
 	}
 
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
@@ -2594,6 +2812,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
 		"project_changed":     projectChanged,
+		"space_changed":       spaceChanged,
+		"prev_space_id":       uuidToPtr(prevIssue.SpaceID),
 		"start_date_changed":  startDateChanged,
 		"due_date_changed":    dueDateChanged,
 		"description_changed": descriptionChanged,
@@ -2944,6 +3164,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -3101,7 +3322,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := identifiers.PrefixForIssue(r.Context(), issue)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 

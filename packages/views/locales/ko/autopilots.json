@@ -321,7 +321,9 @@
       "thursday": "목요일",
       "friday": "금요일",
       "saturday": "토요일"
-    }
+    },
+    "title_required": "제목을 입력해야 합니다",
+    "assignee_required": "실행자를 선택해야 합니다 — 에이전트 또는 스쿼드 선택"
   },
   "trigger_config": {
     "frequencies": {

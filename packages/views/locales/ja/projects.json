@@ -63,6 +63,7 @@
     "unpin_tooltip": "サイドバーの固定を解除",
     "sidebar_tooltip": "サイドバーの開閉",
     "copy_link": "リンクをコピー",
+    "manage_spaces_action": "Space を管理",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",
     "section_progress": "進捗",
@@ -119,6 +120,22 @@
     "description": "プロジェクトが削除されます。イシューは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
     "cancel": "キャンセル"
+  },
+  "manage_spaces": {
+    "title": "Space を管理",
+    "description": "このプロジェクトが属する Space を選択してください。",
+    "empty": "少なくとも 1 つの Space を選択してください。",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "キャンセル",
+    "toast_updated": "Space を更新しました",
+    "toast_failed": "Space の更新に失敗しました",
+    "conflict_title": "Space を削除する前に Issue を移動してください",
+    "conflict_body_other": "削除しようとしている Space に、このプロジェクトの Issue が {{count}} 件あります。移動先を選択してください。",
+    "conflict_row_other": "{{space}} に {{count}} 件の Issue",
+    "conflict_target_placeholder": "移動先を選択…",
+    "confirm_move": "Issue を移動して保存",
+    "back": "戻る"
   },
   "picker": {
     "no_project": "プロジェクトなし",
