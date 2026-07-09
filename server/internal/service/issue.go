@@ -149,27 +149,6 @@ var ErrSpaceNotFound = errors.New("space not found in this workspace")
 // return a clear "space is archived" message instead of a misleading "not found".
 var ErrSpaceArchived = errors.New("space is archived")
 
-// ErrProjectSpaceAmbiguous signals that a Space was not specified for an issue
-// whose Project belongs to more than one Space, so no single Space can be
-// inferred. Callers translate this into a 400 that names the candidate Space
-// keys; matched via errors.Is against a *ProjectSpaceAmbiguousError.
-var ErrProjectSpaceAmbiguous = errors.New("project has multiple spaces; specify space_id")
-
-// ProjectSpaceAmbiguousError carries the candidate Space keys so the transport
-// layer can produce a guided message. It matches ErrProjectSpaceAmbiguous under
-// errors.Is.
-type ProjectSpaceAmbiguousError struct {
-	SpaceKeys []string
-}
-
-func (e *ProjectSpaceAmbiguousError) Error() string {
-	return fmt.Sprintf("project has multiple spaces (%s); specify space_id", strings.Join(e.SpaceKeys, ", "))
-}
-
-func (e *ProjectSpaceAmbiguousError) Is(target error) bool {
-	return target == ErrProjectSpaceAmbiguous
-}
-
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -267,16 +246,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, err
 	}
 	spaceID = space.ID
-
-	// Invariant: an issue's space is always part of its project's space set.
-	// The UI resolves a mismatch with an explicit dialog whose default is
-	// "add the space to the project"; headless callers (agents, CLI, API)
-	// get that same default applied here, so the invariant holds on every
-	// path and a space's Projects page never misses a project that holds
-	// its issues.
-	if err := EnsureProjectHasSpace(ctx, qtx, p.WorkspaceID, projectID, spaceID); err != nil {
-		return IssueCreateResult{}, err
-	}
 
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, spaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {
@@ -387,8 +356,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 //
 //   - an explicit requestedSpaceID is validated and used;
 //   - otherwise, when a Project is given: a single-space Project infers that
-//     Space, a multi-space Project is ambiguous (ErrProjectSpaceAmbiguous), and a
-//     Project with no Space links falls through;
+//     Space; a multi-space Project (or a Project with no Space links) falls
+//     through to the workspace default Space — no error;
 //   - otherwise the workspace default Space is used.
 //
 // The chosen Space must be active (ErrSpaceNotFound / ErrSpaceArchived). The
@@ -404,15 +373,8 @@ func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpac
 		if err != nil {
 			return db.WorkspaceSpace{}, fmt.Errorf("list project spaces: %w", err)
 		}
-		switch {
-		case len(spaces) == 1:
+		if len(spaces) == 1 {
 			spaceID = spaces[0].ID
-		case len(spaces) > 1:
-			keys := make([]string, len(spaces))
-			for i, t := range spaces {
-				keys[i] = t.Key
-			}
-			return db.WorkspaceSpace{}, &ProjectSpaceAmbiguousError{SpaceKeys: keys}
 		}
 	}
 	if !spaceID.Valid {
@@ -423,37 +385,6 @@ func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpac
 		spaceID = space.ID
 	}
 	return ValidateActiveSpace(ctx, q, workspaceID, spaceID)
-}
-
-// EnsureProjectHasSpace upholds the invariant that an issue's space is part of
-// its project's space set, by adding the association when it is missing (the
-// same default the UI's conflict dialog offers). No-op without a project.
-// Exported via the issue create/update paths only — project↔space stays a
-// creation-time default for everything else.
-func EnsureProjectHasSpace(ctx context.Context, q *db.Queries, workspaceID, projectID, spaceID pgtype.UUID) error {
-	if !projectID.Valid || !spaceID.Valid {
-		return nil
-	}
-	spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
-		WorkspaceID: workspaceID,
-		ProjectID:   projectID,
-	})
-	if err != nil {
-		return fmt.Errorf("list project spaces: %w", err)
-	}
-	for _, t := range spaces {
-		if t.ID == spaceID {
-			return nil
-		}
-	}
-	if err := q.AddProjectSpace(ctx, db.AddProjectSpaceParams{
-		WorkspaceID: workspaceID,
-		ProjectID:   projectID,
-		SpaceID:     spaceID,
-	}); err != nil {
-		return fmt.Errorf("add project space: %w", err)
-	}
-	return nil
 }
 
 // MoveIssueToSpace moves a single issue into a different Space: allocates the

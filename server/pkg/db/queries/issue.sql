@@ -372,12 +372,3 @@ SET space_id = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
-
--- name: ListIssuesByProjectAndSpace :many
--- Feeds the "move these issues before removing the space from the project"
--- reconciliation flow (UpdateProject space_reassignments).
-SELECT * FROM issue
-WHERE workspace_id = $1
-  AND project_id = $2
-  AND space_id = $3
-ORDER BY created_at ASC;

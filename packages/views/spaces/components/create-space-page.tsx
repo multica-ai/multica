@@ -7,7 +7,7 @@ import { PlainTextField } from "@multica/ui/components/common/plain-text-field";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import { normalizeSpaceKey, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
+import { sanitizeSpaceKeyInput, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
 import { useCreateSpace } from "@multica/core/spaces/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -55,11 +55,23 @@ export function CreateSpacePage() {
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const normalizedKey = normalizeSpaceKey(key);
   const nameError = nameTouched && name.trim().length === 0;
-  const keyReserved = RESERVED_SPACE_KEYS.has(normalizedKey);
-  const keyError = keyTouched && key.length > 0 && !isValidSpaceKey(normalizedKey);
-  const canSubmit = name.trim().length > 0 && isValidSpaceKey(normalizedKey) && !submitting;
+  const keyReserved = RESERVED_SPACE_KEYS.has(key);
+  const keyStartsWithDigit = /^[0-9]/.test(key);
+  const keyError = keyTouched && key.length > 0 && !isValidSpaceKey(key);
+  const canSubmit = name.trim().length > 0 && isValidSpaceKey(key) && !submitting;
+
+  // The identifier follows the name until the user edits it directly. Only a
+  // valid derivation is applied; a name that can't yield a letter-first key
+  // (CJK, digit-leading) leaves the field empty so the placeholder prompts a
+  // manual entry rather than seeding an invalid key.
+  const handleNameChange = (value: string) => {
+    setName(value);
+    if (!keyTouched) {
+      const derived = sanitizeSpaceKeyInput(value);
+      setKey(isValidSpaceKey(derived) ? derived : "");
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -70,7 +82,7 @@ export function CreateSpacePage() {
     try {
       const space = await createSpace.mutateAsync({
         name: name.trim(),
-        key: normalizedKey,
+        key,
         description: description.trim() || undefined,
         icon: icon.trim() || null,
         member_ids: memberIds,
@@ -137,7 +149,7 @@ export function CreateSpacePage() {
                   autoFocus
                   aria-label={t(($) => $.form.name)}
                   value={name}
-                  onChange={(event) => setName(event.target.value)}
+                  onChange={(event) => handleNameChange(event.target.value)}
                   onBlur={() => setNameTouched(true)}
                   placeholder={t(($) => $.form.name_placeholder)}
                   className="h-auto rounded-none border-0 bg-transparent px-0 py-1 !text-2xl font-bold leading-snug tracking-tight shadow-none focus-visible:ring-0 dark:bg-transparent"
@@ -171,14 +183,21 @@ export function CreateSpacePage() {
             <Input
               id="space-key"
               value={key}
-              onChange={(event) => setKey(normalizeSpaceKey(event.target.value))}
+              onChange={(event) => {
+                setKey(sanitizeSpaceKeyInput(event.target.value));
+                setKeyTouched(true);
+              }}
               onBlur={() => setKeyTouched(true)}
               placeholder="ENG"
               maxLength={7}
               className={cn(underline, "max-w-40 font-mono", keyError && "border-destructive")}
             />
             <p className={cn("text-xs", keyError ? "text-destructive" : "text-muted-foreground")}>
-              {keyError && keyReserved ? t(($) => $.form.key_reserved) : t(($) => $.form.key_hint)}
+              {keyError && keyReserved
+                ? t(($) => $.form.key_reserved)
+                : keyError && keyStartsWithDigit
+                  ? t(($) => $.form.key_start_letter)
+                  : t(($) => $.form.key_hint)}
             </p>
           </div>
 

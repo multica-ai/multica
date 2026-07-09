@@ -43,10 +43,6 @@ export interface UpdateProjectRequest {
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
   space_ids?: string[];
-  // Resolves a space_ids removal that would otherwise strand issues: keys
-  // are the Space being removed, values are the (still-remaining) Space its
-  // issues move to. Only needed for Spaces the 409 conflict response lists.
-  space_reassignments?: Record<string, string>;
 }
 
 export interface ListProjectsResponse {

@@ -40,6 +40,7 @@
     "key": "标识符",
     "key_hint": "用于该空间的 issue 编号，例如 ENG-123。1-7 位大写字母或数字，字母开头。",
     "key_reserved": "NEW 是保留标识符，请换一个。",
+  "key_start_letter": "标识符必须以字母开头。",
     "key_locked": "已有 issue 创建后，标识符会被锁定。",
     "icon": "图标",
     "description": "描述",
@@ -77,12 +78,5 @@
     "last_space_cannot_archive": "工作区必须至少保留一个空间",
     "archive_admin_only": "只有管理员可以归档空间",
     "goto": "前往"
-  },
-  "conflict": {
-    "title": "{{space}} 不在该项目中",
-    "body": "空间 {{space}} 尚未加入项目 {{project}}。可以把空间加入项目，或把 issue 改到项目已有的空间。",
-    "add_space": "把 {{space}} 加入项目",
-    "project_spaces": "项目的空间",
-    "move_issue": "把 issue 改到 {{space}}"
   }
 }

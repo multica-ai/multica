@@ -9,8 +9,7 @@ import (
 )
 
 // TestSpaceResolveMessage locks the single unified wording each service
-// space-resolution error maps to, including the guided ambiguous message that
-// names the candidate Space keys. Unrecognized errors return "".
+// space-resolution error maps to. Unrecognized errors return "".
 func TestSpaceResolveMessage(t *testing.T) {
 	cases := []struct {
 		name string
@@ -19,11 +18,6 @@ func TestSpaceResolveMessage(t *testing.T) {
 	}{
 		{"not found", service.ErrSpaceNotFound, "space not found in this workspace"},
 		{"archived", service.ErrSpaceArchived, "space is archived"},
-		{
-			"ambiguous names keys",
-			&service.ProjectSpaceAmbiguousError{SpaceKeys: []string{"ENG", "GROWTH"}},
-			"project has multiple spaces (ENG, GROWTH); specify space_id",
-		},
 		{"unrelated", errors.New("boom"), ""},
 		{"nil", nil, ""},
 	}
