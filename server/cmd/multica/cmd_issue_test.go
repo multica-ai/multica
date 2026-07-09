@@ -88,12 +88,14 @@ func pipeStdin(t *testing.T, body string, fn func()) {
 }
 
 // newFlagTestCmd builds a throwaway cobra.Command carrying the inline +
-// stdin + file flag triplet that resolveTextFlag expects.
+// stdin + file flag triplet that resolveTextFlag expects, plus the
+// --allow-external-file escape hatch its workdir guardrail reads.
 func newFlagTestCmd(name string) *cobra.Command {
 	c := &cobra.Command{Use: "test"}
 	c.Flags().String(name, "", "")
 	c.Flags().Bool(name+"-stdin", false, "")
 	c.Flags().String(name+"-file", "", "")
+	c.Flags().Bool("allow-external-file", false, "")
 	return c
 }
 
@@ -154,14 +156,17 @@ func TestResolveTextFlag(t *testing.T) {
 	// Reading the body straight off disk skips the shell entirely.
 	// See issues #2198, #2236, #2376.
 	t.Run("file body is preserved verbatim with non-ASCII content", func(t *testing.T) {
+		// The workdir guardrail (MUL-4252) requires the file to live inside the
+		// current working directory, so chdir into a scratch dir and reference
+		// it by a relative name — the mainline agents actually use.
 		dir := t.TempDir()
-		path := dir + string(os.PathSeparator) + "desc.md"
+		t.Chdir(dir)
 		body := "标题 / Заголовок\n\n中文段落 with `code` and \"quotes\".\n"
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile("desc.md", []byte(body), 0o644); err != nil {
 			t.Fatalf("write tempfile: %v", err)
 		}
 		c := newFlagTestCmd("description")
-		_ = c.Flags().Set("description-file", path)
+		_ = c.Flags().Set("description-file", "desc.md")
 		got, ok, err := resolveTextFlag(c, "description")
 		if err != nil || !ok {
 			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
@@ -173,8 +178,11 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 
 	t.Run("file path that doesn't exist surfaces a useful error", func(t *testing.T) {
+		// A missing file inside the workdir clears the containment check and
+		// fails at the read, not at the guardrail.
+		t.Chdir(t.TempDir())
 		c := newFlagTestCmd("content")
-		_ = c.Flags().Set("content-file", "/this/path/does/not/exist.txt")
+		_ = c.Flags().Set("content-file", "does-not-exist.txt")
 		_, _, err := resolveTextFlag(c, "content")
 		if err == nil {
 			t.Fatalf("expected error for missing file")
@@ -185,16 +193,80 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 
 	t.Run("empty file is rejected", func(t *testing.T) {
-		dir := t.TempDir()
-		path := dir + string(os.PathSeparator) + "empty.md"
-		if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("empty.md", []byte(""), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "empty.md")
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected error for empty file")
+		}
+	})
+
+	// MUL-4252: a --<name>-file path that resolves outside the working
+	// directory is rejected, so a stale file left in a machine-shared path
+	// (e.g. /tmp) by another run/environment cannot silently become this
+	// issue's content.
+	t.Run("file outside the working directory is rejected", func(t *testing.T) {
+		workdir := t.TempDir()
+		t.Chdir(workdir)
+		// A sibling directory outside the workdir stands in for /tmp.
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "stale.md"
+		if err := os.WriteFile(path, []byte("another run's content"), 0o644); err != nil {
 			t.Fatalf("write tempfile: %v", err)
 		}
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description-file", path)
 		_, _, err := resolveTextFlag(c, "description")
 		if err == nil {
-			t.Fatalf("expected error for empty file")
+			t.Fatalf("expected rejection for a file outside the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
+		}
+	})
+
+	t.Run("--allow-external-file permits a path outside the working directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "external.md"
+		if err := os.WriteFile(path, []byte("intentional external body"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		_ = c.Flags().Set("allow-external-file", "true")
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != "intentional external body" {
+			t.Errorf("got %q, want the external body verbatim", got)
+		}
+	})
+
+	t.Run("a symlink inside the workdir pointing outside is rejected", func(t *testing.T) {
+		workdir := t.TempDir()
+		t.Chdir(workdir)
+		outside := t.TempDir()
+		target := outside + string(os.PathSeparator) + "stale.md"
+		if err := os.WriteFile(target, []byte("escaped content"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		if err := os.Symlink(target, "link.md"); err != nil {
+			t.Skipf("symlink unsupported on this platform: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "link.md")
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected rejection: symlink escapes the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
 		}
 	})
 
@@ -233,6 +305,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -2610,6 +2683,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
