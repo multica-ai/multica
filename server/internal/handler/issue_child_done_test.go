@@ -554,3 +554,84 @@ func TestChildDoneWakesLeaderWhenChildIsSameSquad(t *testing.T) {
 		t.Errorf("expected 1 pending leader task for same-squad child (MUL-3969), got %d", got)
 	}
 }
+
+// TestChildReviewMentionsParentAssignee_Agent verifies the review handoff path:
+// when a child moves into in_review, the parent agent is woken immediately to
+// verify the child output before the child is marked done and before downstream
+// stages advance.
+func TestChildReviewMentionsParentAssignee_Agent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "ready for parent review") {
+		t.Errorf("expected review handoff wording, got: %s", content)
+	}
+	if !strings.Contains(content, "mention://issue/"+fx.child.ID) {
+		t.Errorf("expected issue mention in review handoff, got: %s", content)
+	}
+	if !strings.Contains(content, "mention://agent/"+agentID) {
+		t.Errorf("expected parent-agent mention in review handoff, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Errorf("expected 1 pending task for parent agent review handoff, got %d", got)
+	}
+}
+
+// TestChildReviewNotificationIsIdempotent ensures re-saving an already
+// in_review child does not create another parent handoff comment.
+func TestChildReviewNotificationIsIdempotent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("after first in_review: expected 1 comment, got %d", got)
+	}
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("after second in_review: expected still 1 comment (idempotent), got %d", got)
+	}
+}
+
+// TestChildReviewSkippedWhenParentMember mirrors child-done: human parent
+// assignees should not get platform-generated review handoff noise.
+func TestChildReviewSkippedWhenParentMember(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var userID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT user_id FROM member WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&userID); err != nil {
+		t.Fatalf("locate workspace member: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "member", userID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM inbox_item WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Errorf("parent with member assignee should not receive review handoff, got %d comments", got)
+	}
+	if got := countInboxItems(t, userID, fx.parent.ID); got != 0 {
+		t.Errorf("parent with member assignee should not receive an inbox row, got %d", got)
+	}
+}

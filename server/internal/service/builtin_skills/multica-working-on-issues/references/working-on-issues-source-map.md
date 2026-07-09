@@ -119,12 +119,14 @@ and is hidden from the PR list.
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
-| Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
+| Child → `in_review` notifies + wakes the parent for review | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildReview`) | new citation |
+| Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildDone`; barrier gate in `stageBarrierClosed`) | func def `:51` |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
-set but no trigger. Promoting `backlog → todo` later fires it then (update path,
-line 2537).
+set but no trigger. Promoting `backlog → todo` later fires it then. A child
+transition into `in_review` is a parent review handoff and wakes the parent
+assignee before the child is marked `done`.
 
 ## Sub-issue stages (barrier wake)
 
@@ -163,5 +165,5 @@ grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse stru
 grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' internal/handler/github.go
 grep -n 'qualifyingIdents\|reference_only\|ReferenceOnly' internal/handler/github.go pkg/db/queries/github.sql
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
-grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
+grep -n 'func notifyParentOfChildReview\|func notifyParentOfChildDone' internal/handler/issue_child_done.go
 ```
