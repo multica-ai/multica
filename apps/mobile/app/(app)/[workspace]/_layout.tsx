@@ -359,6 +359,13 @@ export default function WorkspaceLayout() {
           }}
         />
         <Stack.Screen
+          name="more/runtimes/[id]"
+          options={{
+            title: tRuntimes("detail.header_default_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
           name="more/settings"
           options={{
             title: tSettings("header_title"),
