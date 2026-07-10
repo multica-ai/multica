@@ -31,12 +31,6 @@ const PRESETS: Preset[] = [
     apiUrl: "https://multica-api.firtal.com",
     appUrl: "https://multica.firtal.com",
   },
-  {
-    id: "staging",
-    label: "Staging",
-    apiUrl: "https://sara.firtal.com",
-    appUrl: "https://sara.firtal.com",
-  },
 ];
 
 type SaveState =
