@@ -360,9 +360,18 @@ func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
 			if lvl.Effort == "" {
 				continue
 			}
+			// Only surface efforts we have a label for. codexEffortLabel is
+			// the single source of truth for "a Codex effort Multica knows",
+			// and TestCodexAdvertisedLevelsArePersistable guarantees every key
+			// here is also in providerThinkingEnums["codex"] — so a labelled
+			// effort is always persistable. Dropping unlabelled tokens (a
+			// future Codex release advertising a new level we haven't taught
+			// the server yet) keeps the picker from ever offering a level the
+			// Create/Update enum gate would 400 on save. Fail closed until the
+			// maps learn it, rather than showing an unsaveable option. (MUL-4347)
 			label, ok := codexEffortLabel[lvl.Effort]
 			if !ok {
-				label = strings.Title(lvl.Effort) //nolint:staticcheck
+				continue
 			}
 			levels = append(levels, ThinkingLevel{
 				Value:       lvl.Effort,
@@ -522,13 +531,26 @@ func parseCodebuddyEffortHelp(helpText string) []string {
 // catalog for the given (provider, model) pair. Empty value is always
 // valid — it means "use the runtime default".
 //
-// Empty model is treated as "use the provider's default model"; we
-// resolve it through ListModels so the daemon's pre-execution guard
-// behaves the same whether the agent picked an explicit model or
-// inherited the runtime default. Without this, a default-model task
-// with a valid thinking_level would be rejected on the grounds that
-// the empty string is not in the catalog — exactly the misjudgement
-// Elon flagged in the PR1 review.
+// Empty model means "follow the runtime's own default", resolved at task
+// time. How safely we can validate an effort against that depends on the
+// provider:
+//
+//   - codex: the effective model comes from the user's local config.toml
+//     and can be ANY installed model, not necessarily the catalog's flagged
+//     Default. Borrowing the Default entry (gpt-5.6-sol, the only one
+//     advertising `ultra`) would green-light levels the actually-configured
+//     model may not support — Luna tops out at `max`, gpt-5.5/5.4 at `xhigh`
+//     — and Codex does not reject the mismatch itself. We can't know the
+//     effective model without parsing config.toml in the task cwd (see this
+//     file's Codex header for why that's avoided), so an empty codex model
+//     fails closed: the daemon drops the level rather than injecting one that
+//     may not fit. Users who need a specific effort must pick an explicit
+//     model. (MUL-4347 review.)
+//   - other providers: empty model resolves to the catalog's Default entry
+//     so a default-model task with a valid thinking_level isn't misjudged as
+//     "unknown model → reject" (the misjudgement flagged in an earlier
+//     review). opencode has no single default, so it accepts a level any
+//     advertised model supports.
 //
 // The lookup goes through ListModels so it sees the *current* CLI
 // catalog (including dynamic discovery for codex), not just a static
@@ -538,6 +560,13 @@ func parseCodebuddyEffortHelp(helpText string) []string {
 func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
+	}
+	// Codex empty-model fail-closed (see doc comment). Checked before
+	// ListModels so the outcome is deterministic even when discovery would
+	// error — an errored lookup makes the daemon pass the level through, which
+	// is exactly what we must NOT do for an unresolved codex model.
+	if model == "" && providerType == "codex" {
+		return false, nil
 	}
 	models, err := ListModels(ctx, providerType, executablePath)
 	if err != nil {

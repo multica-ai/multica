@@ -301,11 +301,13 @@ func claudeStaticModels() []Model {
 func codexStaticModels() []Model {
 	// `Default` here is NOT a user-facing "default model" badge — the picker
 	// stopped rendering that (Multica follows the CLI config when the model is
-	// unset). It is the anchor the effort picker previews against, and the
-	// model ValidateThinkingLevel resolves an empty model to when checking an
-	// effort level; dropping it would make a follow-CLI-config agent's effort
-	// selection fail catalog validation and get silently skipped. Keep exactly
-	// one entry flagged, on the current flagship.
+	// unset). It only marks the current flagship for the "default must track
+	// the latest release" catalog guard (TestCodexStaticModelsExposesLatest,
+	// multica#2009). It is deliberately NOT used to validate effort for an
+	// empty (follow-CLI-config) model: that config can resolve to any model,
+	// so ValidateThinkingLevel fails an empty codex model closed rather than
+	// borrowing this entry's catalog (which alone advertises `ultra`) — see
+	// ValidateThinkingLevel and MUL-4347. Keep exactly one entry flagged.
 	return []Model{
 		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true},
 		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai"},

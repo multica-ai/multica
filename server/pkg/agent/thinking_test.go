@@ -271,6 +271,84 @@ func TestParseCodexDebugModels_Malformed(t *testing.T) {
 	}
 }
 
+// TestParseCodexDebugModels_DropsNonPersistableEfforts drives the REAL parser
+// against a catalog that mixes known gpt-5.6 levels with a bogus future token,
+// then asserts every level the parser surfaces is persistable by the server
+// enum. This is the contract TestCodexAdvertisedLevelsArePersistable checks
+// statically (two hand-written maps); doing it through parseCodexDebugModels
+// closes the gap Elon flagged: a future Codex release advertising an effort we
+// haven't taught the server would otherwise reach the picker and 400 on save.
+func TestParseCodexDebugModels_DropsNonPersistableEfforts(t *testing.T) {
+	t.Parallel()
+	// sol advertises max+ultra (plus a made-up `hyper`); luna tops out at max.
+	raw := []byte(`{
+		"models": [
+			{
+				"slug": "gpt-5.6-sol",
+				"default_reasoning_level": "high",
+				"supported_reasoning_levels": [
+					{"effort": "medium"},
+					{"effort": "high"},
+					{"effort": "max"},
+					{"effort": "ultra"},
+					{"effort": "hyper"}
+				]
+			},
+			{
+				"slug": "gpt-5.6-luna",
+				"default_reasoning_level": "medium",
+				"supported_reasoning_levels": [
+					{"effort": "medium"},
+					{"effort": "max"}
+				]
+			}
+		]
+	}`)
+	got := parseCodexDebugModels(raw)
+
+	// Contract: nothing the parser surfaces may be unsaveable.
+	for slug, mt := range got {
+		for _, lvl := range mt.SupportedLevels {
+			if !IsKnownThinkingValue("codex", lvl.Value) {
+				t.Errorf("parser surfaced non-persistable effort %q for %q; the picker would 400 it on save", lvl.Value, slug)
+			}
+		}
+	}
+
+	sol := got["gpt-5.6-sol"]
+	if sol == nil {
+		t.Fatalf("missing gpt-5.6-sol entry: %+v", got)
+	}
+	// The bogus token is dropped, not Title-cased through to the picker.
+	if hasThinkingLevel(sol, "hyper") {
+		t.Errorf("unknown effort 'hyper' leaked into sol picker: %+v", sol.SupportedLevels)
+	}
+	// Known per-model levels survive, with the real per-model gap preserved:
+	// sol keeps ultra, luna must not advertise it.
+	if !hasThinkingLevel(sol, "ultra") {
+		t.Errorf("sol should keep ultra: %+v", sol.SupportedLevels)
+	}
+	luna := got["gpt-5.6-luna"]
+	if luna == nil {
+		t.Fatalf("missing gpt-5.6-luna entry: %+v", got)
+	}
+	if hasThinkingLevel(luna, "ultra") {
+		t.Errorf("luna must not advertise ultra (Codex 0.144.1 tops it out at max): %+v", luna.SupportedLevels)
+	}
+	if !hasThinkingLevel(luna, "max") {
+		t.Errorf("luna should keep max: %+v", luna.SupportedLevels)
+	}
+}
+
+func hasThinkingLevel(mt *ModelThinking, value string) bool {
+	for _, lvl := range mt.SupportedLevels {
+		if lvl.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
 // ── IsKnownThinkingValue (server-side enum gate) ─────────────────────
 
 func TestIsKnownThinkingValue(t *testing.T) {
@@ -426,6 +504,53 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 }
 
+// TestValidateThinkingLevel_CodexEmptyModelFailsClosed pins the MUL-4347
+// fix: an explicit codex model is validated against its own per-model
+// catalog, but an EMPTY model (follow config.toml, which can resolve to any
+// installed model) must NOT borrow the flagged Default entry's catalog. The
+// Default (gpt-5.6-sol) alone advertises `ultra`; letting an empty model
+// inherit it would green-light a level Luna / gpt-5.5 don't support and Codex
+// won't reject. So an empty codex model fails closed for every level and the
+// daemon drops it — users must pick an explicit model to pin an effort.
+func TestValidateThinkingLevel_CodexEmptyModelFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	fakeCodex := writeFakeCodexModelsBinary(t)
+	ctx := context.Background()
+
+	check := func(model, value string, want bool) {
+		t.Helper()
+		ok, err := ValidateThinkingLevel(ctx, "codex", fakeCodex, model, value)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevel(codex, %q, %q): unexpected err: %v", model, value, err)
+		}
+		if ok != want {
+			t.Errorf("ValidateThinkingLevel(codex, %q, %q) = %v, want %v", model, value, ok, want)
+		}
+	}
+
+	// Explicit models resolve against their own per-model catalog.
+	check("gpt-5.6-sol", "ultra", true)   // sol advertises ultra
+	check("gpt-5.6-terra", "ultra", true) // ...and so does terra
+	check("gpt-5.6-luna", "ultra", false) // luna tops out at max
+	check("gpt-5.6-luna", "max", true)    // ...which is valid
+	check("gpt-5.6-luna", "medium", true) // as are the base levels
+
+	// Empty model cannot be validated per-model, so it fails closed for EVERY
+	// level — including `ultra` (must not pass via the Sol Default) and even a
+	// level every model supports (`medium`). The daemon drops it.
+	check("", "ultra", false)
+	check("", "medium", false)
+
+	// Empty VALUE always means "use runtime default" and stays valid — this is
+	// the path a follow-CLI-config agent takes, and the honest orphan/clear
+	// flow relies on it (an already-persisted level round-trips to empty).
+	check("", "", true)
+	check("gpt-5.6-luna", "", true)
+}
+
 func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
@@ -552,6 +677,31 @@ func writeFakeClaudePreEffortHelpBinary(t *testing.T) string {
 		"  --model <model>     Model to use\n" +
 		"  --verbose\n" +
 		"EOF\n"
+	writeTestExecutable(t, path, []byte(script))
+	return path
+}
+
+// writeFakeCodexModelsBinary writes a stand-in `codex` that answers
+// `debug models --bundled` with a Codex 0.144.1-shaped gpt-5.6 catalog
+// (sol/terra advertise max+ultra, luna tops out at max) and prints a version
+// string for any other invocation (DetectVersion's probe). Used to exercise
+// ValidateThinkingLevel against a real per-model catalog without a codex install.
+func writeFakeCodexModelsBinary(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"debug\" ]; then\n" +
+		"cat <<'EOF'\n" +
+		`{"models":[` +
+		`{"slug":"gpt-5.6-sol","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
+		`{"slug":"gpt-5.6-terra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
+		`{"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}` +
+		`]}` + "\n" +
+		"EOF\n" +
+		"exit 0\n" +
+		"fi\n" +
+		"echo 'codex-cli 0.144.1'\n"
 	writeTestExecutable(t, path, []byte(script))
 	return path
 }

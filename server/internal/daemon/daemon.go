@@ -3866,11 +3866,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// model, Codex's per-model `supported_reasoning_levels`) only resolve
 	// here, against the daemon's local CLI catalog. Invalid combinations
 	// log a warning and drop the level rather than failing the task, so a
-	// stale persisted value never blocks execution. Empty model is passed
-	// through unchanged — ValidateThinkingLevel resolves it to the
-	// provider's default model internally so default-model tasks aren't
-	// misjudged. Discovery errors fail open: if we can't list models, we
-	// keep the persisted level and let the CLI surface any objection.
+	// stale persisted value never blocks execution. An empty model is
+	// resolved by ValidateThinkingLevel to the provider's default model so
+	// default-model tasks aren't misjudged — except for codex, whose empty
+	// model follows config.toml (any model) and so fails closed, dropping the
+	// level here. Discovery errors fail open for resolved models: if we can't
+	// list models, we keep the persisted level and let the CLI object.
 	if thinkingLevel != "" {
 		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
 		if err != nil {

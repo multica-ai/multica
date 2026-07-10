@@ -294,6 +294,12 @@ describe("estimateCost", () => {
     // silently inherit `gpt-5` pricing.
     expect(isModelPriced("gpt-5.99-codex")).toBe(false);
     expect(isModelPriced("gpt-5-foo")).toBe(false);
+    // Dash-normalized 5.6 ids must also miss: the real Codex slug is dotted
+    // (`gpt-5.6-luna`) and this resolver does NOT dash-normalize non-claude
+    // ids, so a dashed variant surfaces as unmapped — matching the backend's
+    // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
+    expect(isModelPriced("gpt-5-6-luna")).toBe(false);
+    expect(isModelPriced("gpt-5-6-sol")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,
