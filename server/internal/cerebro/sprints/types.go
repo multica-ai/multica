@@ -90,6 +90,44 @@ func selectableSprintToResponse(s cerebrodb.ListSelectableCerebroSprintsForIssue
 	return out
 }
 
+// WorkspaceSprintResponse is one row of the workspace-wide sprint list
+// (FIR-2500): a sprint annotated with its owning project's title so a CLI
+// caller can tell same-named sprints apart without a second lookup.
+type WorkspaceSprintResponse struct {
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ProjectID    string `json:"project_id"`
+	ProjectTitle string `json:"project_title"`
+	Name         string `json:"name"`
+	SequenceNo   int32  `json:"sequence_no"`
+	Status       string `json:"status"`
+	StartDate    string `json:"start_date"`
+	EndDate      string `json:"end_date"`
+	Goal         string `json:"goal,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func workspaceSprintToResponse(s cerebrodb.ListCerebroSprintsByWorkspaceRow) WorkspaceSprintResponse {
+	out := WorkspaceSprintResponse{
+		ID:           util.UUIDToString(s.ID),
+		WorkspaceID:  util.UUIDToString(s.WorkspaceID),
+		ProjectID:    util.UUIDToString(s.ProjectID),
+		ProjectTitle: s.ProjectTitle,
+		Name:         s.Name,
+		SequenceNo:   s.SequenceNo,
+		Status:       s.Status,
+		StartDate:    dateString(s.StartDate),
+		EndDate:      dateString(s.EndDate),
+		CreatedAt:    tsString(s.CreatedAt),
+		UpdatedAt:    tsString(s.UpdatedAt),
+	}
+	if s.Goal.Valid {
+		out.Goal = s.Goal.String
+	}
+	return out
+}
+
 // SprintResponse is the JSON shape returned by the sprint endpoints.
 type SprintResponse struct {
 	ID          string `json:"id"`
