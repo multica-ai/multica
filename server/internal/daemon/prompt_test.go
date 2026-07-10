@@ -817,6 +817,19 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	if strings.Contains(out, "always use the trigger comment ID below") {
 		t.Errorf("cross-thread prompt must not emit the single-parent reply cookbook, got:\n%s", out)
 	}
+
+	// Chronological ordering (MUL-4348 test-round-2 problem #1): replies must be
+	// posted oldest thread first, the newest (triggering) thread last — so the
+	// coalesced comments c1 (oldest) and c2 come before the trigger c3.
+	if !strings.Contains(out, "OLDEST thread first") {
+		t.Errorf("cross-thread prompt must instruct oldest-first chronological order, got:\n%s", out)
+	}
+	posC1 := strings.Index(out, "--parent c1")
+	posC2 := strings.Index(out, "--parent c2")
+	posC3 := strings.Index(out, "--parent c3")
+	if !(posC1 >= 0 && posC1 < posC2 && posC2 < posC3) {
+		t.Errorf("reply targets must be listed oldest-first (c1 < c2 < c3); got positions c1=%d c2=%d c3=%d\n%s", posC1, posC2, posC3, out)
+	}
 }
 
 // TestBuildCommentPromptSameThreadKeepsSingleReply pins the hard requirement:
