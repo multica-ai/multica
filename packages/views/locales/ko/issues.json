@@ -365,6 +365,7 @@
     "trigger_comment": "댓글 트리거",
     "trigger_initial": "초기 실행",
     "trigger_handoff_prefix": "인계: ",
+    "included_comments_other": "댓글 {{count}}개 포함",
     "status_queued": "대기 중",
     "status_dispatched": "시작 중",
     "status_waiting_local_directory": "로컬 디렉터리 대기 중",

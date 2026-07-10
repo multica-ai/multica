@@ -1356,6 +1356,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
+	supportsCoalescedComments := requestHasDaemonCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	authMs = time.Since(start).Milliseconds()
 
 	claimStart := time.Now()
@@ -1373,12 +1374,64 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome = "no_task"
 		return
 	}
+	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
+		// A legacy edit/delete race can leave a plan whose trigger FK was
+		// cleared while its user-scoped MCP overlay still belongs to the deleted
+		// author. Never dispatch it as a generic assignment: that prompt reads
+		// issue history and would still expose the stale user's capabilities.
+		// Cancel the stale row and replay every survivor through normal routing,
+		// which recomputes originator and connected-app context.
+		if !task.IssueID.Valid {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "comment task has no issue")
+			return
+		}
+		issue, loadErr := h.Queries.GetIssue(r.Context(), task.IssueID)
+		if loadErr != nil {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
+			return
+		}
+		if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
+			outcome = "error_workspace"
+			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+				slog.Error("task claim: cancel stale cross-workspace task failed",
+					"task_id", uuidToString(task.ID), "error", cancelErr)
+			}
+			writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
+			return
+		}
+		cancelled, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID)
+		if cancelErr != nil {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
+			return
+		}
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
+		outcome = "repaired_stale_comment_plan"
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
 
 	outcome = "claimed"
 	buildStart = time.Now()
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
+	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
+	// comment input. Comment tasks replace this with the ids actually embedded
+	// in the capability-aware response built below.
+	deliveredCommentIDs := []pgtype.UUID{}
+	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+	requeueFailedClaim := func(reason string) {
+		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
+			slog.Error("task claim: failed to requeue after finalization error",
+				"task_id", uuidToString(task.ID),
+				"reason", reason,
+				"error", err,
+			)
+		}
+	}
 	composioMCPEnabled := h.composioMCPAppsEnabled(r.Context())
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
@@ -1600,13 +1653,57 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// MUL-4195: surface comments that were folded into this run while it
-		// was still queued so the daemon can steer the agent to read them all.
-		resp.CoalescedCommentIDs = uuidsToStrings(task.CoalescedCommentIds)
-		// Embed the folded comments' full detail (thread/author/created_at/
-		// content) so the prompt can address each one without assuming they
-		// share the triggering thread (MUL-4195 review should-fix #3).
-		resp.CoalescedComments = h.buildCoalescedCommentData(r.Context(), task.CoalescedCommentIds)
+		// Load every planned input as one chronological, de-duplicated set.
+		// The trigger is included here so the delivery receipt can only contain
+		// comments whose body we successfully embedded. Missing/deleted rows are
+		// intentionally absent and remain eligible for reconciliation. A stable
+		// payload budget always keeps the primary trigger, then admits an oldest-
+		// first prefix of additional comments; overflow is reconciled later.
+		plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+		if task.TriggerCommentID.Valid {
+			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
+		}
+		loadedComments := h.buildCoalescedCommentData(r.Context(), plannedCommentIDs)
+		triggerCommentID := uuidToString(task.TriggerCommentID)
+		var deliveredComments []CoalescedCommentData
+		triggerLoaded := false
+		for _, comment := range loadedComments {
+			if comment.ID == triggerCommentID {
+				triggerLoaded = true
+				break
+			}
+		}
+		if task.TriggerCommentID.Valid && triggerLoaded {
+			deliveredComments = selectCommentDelivery(
+				loadedComments,
+				triggerCommentID,
+				!supportsCoalescedComments,
+				maxClaimCommentPayloadBytes,
+			)
+		}
+		// If the persisted trigger body cannot be loaded, fail closed on comment
+		// coverage for this claim. The trigger snapshot CAS below also rejects a
+		// concurrent edit/delete that changes the FK after this read.
+		deliveredCommentIDs = commentDataIDs(deliveredComments)
+		// taskToResponse exposes the enqueue plan to UI task-list callers. A
+		// daemon claim must instead advertise only the structured ids actually
+		// present in this payload, especially when the delivery budget truncates.
+		resp.CoalescedCommentIDs = nil
+		for _, comment := range deliveredComments {
+			if comment.ID == triggerCommentID {
+				// Populate the actual payload from the same successful read that
+				// earned the receipt. The richer GetComment lookup below resolves
+				// initiator ids and count hints, but a transient second-read failure
+				// must never acknowledge a body that was not embedded.
+				resp.TriggerCommentContent = comment.Content
+				resp.TriggerThreadID = comment.ThreadID
+				resp.TriggerAuthorType = comment.AuthorType
+				resp.TriggerAuthorName = comment.AuthorName
+				continue
+			}
+			resp.CoalescedCommentIDs = append(resp.CoalescedCommentIDs, comment.ID)
+			resp.CoalescedComments = append(resp.CoalescedComments, comment)
+		}
 
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
@@ -1614,8 +1711,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// comment author's kind and display name so the agent knows whether it
 		// was triggered by a human or by another agent — a signal used by the
 		// harness instructions to avoid mention loops between agents.
-		if task.TriggerCommentID.Valid {
-			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
+		effectiveTriggerUUID := task.TriggerCommentID
+		if effectiveTriggerUUID.Valid {
+			if comment, err := h.Queries.GetComment(r.Context(), effectiveTriggerUUID); err == nil {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -1665,7 +1763,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					IssueID: comment.IssueID,
 				}); err == nil && startedAt.Valid {
 					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
-						AnchorID:    task.TriggerCommentID,
+						AnchorID:    effectiveTriggerUUID,
 						IssueID:     comment.IssueID,
 						WorkspaceID: comment.WorkspaceID,
 						Since:       startedAt,
@@ -1676,6 +1774,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+
+		if !supportsCoalescedComments {
+			// Legacy daemons ignore the structured coalesced fields. Fold every
+			// successfully loaded comment into the one trigger field they already
+			// understand, then hide the structured fields to avoid duplicate prompt
+			// sections in intermediate daemons that understand them but do not yet
+			// advertise the capability.
+			if len(resp.CoalescedComments) > 0 || (resp.TriggerCommentContent == "" && len(deliveredComments) > 0) {
+				resp.TriggerCommentContent = formatLegacyCommentBundle(deliveredComments)
+			}
+			resp.CoalescedCommentIDs = nil
+			resp.CoalescedComments = nil
+		} else if resp.TriggerCommentContent == "" && len(deliveredComments) > 0 {
+			// A deleted newest trigger must not suppress the structured earlier
+			// comments: buildCommentPrompt renders them inside its trigger-content
+			// branch. The missing id itself is not acknowledged in the receipt.
+			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
@@ -2056,24 +2172,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome = "error_token"
 		slog.Error("task claim: failed to generate agent task token",
 			"task_id", uuidToString(task.ID), "error", terr)
+		requeueFailedClaim("token_generation")
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
-	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}); terr != nil {
-		outcome = "error_token"
-		slog.Error("task claim: failed to persist agent task token",
-			"task_id", uuidToString(task.ID), "error", terr)
-		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+	}, deliveredCommentIDs, commentBackedTask)
+	if ferr != nil {
+		outcome = "error_claim_finalize"
+		slog.Error("task claim: failed to finalize token and comment delivery receipt",
+			"task_id", uuidToString(task.ID), "error", ferr)
+		// FinalizeTaskClaim is transactional, so its newly generated token is
+		// rolled back with the receipt. Never delete by task here: a stale
+		// reclaim can race the original daemon starting, and broad revocation
+		// would invalidate that already-authorized execution.
+		requeueFailedClaim("token_and_delivery_receipt")
+		writeError(w, http.StatusInternalServerError, "failed to finalize task claim")
 		return
 	}
 	resp.AuthToken = tokenStr
+	task.DeliveredCommentIds = receipt
+	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
@@ -2432,10 +2557,11 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // comments a completing run did NOT deliver (MUL-4195).
 //
 // The merge path (mergeCommentIntoPendingTask) folds a comment into a task only
-// while it is still PRE-CLAIM (queued/deferred), so trigger_comment_id plus
-// coalesced_comment_ids is EXACTLY the set the run's claim response carried —
-// its "delivered set". Anything a member posted during this run's lifetime that
-// is NOT in that set was never delivered and must earn a follow-up.
+// while it is still PRE-CLAIM (queued/deferred). Those planned ids are not
+// proof of delivery: older daemons ignore structured coalesced fields, and a
+// referenced comment can be deleted before claim. Claim therefore records the
+// ids it actually embedded in delivered_comment_ids. Anything posted during
+// this run's lifetime that is NOT in that receipt must earn a follow-up.
 //
 // Anchor = created_at + delivered-set exclusion, NOT a dispatch/start timestamp
 // (MUL-4195 review round-3 must-fix). A timestamp anchor cannot tell a
@@ -2446,8 +2572,8 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // yet the comment's created_at is BEFORE dispatched_at, so a dispatched_at
 // anchor would skip it and it would vanish. Anchoring on the task's own
 // created_at reaches back over the whole run, and excluding the delivered set
-// (trigger + coalesced) is what prevents re-firing comments the run actually
-// received. Together they catch the pre-dispatch merge-race comment, the
+// is what prevents re-firing comments the run actually received. Together
+// they catch the pre-dispatch merge-race comment, the
 // dispatch→start comment, and the during-run comment, while never double-firing
 // a delivered one.
 //
@@ -2479,9 +2605,14 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
 	}
+	plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+	if task.TriggerCommentID.Valid {
+		plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
+	}
 	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
-		IssueID: task.IssueID,
-		Since:   task.CreatedAt,
+		IssueID:           task.IssueID,
+		Since:             task.CreatedAt,
+		PlannedCommentIds: plannedCommentIDs,
 	})
 	if err != nil {
 		slog.Warn("reconcile comments on completion: list comments failed",
@@ -2491,15 +2622,11 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 	if len(comments) == 0 {
 		return
 	}
-	// The delivered set: everything this run's claim response actually carried.
-	// Because merges only ever touch pre-claim rows, this is exactly
-	// trigger_comment_id ∪ coalesced_comment_ids. Any member comment since the
-	// task was created that is NOT in here was never delivered to the run.
-	delivered := make(map[string]struct{}, len(task.CoalescedCommentIds)+1)
-	if task.TriggerCommentID.Valid {
-		delivered[uuidToString(task.TriggerCommentID)] = struct{}{}
-	}
-	for _, id := range task.CoalescedCommentIds {
+	// The delivered set is the claim-time receipt, not the enqueue-time plan.
+	// Legacy tasks backfill only the primary trigger, deliberately replaying
+	// coalesced inputs that their daemon may have ignored.
+	delivered := make(map[string]struct{}, len(task.DeliveredCommentIds))
+	for _, id := range task.DeliveredCommentIds {
 		if id.Valid {
 			delivered[uuidToString(id)] = struct{}{}
 		}
@@ -2617,10 +2744,16 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, ids []pgtype.UU
 		return nil
 	}
 	out := make([]CoalescedCommentData, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		if !id.Valid {
 			continue
 		}
+		idString := uuidToString(id)
+		if _, ok := seen[idString]; ok {
+			continue
+		}
+		seen[idString] = struct{}{}
 		comment, err := h.Queries.GetComment(ctx, id)
 		if err != nil {
 			continue
@@ -2652,7 +2785,155 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, ids []pgtype.UU
 	if len(out) == 0 {
 		return nil
 	}
+	sort.Slice(out, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, out[i].CreatedAt)
+		right, rightErr := time.Parse(time.RFC3339Nano, out[j].CreatedAt)
+		if leftErr == nil && rightErr == nil && !left.Equal(right) {
+			return left.Before(right)
+		}
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
+}
+
+func commentDataIDs(comments []CoalescedCommentData) []pgtype.UUID {
+	if len(comments) == 0 {
+		return []pgtype.UUID{}
+	}
+	ids := make([]pgtype.UUID, 0, len(comments))
+	for _, comment := range comments {
+		ids = append(ids, parseUUID(comment.ID))
+	}
+	return ids
+}
+
+const maxClaimCommentPayloadBytes = 512 << 10 // 512 KiB of comment input per claim
+
+// selectCommentDelivery applies a deterministic budget to comment input. The
+// primary trigger is mandatory when it still exists, even when that single
+// comment exceeds the budget; one comment must never become unclaimable. Extra
+// comments are admitted as an oldest-first prefix, so overflow remains a stable
+// suffix for completion reconciliation and cannot starve across retries.
+func selectCommentDelivery(comments []CoalescedCommentData, triggerID string, legacy bool, limit int) []CoalescedCommentData {
+	if len(comments) == 0 {
+		return nil
+	}
+	mandatoryID := triggerID
+	mandatoryFound := false
+	for _, comment := range comments {
+		if comment.ID == mandatoryID {
+			mandatoryFound = true
+			break
+		}
+	}
+	if !mandatoryFound {
+		// The planned trigger may have been deleted. Keep the newest available
+		// comment so the claim still makes progress and reconcile can pick up the
+		// remainder.
+		mandatoryID = comments[len(comments)-1].ID
+	}
+
+	selected := map[string]struct{}{mandatoryID: {}}
+	used := commentDeliveryBaseSize(legacy) + commentDeliveryEntrySize(commentByID(comments, mandatoryID), legacy)
+	for _, comment := range comments {
+		if comment.ID == mandatoryID {
+			continue
+		}
+		cost := commentDeliveryEntrySize(comment, legacy)
+		if limit > 0 && used+cost > limit {
+			break
+		}
+		selected[comment.ID] = struct{}{}
+		used += cost
+	}
+
+	out := make([]CoalescedCommentData, 0, len(selected))
+	for _, comment := range comments {
+		if _, ok := selected[comment.ID]; ok {
+			out = append(out, comment)
+		}
+	}
+	return out
+}
+
+func commentByID(comments []CoalescedCommentData, id string) CoalescedCommentData {
+	for _, comment := range comments {
+		if comment.ID == id {
+			return comment
+		}
+	}
+	return CoalescedCommentData{}
+}
+
+func commentDeliveryBaseSize(legacy bool) int {
+	if legacy {
+		return escapedJSONStringContentSize(legacyCommentBundleHeader)
+	}
+	return 2 // JSON array brackets
+}
+
+func commentDeliveryEntrySize(comment CoalescedCommentData, legacy bool) int {
+	if legacy {
+		return escapedJSONStringContentSize(formatLegacyCommentEntry(comment))
+	}
+	encoded, err := json.Marshal(comment)
+	if err != nil {
+		return maxClaimCommentPayloadBytes + 1
+	}
+	return len(encoded) + 1 // comma between JSON array entries
+}
+
+func escapedJSONStringContentSize(value string) int {
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) < 2 {
+		return maxClaimCommentPayloadBytes + 1
+	}
+	// json.Marshal adds the surrounding string quotes. The remaining bytes
+	// match the escaping cost paid when the legacy bundle is nested in the
+	// claim response.
+	return len(encoded) - 2
+}
+
+const legacyCommentBundleHeader = "This run covers multiple distinct issue comments. Address every comment below in chronological order; do not treat this bundle as one rewritten comment.\n"
+
+// formatLegacyCommentBundle carries every planned comment through the one
+// field understood by daemons that predate coalesced-comments-v1. Delimiters,
+// ids and thread ids keep distinct instructions attributable and fetchable.
+func formatLegacyCommentBundle(comments []CoalescedCommentData) string {
+	if len(comments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(legacyCommentBundleHeader)
+	for _, comment := range comments {
+		b.WriteString(formatLegacyCommentEntry(comment))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatLegacyCommentEntry(comment CoalescedCommentData) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n--- comment %s", comment.ID)
+	if comment.ThreadID != "" {
+		fmt.Fprintf(&b, " [thread %s]", comment.ThreadID)
+	}
+	if comment.AuthorType != "" || comment.AuthorName != "" {
+		fmt.Fprintf(&b, " [author %s", comment.AuthorType)
+		if comment.AuthorName != "" {
+			fmt.Fprintf(&b, ": %s", comment.AuthorName)
+		}
+		b.WriteString("]")
+	}
+	if comment.CreatedAt != "" {
+		fmt.Fprintf(&b, " [created %s]", comment.CreatedAt)
+	}
+	b.WriteString(" ---\n")
+	b.WriteString(comment.Content)
+	fmt.Fprintf(&b, "\n--- end comment %s ---\n", comment.ID)
+	return b.String()
 }
 
 // ReportTaskUsage stores per-task token usage. Called independently of

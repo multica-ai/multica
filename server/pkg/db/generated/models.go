@@ -126,6 +126,7 @@ type AgentTaskQueue struct {
 	// Non-secret per-task connected app metadata corresponding to runtime_mcp_overlay, used by the daemon brief to tell agents which app capabilities are mounted. Cleared with runtime_mcp_overlay after task completion.
 	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
+	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
 }
 
 type Attachment struct {

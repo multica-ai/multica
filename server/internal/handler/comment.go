@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2047,6 +2048,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	oldContent := existing.Content
+	var triggerIssue *db.Issue
+	var cancelled []db.AgentTaskQueue
+	if oldContent != req.Content {
+		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
+		if err != nil {
+			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to load issue")
+			return
+		}
+		triggerIssue = &issue
+		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
+		if err != nil {
+			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+			return
+		}
+	}
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      commentUUID,
@@ -2054,8 +2072,29 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+		if triggerIssue != nil {
+			// Cancellation committed but the edit did not. Restore the complete
+			// original batch, including the still-valid unchanged comment.
+			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update comment")
 		return
+	}
+	retriggerEditedComment := func() {
+		if oldContent == comment.Content {
+			return
+		}
+		issue := *triggerIssue
+		var parentComment *db.Comment
+		if existing.ParentID.Valid {
+			parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
+			if err == nil {
+				parentComment = &parent
+			}
+		}
+
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
+		h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
 	}
 
 	// Replace the comment attachment set when a modern client sends
@@ -2068,6 +2107,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			AttachmentIds: attachmentIDs,
 		}); err != nil {
 			slog.Error("failed to replace comment attachments", "error", err)
+			// UpdateComment already committed the new body. Even though attachment
+			// replacement failed, repair task routing for that persisted edit so a
+			// dispatched run cannot permanently keep the old comment version.
+			retriggerEditedComment()
 			writeError(w, http.StatusInternalServerError, "failed to update attachments")
 			return
 		}
@@ -2081,26 +2124,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 
-	if oldContent != comment.Content {
-		if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID); err != nil {
-			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
-		}
-
-		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
-		if err != nil {
-			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
-		} else {
-			var parentComment *db.Comment
-			if existing.ParentID.Valid {
-				parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
-				if err == nil {
-					parentComment = &parent
-				}
-			}
-
-			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
-		}
-	}
+	retriggerEditedComment()
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2145,16 +2169,23 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
 		return
 	}
+	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	if err != nil {
+		slog.Warn("load issue for delete post-processing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load issue")
+		return
+	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
 
-	// Cancel any active tasks triggered by this comment so the agent does not
-	// run with the now-deleted content already embedded in its prompt. Must
+	// Cancel any active task whose planned batch contains this comment so the
+	// agent does not run with the now-deleted content already embedded. Must
 	// run before DeleteComment because the FK ON DELETE SET NULL would
 	// otherwise nullify trigger_comment_id and orphan those tasks in queued.
-	if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID); err != nil {
-		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+	cancelled, cancelErr := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID)
+	if cancelErr != nil {
+		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
 	}
 
 	if err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
@@ -2162,6 +2193,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: comment.WorkspaceID,
 	}); err != nil {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+		// Cancellation already committed but deletion did not. The comment is
+		// still valid, so rebuild the complete cancelled batch (including this
+		// trigger) before returning the storage error.
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
 	}
@@ -2172,7 +2207,93 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
 	})
+	h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// retriggerCancelledTaskSurvivors repairs the surviving inputs from a
+// batch containing a comment that was edited or deleted. Cancellation releases
+// the one-pending-task constraint; every other comment is replayed through the
+// normal authorization/routing path, scoped to the agent whose task carried
+// it. Chronological replay makes those survivors coalesce back into one batch
+// and lets the latest real comment restamp originator + connected-app context.
+func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.Issue, cancelled []db.AgentTaskQueue, excludedCommentID pgtype.UUID) {
+	if len(cancelled) == 0 {
+		return
+	}
+	targetsByComment := make(map[string]map[string]pgtype.UUID)
+	for _, task := range cancelled {
+		if !task.AgentID.Valid {
+			continue
+		}
+		plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+		if task.TriggerCommentID.Valid {
+			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
+		}
+		for _, commentID := range plannedCommentIDs {
+			if !commentID.Valid || (excludedCommentID.Valid && commentID == excludedCommentID) {
+				continue
+			}
+			commentKey := uuidToString(commentID)
+			if targetsByComment[commentKey] == nil {
+				targetsByComment[commentKey] = make(map[string]pgtype.UUID)
+			}
+			targetsByComment[commentKey][uuidToString(task.AgentID)] = task.AgentID
+		}
+	}
+
+	comments := make([]db.Comment, 0, len(targetsByComment))
+	for commentID := range targetsByComment {
+		comment, err := h.Queries.GetComment(ctx, parseUUID(commentID))
+		if err != nil {
+			slog.Warn("retrigger cancelled comment batch: load survivor failed",
+				"issue_id", uuidToString(issue.ID), "comment_id", commentID, "error", err)
+			continue
+		}
+		if comment.IssueID != issue.ID {
+			continue
+		}
+		comments = append(comments, comment)
+	}
+	sort.Slice(comments, func(i, j int) bool {
+		if !comments[i].CreatedAt.Time.Equal(comments[j].CreatedAt.Time) {
+			return comments[i].CreatedAt.Time.Before(comments[j].CreatedAt.Time)
+		}
+		return uuidToString(comments[i].ID) < uuidToString(comments[j].ID)
+	})
+
+	for i := range comments {
+		comment := comments[i]
+		if isNoteComment(comment.Content) {
+			continue
+		}
+		var parentComment *db.Comment
+		if comment.ParentID.Valid {
+			if parent, err := h.Queries.GetComment(ctx, comment.ParentID); err == nil {
+				parentComment = &parent
+			}
+		}
+		actorType := comment.AuthorType
+		actorID := uuidToString(comment.AuthorID)
+		originatorUserID := actorID
+		if actorType != "member" {
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, comment.ID))
+		}
+		triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+			ExcludeTriggerCommentID: comment.ID,
+			OriginatorUserID:        originatorUserID,
+		})
+		targets := targetsByComment[uuidToString(comment.ID)]
+		scoped := make([]commentAgentTrigger, 0, len(targets))
+		for _, trigger := range triggers {
+			if _, ok := targets[uuidToString(trigger.Agent.ID)]; ok {
+				scoped = append(scoped, trigger)
+			}
+		}
+		if len(scoped) > 0 {
+			h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, scoped)
+		}
+	}
 }
 
 // loadCommentForActor resolves a {commentId} URL param to a comment in the
