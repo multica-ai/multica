@@ -260,7 +260,8 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.
 	CapabilityConnections AgentCapabilityConnectionsLister
 	// CEREBRO-PATCH(handler-api-connection-brief): FIR-2388 shared api-connection resolver for the claim brief.
-	APIConnectionBrief CerebroAPIConnectionBriefResolver
+	APIConnectionBrief          CerebroAPIConnectionBriefResolver
+	ConnectionInstructionsBrief CerebroConnectionInstructionsBriefResolver // CEREBRO-PATCH(handler-connection-instructions): FIR-2760 claim-time guidance seam.
 	// CEREBRO-PATCH(handler-agent-memory-settings): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle.
 	AgentMemory AgentMemorySettingsService
 	// CEREBRO-PATCH(handler-memory-autorecall): FIR-1794 layer 3 — automatic memory recall for daemon claims.

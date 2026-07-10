@@ -51,6 +51,7 @@ func (r *ConnectionToolResolver) APIConnectionToolsForBrief(ctx context.Context,
 	briefs := make([]handler.CerebroAPIConnectionBriefTool, 0, len(out.APITools))
 	for _, v := range out.APITools {
 		briefs = append(briefs, handler.CerebroAPIConnectionBriefTool{
+			Connection:  v.Tool.ConnectionName(),
 			Name:        v.Tool.Name(),
 			Description: v.Tool.Description(),
 			Verdict:     string(v.Verdict),

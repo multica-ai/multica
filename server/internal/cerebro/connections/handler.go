@@ -45,6 +45,7 @@ func NewHandler(pool *pgxpool.Pool) *Handler {
 type createRequest struct {
 	Name                string               `json:"name"`
 	DisplayName         string               `json:"display_name"`
+	Instructions        string               `json:"instructions"`
 	Type                string               `json:"type"`
 	URL                 string               `json:"url"`
 	Internal            bool                 `json:"internal"`
@@ -58,6 +59,7 @@ type createRequest struct {
 
 type updateRequest struct {
 	DisplayName         string               `json:"display_name"`
+	Instructions        string               `json:"instructions"`
 	URL                 string               `json:"url"`
 	Internal            bool                 `json:"internal"`
 	AuthConfig          AuthConfig           `json:"auth_config"`
@@ -132,6 +134,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:         wsID,
 		Name:                req.Name,
 		DisplayName:         req.DisplayName,
+		Instructions:        req.Instructions,
 		Type:                req.Type,
 		URL:                 req.URL,
 		Internal:            req.Internal,
@@ -189,6 +192,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		ID:                  connID,
 		WorkspaceID:         wsID,
 		DisplayName:         req.DisplayName,
+		Instructions:        req.Instructions,
 		URL:                 req.URL,
 		Internal:            req.Internal,
 		AuthConfig:          req.AuthConfig,
