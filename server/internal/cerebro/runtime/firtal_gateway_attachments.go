@@ -181,6 +181,12 @@ func gatewayAttachmentBlocks(ctx context.Context, store storage.Storage, att db.
 			return nil, err
 		}
 		return attachmentTextBlocks(att.Filename, text), nil
+	case isPptxAttachment(mediaType, att.Filename):
+		text, err := extractPptxText(body)
+		if err != nil {
+			return nil, err
+		}
+		return attachmentTextBlocks(att.Filename, text), nil
 	default:
 		// Inject any attachment whose bytes are readable UTF-8 text — text/*,
 		// but also application/json, application/xml, csv, yaml, source code,
@@ -252,6 +258,8 @@ func normalizedAttachmentMediaType(contentType, filename string) string {
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	case ".xlsx":
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	case ".txt", ".md", ".csv":
 		return "text/plain"
 	default:
@@ -265,6 +273,10 @@ func isDocxAttachment(mediaType, filename string) bool {
 
 func isXlsxAttachment(mediaType, filename string) bool {
 	return mediaType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || strings.EqualFold(filepath.Ext(filename), ".xlsx")
+}
+
+func isPptxAttachment(mediaType, filename string) bool {
+	return mediaType == "application/vnd.openxmlformats-officedocument.presentationml.presentation" || strings.EqualFold(filepath.Ext(filename), ".pptx")
 }
 
 func extractDocxText(body []byte) (string, error) {
@@ -370,6 +382,48 @@ func xlsxWorksheetText(data []byte, sharedStrings []string) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// extractPptxText pulls the visible text out of a .pptx deck. PowerPoint stores
+// each slide as ppt/slides/slideN.xml with text in DrawingML <a:t> elements.
+func extractPptxText(body []byte) (string, error) {
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return "", fmt.Errorf("open pptx: %w", err)
+	}
+	type slide struct {
+		num  int
+		text string
+	}
+	var slides []slide
+	for _, f := range zr.File {
+		base := filepath.Base(f.Name)
+		if !strings.HasPrefix(f.Name, "ppt/slides/") || !strings.HasPrefix(base, "slide") || !strings.HasSuffix(base, ".xml") {
+			continue
+		}
+		data, err := readZipFile(f)
+		if err != nil {
+			return "", err
+		}
+		text := strings.TrimSpace(xmlText(data, "t"))
+		if text == "" {
+			continue
+		}
+		num := 0
+		if _, err := fmt.Sscanf(base, "slide%d.xml", &num); err != nil {
+			num = 1 << 30
+		}
+		slides = append(slides, slide{num: num, text: text})
+	}
+	if len(slides) == 0 {
+		return "", fmt.Errorf("pptx slide text not found")
+	}
+	sort.Slice(slides, func(i, j int) bool { return slides[i].num < slides[j].num })
+	parts := make([]string, 0, len(slides))
+	for i, s := range slides {
+		parts = append(parts, fmt.Sprintf("Slide %d: %s", i+1, s.text))
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {

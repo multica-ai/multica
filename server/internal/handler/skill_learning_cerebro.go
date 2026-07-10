@@ -45,6 +45,14 @@ func (h *Handler) RecordSkillObservation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// CEREBRO-PATCH(skill-autolearn-gate): TECH-3692 — only record observations
+	// for skills whose self-learning switch is on. Absent metadata defaults to
+	// enabled so skills never synced keep learning until explicitly switched off.
+	if raw, err := h.CerebroQueries.GetSkillMetadata(r.Context(), skillUUID); err == nil && !cerebro.IsAutoLearnEnabled(raw) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped_auto_learn_disabled"})
+		return
+	}
+
 	obs := cerebro.ObservationInput{
 		SkillID:      skillUUID,
 		SkillVersion: req.SkillVersion,

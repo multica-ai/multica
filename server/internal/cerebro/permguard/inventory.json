@@ -1249,6 +1249,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/skills/{id}/auto-learn",
+      "gate": "skill_ownership"
+    },
+    {
       "id": "POST /api/skills/change-requests/{crId}/review",
       "gate": "skill_ownership"
     },
@@ -2077,6 +2081,10 @@
     {
       "id": "skill_record_observation",
       "gate": "via:POST /api/skill-observations"
+    },
+    {
+      "id": "skill_set_auto_learn",
+      "gate": "via:POST /api/skills/{id}/auto-learn"
     },
     {
       "id": "skill_review_change_request",
@@ -2911,6 +2919,10 @@
     {
       "id": "skill observations",
       "exempt": "read-only — wraps GET /api/skills/{id}/observations"
+    },
+    {
+      "id": "skill auto-learn",
+      "gate": "via:POST /api/skills/{id}/auto-learn"
     },
     {
       "id": "skill ownership",
