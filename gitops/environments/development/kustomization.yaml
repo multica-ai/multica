@@ -40,4 +40,4 @@ images:
     newTag: "f66e9202"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "cade75d5"
+    newTag: "f66e9202"
