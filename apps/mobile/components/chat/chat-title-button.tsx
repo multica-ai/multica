@@ -31,7 +31,7 @@ export function ChatTitleButton({
       <ActorAvatar
         type={currentAgent ? "agent" : null}
         id={currentAgent?.id ?? null}
-        size={24}
+        size={40}
         showPresence
       />
       <View>

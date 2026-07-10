@@ -106,7 +106,7 @@ export default function ChatListPage() {
             const archived = session.status === "archived";
             return (
               <View key={session.id}>
-                {index > 0 ? <View className="h-px bg-border ml-2.5" /> : null}
+                {index > 0 ? <View className="h-px bg-border mx-2.5" /> : null}
                 <Pressable
                   onPress={() => {
                     if (!wsSlug) return;
@@ -118,18 +118,20 @@ export default function ChatListPage() {
                   onLongPress={() => confirmDelete(session)}
                   className="flex-row items-center gap-3 px-2.5 py-4 active:bg-secondary"
                 >
-                  <View
-                    className={cn(
-                      "h-2 w-2 rounded-full",
-                      session.has_unread ? "bg-primary" : "bg-transparent",
-                    )}
-                  />
-                  <ActorAvatar
-                    type="agent"
-                    id={session.agent_id}
-                    size={40}
-                    showPresence
-                  />
+                  <View className="relative">
+                    <ActorAvatar
+                      type="agent"
+                      id={session.agent_id}
+                      size={40}
+                      showPresence
+                    />
+                    {session.has_unread ? (
+                      <View
+                        className="absolute -top-0.5 -left-0.5 h-2.5 w-2.5 rounded-full bg-primary"
+                        pointerEvents="none"
+                      />
+                    ) : null}
+                  </View>
                   <View className="flex-1">
                     <Text
                       className={cn(
