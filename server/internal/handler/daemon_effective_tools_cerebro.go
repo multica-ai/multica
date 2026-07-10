@@ -30,10 +30,18 @@ import (
 // tools"); Name is the exact tool name the agent calls; Description is the
 // model-facing one-liner; Verdict is "allow" or "ask".
 type AgentTaskToolEntry struct {
-	Family      string `json:"family"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Verdict     string `json:"verdict,omitempty"`
+	// CEREBRO-PATCH(connection-instructions-claim): FIR-2760 attaches guidance only after tool-policy filtering.
+	Family       string `json:"family"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	Connection   string `json:"connection,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+type CerebroConnectionInstructionsBriefResolver interface {
+	// CEREBRO-PATCH(connection-instructions-claim): The resolver receives only exposed connection names.
+	ConnectionInstructionsForBrief(context.Context, pgtype.UUID, []string) map[string]string
 }
 
 // CerebroAPIConnectionBriefResolver (FIR-2388) resolves the api-type connection
@@ -67,6 +75,7 @@ type CerebroAPIConnectionBriefIdentity struct {
 // Name is the exact tool name the agent calls verbatim; Verdict is "allow" or
 // "ask".
 type CerebroAPIConnectionBriefTool struct {
+	Connection  string
 	Name        string
 	Description string
 	Verdict     string
@@ -156,6 +165,7 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 			Name:        name,
 			Description: strings.TrimSpace(v.Descriptor.Description),
 			Verdict:     strings.TrimSpace(v.Policy.Effective),
+			Connection:  server,
 		})
 	}
 
@@ -199,7 +209,22 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 				Name:        name,
 				Description: strings.TrimSpace(t.Description),
 				Verdict:     verdict,
+				Connection:  strings.TrimSpace(t.Connection),
 			})
+		}
+	}
+	if h.ConnectionInstructionsBrief != nil {
+		// CEREBRO-PATCH(connection-instructions-claim): Never load guidance for a denied/hidden connection.
+		names, seen := []string{}, map[string]bool{}
+		for _, e := range out {
+			if e.Connection != "" && !seen[e.Connection] {
+				seen[e.Connection] = true
+				names = append(names, e.Connection)
+			}
+		}
+		instructions := h.ConnectionInstructionsBrief.ConnectionInstructionsForBrief(ctx, runtime.WorkspaceID, names)
+		for i := range out {
+			out[i].Instructions = strings.TrimSpace(instructions[out[i].Connection])
 		}
 	}
 

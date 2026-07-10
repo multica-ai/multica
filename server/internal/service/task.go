@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
 	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"
+	"github.com/multica-ai/multica/server/internal/cerebro/failrouter" // CEREBRO-PATCH(failure-router): FIR-2751 central failure routing policy.
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -111,6 +112,7 @@ type WorkflowSessionStamper interface {
 // import cycle (cerebro/runtime → service → would loop back here).
 type AutoPauseInvoker interface {
 	MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool
+	AlertRuntimeFailure(ctx context.Context, task db.AgentTaskQueue) // CEREBRO-PATCH(failure-router): alert runtime owners for actionable setup failures.
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — clear the consecutive
 	// auto-pause circuit-breaker counter when a task completes successfully.
 	ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID)
@@ -1891,6 +1893,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// fail-safe 5-min loop does not re-queue the same task indefinitely. See
 	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
 	autoPaused := s.AutoPause != nil && s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
+	route, _ := failrouter.Lookup(failureReason) // CEREBRO-PATCH(failure-router): use the exhaustive Cerebro policy table.
+	if route.Action == "" {
+		route.Action = failrouter.ActionSurface
+	}
+	if autoPaused {
+		route.Action = failrouter.ActionPause
+	} else if route.Action == failrouter.ActionPause {
+		route.Action = failrouter.ActionSurface
+	} else if route.Action == failrouter.ActionAlert && s.AutoPause != nil {
+		s.AutoPause.AlertRuntimeFailure(ctx, task)
+	}
+	s.Metrics.RecordTaskFailureDecision(failureReason, string(route.Action))
+	if message := failrouter.UserMessage(failureReason); message != "" {
+		errMsg = message
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
@@ -1967,14 +1984,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
-var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
-}
-
 func resumeUnsafeFailureReason(reason string) bool {
+	if route, ok := failrouter.Lookup(reason); ok && route.FreshSession { // CEREBRO-PATCH(failure-router): fresh retries cannot reuse poisoned sessions.
+		return true
+	}
 	switch reason {
 	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
 	// CreateRetryTask's fresh-session CASE WHEN.
@@ -2003,7 +2016,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
-	if !retryableReasons[reason] {
+	route, ok := failrouter.Lookup(reason) // CEREBRO-PATCH(failure-router): all retry eligibility comes from one table.
+	if !ok || route.Action != failrouter.ActionRetry {
+		return nil, nil
+	}
+	if route.RetryLimit > 0 && parent.Attempt > route.RetryLimit {
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {

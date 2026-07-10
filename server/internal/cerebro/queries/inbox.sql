@@ -157,6 +157,27 @@ INSERT INTO inbox_item (
 ) VALUES ($1, 'member', $2, 'runtime_auto_paused', $3, NULL, $4, $5, 'system', NULL, $6, 'inbox')
 RETURNING *;
 
+-- name: FindRuntimeFailureInboxCard :one
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'runtime_failure_alert'
+  AND archived = false
+  AND details->>'runtime_id' = $3::text
+  AND details->>'failure_reason' = $4::text
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreateRuntimeFailureInboxCard :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'runtime_failure_alert', 'action_required', $3, $4, $5, 'system', NULL, $6, 'inbox')
+RETURNING *;
+
 -- name: FindManualInboxItem :one
 -- Dedup guard for manually_added items. Returns the active (non-archived) item
 -- for (recipient, issue) so AddIssueToInbox can resurface it instead of

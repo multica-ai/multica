@@ -1148,10 +1148,11 @@ INSERT INTO agent_task_queue (
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    -- CEREBRO-PATCH(failure-router): FIR-2751 fresh retries discard poisoned context.
+    CASE WHEN p.failure_reason = ANY(ARRAY['codex_semantic_inactivity', 'agent_error.context_overflow', 'agent_error.empty_or_unparseable_output']) THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason = ANY(ARRAY['codex_semantic_inactivity', 'agent_error.context_overflow', 'agent_error.empty_or_unparseable_output']) THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    COALESCE(p.failure_reason = ANY(ARRAY['codex_semantic_inactivity', 'agent_error.context_overflow', 'agent_error.empty_or_unparseable_output']), FALSE),
     p.is_leader_task,
     p.original_user_id, p.delegating_agent_id, p.source_task_id, p.delegation_source,
     p.squad_id

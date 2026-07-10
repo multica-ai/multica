@@ -827,6 +827,13 @@
       "default": true
     },
     {
+      "key": "cerebro_description_drafts",
+      "label": "Recover unsaved description edits",
+      "description": "Keep what you have typed into an issue description on this device, independent of whether the save actually reached the server. If the last save never reached the backend (e.g. the Cloudflare Access session expired mid-edit), a small banner offers to restore or discard it the next time the description editor is opened. Saved on this device only (not synced across devices). Off restores the old behaviour where an edit that never saved is silently lost. FIR-2648.",
+      "group": "issues",
+      "default": true
+    },
+    {
       "key": "cerebro_workspace_copy",
       "label": "Workspace copy console",
       "description": "Add a \"Workspace copy\" tab to Settings (owners/admins only) for merging one workspace into another: pick a target workspace, then copy individual issues, channels, projects, agents, chats, or autopilots into it. Copies are non-destructive — the source workspace is never changed. Off hides the tab. TECH-3582.",

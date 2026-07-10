@@ -11,6 +11,54 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createRuntimeFailureInboxCard = `-- name: CreateRuntimeFailureInboxCard :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'runtime_failure_alert', 'action_required', $3, $4, $5, 'system', NULL, $6, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
+`
+
+type CreateRuntimeFailureInboxCardParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Title       string      `json:"title"`
+	Body        pgtype.Text `json:"body"`
+	Details     []byte      `json:"details"`
+}
+
+func (q *Queries) CreateRuntimeFailureInboxCard(ctx context.Context, arg CreateRuntimeFailureInboxCardParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createRuntimeFailureInboxCard, arg.WorkspaceID, arg.RecipientID, arg.IssueID, arg.Title, arg.Body, arg.Details)
+	var i InboxItem
+	err := row.Scan(&i.ID, &i.WorkspaceID, &i.RecipientType, &i.RecipientID, &i.Type, &i.Severity, &i.IssueID, &i.Title, &i.Body, &i.Read, &i.Archived, &i.CreatedAt, &i.ActorType, &i.ActorID, &i.Details, &i.Route, &i.MutedUntil, &i.ArchivedAt)
+	return i, err
+}
+
+const findRuntimeFailureInboxCard = `-- name: FindRuntimeFailureInboxCard :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
+FROM inbox_item
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND type = 'runtime_failure_alert' AND archived = false
+  AND details->>'runtime_id' = $3::text AND details->>'failure_reason' = $4::text
+ORDER BY created_at DESC LIMIT 1
+`
+
+type FindRuntimeFailureInboxCardParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Column3     string      `json:"column_3"`
+	Column4     string      `json:"column_4"`
+}
+
+func (q *Queries) FindRuntimeFailureInboxCard(ctx context.Context, arg FindRuntimeFailureInboxCardParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findRuntimeFailureInboxCard, arg.WorkspaceID, arg.RecipientID, arg.Column3, arg.Column4)
+	var i InboxItem
+	err := row.Scan(&i.ID, &i.WorkspaceID, &i.RecipientType, &i.RecipientID, &i.Type, &i.Severity, &i.IssueID, &i.Title, &i.Body, &i.Read, &i.Archived, &i.CreatedAt, &i.ActorType, &i.ActorID, &i.Details, &i.Route, &i.MutedUntil, &i.ArchivedAt)
+	return i, err
+}
+
 const bumpRuntimePauseInboxCard = `-- name: BumpRuntimePauseInboxCard :one
 UPDATE inbox_item
 SET read = false,
