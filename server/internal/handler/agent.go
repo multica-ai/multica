@@ -1359,6 +1359,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CEREBRO-PATCH(agent-office-direct-edit-version): FIR-1775 Phase 2 — a direct edit (outside the change-request flow) records an agent_context_version so version history stays complete. Best-effort; logic in agent_context_direct_edit_cerebro.go.
+	h.recordAgentContextDirectEdit(r, updated)
+
 	resp := agentToResponse(updated)
 	// agentToResponse always initialises Skills as []; junction-table rows
 	// are untouched by the SQL update, so we reload them here to keep the

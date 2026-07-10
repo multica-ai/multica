@@ -1,6 +1,8 @@
 # Agent Office — versioning + governance for agent context
 
-**Issue:** FIR-1775. **Status:** building (Phase 1). **Owner:** Mia.
+**Issue:** FIR-1775. **Status:** Phases 1–2 shipped; Phase 3 building (context
+lint + repo-file drift lint shipped; managed region + CI write-gate shipped,
+§10; skill MCP gaps open). **Owner:** Mia.
 
 The real solution (not an MVP): bring *all* agent context under the same
 versioning + governance machinery that skills already have, exposed via **REST
@@ -83,8 +85,11 @@ REST (proposed):
 - `GET  /api/agents/{id}/context/change-requests`
 - `POST /api/agents/context/change-requests/{crId}/review`
 - `PUT  /api/agents/{id}/context/ownership`
-- `GET  /api/agents/{id}/context/lint`  (drift/dup lint — requirement D)
-- `GET  /api/agents/context/lint`       (workspace-wide drift sweep)
+- `GET  /api/agents/{id}/context/lint`  (drift/dup lint — requirement D; live)
+- `GET  /api/agents/context/lint`       (workspace-wide drift sweep; live)
+- `POST /api/agents/context/lint/repo-file` (repo CLAUDE.md/AGENTS.md drift
+  lint, §9 move 2; the CLI/agent posts the file content because the server has
+  no repo checkout; live)
 
 MCP tools (new): `agent_context_list_versions`, `agent_context_diff`,
 `agent_context_propose_change`, `agent_context_list_change_requests`,
@@ -200,3 +205,29 @@ already own the pattern in this repo (`scripts/validate-cerebro-patches.sh` +
 and not human PRs. A blanket block on all `CLAUDE.md` writes would also stop
 legitimate code-convention updates, which belong in the repo. So: gate the
 managed region, leave the rest free.
+
+**Shipped (marker format + CI guard + CLI):**
+- Marker format (canonical source
+  `server/internal/cerebro/agentoffice/managed_region.go`):
+  `<!-- agent-office:start vN sha256:<64-hex> -->` … `<!-- agent-office:end -->`.
+  The start marker **seals** the body: the checksum is the SHA-256 of the body
+  in canonical form (lines strictly between the markers, each stripped of a
+  trailing CR and terminated by LF). One region per file, integer version.
+- CI guard: `scripts/validate-agent-office-region.sh` (step in the
+  `upstream-zone-guard` job, `--test` self-test built in). Rejects: broken
+  seal (hand-edit), region removal / deletion of a region-carrying file, body
+  change without a version bump, version decrease, malformed markers. Files
+  without a region are untouched. Human override:
+  `AGENT-OFFICE-ALLOW-REGION:` commit token or
+  `AGENT_OFFICE_ALLOW_REGION_EDIT=1`.
+- Sanctioned write path: `multica agent context region-sync <file>`
+  (`--content-file`/`--content-stdin`, auto-bumps the version) and
+  `multica agent context region-verify <file>` (exit 1 on a broken seal).
+- Honest limit: the seal proves the region was written by the tooling, not by
+  a stray `echo >>` — a determined agent could re-seal by hand. Full
+  provenance ("came from the interface") lands with the repo-scoped harness
+  binding (§9 move 3), which will record the region version server-side.
+
+**Open (next bricks):** the runtime `PreToolUse` hook (move 1 of the gate),
+and the repo-scoped harness binding + deploy-time sync that makes the
+interface the actual author of the region content.

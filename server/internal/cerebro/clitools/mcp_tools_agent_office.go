@@ -295,6 +295,53 @@ workspace admin) may propose a rollback.`,
 	})
 
 	// -----------------------------------------------------------------------
+	// agent_context_lint
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "agent_context_lint",
+		Description: `Drift-lint agent context (FIR-1775 Phase 3). Three modes:
+- agent_id set: lint that agent — dead/unbound skill references in its
+  instructions, rules duplicated between instructions and bound skills, empty
+  governance fields, stale repo links.
+- nothing set: workspace-wide sweep over every non-archived agent.
+- file_name + file_content set: drift-lint a repo CLAUDE.md/AGENTS.md — flags
+  agent-behavior language (belongs in the versioned harness) and lines
+  duplicated from an agent's instructions or a skill.
+Read-only analysis; findings are review hints, never hard failures.`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent_id":     map[string]any{"type": "string", "description": "Agent ID to lint (omit for a workspace sweep)"},
+				"file_name":    map[string]any{"type": "string", "description": "Repo instruction file name, e.g. CLAUDE.md (requires file_content)"},
+				"file_content": map[string]any{"type": "string", "description": "The repo instruction file's full content"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		fileName := optString(args, "file_name")
+		fileContent := optString(args, "file_content")
+		if fileName != "" || fileContent != "" {
+			if fileName == "" || fileContent == "" {
+				return mcp.ErrorResult("file_name and file_content must be provided together"), nil
+			}
+			body := map[string]any{"filename": fileName, "content": fileContent}
+			var out any
+			if err := client.PostJSON(ctx, "/api/agents/context/lint/repo-file", body, &out); err != nil {
+				return mcp.ErrorResult(err.Error()), nil
+			}
+			return jsonText(out)
+		}
+		path := "/api/agents/context/lint"
+		if id := optString(args, "agent_id"); id != "" {
+			path = "/api/agents/" + url.PathEscape(id) + "/context/lint"
+		}
+		var out any
+		if err := client.GetJSON(ctx, path, &out); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(out)
+	})
+
+	// -----------------------------------------------------------------------
 	// agent_context_set_ownership
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{

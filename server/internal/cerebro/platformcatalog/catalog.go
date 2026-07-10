@@ -349,6 +349,8 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
 			"PUT /api/notes/{id}/visibility",
+			// FIR-2810: per-note toggle for per-line author-code stamping.
+			"PUT /api/notes/{id}/author-codes",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
 			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
@@ -791,8 +793,8 @@ var catalog = []Capability{
 		Key:           "manage_project_sprints",
 		Title:         "Manage project sprints",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
-		DescriptionZh: "创建、编辑、删除并分配项目冲刺与周期性冲刺任务。",
+		Description:   "Create, edit, complete, delete, and assign project sprints and recurring sprint tasks.",
+		DescriptionZh: "创建、编辑、完成、删除并分配项目冲刺与周期性冲刺任务。",
 		Ops: []string{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
@@ -801,6 +803,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+			"POST /api/cerebro/sprints/{sprintID}/complete",
 			"PUT /api/cerebro/sprints/{sprintID}/",
 			"DELETE /api/cerebro/sprints/{sprintID}/",
 			"PUT /api/cerebro/issues/{issueID}/sprint/",
@@ -1214,6 +1217,7 @@ var excluded = map[string]string{
 	"POST /api/agents/backfill-avatars":              "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
+	"POST /api/agents/context/lint/repo-file":        "read-only — drift lint of a repo CLAUDE.md/AGENTS.md's content posted in the body (FIR-1775 Phase 3); pure analysis, changes no state",
 	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 

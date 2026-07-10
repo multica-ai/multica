@@ -16,9 +16,31 @@ SET visibility = EXCLUDED.visibility,
 RETURNING artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at;
 
 -- name: GetNote :one
-SELECT artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at
+SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, created_at, updated_at
 FROM cerebro_note
 WHERE artifact_id = $1;
+
+-- name: SetNoteAuthorCodes :exec
+-- FIR-2810: per-note toggle — stamp the writer's member code on every line.
+UPDATE cerebro_note
+SET author_codes = $2, updated_at = now()
+WHERE artifact_id = $1;
+
+-- name: GetNoteLineAttr :one
+-- FIR-2810: per-line attribution state for a note. base_body is the body the
+-- attrs array was computed for; a mismatch with the current artifact body
+-- means an out-of-band edit happened and the caller must self-heal.
+SELECT artifact_id, base_body, attrs, updated_at
+FROM cerebro_note_line_attr
+WHERE artifact_id = $1;
+
+-- name: UpsertNoteLineAttr :exec
+INSERT INTO cerebro_note_line_attr (artifact_id, base_body, attrs, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (artifact_id) DO UPDATE
+SET base_body  = EXCLUDED.base_body,
+    attrs      = EXCLUDED.attrs,
+    updated_at = now();
 
 -- name: SetNoteVisibility :exec
 UPDATE cerebro_note

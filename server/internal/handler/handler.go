@@ -263,6 +263,8 @@ type Handler struct {
 	AgentMemory AgentMemorySettingsService
 	// CEREBRO-PATCH(handler-memory-autorecall): FIR-1794 layer 3 — automatic memory recall for daemon claims.
 	MemoryAutoRecall CerebroMemoryAutoRecaller
+	// CEREBRO-PATCH(handler-agent-office-direct-edit): FIR-1775 Phase 2 — direct UpdateAgent edits land in agent context version history.
+	AgentContextDirectEdit CerebroAgentContextDirectEditRecorder
 	// CEREBRO-PATCH(handler-issue-workflow-activator): FIR-2283 followup —
 	// attaches an Issue workflow recipe to a freshly created issue when the
 	// create request (HTTP or CLI) carries workflow_id, so agents get the same

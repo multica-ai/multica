@@ -25,6 +25,10 @@
       "gate": "agent_context_manage"
     },
     {
+      "id": "POST /api/agents/context/lint/repo-file",
+      "exempt": "read-only analysis — the POST only submits repo-file content to be linted against the harness; nothing is written"
+    },
+    {
       "id": "PUT /api/agents/{id}/context/ownership",
       "gate": "agent_context_manage"
     },
@@ -131,6 +135,10 @@
     {
       "id": "DELETE /api/cerebro/sprints/{sprintID}/",
       "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
+    },
+    {
+      "id": "POST /api/cerebro/sprints/{sprintID}/complete",
+      "gate": "via:POST /api/cerebro/sprints/{sprintID}/complete"
     },
     {
       "id": "DELETE /api/cerebro/status-models/default",
@@ -1545,6 +1553,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/notes/{id}/author-codes",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/notes/{id}/comments/{commentId}",
       "gate": "workspace_member"
     },
@@ -1745,6 +1757,10 @@
     {
       "id": "agent_context_diff",
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff, no mutation"
+    },
+    {
+      "id": "agent_context_lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
     },
     {
       "id": "agent_context_propose",
@@ -2081,12 +2097,24 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff"
     },
     {
+      "id": "agent context lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/[{id}/]context/lint and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent context ownership",
       "gate": "via:PUT /api/agents/{id}/context/ownership"
     },
     {
       "id": "agent context propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
+    },
+    {
+      "id": "agent context region-sync",
+      "exempt": "local-only — rewrites the sealed Agent Office managed region in a repo CLAUDE.md/AGENTS.md on the caller's own disk (FIR-1775 §10); no API call, and the result is still gated by PR review + scripts/validate-agent-office-region.sh in CI"
+    },
+    {
+      "id": "agent context region-verify",
+      "exempt": "read-only, local-only — parses a repo CLAUDE.md/AGENTS.md on the caller's own disk and checks the managed-region seal (FIR-1775 §10); no API call, nothing is written"
     },
     {
       "id": "agent context review",
@@ -2339,6 +2367,14 @@
     {
       "id": "document update",
       "gate": "via:PUT /api/artifacts/{id}"
+    },
+    {
+      "id": "feature get",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
+    },
+    {
+      "id": "feature list",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
     },
     {
       "id": "group agent add",

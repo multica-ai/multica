@@ -57,6 +57,12 @@ server/**
 # same way as the `_cerebro.go` source files above.
 !server/**/*_cerebro_test.go
 !server/**/cerebro_*_test.go
+# Cerebro-only generated JSON data files follow the same net-new `cerebro_`
+# filename convention as the Go carve-outs above (e.g. the feature-flag catalog
+# embedded by cerebro_feature.go, regenerated whenever the flag registry
+# changes). JSON cannot carry comments, so a per-line marker is impossible —
+# same reasoning as the go.sum carve-out.
+!server/**/cerebro_*.json
 # Net-new cerebro built-in agent skills are fork-only ADDITIONS (a whole new
 # skill directory upstream never ships), not edits to an upstream skill — same
 # philosophy as the _cerebro.go carve-outs above. A markdown SKILL.md cannot

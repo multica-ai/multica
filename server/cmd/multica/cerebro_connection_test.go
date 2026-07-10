@@ -30,7 +30,7 @@ func newCerebroConnectionTestServer() (*httptest.Server, *requestRecorder) {
 		"internal":             true,
 		"enabled":              true,
 		"default_access":       "deny",
-		"auth_config":          map[string]any{"bearer_token": "***"},
+		"auth_config": map[string]any{"bearer_token": "***", "session_exchange": map[string]any{"enabled": true, "path": "/sessions/exchange", "ttl_seconds": 3600}},
 		"endpoint_permissions": []any{},
 		"scopable_args":        []any{},
 	}
@@ -191,5 +191,91 @@ func TestConnectionUpdateByNameMergesStored(t *testing.T) {
 	}
 	if req.Body["internal"] != true {
 		t.Errorf("internal = %v, want stored true preserved", req.Body["internal"])
+	}
+}
+
+// TestConnectionUpdateOnBehalfOfEnables verifies --on-behalf-of=true merges
+// auth_config.on_behalf_of.enabled=true into the PUT body while preserving
+// every other stored auth_config field (masked secrets, session_exchange) —
+// the toggle a type=api connection needs for per-agent X-On-Behalf-Of
+// delegation (FIR-2668).
+func TestConnectionUpdateOnBehalfOfEnables(t *testing.T) {
+	srv, rec := newCerebroConnectionTestServer()
+	defer srv.Close()
+
+	t.Cleanup(func() {
+		for _, n := range []string{"display-name", "url", "internal", "enabled", "auth-token", "default-access", "on-behalf-of", "output"} {
+			_ = connectionUpdateCmd.Flags().Set(n, "")
+			if f := connectionUpdateCmd.Flags().Lookup(n); f != nil {
+				f.Changed = false
+			}
+		}
+	})
+	if err := connectionUpdateCmd.Flags().Set("on-behalf-of", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	withCLIEnv(t, srv.URL, cerebroConnTestWorkspaceID, func() {
+		if err := runConnectionUpdate(connectionUpdateCmd, []string{"finance-mcp"}); err != nil {
+			t.Fatalf("runConnectionUpdate: %v", err)
+		}
+	})
+
+	req, ok := findRequest(rec, http.MethodPut, "/api/workspaces/"+cerebroConnTestWorkspaceID+"/connections/"+cerebroConnTestConnID)
+	if !ok {
+		t.Fatal("expected PUT to /connections/{id}")
+	}
+	auth, ok := req.Body["auth_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("auth_config = %v, want object", req.Body["auth_config"])
+	}
+	onBehalfOf, ok := auth["on_behalf_of"].(map[string]any)
+	if !ok || onBehalfOf["enabled"] != true {
+		t.Errorf("auth_config.on_behalf_of = %v, want enabled=true", auth["on_behalf_of"])
+	}
+	// Untouched auth_config fields must survive the merge.
+	if auth["bearer_token"] != "***" {
+		t.Errorf("bearer_token = %v, want preserved masked value", auth["bearer_token"])
+	}
+	if _, ok := auth["session_exchange"].(map[string]any); !ok {
+		t.Errorf("session_exchange = %v, want preserved", auth["session_exchange"])
+	}
+}
+
+// TestConnectionUpdateWithoutOnBehalfOfLeavesItUntouched verifies an update
+// that never mentions --on-behalf-of does not touch (and cannot silently
+// disable) an already-enabled delegation toggle.
+func TestConnectionUpdateWithoutOnBehalfOfLeavesItUntouched(t *testing.T) {
+	srv, rec := newCerebroConnectionTestServer()
+	defer srv.Close()
+
+	t.Cleanup(func() {
+		for _, n := range []string{"display-name", "url", "internal", "enabled", "auth-token", "default-access", "on-behalf-of", "output"} {
+			_ = connectionUpdateCmd.Flags().Set(n, "")
+			if f := connectionUpdateCmd.Flags().Lookup(n); f != nil {
+				f.Changed = false
+			}
+		}
+	})
+	if err := connectionUpdateCmd.Flags().Set("display-name", "Finance MCP v3"); err != nil {
+		t.Fatal(err)
+	}
+
+	withCLIEnv(t, srv.URL, cerebroConnTestWorkspaceID, func() {
+		if err := runConnectionUpdate(connectionUpdateCmd, []string{"finance-mcp"}); err != nil {
+			t.Fatalf("runConnectionUpdate: %v", err)
+		}
+	})
+
+	req, ok := findRequest(rec, http.MethodPut, "/api/workspaces/"+cerebroConnTestWorkspaceID+"/connections/"+cerebroConnTestConnID)
+	if !ok {
+		t.Fatal("expected PUT to /connections/{id}")
+	}
+	auth, ok := req.Body["auth_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("auth_config = %v, want object", req.Body["auth_config"])
+	}
+	if _, present := auth["on_behalf_of"]; present {
+		t.Errorf("on_behalf_of = %v, want absent (untouched) when --on-behalf-of not passed", auth["on_behalf_of"])
 	}
 }

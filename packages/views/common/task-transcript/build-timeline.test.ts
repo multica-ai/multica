@@ -76,4 +76,30 @@ describe("task transcript timeline", () => {
     expect(items[0]?.content).not.toContain("abc123xyz");
     expect(items[0]?.content).not.toContain("def456");
   });
+
+  it("normalizes malformed historical message fields before rendering", () => {
+    const items = buildTimeline([
+      {
+        task_id: "task-1",
+        issue_id: "issue-1",
+        seq: 1,
+        type: "tool_use",
+        tool: {} as unknown as string,
+        content: { step: "inspect" } as unknown as string,
+        input: ["unexpected"] as unknown as Record<string, unknown>,
+        output: { ok: true } as unknown as string,
+      },
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        type: "tool_use",
+        tool: undefined,
+        content: "{\"step\":\"inspect\"}",
+        input: { value: ["unexpected"] },
+        output: "{\"ok\":true}",
+      }),
+    ]);
+  });
 });

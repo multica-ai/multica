@@ -34,7 +34,7 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
-  it("uses cloud defaults when packaged config is absent", async () => {
+  it("uses Firtal defaults when packaged config is absent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     await expect(
       loadRuntimeConfig({
@@ -46,9 +46,9 @@ describe("loadRuntimeConfig", () => {
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://api.multica.ai",
-        wsUrl: "wss://api.multica.ai/ws",
-        appUrl: "https://multica.ai",
+        apiUrl: "https://multica-api.firtal.com",
+        wsUrl: "wss://multica-api.firtal.com/ws",
+        appUrl: "https://multica.firtal.com",
       },
     });
   });
@@ -70,6 +70,31 @@ describe("loadRuntimeConfig", () => {
         apiUrl: "https://api.example.com",
         wsUrl: "wss://api.example.com/ws",
         appUrl: "https://example.com",
+      },
+    });
+  });
+
+  it("ignores stale staging desktop.json in packaged builds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
+    const configPath = join(dir, "desktop.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        apiUrl: "https://sara.firtal.com",
+        appUrl: "https://sara.firtal.com",
+      }),
+    );
+
+    await expect(
+      loadRuntimeConfig({ isDev: false, configPath, env: {} }),
+    ).resolves.toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://multica-api.firtal.com",
+        wsUrl: "wss://multica-api.firtal.com/ws",
+        appUrl: "https://multica.firtal.com",
       },
     });
   });
