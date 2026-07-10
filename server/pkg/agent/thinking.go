@@ -15,8 +15,8 @@ import (
 // UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
-// xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh` onto a
-// shared enum. OpenCode exposes provider-specific model variants through
+// xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
+// onto a shared enum. OpenCode exposes provider-specific model variants through
 // `opencode run --variant`, and those names can be extended by local
 // opencode.json config. What users pick must round-trip exactly through
 // each CLI's own value vocabulary.
@@ -240,12 +240,15 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 
 // ── Codex ────────────────────────────────────────────────────────────
 //
-// `codex debug models` is the structured discovery hook Elon's review
-// flagged. It returns the per-model reasoning catalog directly,
-// including the model's documented default. We prefer this over the
-// older config-error probe trick because:
+// `codex debug models --bundled` is the structured discovery hook for both
+// the visible model catalog and each model's reasoning catalog. OpenAI added
+// the command and `--bundled` flag together in Codex 0.122.0 (openai/codex
+// #18625). Older versions, failed invocations, and malformed/empty payloads
+// use codexStaticModels so the picker remains usable.
+//
+// We prefer this over the older config-error probe trick because:
 //   1. It gives us per-model subsets without hand-maintained tables.
-//   2. The schema is stable across CLI versions (Codex 0.131.0+).
+//   2. The schema is structured and has been stable since its 0.122.0 debut.
 //   3. It doesn't pollute stderr with an intentional misconfiguration.
 //
 // The subcommand emits JSON on stdout by default — there is no
@@ -257,8 +260,8 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 // tokens the local binary actually accepts, which is the only thing we
 // need for validation.
 //
-// On older Codex versions / failures, the picker just disappears for
-// that model rather than offering a wrong list.
+// The static fallback deliberately mirrors a recently verified bundled
+// catalog, including thinking metadata, rather than guessing model IDs.
 
 // codexEffortLabel is the human display string for each Codex effort
 // value, matching Codex's own TUI (`Extra high`, `Minimal`, …) so
@@ -270,61 +273,66 @@ var codexEffortLabel = map[string]string{
 	"medium":  "Medium",
 	"high":    "High",
 	"xhigh":   "Extra high",
-	// Codex 0.144.1 added these for the gpt-5.6 series (sol/terra advertise
-	// `max`+`ultra`, luna advertises `max`). They must stay in sync with the
-	// server enum in providerThinkingEnums["codex"], or the picker shows a
-	// level that 400s on save. See TestCodexAdvertisedLevelsArePersistable.
-	"max":   "Max",
-	"ultra": "Ultra",
+	"max":     "Max",
+	"ultra":   "Ultra",
 }
+
+const minCodexDebugModelsVersion = "0.122.0"
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
-// `codex debug models` (Codex 0.131.0+). Only the fields we
+// `codex debug models --bundled` (Codex 0.122.0+). Only the fields we
 // consume are typed; unknown keys are ignored.
 type codexDebugModelsResponse struct {
-	Models []struct {
-		Slug                    string `json:"slug"`
-		DefaultReasoningLevel   string `json:"default_reasoning_level"`
-		SupportedReasoningLevel []struct {
-			Effort      string `json:"effort"`
-			Description string `json:"description"`
-		} `json:"supported_reasoning_levels"`
-	} `json:"models"`
+	Models []codexDebugModel `json:"models"`
 }
 
-// annotateCodexThinking decorates each model entry with its reasoning
-// catalog. Models the CLI doesn't know about (older codex install,
-// brand-new ID we haven't shipped) get Thinking=nil — the UI hides
-// the picker for those rows rather than guessing.
-func annotateCodexThinking(ctx context.Context, models []Model, executablePath string) {
-	mapping := loadCodexThinkingByModel(ctx, executablePath)
-	for i := range models {
-		if t, ok := mapping[models[i].ID]; ok && t != nil {
-			models[i].Thinking = t
-		}
-	}
+type codexDebugModel struct {
+	Slug                    string                     `json:"slug"`
+	DisplayName             string                     `json:"display_name"`
+	Visibility              string                     `json:"visibility"`
+	DefaultReasoningLevel   string                     `json:"default_reasoning_level"`
+	SupportedReasoningLevel []codexDebugReasoningLevel `json:"supported_reasoning_levels"`
 }
 
-func loadCodexThinkingByModel(ctx context.Context, executablePath string) map[string]*ModelThinking {
+type codexDebugReasoningLevel struct {
+	Effort      string `json:"effort"`
+	Description string `json:"description"`
+}
+
+// discoverCodexModels returns the installed Codex binary's bundled visible
+// catalog, including reasoning metadata. Version detection happens before the
+// debug command so old binaries do not log a predictable "unknown command"
+// failure on every cache refresh.
+func discoverCodexModels(ctx context.Context, executablePath string) []Model {
 	if executablePath == "" {
 		executablePath = "codex"
 	}
-	version, _ := DetectVersion(ctx, executablePath)
-	key := thinkingCacheKey{provider: "codex", executablePath: executablePath, cliVersion: version}
-	if cached, ok := thinkingCacheGet(key); ok {
-		return cached
+	version, err := DetectVersion(ctx, executablePath)
+	if err != nil || !codexSupportsDebugModels(version) {
+		return codexStaticModels()
 	}
 
 	raw, err := runCodexDebugModels(ctx, executablePath)
 	if err != nil {
-		// Cache the empty result so repeated UI polls don't re-shell
-		// the missing binary; TTL eventually retries.
-		thinkingCachePut(key, map[string]*ModelThinking{})
-		return map[string]*ModelThinking{}
+		return codexStaticModels()
 	}
-	parsed := parseCodexDebugModels(raw)
-	thinkingCachePut(key, parsed)
-	return parsed
+	models, err := parseCodexModelCatalog(raw)
+	if err != nil || len(models) == 0 {
+		return codexStaticModels()
+	}
+	return models
+}
+
+func codexSupportsDebugModels(version string) bool {
+	parsed, err := parseSemver(version)
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(minCodexDebugModelsVersion)
+	if err != nil {
+		return false
+	}
+	return !parsed.lessThan(minimum)
 }
 
 // codexDebugModelsArgs is the argv we pass to discover the local Codex
@@ -341,53 +349,62 @@ func runCodexDebugModels(ctx context.Context, executablePath string) ([]byte, er
 	return cmd.Output()
 }
 
-// parseCodexDebugModels takes the JSON payload from `codex debug
-// models` and projects it into a per-model thinking catalog.
-// Returns an empty map (never nil) so callers can compose safely
-// without nil-checking the result.
-func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
-	out := map[string]*ModelThinking{}
+// parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
+// model. Hidden entries are intentionally excluded to match Codex's own model
+// picker; the first visible entry is the bundled catalog's preferred default.
+func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 	var resp codexDebugModelsResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return out
+		return nil, err
 	}
+	models := make([]Model, 0, len(resp.Models))
 	for _, m := range resp.Models {
-		if m.Slug == "" || len(m.SupportedReasoningLevel) == 0 {
+		if m.Slug == "" || m.Visibility == "hide" {
 			continue
 		}
-		levels := make([]ThinkingLevel, 0, len(m.SupportedReasoningLevel))
-		for _, lvl := range m.SupportedReasoningLevel {
-			if lvl.Effort == "" {
-				continue
-			}
-			// Only surface efforts we have a label for. codexEffortLabel is
-			// the single source of truth for "a Codex effort Multica knows",
-			// and TestCodexAdvertisedLevelsArePersistable guarantees every key
-			// here is also in providerThinkingEnums["codex"] — so a labelled
-			// effort is always persistable. Dropping unlabelled tokens (a
-			// future Codex release advertising a new level we haven't taught
-			// the server yet) keeps the picker from ever offering a level the
-			// Create/Update enum gate would 400 on save. Fail closed until the
-			// maps learn it, rather than showing an unsaveable option. (MUL-4347)
-			label, ok := codexEffortLabel[lvl.Effort]
-			if !ok {
-				continue
-			}
-			levels = append(levels, ThinkingLevel{
-				Value:       lvl.Effort,
-				Label:       label,
-				Description: lvl.Description,
-			})
+		label := m.DisplayName
+		if label == "" {
+			label = m.Slug
 		}
-		if len(levels) == 0 {
-			continue
-		}
-		out[m.Slug] = &ModelThinking{
-			SupportedLevels: levels,
-			DefaultLevel:    m.DefaultReasoningLevel,
-		}
+		models = append(models, Model{
+			ID:       m.Slug,
+			Label:    label,
+			Provider: "openai",
+			Thinking: codexThinkingFromDebugModel(m),
+		})
 	}
-	return out
+	if len(models) > 0 {
+		models[0].Default = true
+	}
+	return models, nil
+}
+
+func codexThinkingFromDebugModel(m codexDebugModel) *ModelThinking {
+	levels := make([]ThinkingLevel, 0, len(m.SupportedReasoningLevel))
+	for _, lvl := range m.SupportedReasoningLevel {
+		if lvl.Effort == "" {
+			continue
+		}
+		label, ok := codexEffortLabel[lvl.Effort]
+		if !ok {
+			// Codex effort tokens are catalog-owned. Surface new safe tokens
+			// immediately; the server accepts their syntax and the daemon uses
+			// this exact per-model catalog for compatibility validation.
+			label = strings.Title(lvl.Effort) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{
+			Value:       lvl.Effort,
+			Label:       label,
+			Description: lvl.Description,
+		})
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return &ModelThinking{
+		SupportedLevels: levels,
+		DefaultLevel:    m.DefaultReasoningLevel,
+	}
 }
 
 // ── CodeBuddy ────────────────────────────────────────────────────────
@@ -623,23 +640,18 @@ func anyModelSupportsThinkingValue(models []Model, value string) bool {
 }
 
 // providerThinkingEnums is the server-side accept-list for runtimes with a
-// fixed reasoning-effort vocabulary. OpenCode is deliberately absent because
-// its `--variant` values come from the local model catalog and custom
-// opencode.json entries can define additional variant names.
+// fixed reasoning-effort vocabulary. Codex and OpenCode are deliberately
+// absent because their values come from daemon-local model catalogs, which can
+// gain new tokens without a Multica release.
 //
 // The server doesn't have local CLI binaries, so it cannot do per-model
-// discovery the way the daemon can; what it CAN do is reject values that are
-// not in any version of the provider's enum at all. Per-model gaps (e.g. user
-// sets `xhigh` while the chosen model only supports up to `high`) are handled
-// by the daemon's pre-execution guard, which logs and skips injection rather
-// than mutating persisted agent state. That split keeps API behaviour
-// consistent: always 400 on literal-invalid, never auto-clear on
-// combination-invalid. See MUL-2339 review notes.
+// discovery the way the daemon can. Fixed-catalog providers use this enum;
+// dynamic providers take the safe-token path in IsKnownThinkingValue below.
+// Per-model gaps are handled by the daemon's pre-execution guard, which logs
+// and skips injection rather than mutating persisted agent state.
 //
-// Keep these lists permissive: they're a "is this a known token in this
-// runtime's universe" check, not an "is this the right level for this
-// model" check. Adding a new level upstream means adding it here too so
-// users can persist it before the next discovery refresh.
+// Keep fixed-provider lists permissive: this is a provider-universe check,
+// not an "is this right for this model" check.
 var providerThinkingEnums = map[string]map[string]bool{
 	"claude": {
 		"low":    true,
@@ -647,19 +659,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":   true,
 		"xhigh":  true,
 		"max":    true,
-	},
-	"codex": {
-		"none":    true,
-		"minimal": true,
-		"low":     true,
-		"medium":  true,
-		"high":    true,
-		"xhigh":   true,
-		// Added for the gpt-5.6 series (Codex 0.144.1). Keep in lockstep with
-		// codexEffortLabel — the daemon advertises these, so the server must
-		// let users persist them.
-		"max":   true,
-		"ultra": true,
 	},
 	"codebuddy": {
 		"low":    true,
@@ -672,8 +671,8 @@ var providerThinkingEnums = map[string]map[string]bool{
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
 // "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty; OpenCode accepts well-formed variant names because its local
-// catalog can be extended by opencode.json.
+// only empty; Codex and OpenCode accept well-formed tokens here because their
+// daemon-local catalogs perform the exact per-model check before execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
@@ -682,8 +681,8 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if providerType == "opencode" {
-		return isValidOpenCodeVariantName(value)
+	if providerType == "codex" || providerType == "opencode" {
+		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]
 	if !ok {
@@ -692,7 +691,7 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	return enum[value]
 }
 
-func isValidOpenCodeVariantName(value string) bool {
+func isValidDynamicThinkingValue(value string) bool {
 	if len(value) > 64 {
 		return false
 	}

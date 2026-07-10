@@ -367,7 +367,7 @@ export interface Agent {
   /**
    * Runtime-native reasoning/effort token (e.g. Claude's
    * `low|medium|high|xhigh|max`, Codex's
-   * `none|minimal|low|medium|high|xhigh`). Empty string means "no
+   * `none|minimal|low|medium|high|xhigh|max|ultra`). Empty string means "no
    * override": the backend omits the effort flag and the upstream CLI
    * config / built-in default decides at run time. The picker is
    * per-runtime per-model — the API never normalises across providers.

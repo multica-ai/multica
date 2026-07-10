@@ -199,92 +199,169 @@ func splitNonEmptyLines(s string) []string {
 	return out
 }
 
-// ── Codex debug models JSON parsing ──────────────────────────────────
+// ── Codex debug models version/catalog discovery ────────────────────
 
-func TestParseCodexDebugModels(t *testing.T) {
+func TestCodexSupportsDebugModels(t *testing.T) {
 	t.Parallel()
-	raw := []byte(`{
-		"models": [
-			{
-				"slug": "gpt-5.5",
-				"default_reasoning_level": "medium",
-				"supported_reasoning_levels": [
-					{"effort": "low", "description": "Fast"},
-					{"effort": "medium", "description": "Balanced"},
-					{"effort": "high", "description": "Deeper"},
-					{"effort": "xhigh", "description": "Maximum"}
-				]
-			},
-			{
-				"slug": "gpt-5",
-				"default_reasoning_level": "low",
-				"supported_reasoning_levels": [
-					{"effort": "minimal", "description": "Quick"},
-					{"effort": "low", "description": "Fast"}
-				]
-			},
-			{
-				"slug": "no-reasoning",
-				"supported_reasoning_levels": []
-			}
-		]
-	}`)
-	got := parseCodexDebugModels(raw)
-
-	gpt55, ok := got["gpt-5.5"]
-	if !ok || gpt55 == nil {
-		t.Fatalf("missing gpt-5.5 entry: %+v", got)
-	}
-	if gpt55.DefaultLevel != "medium" {
-		t.Errorf("gpt-5.5 default: got %q, want medium", gpt55.DefaultLevel)
-	}
-	if len(gpt55.SupportedLevels) != 4 {
-		t.Errorf("gpt-5.5 supported count: got %d, want 4", len(gpt55.SupportedLevels))
-	}
-	// Labels should come from codexEffortLabel mapping, not from raw effort.
-	for _, lvl := range gpt55.SupportedLevels {
-		if lvl.Value == "xhigh" && lvl.Label != "Extra high" {
-			t.Errorf("xhigh label: got %q, want Extra high", lvl.Label)
+	for _, tc := range []struct {
+		version string
+		want    bool
+	}{
+		{"codex-cli 0.121.0", false},
+		{"codex-cli 0.122.0", true},
+		{"codex-cli 0.144.1", true},
+		{"invalid", false},
+	} {
+		if got := codexSupportsDebugModels(tc.version); got != tc.want {
+			t.Errorf("codexSupportsDebugModels(%q) = %v, want %v", tc.version, got, tc.want)
 		}
 	}
-
-	gpt5, ok := got["gpt-5"]
-	if !ok || gpt5 == nil {
-		t.Fatalf("missing gpt-5 entry: %+v", got)
-	}
-	if gpt5.DefaultLevel != "low" {
-		t.Errorf("gpt-5 default: got %q, want low", gpt5.DefaultLevel)
-	}
-
-	// Models with empty supported_reasoning_levels should be omitted to
-	// keep the wire payload small and avoid rendering empty pickers.
-	if _, ok := got["no-reasoning"]; ok {
-		t.Errorf("no-reasoning should be omitted, got %+v", got["no-reasoning"])
-	}
 }
 
-func TestParseCodexDebugModels_Malformed(t *testing.T) {
+func TestParseCodexModelCatalog(t *testing.T) {
 	t.Parallel()
-	got := parseCodexDebugModels([]byte("not json"))
-	if len(got) != 0 {
-		t.Fatalf("expected empty map on malformed input, got %+v", got)
-	}
-}
-
-// TestParseCodexDebugModels_DropsNonPersistableEfforts drives the REAL parser
-// against a catalog that mixes known gpt-5.6 levels with a bogus future token,
-// then asserts every level the parser surfaces is persistable by the server
-// enum. This is the contract TestCodexAdvertisedLevelsArePersistable checks
-// statically (two hand-written maps); doing it through parseCodexDebugModels
-// closes the gap Elon flagged: a future Codex release advertising an effort we
-// haven't taught the server would otherwise reach the picker and 400 on save.
-func TestParseCodexDebugModels_DropsNonPersistableEfforts(t *testing.T) {
-	t.Parallel()
-	// sol advertises max+ultra (plus a made-up `hyper`); luna tops out at max.
 	raw := []byte(`{
 		"models": [
 			{
 				"slug": "gpt-5.6-sol",
+				"display_name": "GPT-5.6-Sol",
+				"visibility": "list",
+				"default_reasoning_level": "low",
+				"supported_reasoning_levels": [
+					{"effort": "low", "description": "Fast"},
+					{"effort": "max", "description": "Maximum"},
+					{"effort": "ultra", "description": "Delegates"},
+					{"effort": "future", "description": "New CLI value"}
+				]
+			},
+			{
+				"slug": "hidden-model",
+				"display_name": "Hidden",
+				"visibility": "hide",
+				"supported_reasoning_levels": [{"effort": "low"}]
+			},
+			{
+				"slug": "no-reasoning",
+				"display_name": "No Reasoning",
+				"visibility": "list",
+				"supported_reasoning_levels": []
+			}
+		]
+	}`)
+	got, err := parseCodexModelCatalog(raw)
+	if err != nil {
+		t.Fatalf("parseCodexModelCatalog: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected two visible models, got %+v", got)
+	}
+	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6-Sol" || !got[0].Default {
+		t.Errorf("unexpected first model: %+v", got[0])
+	}
+	if got[0].Thinking == nil || got[0].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[0].Thinking, "max") || !hasThinkingLevel(got[0].Thinking, "ultra") || !hasThinkingLevel(got[0].Thinking, "future") {
+		t.Errorf("unexpected per-model thinking catalog: %+v", got[0].Thinking)
+	}
+	if got[1].ID != "no-reasoning" || got[1].Thinking != nil {
+		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[1])
+	}
+}
+
+func TestParseCodexModelCatalogMalformed(t *testing.T) {
+	t.Parallel()
+	if _, err := parseCodexModelCatalog([]byte("not json")); err == nil {
+		t.Fatal("expected malformed catalog error")
+	}
+}
+
+func TestDiscoverCodexModelsVersionGateAndFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	t.Run("supported version uses bundled catalog", func(t *testing.T) {
+		dir := t.TempDir()
+		fake := filepath.Join(dir, "codex")
+		script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.122.0"
+  exit 0
+fi
+printf '%s\n' "$@" > "` + filepath.Join(dir, "argv.txt") + `"
+echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibility":"list","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high","description":"Live"}]}]}'
+`
+		writeTestExecutable(t, fake, []byte(script))
+
+		got := discoverCodexModels(context.Background(), fake)
+		if len(got) != 1 || got[0].ID != "runtime-model" || got[0].Thinking == nil || !hasThinkingLevel(got[0].Thinking, "high") {
+			t.Fatalf("expected runtime catalog, got %+v", got)
+		}
+	})
+
+	t.Run("old version uses static fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		fake := filepath.Join(dir, "codex")
+		script := "#!/bin/sh\n" +
+			"if [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.121.0'; exit 0; fi\n" +
+			"exit 99\n"
+		writeTestExecutable(t, fake, []byte(script))
+
+		got := discoverCodexModels(context.Background(), fake)
+		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" {
+			t.Fatalf("expected static fallback, got %+v", got)
+		}
+	})
+
+	t.Run("debug command failure uses static fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		fake := filepath.Join(dir, "codex")
+		script := "#!/bin/sh\n" +
+			"if [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.144.1'; exit 0; fi\n" +
+			"exit 1\n"
+		writeTestExecutable(t, fake, []byte(script))
+
+		got := discoverCodexModels(context.Background(), fake)
+		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" || got[0].Thinking == nil {
+			t.Fatalf("expected model + thinking fallback, got %+v", got)
+		}
+	})
+}
+
+func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		model string
+		level string
+		want  bool
+	}{
+		{model: "gpt-5.6-sol", level: "ultra", want: true},
+		{model: "gpt-5.6-terra", level: "ultra", want: true},
+		{model: "gpt-5.6-luna", level: "max", want: true},
+		{model: "gpt-5.6-luna", level: "ultra", want: false},
+		{model: "gpt-5.3-codex", level: "xhigh", want: true},
+		{model: "gpt-5.3-codex", level: "max", want: false},
+	} {
+		got, err := ValidateThinkingLevel(context.Background(), "codex", "/nonexistent/codex", tc.model, tc.level)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
+		}
+		if got != tc.want {
+			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+		}
+	}
+}
+
+// TestParseCodexModelCatalog_PreservesFutureEfforts pins the dynamic-catalog
+// contract: a future Codex effort should reach the picker without a Multica
+// code update, pass the server's safe-token gate, and remain scoped to the
+// model that advertised it.
+func TestParseCodexModelCatalog_PreservesFutureEfforts(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"models": [
+			{
+				"slug": "gpt-5.6-sol",
+				"display_name": "GPT-5.6-Sol",
+				"visibility": "list",
 				"default_reasoning_level": "high",
 				"supported_reasoning_levels": [
 					{"effort": "medium"},
@@ -296,6 +373,8 @@ func TestParseCodexDebugModels_DropsNonPersistableEfforts(t *testing.T) {
 			},
 			{
 				"slug": "gpt-5.6-luna",
+				"display_name": "GPT-5.6-Luna",
+				"visibility": "list",
 				"default_reasoning_level": "medium",
 				"supported_reasoning_levels": [
 					{"effort": "medium"},
@@ -304,39 +383,31 @@ func TestParseCodexDebugModels_DropsNonPersistableEfforts(t *testing.T) {
 			}
 		]
 	}`)
-	got := parseCodexDebugModels(raw)
-
-	// Contract: nothing the parser surfaces may be unsaveable.
-	for slug, mt := range got {
-		for _, lvl := range mt.SupportedLevels {
-			if !IsKnownThinkingValue("codex", lvl.Value) {
-				t.Errorf("parser surfaced non-persistable effort %q for %q; the picker would 400 it on save", lvl.Value, slug)
-			}
-		}
+	got, err := parseCodexModelCatalog(raw)
+	if err != nil {
+		t.Fatalf("parseCodexModelCatalog: %v", err)
+	}
+	byID := make(map[string]Model, len(got))
+	for _, model := range got {
+		byID[model.ID] = model
 	}
 
-	sol := got["gpt-5.6-sol"]
-	if sol == nil {
-		t.Fatalf("missing gpt-5.6-sol entry: %+v", got)
+	sol := byID["gpt-5.6-sol"]
+	if sol.Thinking == nil {
+		t.Fatalf("missing gpt-5.6-sol thinking entry: %+v", got)
 	}
-	// The bogus token is dropped, not Title-cased through to the picker.
-	if hasThinkingLevel(sol, "hyper") {
-		t.Errorf("unknown effort 'hyper' leaked into sol picker: %+v", sol.SupportedLevels)
+	if !hasThinkingLevel(sol.Thinking, "hyper") {
+		t.Errorf("future effort should be preserved for sol: %+v", sol.Thinking.SupportedLevels)
 	}
-	// Known per-model levels survive, with the real per-model gap preserved:
-	// sol keeps ultra, luna must not advertise it.
-	if !hasThinkingLevel(sol, "ultra") {
-		t.Errorf("sol should keep ultra: %+v", sol.SupportedLevels)
+	if !IsKnownThinkingValue("codex", "hyper") {
+		t.Error("future safe Codex effort should pass the server token gate")
 	}
-	luna := got["gpt-5.6-luna"]
-	if luna == nil {
-		t.Fatalf("missing gpt-5.6-luna entry: %+v", got)
+	luna := byID["gpt-5.6-luna"]
+	if luna.Thinking == nil {
+		t.Fatalf("missing gpt-5.6-luna thinking entry: %+v", got)
 	}
-	if hasThinkingLevel(luna, "ultra") {
-		t.Errorf("luna must not advertise ultra (Codex 0.144.1 tops it out at max): %+v", luna.SupportedLevels)
-	}
-	if !hasThinkingLevel(luna, "max") {
-		t.Errorf("luna should keep max: %+v", luna.SupportedLevels)
+	if hasThinkingLevel(luna.Thinking, "hyper") {
+		t.Errorf("future effort must remain model-specific: %+v", luna.Thinking.SupportedLevels)
 	}
 }
 
@@ -367,9 +438,11 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"codex", "none", true},
 		{"codex", "minimal", true},
 		{"codex", "xhigh", true},
-		{"codex", "max", true},     // Codex 0.144.1 advertises `max` for gpt-5.6
-		{"codex", "ultra", true},   // ...and `ultra` for sol/terra
-		{"codex", "insane", false}, // still reject tokens outside the enum
+		{"codex", "max", true},
+		{"codex", "ultra", true},
+		{"codex", "future-level", true}, // exact support is checked against the daemon catalog
+		{"codex", ".hidden", false},
+		{"codex", "bad value", false},
 		{"opencode", "", true},
 		{"opencode", "max", true},
 		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
@@ -396,7 +469,7 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 	for effort := range codexEffortLabel {
 		if !IsKnownThinkingValue("codex", effort) {
 			t.Errorf("Codex advertises effort %q but IsKnownThinkingValue rejects it; "+
-				"add it to providerThinkingEnums[\"codex\"] so it can be saved", effort)
+				"keep the dynamic Codex token gate compatible so it can be saved", effort)
 		}
 	}
 }

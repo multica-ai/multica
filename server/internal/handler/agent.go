@@ -893,10 +893,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// thinking_level validation: provider-level enum only. Per-model gaps
-	// are enforced by the daemon at execution time (MUL-2339, Trump's
-	// review note — keep API behaviour consistent: literal-invalid →
-	// always 400; combination-invalid → daemon-side task error).
+	// thinking_level validation: fixed-enum providers reject unknown literals;
+	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
+	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
@@ -1439,15 +1439,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
 	//     runtime change in this same request would make the *existing*
-	//     value literal-invalid for the new provider, reject 400. This
-	//     closes the gap Elon's review flagged: previously, switching a
-	//     Claude agent storing `max` to a Codex runtime would silently
-	//     keep `max` and forward it to the daemon.
+	//     value invalid for the new provider's fixed enum or token syntax,
+	//     reject 400. Exact dynamic-catalog compatibility is daemon-owned.
 	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
-	//   - field set to value → validate against the target runtime's provider
-	//     enum; reject literal-invalid with 400. Per-model combination checks
-	//     run in the daemon at execution time, not here — see Trump's review
-	//     constraint that API behaviour stays consistent across change paths.
+	//   - field set to value → validate against the target runtime's fixed enum
+	//     or dynamic-token syntax; reject literal-invalid with 400. Per-model
+	//     combination checks run in the daemon at execution time, not here.
 	shouldClearThinkingLevel := false
 	if req.ThinkingLevel != nil {
 		value := *req.ThinkingLevel
