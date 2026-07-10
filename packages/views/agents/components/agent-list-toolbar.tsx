@@ -413,7 +413,7 @@ export function AgentListToolbar({
                         name={m?.name ?? userId.slice(0, 8)}
                         initials={(m?.name ?? "?").slice(0, 2).toUpperCase()}
                         avatarUrl={resolvePublicFileUrl(m?.avatar_url ?? null)}
-                        size={16}
+                        size="sm"
                       />
                       <span className="min-w-0 truncate">
                         {m?.name ?? userId.slice(0, 8)}

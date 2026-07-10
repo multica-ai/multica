@@ -604,7 +604,7 @@ function SubscriberChips({
           key={`${s.user_type}:${s.user_id}`}
           className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
         >
-          <ActorAvatar actorType="member" actorId={s.user_id} size={14} />
+          <ActorAvatar actorType="member" actorId={s.user_id} size="xs" />
           <span className="max-w-[14rem] truncate">
             {getActorName("member", s.user_id)}
           </span>
@@ -799,7 +799,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   <ActorAvatar
                     actorType={autopilot.assignee_type}
                     actorId={autopilot.assignee_id}
-                    size={20}
+                    size="sm"
                     enableHoverCard={autopilot.assignee_type === "agent"}
                     showStatusDot={autopilot.assignee_type === "agent"}
                   />
@@ -817,7 +817,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   <ActorAvatar
                     actorType={autopilot.created_by_type}
                     actorId={autopilot.created_by_id}
-                    size={20}
+                    size="sm"
                     enableHoverCard
                     showStatusDot={autopilot.created_by_type === "agent"}
                   />

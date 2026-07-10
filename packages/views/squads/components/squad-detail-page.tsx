@@ -354,7 +354,7 @@ function SquadDetailSkeleton() {
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="flex flex-col gap-4 rounded-lg border p-5">
-          <Skeleton className="h-16 w-16 rounded-lg" />
+          <Skeleton className="h-16 w-16 rounded-full" />
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-3 w-full" />
           <div className="space-y-2">
@@ -389,8 +389,8 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
       name={squad.name}
       initials={initials}
       avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-      size={16}
-      className="rounded"
+      size="sm"
+      className="shrink-0"
     />
   );
 }
@@ -400,14 +400,13 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
 // affordance.
 function SquadStaticAvatar({ squad, initials }: { squad: Squad; initials: string }) {
   return (
-    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
       {squad.avatar_url ? (
         <ActorAvatarBase
           name={squad.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-          size={64}
-          className="rounded-none"
+          size="2xl"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -599,7 +598,7 @@ function AddMemberDialog({
             <Popover open={pickerOpen} onOpenChange={(v) => { setPickerOpen(v); if (!v) setPickerFilter(""); }}>
               <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1 text-left text-sm transition-colors hover:bg-muted">
                 {target ? (
-                  <ActorAvatar actorType={target.type} actorId={target.id} size={20} />
+                  <ActorAvatar actorType={target.type} actorId={target.id} size="sm" />
                 ) : (
                   <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
@@ -637,7 +636,7 @@ function AddMemberDialog({
                             setPickerFilter("");
                           }}
                         >
-                          <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                          <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                           <span>{m.name}</span>
                         </PickerItem>
                       ))}
@@ -655,7 +654,7 @@ function AddMemberDialog({
                             setPickerFilter("");
                           }}
                         >
-                          <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                          <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                           <span>{a.name}</span>
                         </PickerItem>
                       ))}
@@ -837,7 +836,7 @@ function SquadDetailInspector({
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <InspectorRow label="Leader">
             <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar actorType="agent" actorId={squad.leader_id} size={14} />
+              <ActorAvatar actorType="agent" actorId={squad.leader_id} size="xs" />
               <span className="truncate">{leaderName}</span>
             </span>
           </InspectorRow>
@@ -846,7 +845,7 @@ function SquadDetailInspector({
           </InspectorRow>
           <InspectorRow label="Created by">
             <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar actorType="member" actorId={squad.creator_id} size={14} />
+              <ActorAvatar actorType="member" actorId={squad.creator_id} size="xs" />
               <span className="truncate">{creatorName}</span>
             </span>
           </InspectorRow>
@@ -1214,7 +1213,7 @@ function SquadMembersTab({
               <ActorAvatar
                 actorType={m.member_type}
                 actorId={m.member_id}
-                size={32}
+                size="lg"
                 showStatusDot
                 enableHoverCard={m.member_type === "agent"}
                 hoverCardVariant="live"
