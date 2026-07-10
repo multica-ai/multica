@@ -1769,18 +1769,18 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				return fmt.Errorf("update chat session resume pointer: %w", err)
 			}
 
-			// Write exactly one assistant outcome in the SAME transaction as the
-			// status flip and resume-pointer update (MUL-4351). A non-empty final
-			// output becomes an ordinary assistant message; an empty/whitespace
-			// output becomes a visible no_response outcome. Failing here rolls the
-			// whole completion back so the daemon retries the terminal callback —
-			// we never leave a completed task without its single outcome row, and
-			// the status CAS above guarantees a replay can't write a second one.
+			// Write the assistant outcome in the SAME transaction as the status
+			// flip and resume-pointer update (MUL-4351). For a task-owned direct
+			// task this is exactly one row (message or no_response); for a
+			// legacy/channel task an empty output writes no row (see
+			// writeChatCompletionOutcome). Failing here rolls the whole completion
+			// back so the daemon retries the terminal callback, and the status CAS
+			// above guarantees a replay can't write a second row.
 			msg, err := s.writeChatCompletionOutcome(ctx, qtx, t, result)
 			if err != nil {
 				return fmt.Errorf("write chat assistant outcome: %w", err)
 			}
-			chatAssistantMsg = &msg
+			chatAssistantMsg = msg
 		}
 		return nil
 	}); err != nil {
@@ -1898,14 +1898,24 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // message_kind still show this text instead of an empty bubble (MUL-4351).
 const chatNoResponseFallback = "The agent finished this turn without a text reply."
 
-// writeChatCompletionOutcome writes exactly one assistant chat_message for a
-// completed direct-chat task, inside the caller's completion transaction. A
-// non-empty final output becomes an ordinary assistant message; an empty or
-// whitespace-only output becomes a visible no_response outcome carrying a
-// non-empty English fallback body. It never auto-retries: an empty output is a
-// legitimate terminal result (a tool-only turn), and re-running it would repeat
-// any external side effects the agent already performed.
-func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, result []byte) (db.ChatMessage, error) {
+// writeChatCompletionOutcome writes the assistant chat_message outcome for a
+// completed chat task inside the caller's completion transaction, returning the
+// row (nil when none is written).
+//
+// Task-owned direct (web/mobile) tasks — chat_input_task_id set — get the
+// explicit single-outcome contract: a non-empty final output becomes an ordinary
+// assistant message, and an empty/whitespace output becomes a visible
+// no_response outcome carrying a non-empty English fallback body. It never
+// auto-retries: an empty output is a legitimate terminal result (a tool-only
+// turn) and re-running it would repeat side effects already performed.
+//
+// Legacy and channel (Slack/Lark) tasks — chat_input_task_id NULL — keep the
+// prior behavior: a non-empty output writes an ordinary assistant message, but
+// an EMPTY output writes NO row, so chat:done carries empty content and the
+// channel outbound silently drops it. This preserves Slack/Lark empty-completion
+// semantics unchanged (MUL-4351 review): the no_response fallback body must never
+// be pushed to an external channel.
+func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, result []byte) (*db.ChatMessage, error) {
 	// result is the daemon request re-marshalled by the handler, so it is always
 	// valid JSON; an empty Output is the only case this branch cares about.
 	var payload protocol.TaskCompletedPayload
@@ -1913,6 +1923,13 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// Same unescape as the issue-comment path: literal `\n` from agent stdout
 	// becomes a real newline so the chat panel renders paragraph breaks.
 	body := util.UnescapeBackslashEscapes(payload.Output)
+	isEmpty := strings.TrimSpace(body) == ""
+
+	// Channel/legacy empty completion: emit no assistant row, only an empty
+	// chat:done for typing/lifecycle. Keeps the Slack/Lark silent-drop path.
+	if isEmpty && !task.ChatInputTaskID.Valid {
+		return nil, nil
+	}
 
 	params := db.CreateChatMessageParams{
 		ChatSessionID: task.ChatSessionID,
@@ -1920,14 +1937,19 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		TaskID:        task.ID,
 		ElapsedMs:     computeChatElapsedMs(task),
 	}
-	if strings.TrimSpace(body) == "" {
+	if isEmpty {
+		// Task-owned direct task: explicit, visible no_response outcome.
 		params.Content = chatNoResponseFallback
 		params.MessageKind = pgtype.Text{String: protocol.ChatMessageKindNoResponse, Valid: true}
 	} else {
 		params.Content = redact.Text(body)
 		// message_kind left NULL → COALESCE defaults to 'message'.
 	}
-	return qtx.CreateChatMessage(ctx, params)
+	row, err := qtx.CreateChatMessage(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
 }
 
 // FailTask marks a task as failed.

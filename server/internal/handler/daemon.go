@@ -1774,38 +1774,38 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// Build the chat prompt from EVERY user message that has arrived
-			// since the agent's last reply — not just the most recent one. A
-			// short-window debounce (MUL-2968) can land several user messages
-			// before a single run fires; the agent resumes its prior session
-			// and only learns of new input through resp.ChatMessage, so
-			// delivering just the latest message would silently drop the
-			// earlier ones (e.g. "看上海天气" then "还有青岛" → only Qingdao
-			// answered). The unanswered set is the trailing run of user
-			// messages after the last assistant message (every completed or
-			// failed run writes an assistant row, so that anchor advances each
-			// turn). Attachments are collected from each included message so
-			// the agent can `multica attachment download <id>` — the markdown
-			// URL alone is signed and 30-min expiring on the private CDN.
 			// Resolve the user-message input batch for this run. A task-owned
 			// direct-chat task (chat_input_task_id set, MUL-4351) reads exactly
 			// the user messages tagged with its own input owner, so a message
 			// that arrived after this turn was sealed can never be absorbed here.
 			// Legacy and channel (Slack/Lark) tasks carry a NULL owner and keep
-			// the trailing-message selector, so a rolling deploy never replays
-			// their history.
+			// the trailing-message selector — the run of user messages after the
+			// last assistant row, which also covers a debounced burst (MUL-2968:
+			// "看上海天气" then "还有青岛" must both be delivered) — so a rolling
+			// deploy never replays their history. Attachments are collected per
+			// included message so the agent can `multica attachment download <id>`
+			// (the inline markdown URL is signed + 30-min expiring on the CDN).
 			var unanswered []db.ChatMessage
+			var inputLoadErr error
 			if task.ChatInputTaskID.Valid {
-				if owned, err := h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID); err == nil {
-					unanswered = owned
-				} else {
-					slog.Warn("chat claim: load owned input messages failed",
-						"task_id", uuidToString(task.ID),
-						"chat_input_task_id", uuidToString(task.ChatInputTaskID),
-						"error", err)
-				}
-			} else if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
+				unanswered, inputLoadErr = h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID)
+			} else if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil {
 				unanswered = trailingUserMessages(msgs)
+			} else {
+				inputLoadErr = err
+			}
+			// A read failure must NOT masquerade as "zero input". Preserve the
+			// just-dispatched task (the stale-dispatched reclaim redelivers it)
+			// and reject the claim with 5xx, rather than cancelling a valid direct
+			// task on a transient DB error (MUL-4351 review).
+			if inputLoadErr != nil {
+				outcome = "error_chat_input_load"
+				slog.Error("chat claim: load chat input messages failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", inputLoadErr)
+				writeError(w, http.StatusInternalServerError, "failed to load chat input")
+				return
 			}
 
 			parts := make([]string, 0, len(unanswered))

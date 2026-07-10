@@ -332,3 +332,55 @@ func assertNoRetryChild(t *testing.T, ctx context.Context, taskID string) {
 		t.Fatalf("expected no retry child for a completed no_response turn, got %d", n)
 	}
 }
+
+// insertChannelChatTask creates a running chat task with chat_input_task_id NULL
+// — the legacy/channel (Slack/Lark) shape — directly, bypassing the task-owned
+// direct-send path.
+func insertChannelChatTask(t *testing.T, ctx context.Context, agentID, runtimeID, sessionID string) string {
+	t.Helper()
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, dispatched_at)
+		VALUES ($1, $2, $3, 'running', 2, now(), now())
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create channel chat task: %v", err)
+	}
+	return taskID
+}
+
+// TestCompleteTask_ChannelEmptyOutputWritesNoRow pins the MUL-4351 review fix:
+// a legacy/channel task (chat_input_task_id NULL) that completes with empty
+// output must NOT write an assistant row — so chat:done carries empty content
+// and the Slack/Lark outbound keeps silently dropping it. The no_response
+// fallback body must never reach an external channel. A non-empty channel
+// completion still writes an ordinary message.
+func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "channel-like chat")
+
+	// Empty output → no row at all.
+	emptyTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", ""); err != nil {
+		t.Fatalf("complete channel task (empty): %v", err)
+	}
+	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
+		t.Fatalf("channel empty completion must write NO assistant row (Slack/Lark silent-drop), got %d", len(rows))
+	}
+
+	// Non-empty output → one ordinary message (kind 'message', not no_response).
+	textTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "channel reply"), "", ""); err != nil {
+		t.Fatalf("complete channel task (text): %v", err)
+	}
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("channel non-empty completion must write exactly one message, got %d", len(rows))
+	}
+	if rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "channel reply" {
+		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
+	}
+}
