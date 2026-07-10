@@ -659,6 +659,13 @@
       "default": false
     },
     {
+      "key": "cerebro_note_line_authors",
+      "label": "Note line authors",
+      "description": "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
+      "group": "workspace",
+      "default": true
+    },
+    {
       "key": "cerebro_skill_folders",
       "label": "Skill folders",
       "description": "Organise skills into folders (with sub-folders) on the Skills page. A folder sidebar lets you create, rename and delete folders and file skills into them; off hides the sidebar and shows the flat list. FIR-1412.",
