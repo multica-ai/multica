@@ -3588,8 +3588,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
 	// against the user's local_directory cannot be re-entered without a lock.
 	var agentMcpConfig json.RawMessage
+	var cursorMcpAuthSource string
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		if provider == "cursor" {
+			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
+		}
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
 	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
@@ -3602,29 +3606,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			WorkDir:         task.PriorWorkDir,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			WorkspacesRoot:      d.cfg.WorkspacesRoot,
+			WorkDir:             task.PriorWorkDir,
+			Provider:            provider,
+			CodexVersion:        codexVersion,
+			OpenclawBin:         openclawBin,
+			McpConfig:           agentMcpConfig,
+			CursorMcpAuthSource: cursorMcpAuthSource,
+			OpenclawGateway:     openclawGateway,
+			Task:                taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			WorkspaceID:     task.WorkspaceID,
-			TaskID:          task.ID,
-			AgentName:       agentName,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			WorkspacesRoot:      d.cfg.WorkspacesRoot,
+			WorkspaceID:         task.WorkspaceID,
+			TaskID:              task.ID,
+			AgentName:           agentName,
+			Provider:            provider,
+			CodexVersion:        codexVersion,
+			OpenclawBin:         openclawBin,
+			McpConfig:           agentMcpConfig,
+			CursorMcpAuthSource: cursorMcpAuthSource,
+			OpenclawGateway:     openclawGateway,
+			Task:                taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -4700,7 +4706,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

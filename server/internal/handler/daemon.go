@@ -1659,11 +1659,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// intentionally absent and remain eligible for reconciliation. A stable
 		// payload budget always keeps the primary trigger, then admits an oldest-
 		// first prefix of additional comments; overflow is reconciled later.
+		// Workspace-scoped load (MUL-4252) so a foreign comment UUID resolves to
+		// "missing" instead of leaking another tenant's text into the prompt.
 		plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
 		if task.TriggerCommentID.Valid {
 			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 		}
-		loadedComments := h.buildCoalescedCommentData(r.Context(), plannedCommentIDs)
+		loadedComments := h.buildCoalescedCommentData(r.Context(), runtime.WorkspaceID, plannedCommentIDs)
 		triggerCommentID := uuidToString(task.TriggerCommentID)
 		var deliveredComments []CoalescedCommentData
 		triggerLoaded := false
@@ -1713,7 +1715,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// harness instructions to avoid mention loops between agents.
 		effectiveTriggerUUID := task.TriggerCommentID
 		if effectiveTriggerUUID.Valid {
-			if comment, err := h.Queries.GetComment(r.Context(), effectiveTriggerUUID); err == nil {
+			// Scope by the runtime's workspace so a task row carrying a foreign
+			// comment UUID can never pull another workspace's comment text into
+			// this agent's prompt. The task's issue workspace is asserted equal
+			// to runtime.WorkspaceID below, so this is the right tenant (MUL-4252).
+			if comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+				ID:          effectiveTriggerUUID,
+				WorkspaceID: runtime.WorkspaceID,
+			}); err == nil {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -2650,7 +2659,13 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		}
 		var parentComment *db.Comment
 		if c.ParentID.Valid {
-			if parent, err := h.Queries.GetComment(ctx, c.ParentID); err == nil {
+			// Scope to the issue's workspace; a comment's parent is always in the
+			// same workspace, so this only fails closed against a stray foreign
+			// UUID rather than changing behavior (MUL-4252).
+			if parent, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+				ID:          c.ParentID,
+				WorkspaceID: issue.WorkspaceID,
+			}); err == nil {
 				parentComment = &parent
 			}
 		}
@@ -2667,7 +2682,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
 		if actorType != "member" {
-			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, c.ID))
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
 		}
 		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,
@@ -2739,7 +2754,7 @@ func keepExplicitMentionTriggers(triggers []commentAgentTrigger) []commentAgentT
 // comment's own id). Missing comments (deleted / wrong workspace) are skipped
 // rather than failing the claim. The set is bounded by how many comments a user
 // fires before a run starts, so the per-comment lookups stay cheap.
-func (h *Handler) buildCoalescedCommentData(ctx context.Context, ids []pgtype.UUID) []CoalescedCommentData {
+func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgtype.UUID, ids []pgtype.UUID) []CoalescedCommentData {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -2754,7 +2769,13 @@ func (h *Handler) buildCoalescedCommentData(ctx context.Context, ids []pgtype.UU
 			continue
 		}
 		seen[idString] = struct{}{}
-		comment, err := h.Queries.GetComment(ctx, id)
+		// Workspace-scoped so a foreign comment UUID resolves to "missing"
+		// (skipped) instead of leaking another tenant's text into the prompt
+		// (MUL-4252). Matches this function's documented skip-on-missing rule.
+		comment, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: workspaceID,
+		})
 		if err != nil {
 			continue
 		}

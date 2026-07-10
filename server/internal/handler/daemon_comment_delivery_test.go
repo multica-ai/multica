@@ -512,7 +512,7 @@ func TestBuildCoalescedCommentData_SortsEqualTimestampsByID(t *testing.T) {
 		util.MustParseUUID(fixture.commentID[1]),
 		util.MustParseUUID(fixture.commentID[0]),
 	}
-	comments := testHandler.buildCoalescedCommentData(context.Background(), ids)
+	comments := testHandler.buildCoalescedCommentData(context.Background(), util.MustParseUUID(testWorkspaceID), ids)
 	want := append([]string{}, fixture.commentID[:2]...)
 	slices.Sort(want)
 	got := []string{comments[0].ID, comments[1].ID}
@@ -836,9 +836,14 @@ func TestClaimTaskByRuntime_FinalizationFailureRequeuesImmediately(t *testing.T)
 	}
 
 	failingHandler := *testHandler
-	failingTaskService := *testHandler.TaskService
-	failingTaskService.TxStarter = &failNthBegin{delegate: testPool, failAt: 2}
-	failingHandler.TaskService = &failingTaskService
+	// Inject a failing transaction starter without copying TaskService by value:
+	// it embeds a sync.Mutex (go vet rejects the copy) and a value copy would also
+	// split the analytics-cache lock from the map it guards. Swap the field on the
+	// shared service and restore it when the test ends. failingHandler shares the
+	// same *TaskService pointer, so it observes the failing starter.
+	originalTxStarter := testHandler.TaskService.TxStarter
+	testHandler.TaskService.TxStarter = &failNthBegin{delegate: testPool, failAt: 2}
+	defer func() { testHandler.TaskService.TxStarter = originalTxStarter }()
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+fixture.runtimeID+"/tasks/claim", nil,

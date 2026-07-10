@@ -289,7 +289,9 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"codex", "none", true},
 		{"codex", "minimal", true},
 		{"codex", "xhigh", true},
-		{"codex", "max", false}, // Claude-only token rejected for Codex
+		{"codex", "max", true},     // Codex 0.144.1 advertises `max` for gpt-5.6
+		{"codex", "ultra", true},   // ...and `ultra` for sol/terra
+		{"codex", "insane", false}, // still reject tokens outside the enum
 		{"opencode", "", true},
 		{"opencode", "max", true},
 		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
@@ -302,6 +304,21 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {
 			t.Errorf("IsKnownThinkingValue(%q, %q) = %v, want %v",
 				tc.provider, tc.value, got, tc.want)
+		}
+	}
+}
+
+// TestCodexAdvertisedLevelsArePersistable pins the catalog → API contract:
+// every effort token Codex discovery can label (a key in codexEffortLabel)
+// must pass the server's Create/Update enum gate. Otherwise the daemon
+// advertises a level the picker shows but the server 400s on save — the
+// exact drift the gpt-5.6 `max`/`ultra` additions introduced.
+func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
+	t.Parallel()
+	for effort := range codexEffortLabel {
+		if !IsKnownThinkingValue("codex", effort) {
+			t.Errorf("Codex advertises effort %q but IsKnownThinkingValue rejects it; "+
+				"add it to providerThinkingEnums[\"codex\"] so it can be saved", effort)
 		}
 	}
 }

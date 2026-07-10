@@ -47,6 +47,10 @@ type PrepareParams struct {
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
 	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource is an explicit opt-in path to a Cursor mcp-auth.json
+	// file, or the Cursor project data directory containing it. Only Cursor's
+	// managed MCP path consumes it.
+	CursorMcpAuthSource string
 	// OpenclawGateway pins the OpenClaw Gateway endpoint inside the per-task
 	// wrapper. Only consulted when Provider == "openclaw" and the agent's
 	// runtime_config selected gateway mode (issue #3260). Zero means "inherit
@@ -267,7 +271,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs.
 	if params.Provider == "cursor" {
-		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
 		}
@@ -319,6 +323,8 @@ type ReuseParams struct {
 	// task starts — without this a stale wrapper from a prior run would keep
 	// the old MCP set in play.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource mirrors PrepareParams.CursorMcpAuthSource on reuse.
+	CursorMcpAuthSource string
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
 	OpenclawGateway OpenclawGatewayPin
@@ -437,7 +443,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
 	if params.Provider == "cursor" && env.RootDir != "" {
-		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
 			return nil

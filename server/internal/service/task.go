@@ -129,11 +129,19 @@ const (
 // it for storage on the task row. Returns an invalid pgtype.Text when
 // the comment is missing (deleted / wrong workspace / etc) so the column
 // stays NULL — front-end falls back to a structural label in that case.
-func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
+//
+// workspaceID scopes the fetch to the task's own workspace: the summary is
+// later returned in claim / task-history responses, so a foreign comment UUID
+// reaching an enqueue/merge path must NOT leak another workspace's text even in
+// truncated form (MUL-4252).
+func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, workspaceID, commentID pgtype.UUID) pgtype.Text {
 	if !commentID.Valid {
 		return pgtype.Text{}
 	}
-	comment, err := s.Queries.GetComment(ctx, commentID)
+	comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID:          commentID,
+		WorkspaceID: workspaceID,
+	})
 	if err != nil {
 		return pgtype.Text{}
 	}
@@ -147,16 +155,17 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 // ResolveOriginatorFromTriggerComment is the exported wrapper used by the
 // comment-merge path (MUL-4195) to compute the top-of-chain human originator
 // for a newly-arrived comment, so a merge can be gated on the originator being
-// unchanged. See resolveOriginatorFromTriggerComment for the chain rules.
-func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
-	return s.resolveOriginatorFromTriggerComment(ctx, commentID)
+// unchanged. workspaceID scopes the comment lookup to the task's workspace
+// (MUL-4252). See resolveOriginatorFromTriggerComment for the chain rules.
+func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, workspaceID, commentID pgtype.UUID) pgtype.UUID {
+	return s.resolveOriginatorFromTriggerComment(ctx, workspaceID, commentID)
 }
 
 // BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
 // path (MUL-4195) to refresh a coalesced task's trigger_summary to the newest
-// trigger comment's snapshot.
-func (s *TaskService) BuildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
-	return s.buildCommentTriggerSummary(ctx, commentID)
+// trigger comment's snapshot. workspaceID scopes the lookup (MUL-4252).
+func (s *TaskService) BuildCommentTriggerSummary(ctx context.Context, workspaceID, commentID pgtype.UUID) pgtype.Text {
+	return s.buildCommentTriggerSummary(ctx, workspaceID, commentID)
 }
 
 // BuildRuntimeMCPOverlayForMerge recomputes the Composio MCP overlay +
@@ -270,15 +279,20 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 //     (gate 1).
 //
 // A nil receiver / nil Queries falls through to invalid so unit-test
-// setups that don't wire a DB stay safe.
-func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
+// setups that don't wire a DB stay safe. workspaceID scopes the comment lookup
+// to the task's workspace so a foreign comment UUID cannot resolve an
+// originator from another tenant (MUL-4252).
+func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, workspaceID, commentID pgtype.UUID) pgtype.UUID {
 	if s == nil || s.Queries == nil {
 		return pgtype.UUID{}
 	}
 	if !commentID.Valid {
 		return pgtype.UUID{}
 	}
-	comment, err := s.Queries.GetComment(ctx, commentID)
+	comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID:          commentID,
+		WorkspaceID: workspaceID,
+	})
 	if err != nil {
 		return pgtype.UUID{}
 	}
@@ -313,7 +327,7 @@ func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, c
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	if triggerCommentID.Valid {
-		return s.resolveOriginatorFromTriggerComment(ctx, triggerCommentID)
+		return s.resolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, triggerCommentID)
 	}
 	if issue.CreatorType == "member" && issue.CreatorID.Valid {
 		return issue.CreatorID
@@ -728,7 +742,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
 		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		OriginatorUserID:     originatorUserID,
@@ -823,7 +837,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
 		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
@@ -871,7 +885,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		IssueID:             issue.ID,
 		Priority:            priorityToInt(issue.Priority),
 		TriggerCommentID:    triggerCommentID,
-		TriggerSummary:      s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		TriggerSummary:      s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		IsLeaderTask:        pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		SquadID:             squadID,
 		EscalationForTaskID: escalationForTaskID,
