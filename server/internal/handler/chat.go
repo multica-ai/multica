@@ -366,6 +366,17 @@ type SetChatSessionArchivedRequest struct {
 // user's history (behind the "Archived" entry) and the conversation becomes
 // read-only — SendChatMessage refuses status='archived'. Hard delete is only
 // offered from the archived list, so nothing is destroyed in one hover click.
+//
+// Archiving also severs any external-channel binding. The web send path already
+// treats status='archived' as read-only, but the channel engine (Feishu/Slack)
+// resolves inbound traffic through channel_chat_session_binding without checking
+// session status, so a bound session kept accumulating agent replies — and a
+// stuck unread badge — after the user archived it (MUL-4372). Dropping the
+// binding in the same tx makes the next inbound message for that external chat
+// create a fresh chat_session under a new binding (see EnsureSession) instead of
+// reviving this archived one. Unarchive deliberately does NOT recreate the
+// binding: if later traffic already forked a new session, that session owns the
+// channel now, and restoring the old binding would steal it back.
 func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -385,12 +396,33 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	updated, err := h.Queries.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	updated, err := qtx.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
 		ID:       session.ID,
 		Archived: req.Archived,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	if req.Archived {
+		if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear chat session channel binding")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit chat session archive failed", "session_id", sessionID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to commit chat session update")
 		return
 	}
 
