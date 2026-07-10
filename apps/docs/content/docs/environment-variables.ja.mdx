@@ -194,8 +194,10 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 multica config set device_name my-vm-custom-name
 multica config set runtime_name worker-a
 multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go の期間文字列
+multica config set poll_interval 10s          # Go の期間、必ず > 0
 ```
+
+`poll_interval` は正の Go 期間（`500ms`、`10s`、`1m30s` など）のみを受け付けます。`0s`、負値、パース不能な文字列は `config set` の時点で拒否されます。永続化した値をクリアして環境変数 / 組み込みデフォルトに戻すには `multica config set poll_interval ""` を使ってください。
 
 優先順位は上から順に: `daemon start` の `--flag` > `MULTICA_…` 環境変数 > `config.json` > 組み込みデフォルト。systemd unit などで環境変数を設定するとファイルより優先され、明示的な CLI フラグは両者よりさらに優先されます。
 

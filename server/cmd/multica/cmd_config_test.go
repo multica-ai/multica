@@ -113,9 +113,15 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 
 // TestApplyConfigSetRejectsBadValues covers the two typed keys —
 // max_concurrent_tasks (int, non-negative) and poll_interval (Go
-// duration, non-negative). Catching bad values at write time keeps the
-// error next to the user's typo instead of surfacing later at daemon
-// start.
+// duration, strictly positive). Catching bad values at write time
+// keeps the error next to the user's typo instead of surfacing later
+// at daemon start.
+//
+// The "poll zero" case is the regression from #3824's review: `config
+// set poll_interval 0s` used to be accepted and persisted, then
+// silently ignored at daemon start because the resolver only
+// substitutes strictly positive durations. Reject it up front so
+// `config show` and daemon behavior agree.
 func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 	t.Parallel()
 
@@ -128,7 +134,8 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 		{"max non-int", "max_concurrent_tasks", "many", "integer"},
 		{"max negative", "max_concurrent_tasks", "-1", ">= 0"},
 		{"poll bad duration", "poll_interval", "10", "duration"},
-		{"poll negative", "poll_interval", "-5s", "non-negative"},
+		{"poll zero", "poll_interval", "0s", "positive"},
+		{"poll negative", "poll_interval", "-5s", "positive"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -143,6 +150,22 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 				t.Fatalf("error = %q; want to contain %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// TestApplyConfigSetPollIntervalZeroDoesNotOverwrite ensures a rejected
+// "0s" write leaves any previously persisted value intact — the caller
+// only saves when applyConfigSet returns nil, but pin the invariant so
+// a future refactor can't quietly drop it.
+func TestApplyConfigSetPollIntervalZeroDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{PollInterval: "10s"}
+	if err := applyConfigSet(&cfg, "poll_interval", "0s"); err == nil {
+		t.Fatalf("expected error for poll_interval=0s, got nil")
+	}
+	if cfg.PollInterval != "10s" {
+		t.Fatalf("PollInterval mutated on rejected write: got %q, want %q", cfg.PollInterval, "10s")
 	}
 }
 

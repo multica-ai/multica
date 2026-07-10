@@ -194,8 +194,10 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 multica config set device_name my-vm-custom-name
 multica config set runtime_name worker-a
 multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go 기간 문자열
+multica config set poll_interval 10s          # Go 기간, 반드시 > 0
 ```
+
+`poll_interval`은 양수인 Go 기간(`500ms`, `10s`, `1m30s` 등)만 허용합니다. `0s`, 음수, 파싱 불가능한 문자열은 `config set` 시점에 거부됩니다. 이미 저장된 값을 지우고 환경 변수 / 내장 기본값으로 되돌리려면 `multica config set poll_interval ""`를 사용하세요.
 
 우선순위(위쪽이 우선): `daemon start`의 `--flag` > `MULTICA_…` 환경 변수 > `config.json` > 내장 기본값. systemd unit 등에서 설정한 라이브 환경 변수는 파일을 이깁니다. 명시적인 CLI 플래그는 둘 다 이깁니다.
 

@@ -767,8 +767,10 @@ func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
 
 // resolveDaemonDurationOverride is the numeric counterpart for
 // poll_interval. flagValue > 0 wins; otherwise, if the env var is unset
-// we parse cfgValue. Parse errors are surfaced so a bad config.json
-// value doesn't silently fall through to the default.
+// we parse cfgValue. Parse errors and non-positive values are surfaced
+// so a bad config.json value doesn't silently fall through to the
+// default — `config set` already rejects the same shapes at write
+// time, and this guard catches legacy configs that predate that check.
 func resolveDaemonDurationOverride(flagValue time.Duration, envName, cfgValue string) (time.Duration, error) {
 	if flagValue > 0 {
 		return flagValue, nil
@@ -780,8 +782,8 @@ func resolveDaemonDurationOverride(flagValue time.Duration, envName, cfgValue st
 	if err != nil {
 		return 0, fmt.Errorf("config value %q for %s is not a valid duration: %w", cfgValue, envName, err)
 	}
-	if parsed < 0 {
-		return 0, fmt.Errorf("config value %q for %s must be non-negative", cfgValue, envName)
+	if parsed <= 0 {
+		return 0, fmt.Errorf("config value %q for %s must be positive", cfgValue, envName)
 	}
 	return parsed, nil
 }

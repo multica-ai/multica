@@ -199,8 +199,10 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 multica config set device_name my-vm-custom-name
 multica config set runtime_name worker-a
 multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go 时长字符串
+multica config set poll_interval 10s          # Go 时长格式，必须 > 0
 ```
+
+`poll_interval` 只接受**正的** Go 时长（`500ms`、`10s`、`1m30s` 等）。`0s`、负值以及无法解析的字符串在 `config set` 阶段就会被拒绝。若要清除已持久化的值、退回到环境变量 / 内置默认，用 `multica config set poll_interval ""`。
 
 优先级从高到低：`--flag`（`daemon start` 命令行）> `MULTICA_…` 环境变量 > `config.json` > 内置默认。运行时环境变量（如 systemd unit 里设的）优先级高于 config 文件；显式命令行 flag 又高于两者。
 

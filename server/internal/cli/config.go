@@ -48,12 +48,14 @@ type CLIConfig struct {
 
 	// PollInterval is how often the daemon polls the server for new tasks
 	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
-	// motivation as MaxConcurrentTasks. Zero-value ("") means "not set —
-	// use env / built-in default". Resolution precedence (highest wins):
-	// --poll-interval flag, MULTICA_DAEMON_POLL_INTERVAL env, this field,
-	// DefaultPollInterval. Parsed lazily by the daemon; an invalid value
-	// here surfaces as a config error at `daemon start`, not at
-	// `config set` time (mirrors env-var behavior).
+	// motivation as MaxConcurrentTasks. Empty ("") means "not set — use
+	// env / built-in default". Only strictly positive durations are
+	// meaningful here: `config set poll_interval` rejects non-positive
+	// values (including "0s") and un-parseable durations at write time,
+	// so a value that reaches this field is always well-formed. Use
+	// `config set poll_interval ""` to clear a previously persisted
+	// value. Resolution precedence (highest wins): --poll-interval flag,
+	// MULTICA_DAEMON_POLL_INTERVAL env, this field, DefaultPollInterval.
 	PollInterval string `json:"poll_interval,omitempty"`
 
 	// Backends contains per-backend overrides for users who want to point

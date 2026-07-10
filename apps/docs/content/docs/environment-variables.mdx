@@ -196,8 +196,10 @@ The four daemon knobs — `device_name`, `runtime_name`, `max_concurrent_tasks`,
 multica config set device_name my-vm-custom-name
 multica config set runtime_name worker-a
 multica config set max_concurrent_tasks 8
-multica config set poll_interval 10s          # Go duration string
+multica config set poll_interval 10s          # Go duration, must be > 0
 ```
+
+`poll_interval` accepts any positive Go duration (`500ms`, `10s`, `1m30s`, ...). Values ≤ 0 (`0s`, `-5s`) and un-parseable strings are rejected at `config set` time. To clear a persisted value and fall back to the env / built-in default, use `multica config set poll_interval ""`.
 
 Precedence, highest first: `--flag` on `daemon start` > `MULTICA_…` env var > `config.json` value > built-in default. A live env override (typical for systemd units) always wins over the file, and an explicit CLI flag wins over both.
 

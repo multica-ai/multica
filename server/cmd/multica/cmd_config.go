@@ -46,7 +46,9 @@ var configSetCmd = &cobra.Command{
 		"poll_interval) mirror their --flag / env counterparts and are read by " +
 		"`daemon start` when neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
-		"Set poll_interval as a Go duration string, e.g. '10s' or '500ms'.",
+		"poll_interval takes a positive Go duration (e.g. '10s', '500ms', '1m30s'); " +
+		"'0s' and negative values are rejected. Pass an empty string to clear " +
+		"a persisted value (e.g. `config set poll_interval \"\"`).",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -143,8 +145,14 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		if err != nil {
 			return fmt.Errorf("poll_interval must be a Go duration (e.g. 10s, 500ms): %w", err)
 		}
-		if d < 0 {
-			return fmt.Errorf("poll_interval must be non-negative (got %s)", d)
+		// Reject zero and negative durations. Persisting "0s" would look
+		// configured in `config show` but be silently ignored at daemon
+		// start (the resolver only substitutes strictly positive values),
+		// which is exactly the trap reported in #3824's review. Empty
+		// string is the one and only way to clear a previously persisted
+		// value.
+		if d <= 0 {
+			return fmt.Errorf("poll_interval must be positive (got %s); use `config set poll_interval \"\"` to clear it", d)
 		}
 		cfg.PollInterval = value
 	default:

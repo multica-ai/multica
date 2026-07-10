@@ -61,7 +61,8 @@ func TestResolveDaemonDurationOverridePrecedence(t *testing.T) {
 		{"cfg parsed when flag and env unset", 0, "", "500ms", 500 * time.Millisecond, ""},
 		{"empty cfg returns zero", 0, "", "", 0, ""},
 		{"invalid cfg errors", 0, "", "not-a-duration", 0, "not a valid duration"},
-		{"negative cfg errors", 0, "", "-1s", 0, "non-negative"},
+		{"zero cfg errors", 0, "", "0s", 0, "must be positive"},
+		{"negative cfg errors", 0, "", "-1s", 0, "must be positive"},
 	}
 	for _, tc := range cases {
 		tc := tc
