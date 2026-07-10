@@ -143,10 +143,10 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 	}
 }
 
-// TestRunAttachmentUploadNonImageUsesLinkMarkdown covers the content-type
-// branch: a non-image file must emit a plain link, not `![...]`, which would
-// render as a broken image in the reply.
-func TestRunAttachmentUploadNonImageUsesLinkMarkdown(t *testing.T) {
+// TestRunAttachmentUploadNonImageUsesFileCardMarkdown covers the content-type
+// branch: a non-image file emits the block-level `!file[...]( )` card snippet,
+// not image `![...]` markdown.
+func TestRunAttachmentUploadNonImageUsesFileCardMarkdown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatalf("parse multipart: %v", err)
@@ -176,11 +176,54 @@ func TestRunAttachmentUploadNonImageUsesLinkMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runAttachmentUpload: %v", err)
 	}
-	if !strings.Contains(out, `[report.pdf](https://public.example/api/attachments/att-doc/download)`) {
-		t.Fatalf("stdout missing link markdown: %q", out)
+	// Non-image uses the block-level file-card snippet, never image markdown.
+	if !strings.Contains(out, `!file[report.pdf](https://public.example/api/attachments/att-doc/download)`) {
+		t.Fatalf("stdout missing file-card markdown snippet: %q", out)
 	}
 	if strings.Contains(out, `![report.pdf]`) {
 		t.Fatalf("non-image must not use image markdown: %q", out)
+	}
+	if !strings.Contains(out, `"markdown_url": "https://public.example/api/attachments/att-doc/download"`) {
+		t.Fatalf("stdout missing markdown_url: %q", out)
+	}
+}
+
+// TestRunAttachmentUploadEscapesFilename covers filenames carrying markdown
+// label metacharacters (`[`, `]`): the snippet must escape them so the label
+// does not truncate — otherwise the card fails to render and the standalone
+// attachment is hidden by the referenced URL, showing nothing.
+func TestRunAttachmentUploadEscapesFilename(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "att-esc",
+			"filename":     "a]b.pdf",
+			"content_type": "application/pdf",
+			"markdown_url": "https://public.example/api/attachments/att-esc/download",
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "a]b.pdf")
+	if err := os.WriteFile(docPath, []byte("%PDF-1.4 bytes"), 0o644); err != nil {
+		t.Fatalf("write temp doc: %v", err)
+	}
+
+	cmd := newAttachmentUploadTestCmd()
+	_ = cmd.Flags().Set("task", "task-abc")
+
+	out, err := captureStdout(t, func() error { return runAttachmentUpload(cmd, []string{docPath}) })
+	if err != nil {
+		t.Fatalf("runAttachmentUpload: %v", err)
+	}
+	// The `]` in the filename must be escaped inside the label.
+	if !strings.Contains(out, `!file[a\\]b.pdf](https://public.example/api/attachments/att-esc/download)`) {
+		t.Fatalf("stdout missing escaped file-card snippet: %q", out)
 	}
 }
 

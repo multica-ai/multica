@@ -315,7 +315,7 @@ func buildChatPrompt(task Task) string {
 	// Web/mobile chat only — for IM-channel chats the reply is delivered to
 	// that platform, not the Multica chat UI, so this binding does not apply.
 	if task.ChatChannelType == "" {
-		b.WriteString("\nTo include an image or file in your reply, run `multica attachment upload <local-path>`. It returns a `markdown` snippet — paste it where you want the image inline, or skip it and the file still appears as an attachment card under your reply. Upload files you produced locally; do not paste raw URLs.\n")
+		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
 	}
 	return b.String()
 }

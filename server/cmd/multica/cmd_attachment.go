@@ -34,14 +34,14 @@ var attachmentDownloadCmd = &cobra.Command{
 var attachmentUploadCmd = &cobra.Command{
 	Use:   "upload <path>",
 	Short: "Upload a file to attach to your chat reply",
-	Long: `Upload a local file so it appears attached to the reply of the current chat task.
+	Long: `Upload a local file so it is attached to the reply of the current chat task.
 
 Intended for agents running inside a chat task: the file is tagged with the
 task and, when the task completes, the server binds it to the assistant reply
-it produces. The command prints the attachment id, a durable markdown_url, and
-a ready-to-paste markdown snippet — embed the snippet in your reply to place
-the image inline, or omit it and the file still shows as an attachment card
-below the reply.
+it produces — it appears as an attachment card below your reply even if you
+paste nothing. The command also returns a markdown snippet you may paste on its
+own line to place the item: files use !file[name](url) (a card), images use
+![name](url) (inline).
 
 The task id is read from MULTICA_TASK_ID (set by the daemon inside a task);
 override it with --task when needed.`,
@@ -91,12 +91,14 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 	}
 
 	filename := filepath.Base(path)
-	// Image content types get image markdown so they render inline in the
-	// reply; every other file gets a normal link so it shows as a proper file
-	// reference instead of a broken-image icon.
-	markdown := fmt.Sprintf("[%s](%s)", filename, att.MarkdownURL)
+	// Escape markdown label metacharacters in the filename so a name like
+	// `report[v2].pdf` does not truncate the snippet's label. Files render as a
+	// block-level attachment card via `!file[...]( )`; images render inline via
+	// `![...]( )`.
+	label := escapeMarkdownLabel(filename)
+	markdown := fmt.Sprintf("!file[%s](%s)", label, att.MarkdownURL)
 	if strings.HasPrefix(att.ContentType, "image/") {
-		markdown = fmt.Sprintf("![%s](%s)", filename, att.MarkdownURL)
+		markdown = fmt.Sprintf("![%s](%s)", label, att.MarkdownURL)
 	}
 	fmt.Fprintln(os.Stderr, "Uploaded:", filename)
 
@@ -106,6 +108,21 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 		"markdown_url": att.MarkdownURL,
 		"markdown":     markdown,
 	})
+}
+
+// escapeMarkdownLabel escapes the metacharacters a markdown link/image label
+// may not contain unescaped ([ ] ( ) and backslash), so a filename like
+// `report[v2].pdf` stays a single valid label instead of truncating the
+// snippet. Kept in sync with the renderers' unescape set
+// (packages/ui/markdown/file-cards.ts).
+func escapeMarkdownLabel(s string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		`[`, `\[`,
+		`]`, `\]`,
+		`(`, `\(`,
+		`)`, `\)`,
+	).Replace(s)
 }
 
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {
