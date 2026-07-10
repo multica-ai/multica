@@ -176,6 +176,7 @@ func DefaultInAppAdminDenylist() map[string]bool {
 		// Skill governance (write)
 		"skill_propose_change", "skill_review_change_request", "skill_fork",
 		"skill_record_observation", "skill_audit", "skill_impact_analysis",
+		"skill_update", "skill_set_ownership",
 		// Code sessions (irrelevant for an in-app chat assistant)
 		"attach_session", "fork_session", "resume_session",
 		"report_activity", "complete_work", "bind_repo",
