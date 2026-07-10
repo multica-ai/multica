@@ -2,7 +2,7 @@
 
 **Issue:** FIR-1775. **Status:** Phases 1–2 shipped; Phase 3 building (context
 lint + repo-file drift lint shipped; managed region + CI write-gate shipped,
-§10; skill MCP gaps open). **Owner:** Mia.
+§10; skill MCP gaps closed, §5). **Owner:** Mia.
 
 The real solution (not an MVP): bring *all* agent context under the same
 versioning + governance machinery that skills already have, exposed via **REST
@@ -94,9 +94,13 @@ REST (proposed):
 MCP tools (new): `agent_context_list_versions`, `agent_context_diff`,
 `agent_context_propose_change`, `agent_context_list_change_requests`,
 `agent_context_review_change_request`, `agent_context_set_ownership`,
-`agent_context_lint`. Plus close the skill-governance MCP gaps Jesper flagged:
-`skill_diff`, `skill_update`, `skill_set_ownership`, `skill_audit` are CLI-only
-today — add MCP wrappers so skills are fully MCP-drivable too.
+`agent_context_lint`. The skill-governance MCP gaps Jesper flagged are closed:
+`skill_diff`, `skill_update`, `skill_set_ownership` now have MCP wrappers in
+`clitools/mcp_tools_skill_governance_gaps.go` (`skill_audit` was already closed
+in `clitools/mcp_tools_skill_metadata.go`, TECH-3077), so skills are fully
+MCP-drivable. Inventory parity lives in `runtime/tools_registry.go` +
+`permguard/inventory.json`; the two write tools are on the in-app admin
+denylist (`runtime/firtal_gateway_bridge.go`) like the other governance writes.
 
 ## 6. Upstream-zone touchpoints (fork rules)
 

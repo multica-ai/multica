@@ -2007,6 +2007,10 @@
       "exempt": "read-only — GET /api/skills/audit, no mutation"
     },
     {
+      "id": "skill_diff",
+      "exempt": "read-only — renders a diff from GET /api/skills/{id}/versions, no mutation"
+    },
+    {
       "id": "skill_fork",
       "gate": "via:POST /api/skills/{id}/forks"
     },
@@ -2053,6 +2057,14 @@
     {
       "id": "skill_review_change_request",
       "gate": "via:POST /api/skills/change-requests/{crId}/review"
+    },
+    {
+      "id": "skill_set_ownership",
+      "gate": "via:PUT /api/skills/{id}/ownership"
+    },
+    {
+      "id": "skill_update",
+      "gate": "via:PUT /api/skills/{id}"
     },
     {
       "id": "update_artifact",
