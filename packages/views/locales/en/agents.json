@@ -382,7 +382,7 @@
       "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
     },
     "availability": {
-      "label": "Availability",
+      "label": "Space access",
       "private_title": "Private",
       "private_desc": "Only you can use this Agent",
       "spaces_title": "Selected Spaces",
@@ -397,7 +397,7 @@
       "unavailable_space": "Unavailable or restricted Space",
       "remove_unavailable_hint": "Remove unavailable or archived Spaces before creating.",
       "legacy_custom_hint": "This Agent uses legacy people-specific access. Its duplicate will start Private unless you choose a new Availability.",
-      "work_access_note": "Availability does not grant access to Space data, integrations, or resources."
+      "work_access_note": "Each run can access data only in its current Space; other assigned Spaces stay isolated."
     },
     "runtime_label": "Runtime",
     "runtime_filter_mine": "Mine",
@@ -750,7 +750,7 @@
     "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
   },
   "availability_scope": {
-    "tooltip": "Availability · where this Agent can be used",
+    "tooltip": "Space access · where this Agent can work",
     "trigger_private": "Private",
     "trigger_spaces_count_one": "{{count}} Space",
     "trigger_spaces_count_other": "{{count}} Spaces",
@@ -768,10 +768,10 @@
     "archived_badge": "Archived",
     "remove_unavailable_hint": "Remove unavailable or archived Spaces before applying.",
     "legacy_custom_hint": "This Agent uses legacy people-specific access. Applying a new Availability converts it to the three-mode model.",
-    "owner_only_readonly": "Only the Agent owner can change Availability.",
+    "owner_only_readonly": "Only the Agent owner can change Space access.",
     "unsupported_server": "This server does not support Space Availability yet.",
     "composio_switch_hint": "This Agent has Composio apps enabled. Sharing it lets collaborators use those apps through the Agent.",
-    "work_access_note": "Availability does not grant access to Space data, integrations, or resources.",
+    "work_access_note": "Each run can access data only in its current Space; other assigned Spaces stay isolated.",
     "cancel": "Cancel",
     "apply": "Apply"
   },

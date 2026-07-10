@@ -63,7 +63,7 @@ export function canAssignAgentToIssue(
     return deny("not_authenticated", "Sign in to assign agents.");
   }
 
-  // Availability is a location gate and therefore runs before the owner
+  // Availability is the Agent's Space assignment and therefore runs before the owner
   // shortcut. Even an Agent owner cannot place a Selected-Spaces Agent into
   // an unselected Space. Older servers omit the field; in that case the
   // legacy invocation rules below remain authoritative.

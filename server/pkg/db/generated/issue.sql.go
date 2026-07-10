@@ -17,9 +17,15 @@ SELECT parent_issue_id,
        COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
 FROM issue
 WHERE workspace_id = $1
+  AND ($2::uuid IS NULL OR space_id = $2::uuid)
   AND parent_issue_id IS NOT NULL
 GROUP BY parent_issue_id
 `
+
+type ChildIssueProgressParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
 
 type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
@@ -27,8 +33,8 @@ type ChildIssueProgressRow struct {
 	Done          int64       `json:"done"`
 }
 
-func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUID) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, workspaceID)
+func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
+	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.SpaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -804,12 +810,14 @@ const listChildrenByParents = `-- name: ListChildrenByParents :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, space_id, properties FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
+  AND ($3::uuid IS NULL OR space_id = $3::uuid)
 ORDER BY parent_issue_id, number ASC
 `
 
 type ListChildrenByParentsParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 	ParentIds   []pgtype.UUID `json:"parent_ids"`
+	SpaceID     pgtype.UUID   `json:"space_id"`
 }
 
 // Batched variant of ListChildIssues: returns all children for the given
@@ -820,7 +828,7 @@ type ListChildrenByParentsParams struct {
 // Within each parent, order by number ASC for the same sibling-stable
 // creation order as ListChildIssues.
 func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByParentsParams) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds)
+	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds, arg.SpaceID)
 	if err != nil {
 		return nil, err
 	}

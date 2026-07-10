@@ -26,9 +26,9 @@ export type AgentVisibility = "workspace" | "private";
 export type AgentPermissionMode = "private" | "public_to";
 
 /**
- * Product-facing Agent Availability. This controls where an Agent may be
- * discovered and invoked; it is independent from the Agent's future Work
- * access to Space data, integrations, and resources.
+ * Product-facing Agent Space assignment. This controls where an Agent may be
+ * discovered and invoked and which Space can be bound to a run. Every run is
+ * still isolated to exactly one Space.
  */
 export type AgentAvailabilityMode =
   | "private"

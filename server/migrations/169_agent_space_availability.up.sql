@@ -1,5 +1,6 @@
--- Agent availability is a location gate, separate from invocation audience
--- (`permission_mode` + `agent_invocation_target`). It grants no data access.
+-- Agent availability is its Space assignment, separate from invocation audience
+-- (`permission_mode` + `agent_invocation_target`). A concrete run receives data
+-- access to exactly one assigned Space through its task-scoped token.
 --
 --   private         -> only the agent owner; any active Space they may use
 --   selected_spaces -> only the explicitly selected active Spaces
@@ -39,7 +40,7 @@ CREATE INDEX idx_agent_available_space_workspace_space
     ON agent_available_space(workspace_id, space_id, agent_id);
 
 COMMENT ON COLUMN agent.availability_mode IS
-    'Location availability gate. private = owner only in any active Space they can use; selected_spaces = only rows in agent_available_space; workspace = every active Space. Independent of invocation audience and grants no data access.';
+    'Space assignment. private = owner only in a concrete active Space they can use; selected_spaces = only rows in agent_available_space; workspace = every active Space. Each run is still bound to exactly one Space.';
 
 COMMENT ON TABLE agent_available_space IS
-    'Selected-Space location grants for agents with availability_mode=selected_spaces. These rows only permit invocation in a Space context; they grant no read/write access to Space data, integrations, or resources.';
+    'Selected-Space assignments for agents with availability_mode=selected_spaces. A run may receive read/write access to its one bound Space only.';

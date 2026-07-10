@@ -50,9 +50,10 @@ func MemberCanInvokeAgent(
 	return false
 }
 
-// AgentAvailableInSpace evaluates only the Agent Availability location gate.
-// It deliberately does not decide who may invoke the agent; HTTP entry points
-// still apply their actor/audience rules before enqueueing work.
+// AgentAvailableInSpace evaluates the Agent's Space assignment. It does not
+// decide who may invoke the Agent; HTTP entry points still apply their
+// actor/audience rules before enqueueing work. Once a task starts, this same
+// predicate is rechecked and its task token is bound to the one target Space.
 //
 // Keeping this structural check in the service layer protects continuations
 // and non-HTTP issue creation paths that already have an Issue/Space but no

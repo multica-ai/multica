@@ -765,6 +765,14 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	boundSpaceID, isTaskToken, ok := h.taskTokenSpaceScope(w, r, wsUUID)
+	if !ok {
+		return
+	}
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return
@@ -781,6 +789,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
 		return
+	}
+	if isTaskToken {
+		scoped := make([]db.Agent, 0, len(agents))
+		for _, candidate := range agents {
+			if service.AgentAvailableInSpace(r.Context(), h.Queries, candidate, wsUUID, boundSpaceID) {
+				scoped = append(scoped, candidate)
+			}
+		}
+		agents = scoped
 	}
 
 	// Batch-load skills for all agents to avoid N+1.
@@ -927,6 +944,14 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// render an explicit "no access" placeholder instead of a 404 — see
 	// agent-detail-page.tsx.
 	workspaceID := uuidToString(agent.WorkspaceID)
+	boundSpaceID, isTaskToken, scopeOK := h.taskTokenSpaceScope(w, r, agent.WorkspaceID)
+	if !scopeOK {
+		return
+	}
+	if isTaskToken && !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, agent.WorkspaceID, boundSpaceID) {
+		writeError(w, http.StatusForbidden, "this Agent is not available in the task Space")
+		return
+	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")

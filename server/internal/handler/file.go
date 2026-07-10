@@ -612,8 +612,7 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	if !h.canViewAttachmentSpace(r.Context(), requestUserID(r), att) {
-		writeError(w, http.StatusNotFound, "attachment not found")
+	if !h.canViewAttachmentSpace(w, r, att) {
 		return db.Attachment{}, false
 	}
 
@@ -670,39 +669,43 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		}
 		h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	}
-	if !h.canViewAttachmentSpace(r.Context(), userID, att) {
-		writeError(w, http.StatusNotFound, "attachment not found")
+	if !h.canViewAttachmentSpace(w, r, att) {
 		return db.Attachment{}, false
 	}
 	return att, true
 }
 
-func (h *Handler) canViewAttachmentSpace(ctx context.Context, userID string, att db.Attachment) bool {
+func (h *Handler) attachmentSpaceID(ctx context.Context, att db.Attachment) (pgtype.UUID, bool) {
 	var issueID pgtype.UUID
 	if att.IssueID.Valid {
 		issueID = att.IssueID
 	} else if att.CommentID.Valid {
 		comment, err := h.Queries.GetComment(ctx, att.CommentID)
 		if err != nil {
-			return false
+			return pgtype.UUID{}, false
 		}
 		issueID = comment.IssueID
 	} else {
-		return true
+		return pgtype.UUID{}, false
 	}
 	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 		ID:          issueID,
 		WorkspaceID: att.WorkspaceID,
 	})
 	if err != nil {
-		return false
+		return pgtype.UUID{}, false
 	}
-	allowed, err := h.Queries.CanViewWorkspaceSpace(ctx, db.CanViewWorkspaceSpaceParams{
-		WorkspaceID: att.WorkspaceID,
-		ID:          issue.SpaceID,
-		UserID:      parseUUID(userID),
-	})
-	return err == nil && allowed
+	return issue.SpaceID, true
+}
+
+func (h *Handler) canViewAttachmentSpace(w http.ResponseWriter, r *http.Request, att db.Attachment) bool {
+	spaceID, hasSpace := h.attachmentSpaceID(r.Context(), att)
+	if !hasSpace {
+		// Chat/draft attachments are not Space-backed. Their owning chat/task
+		// endpoints provide the narrower binding; preserve that existing flow.
+		return true
+	}
+	return h.requireSpaceView(w, r, att.WorkspaceID, spaceID)
 }
 
 // ---------------------------------------------------------------------------
@@ -1308,6 +1311,11 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return
+	}
+	if spaceID, hasSpace := h.attachmentSpaceID(r.Context(), att); hasSpace {
+		if !h.requireSpaceCollaboration(w, r, wsUUID, spaceID) {
+			return
+		}
 	}
 
 	// Only the uploader (or workspace admin) can delete

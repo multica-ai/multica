@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -59,7 +60,76 @@ func validSpaceRole(role string) bool {
 	return role == "lead" || role == "admin" || role == "member" || role == "guest"
 }
 
+// taskTokenSpaceScope resolves and revalidates the Space boundary stamped by
+// Auth for a running Agent. The token carries exactly one Space. Assignment is
+// checked on every Space-backed request so removing an Agent from a Space
+// revokes an already-running task without waiting for token expiry.
+//
+// Return values are (spaceID, isTaskToken, ok). A context-free task token has
+// no X-Space-ID and therefore fails closed for Space-backed data.
+func (h *Handler) taskTokenSpaceScope(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID) (pgtype.UUID, bool, bool) {
+	if r.Header.Get("X-Actor-Source") != "task_token" {
+		return pgtype.UUID{}, false, true
+	}
+	if r.Header.Get("X-Workspace-ID") != uuidToString(workspaceID) {
+		writeError(w, http.StatusForbidden, "task token is not authorized for this workspace")
+		return pgtype.UUID{}, true, false
+	}
+	spaceID, err := util.ParseUUID(r.Header.Get("X-Space-ID"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, "this task has no Space data access")
+		return pgtype.UUID{}, true, false
+	}
+	agentID, err := util.ParseUUID(r.Header.Get("X-Agent-ID"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, "invalid task identity")
+		return pgtype.UUID{}, true, false
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil || !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, workspaceID, spaceID) {
+		writeError(w, http.StatusForbidden, "agent no longer has access to this Space")
+		return pgtype.UUID{}, true, false
+	}
+	return spaceID, true, true
+}
+
+func (h *Handler) requireTaskTokenSpace(w http.ResponseWriter, r *http.Request, workspaceID, targetSpaceID pgtype.UUID) (bool, bool) {
+	boundSpaceID, isTaskToken, ok := h.taskTokenSpaceScope(w, r, workspaceID)
+	if !isTaskToken {
+		return false, true
+	}
+	if !ok {
+		return true, false
+	}
+	if boundSpaceID != targetSpaceID {
+		writeError(w, http.StatusForbidden, "task token cannot access another Space")
+		return true, false
+	}
+	return true, true
+}
+
+// taskTokenSpaceFilter forces list/search endpoints to the task's one bound
+// Space. A caller-provided filter may narrow to that same Space but can never
+// redirect the task to another one.
+func (h *Handler) taskTokenSpaceFilter(w http.ResponseWriter, r *http.Request, workspaceID, requested pgtype.UUID) (pgtype.UUID, bool) {
+	boundSpaceID, isTaskToken, ok := h.taskTokenSpaceScope(w, r, workspaceID)
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	if !isTaskToken {
+		return requested, true
+	}
+	if requested.Valid && requested != boundSpaceID {
+		writeError(w, http.StatusForbidden, "task token cannot access another Space")
+		return pgtype.UUID{}, false
+	}
+	return boundSpaceID, true
+}
+
 func (h *Handler) requireSpaceView(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	if isTaskToken, ok := h.requireTaskTokenSpace(w, r, workspaceID, spaceID); isTaskToken {
+		return ok
+	}
 	allowed, err := h.Queries.CanViewWorkspaceSpace(r.Context(), db.CanViewWorkspaceSpaceParams{
 		WorkspaceID: workspaceID,
 		ID:          spaceID,
@@ -77,6 +147,9 @@ func (h *Handler) requireSpaceView(w http.ResponseWriter, r *http.Request, works
 }
 
 func (h *Handler) requireSpaceCollaboration(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	if isTaskToken, ok := h.requireTaskTokenSpace(w, r, workspaceID, spaceID); isTaskToken {
+		return ok
+	}
 	allowed, err := h.Queries.CanCollaborateInWorkspaceSpace(r.Context(), db.CanCollaborateInWorkspaceSpaceParams{
 		WorkspaceID: workspaceID,
 		ID:          spaceID,
@@ -94,6 +167,10 @@ func (h *Handler) requireSpaceCollaboration(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) requireSpaceManagement(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		writeError(w, http.StatusForbidden, "Space management is only available to human actors")
+		return false
+	}
 	allowed, err := h.Queries.CanManageWorkspaceSpace(r.Context(), db.CanManageWorkspaceSpaceParams{
 		WorkspaceID: workspaceID,
 		ID:          spaceID,
@@ -134,6 +211,10 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	boundSpaceID, isTaskToken, ok := h.taskTokenSpaceScope(w, r, wsUUID)
+	if !ok {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -146,14 +227,18 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list spaces")
 		return
 	}
-	resp := make([]SpaceResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = spaceToResponse(row.WorkspaceSpace)
-		resp[i].IsMember = row.IsMember
-		resp[i].MemberRole = textToPtr(row.MemberRole)
-		resp[i].IsPinned = row.IsPinned
-		resp[i].IsFollowed = row.IsFollowed
-		resp[i].SortOrder = row.MemberSortOrder
+	resp := make([]SpaceResponse, 0, len(rows))
+	for _, row := range rows {
+		if isTaskToken && row.WorkspaceSpace.ID != boundSpaceID {
+			continue
+		}
+		item := spaceToResponse(row.WorkspaceSpace)
+		item.IsMember = row.IsMember
+		item.MemberRole = textToPtr(row.MemberRole)
+		item.IsPinned = row.IsPinned
+		item.IsFollowed = row.IsFollowed
+		item.SortOrder = row.MemberSortOrder
+		resp = append(resp, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": resp, "total": len(resp)})
 }

@@ -2,7 +2,7 @@
 
 > 状态：已确定的产品方向，具体实现可以分阶段完成。
 >
-> 更新时间：2026-07-10。
+> 更新时间：2026-07-11。
 >
 > 范围：定义 Workspace、Space、Project、Issue、Agent、Skill、Squad、Autopilot 和未来跨 Space 协作层之间的产品关系。本文描述目标模型，不代表当前代码已经完全实现。
 
@@ -228,22 +228,22 @@ Move Project 是显式的高影响操作：
 
 ## Agent
 
-Agent 是 Workspace 级数字成员，不属于某一个 Space。一个 Agent 可以服务多个 Space，避免为每个团队复制配置、记忆和运行环境。
+Agent 是 Workspace 级数字成员，不以某一个 Space 作为唯一 home。一个 Agent 可以加入多个 Space，避免为每个团队复制配置、记忆和运行环境。
 
-Agent 必须有两套独立范围：
+产品上需要区分两个问题：
 
-1. **Availability**：哪些人或 Space 可以发现、@mention、分配和调用 Agent；
-2. **Work access**：Agent 可以读取或修改哪些 Space、Project、Issue、Integration 和 Resource。
+1. **Space access**：Agent 被加入哪些 Space，决定它可以在哪些 Space 被使用，也决定它的运行可以访问哪些 Space 数据；
+2. **Invocation audience**：哪些人可以调用这个 Agent，例如仅 Owner、指定成员或 Workspace 成员。
 
-调用权限不自动授予数据权限。一次执行的有效范围应是「调用者权限、Agent 权限和当前工作上下文」的安全交集，不能因为 Agent 被分享给某个 Space 就泄露其他 Space 的内容。
+首个版本用三档 Space access 覆盖高频场景：
 
-建议支持三种 Availability：
+- Private：只有 Owner 可以调用；Owner 在某个可访问 Space 中启动任务时，该次运行只获得这个 Space 的数据访问；
+- Selected Spaces：Agent 明确加入若干 Space，可在这些 Space 中被发现、@mention、分配和调用；
+- Workspace：Agent 默认加入当前及未来所有 Active Space。
 
-- Private：仅创建者或维护者；
-- Selected Spaces：明确授权给若干 Space；
-- Workspace：全 Workspace 可用。
+把 Agent 加入一个 Space，会授予它在该 Space 执行工作所需的数据访问，但不会给 Agent Owner 或调用者增加任何人类权限。更重要的是，授权不是“本次进程可以看完所有已加入 Space”：每个任务令牌必须绑定唯一的当前 Space，Space A 的运行不能读取 Space B，即使同一个 Agent 同时加入了 A 和 B。无 Space 上下文的 Direct Chat 默认没有任何 Space 数据访问。
 
-Agent 只有在目标 Space 可用时，才能成为该 Space Issue、Autopilot 或 Squad 的执行者。
+因此一次执行的有效范围是「Agent 的 Space access ∩ 当前任务 Space ∩ 该任务允许使用的 Integration / Resource」。Agent 只有在目标 Space 可用时，才能成为该 Space Issue、Autopilot 或 Squad 的执行者；运行期间从 Space 移除 Agent，应立即撤销该令牌后续的 Space 数据访问。
 
 ## Skill
 
@@ -386,7 +386,7 @@ Workspace membership
 - Project 可以限制为部分 Space 成员，但不能分享给 Space 外部来绕过 Space；
 - Issue 默认不提供独立的广泛分享开关；
 - Workspace Owner 可以执行治理和恢复操作，审计访问应有明确记录；
-- Agent 的 Availability 与 Work access 始终分开计算；
+- Agent 的调用者范围与 Space access 始终分开计算；
 - Initiative、搜索结果和 Dashboard 不授予底层对象权限。
 
 ## 必须长期成立的产品不变量
@@ -399,7 +399,7 @@ Workspace membership
 6. 每个 Squad 恰好有一个 Space。
 7. Agent 和 Skill 不以 Space 作为唯一 home。
 8. 一个对象出现在多个视图中，不代表它拥有多个 home。
-9. 分享 Agent 或 Skill 不授予数据和 Integration 权限。
+9. Agent 加入 Space 只授予该 Space 的数据权限；每次运行仍绑定一个 Space，Integration 仍需显式 binding。分享 Skill 不授予数据或 Integration 权限。
 10. Initiative 只聚合，不改变底层 Project 的归属或权限。
 
 如果一个新功能违反这些不变量，应先判断它是否应该成为新的 Workspace 级聚合对象，而不是给现有对象增加隐式多归属。
@@ -432,8 +432,9 @@ Workspace membership
 
 - 完整区分 Join、Follow、Pin 和 Reorder；
 - 补齐 Open / Private Space 与角色；
-- 为 Agent 和 Skill 增加 Selected Spaces / Workspace 的分享范围；
-- 分离 Agent Availability 与 Work access。
+- 为 Agent 增加 Private / Selected Spaces / Workspace 的 Space access，并让每次运行绑定唯一 Space；
+- 为 Skill 增加 Selected Spaces / Workspace 的分享范围；
+- 分离 Agent 的调用者范围、Space access 和 Integration binding。
 
 ### Phase 3：Space 运行能力
 
@@ -456,7 +457,7 @@ Workspace membership
 - Issue 多 home 或 multi-homing；
 - Shared Project 这一第二种 Project 类型；
 - 通过 Pin、Follow 或全局视图改变权限；
-- 通过分享 Agent、Skill 或 Initiative 隐式扩大数据权限；
+- 通过 Agent 的单次运行横向访问其他已加入 Space，或通过分享 Skill / Initiative 隐式扩大数据权限；
 - 为一次临时跨团队协作自动创建 Space。
 
 ## 外部产品研究带来的启示

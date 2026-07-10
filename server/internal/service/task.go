@@ -3191,26 +3191,31 @@ func (s *TaskService) retryStillAllowed(ctx context.Context, parent db.AgentTask
 	return false
 }
 
-// issueTaskStillAllowed applies the two independent gates every issue-backed
-// task needs at a delayed execution boundary: Availability decides whether the
-// Agent may run in the issue's current Space, while invocation audience decides
-// whether the original human may still invoke it. The owner shortcut inside
-// MemberCanInvokeAgent deliberately keeps a private owner's own task valid.
+// issueTaskStillAllowed applies the delayed execution gates for issue-backed
+// work. Space assignment is always required. When a human originator exists we
+// also recheck their invocation audience; system/Autopilot work has no human
+// originator and relies on the already-authorized automation plus the Agent's
+// live Space assignment.
 func (s *TaskService) issueTaskStillAllowed(
 	ctx context.Context,
 	task db.AgentTaskQueue,
 	agent db.Agent,
 	originatorUserID pgtype.UUID,
 ) bool {
-	if !task.IssueID.Valid || !originatorUserID.Valid {
+	if !task.IssueID.Valid {
 		return false
 	}
 	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
 		return false
 	}
-	return AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) &&
-		MemberCanInvokeAgent(ctx, s.Queries, agent, issue.WorkspaceID, originatorUserID)
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		return false
+	}
+	if !originatorUserID.Valid {
+		return true
+	}
+	return MemberCanInvokeAgent(ctx, s.Queries, agent, issue.WorkspaceID, originatorUserID)
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -3694,7 +3699,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 // task's Issue/Autopilot Space to match. Sharing a Skill grants no Space data
 // access — it only decides whether the Skill bundle is mounted for this run.
 func (s *TaskService) LoadAgentSkillsForTask(ctx context.Context, task db.AgentTaskQueue) []AgentSkillData {
-	spaceID := s.taskSpaceID(ctx, task)
+	spaceID := s.TaskSpaceID(ctx, task)
 	return s.loadAgentSkillsForContext(ctx, task.AgentID, spaceID, true)
 }
 
@@ -3761,7 +3766,10 @@ func (s *TaskService) skillAvailableForTask(
 	}
 }
 
-func (s *TaskService) taskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+// TaskSpaceID resolves the single Space authorization boundary for a task.
+// Direct Chat deliberately resolves to NULL: without a concrete Space context,
+// its task token may use chat/task endpoints but cannot browse Space work.
+func (s *TaskService) TaskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
 	if task.IssueID.Valid {
 		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 		if err == nil {
@@ -3775,6 +3783,11 @@ func (s *TaskService) taskSpaceID(ctx context.Context, task db.AgentTaskQueue) p
 			if err == nil {
 				return autopilot.SpaceID
 			}
+		}
+	}
+	if qc, ok := s.parseQuickCreateContext(task); ok && qc.SpaceID != "" {
+		if spaceID, err := util.ParseUUID(qc.SpaceID); err == nil {
+			return spaceID
 		}
 	}
 	return pgtype.UUID{}

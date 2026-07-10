@@ -394,6 +394,10 @@ type UpdateAutopilotTriggerRequest struct {
 
 func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 
 	var statusFilter pgtype.Text
 	if s := r.URL.Query().Get("status"); s != "" {
@@ -407,9 +411,13 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		}
 		spaceFilter = id
 	}
+	spaceFilter, ok = h.taskTokenSpaceFilter(w, r, wsUUID, spaceFilter)
+	if !ok {
+		return
+	}
 
 	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
-		WorkspaceID:  parseUUID(workspaceID),
+		WorkspaceID:  wsUUID,
 		ViewerUserID: parseUUID(requestUserID(r)),
 		SpaceID:      spaceFilter,
 		Status:       statusFilter,

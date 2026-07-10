@@ -425,6 +425,10 @@ type searchResult struct {
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
 func buildSearchQuery(phrase string, terms []string, queryNum int, querySpaceKey string, hasNum bool, includeClosed bool) (string, []any) {
+	return buildSearchQueryForSpace(phrase, terms, queryNum, querySpaceKey, hasNum, includeClosed, pgtype.UUID{})
+}
+
+func buildSearchQueryForSpace(phrase string, terms []string, queryNum int, querySpaceKey string, hasNum bool, includeClosed bool, spaceID pgtype.UUID) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -517,6 +521,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, querySpaceKey
 
 	if !includeClosed {
 		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+	}
+	if spaceID.Valid {
+		whereClause += fmt.Sprintf(" AND i.space_id = %s::uuid", nextArg(spaceID))
 	}
 
 	// --- ORDER BY clause ---
@@ -714,7 +721,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	terms := splitSearchTerms(q)
 	queryNum, querySpaceKey, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, querySpaceKey, hasNum, includeClosed)
+	spaceFilter, ok := h.taskTokenSpaceFilter(w, r, wsUUID, pgtype.UUID{})
+	if !ok {
+		return
+	}
+	sqlQuery, args := buildSearchQueryForSpace(q, terms, queryNum, querySpaceKey, hasNum, includeClosed, spaceFilter)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-3] = parseUUID(requestUserID(r))
@@ -882,6 +893,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		spaceFilter = id
+	}
+	spaceFilter, ok = h.taskTokenSpaceFilter(w, r, wsUUID, spaceFilter)
+	if !ok {
+		return
 	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
@@ -1399,6 +1414,17 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var requestedSpaceFilter pgtype.UUID
+	if raw := r.URL.Query().Get("space_id"); raw != "" {
+		requestedSpaceFilter, ok = parseUUIDOrBadRequest(w, raw, "space_id")
+		if !ok {
+			return
+		}
+	}
+	spaceFilter, ok := h.taskTokenSpaceFilter(w, r, wsUUID, requestedSpaceFilter)
+	if !ok {
+		return
+	}
 
 	limit := 50
 	offset := 0
@@ -1486,19 +1512,22 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
 	}
-	if raw := r.URL.Query().Get("space_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "space_id")
-		if !ok {
-			return
-		}
-		where = append(where, fmt.Sprintf("i.space_id = %s::uuid", addArg(id)))
+	if spaceFilter.Valid {
+		where = append(where, fmt.Sprintf("i.space_id = %s::uuid", addArg(spaceFilter)))
 	}
 	if raw := r.URL.Query().Get("space_ids"); raw != "" {
 		ids, ok := parseUUIDParamList(w, raw, "space_ids")
 		if !ok {
 			return
 		}
-		if len(ids) > 0 {
+		if r.Header.Get("X-Actor-Source") == "task_token" {
+			for _, id := range ids {
+				if id != spaceFilter {
+					writeError(w, http.StatusForbidden, "task token cannot access another Space")
+					return
+				}
+			}
+		} else if len(ids) > 0 {
 			where = append(where, fmt.Sprintf("i.space_id = ANY(%s::uuid[])", addArg(ids)))
 		}
 	}
@@ -1915,6 +1944,10 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	spaceFilter, ok := h.taskTokenSpaceFilter(w, r, wsUUID, pgtype.UUID{})
+	if !ok {
+		return
+	}
 
 	raw := r.URL.Query().Get("parent_ids")
 	if raw == "" {
@@ -1950,6 +1983,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	children, err := h.Queries.ListChildrenByParents(r.Context(), db.ListChildrenByParentsParams{
 		WorkspaceID: wsUUID,
 		ParentIds:   parentIDs,
+		SpaceID:     spaceFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
@@ -1971,8 +2005,15 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	spaceFilter, ok := h.taskTokenSpaceFilter(w, r, wsUUID, pgtype.UUID{})
+	if !ok {
+		return
+	}
 
-	rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
+	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceFilter,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
 		return

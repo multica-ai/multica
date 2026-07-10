@@ -273,7 +273,7 @@
       "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
     },
     "availability": {
-      "label": "利用範囲",
+      "label": "Space アクセス",
       "private_title": "プライベート",
       "private_desc": "この Agent を使用できるのはあなただけです",
       "spaces_title": "選択した Space",
@@ -288,7 +288,7 @@
       "unavailable_space": "利用不可または制限された Space",
       "remove_unavailable_hint": "作成前に利用不可またはアーカイブ済みの Space を削除してください。",
       "legacy_custom_hint": "この Agent は旧式のメンバー別アクセスを使用しています。新しい利用範囲を選ばない限り、複製はプライベートで開始します。",
-      "work_access_note": "利用範囲は Space のデータ、連携、リソースへのアクセスを許可しません。"
+      "work_access_note": "各実行がアクセスできるのは現在の Space のデータだけです。割り当てられた他の Space は分離されたままです。"
     },
     "runtime_label": "ランタイム",
     "runtime_filter_mine": "自分のもの",
@@ -636,7 +636,7 @@
     "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
   },
   "availability_scope": {
-    "tooltip": "利用範囲 · この Agent を使用できる場所",
+    "tooltip": "Space アクセス · この Agent が作業できる場所",
     "trigger_private": "プライベート",
     "trigger_spaces_count_other": "{{count}} 個の Space",
     "trigger_workspace": "ワークスペース",
@@ -653,10 +653,10 @@
     "archived_badge": "アーカイブ済み",
     "remove_unavailable_hint": "適用前に利用不可またはアーカイブ済みの Space を削除してください。",
     "legacy_custom_hint": "この Agent は旧式のメンバー別アクセスを使用しています。新しい利用範囲を適用すると3段階モデルへ変換されます。",
-    "owner_only_readonly": "利用範囲を変更できるのは Agent のオーナーだけです。",
+    "owner_only_readonly": "Space アクセスを変更できるのは Agent のオーナーだけです。",
     "unsupported_server": "このサーバーはまだ Space の利用範囲に対応していません。",
     "composio_switch_hint": "この Agent は Composio アプリが有効です。共有すると共同作業者が Agent 経由で利用できます。",
-    "work_access_note": "利用範囲は Space のデータ、連携、リソースへのアクセスを許可しません。",
+    "work_access_note": "各実行がアクセスできるのは現在の Space のデータだけです。割り当てられた他の Space は分離されたままです。",
     "cancel": "キャンセル",
     "apply": "適用"
   },

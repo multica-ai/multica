@@ -373,7 +373,7 @@
       "public_targets_empty_hint": "至少勾选下方一项 —— 否则该智能体仍为私有。"
     },
     "availability": {
-      "label": "可用范围",
+      "label": "空间访问",
       "private_title": "私有",
       "private_desc": "仅你可以使用这个智能体",
       "spaces_title": "指定空间",
@@ -388,7 +388,7 @@
       "unavailable_space": "不可用或受限的空间",
       "remove_unavailable_hint": "创建前请移除不可用或已归档的空间。",
       "legacy_custom_hint": "这个智能体使用旧版按成员授权。副本将默认设为私有，除非你选择新的可用范围。",
-      "work_access_note": "可用范围不会授予空间数据、集成或资源的访问权限。"
+      "work_access_note": "每次运行只能访问当前空间的数据；同一智能体归属的其他空间仍相互隔离。"
     },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
@@ -736,7 +736,7 @@
     "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
   },
   "availability_scope": {
-    "tooltip": "可用范围 · 这个智能体可以在哪些空间使用",
+    "tooltip": "空间访问 · 这个智能体可以在哪些空间工作",
     "trigger_private": "私有",
     "trigger_spaces_count_other": "{{count}} 个空间",
     "trigger_workspace": "整个工作区",
@@ -753,10 +753,10 @@
     "archived_badge": "已归档",
     "remove_unavailable_hint": "应用前请移除不可用或已归档的空间。",
     "legacy_custom_hint": "这个智能体使用旧版按成员授权。应用新的可用范围会将其转换为三档模型。",
-    "owner_only_readonly": "只有智能体所有者可以更改可用范围。",
+    "owner_only_readonly": "只有智能体所有者可以更改空间访问。",
     "unsupported_server": "当前服务端尚不支持空间可用范围。",
     "composio_switch_hint": "此智能体已启用 Composio 应用。共享后，协作者可以通过智能体使用这些应用。",
-    "work_access_note": "可用范围不会授予空间数据、集成或资源的访问权限。",
+    "work_access_note": "每次运行只能访问当前空间的数据；同一智能体归属的其他空间仍相互隔离。",
     "cancel": "取消",
     "apply": "应用"
   },

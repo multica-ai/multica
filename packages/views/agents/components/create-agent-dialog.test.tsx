@@ -477,7 +477,7 @@ describe("CreateAgentDialog Availability", () => {
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
 
-    expect(screen.getByText("Availability")).toBeInTheDocument();
+    expect(screen.getByText("Space access")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Workspace Agent" },
     });

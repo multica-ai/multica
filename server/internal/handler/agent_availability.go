@@ -15,10 +15,12 @@ const (
 	agentAvailabilityWorkspace      = "workspace"
 )
 
-// resolvedAgentAvailability is the normalized location gate stored across
-// agent.availability_mode and agent_available_space. It grants no data,
-// integration, or resource access; invocation still has to pass the existing
-// permission_mode / invocation_targets audience gate as well.
+// resolvedAgentAvailability is the normalized Space assignment stored across
+// agent.availability_mode and agent_available_space. It decides both where an
+// Agent may be invoked and which Space may be bound to a concrete run. The run
+// token is still narrowed to exactly one of those Spaces; assignment to several
+// Spaces never gives one task lateral access across them. Invocation also has
+// to pass permission_mode / invocation_targets.
 type resolvedAgentAvailability struct {
 	mode     string
 	spaceIDs []pgtype.UUID

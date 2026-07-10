@@ -37,7 +37,7 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// X-Actor-Source is server-set only — any value supplied by
+			// X-Actor-Source and X-Space-ID are server-set only — any value supplied by
 			// the client is untrusted and discarded before the auth
 			// branches run. Only the mat_ branch below re-sets it. This
 			// is what prevents a client from sending a normal mul_ PAT
@@ -45,6 +45,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
+			r.Header.Del("X-Space-ID")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -63,7 +64,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// Agent task token: "mat_" prefix. Minted by the server at
 			// task-claim time and injected by the daemon into the agent
 			// process. Authoritative for actor identity — the bound
-			// (user_id, agent_id, task_id, workspace_id) triple is
+			// (user_id, agent_id, task_id, workspace_id, space_id) binding is
 			// written into request headers here, OVERRIDING whatever the
 			// client sent, so a downstream actor-resolver cannot be
 			// tricked by a client that strips or forges X-Agent-ID /
@@ -86,6 +87,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
 				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+				if tt.SpaceID.Valid {
+					r.Header.Set("X-Space-ID", uuidToString(tt.SpaceID))
+				}
 				// X-Actor-Source flags the auth path so resolveActor and
 				// any owner-only handler can deny without re-querying the
 				// token table. The value "task_token" is the only signal

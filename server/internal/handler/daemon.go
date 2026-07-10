@@ -2459,7 +2459,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
-	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
+	// one Space, owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
@@ -2483,6 +2483,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
 		return
 	}
+	taskSpaceID := h.TaskService.TaskSpaceID(r.Context(), *task)
+	if taskSpaceID.Valid {
+		agent, agentErr := h.Queries.GetAgent(r.Context(), task.AgentID)
+		if agentErr != nil || !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, parseUUID(resp.WorkspaceID), taskSpaceID) {
+			outcome = "revoked_space_access"
+			slog.Info("task claim cancelled: agent no longer has access to task Space",
+				"task_id", uuidToString(task.ID),
+				"agent_id", uuidToString(task.AgentID),
+				"space_id", uuidToString(taskSpaceID),
+			)
+			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+				slog.Error("task claim: cancel after Space access revocation failed",
+					"task_id", uuidToString(task.ID), "error", cancelErr)
+			}
+			payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+			return
+		}
+	}
 	tokenStr, terr := auth.GenerateAgentTaskToken()
 	if terr != nil {
 		outcome = "error_token"
@@ -2497,6 +2515,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
+		SpaceID:     taskSpaceID,
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}, deliveredCommentIDs, commentBackedTask)

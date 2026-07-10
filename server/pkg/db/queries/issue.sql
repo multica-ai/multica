@@ -338,6 +338,7 @@ ORDER BY number ASC;
 SELECT * FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
+  AND (sqlc.narg('space_id')::uuid IS NULL OR space_id = sqlc.narg('space_id')::uuid)
 ORDER BY parent_issue_id, number ASC;
 
 -- name: GetIssueByOrigin :one
@@ -371,7 +372,8 @@ SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
        COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
 FROM issue
-WHERE workspace_id = $1
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('space_id')::uuid IS NULL OR space_id = sqlc.narg('space_id')::uuid)
   AND parent_issue_id IS NOT NULL
 GROUP BY parent_issue_id;
 

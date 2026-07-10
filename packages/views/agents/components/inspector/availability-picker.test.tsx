@@ -72,7 +72,7 @@ afterEach(() => {
 describe("AvailabilityPicker", () => {
   it("collects a multi-Space draft and applies it once", () => {
     const { onChange } = renderPicker();
-    fireEvent.click(screen.getByRole("button", { name: /Availability/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Space access/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Engineering/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Design/ }));
 
@@ -91,7 +91,7 @@ describe("AvailabilityPicker", () => {
       availabilityMode: "selected_spaces",
       availabilitySpaceIds: ["space-1", "space-old"],
     });
-    fireEvent.click(screen.getByRole("button", { name: /Availability/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Space access/ }));
 
     expect(screen.getByText("Old Team")).toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
