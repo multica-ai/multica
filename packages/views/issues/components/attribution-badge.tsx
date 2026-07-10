@@ -96,7 +96,7 @@ export function AttributionBadge({
         name={name}
         initials={initialsOf(name)}
         avatarUrl={initiator.avatar_url}
-        size={14}
+        size="xs"
         className="shrink-0"
       />
       <span className="min-w-0 truncate">
