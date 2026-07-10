@@ -1409,3 +1409,53 @@ func TestWriteRuntimeConfigFileAlwaysInsertsFixedManagedSeparator(t *testing.T) 
 		})
 	}
 }
+
+// TestCommentTriggeredBriefFansOutAcrossThreads pins the second reply-instruction
+// source (the persistent workflow brief) in sync with the per-turn prompt
+// (MUL-4348). When a coalesced run spans >=2 root threads, the workflow's reply
+// step must emit the per-thread fan-out plan — not the single --parent=trigger
+// cookbook — so a cross-thread run never gets one surface saying "one comment"
+// and the other "one per thread".
+func TestCommentTriggeredBriefFansOutAcrossThreads(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "c3",
+		TriggerThreadID:  "c3",
+		CommentReplyTargets: []ThreadReplyTarget{
+			{ThreadID: "c1", ParentID: "c1"},
+			{ThreadID: "c2", ParentID: "c2"},
+			{ThreadID: "c3", ParentID: "c3"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{"3 DISTINCT threads", "Post ONE reply per thread", "--parent c1", "--parent c2", "--parent c3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cross-thread brief must contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestCommentTriggeredBriefSingleThreadKeepsSingleReply pins the hard
+// requirement on the brief surface too: a run with no multi-thread targets
+// (ordinary comment, or same-thread follow-ups that collapsed upstream) keeps
+// the single --parent=trigger cookbook and never emits the fan-out block.
+func TestCommentTriggeredBriefSingleThreadKeepsSingleReply(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "c3",
+		TriggerThreadID:  "thread-A",
+		// CommentReplyTargets deliberately empty: same-thread follow-ups collapse
+		// to a single group upstream, so no fan-out targets reach the brief.
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	if strings.Contains(out, "DISTINCT threads") {
+		t.Errorf("single/same-thread brief must not emit the multi-thread fan-out block, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {
+		t.Errorf("single/same-thread brief must keep the single --parent=trigger cookbook, got:\n%s", out)
+	}
+}

@@ -299,6 +299,129 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 }
 
+// TestEnsureAttachmentWithinWorkdir covers the MUL-4252 guardrail extended to
+// --attachment: a local attachment path outside the task workdir is rejected
+// (so an agent can't attach another run's stale /tmp file), with the same
+// --allow-external-file escape hatch as the text flags.
+func TestEnsureAttachmentWithinWorkdir(t *testing.T) {
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "test"}
+		c.Flags().Bool("allow-external-file", false, "")
+		return c
+	}
+
+	t.Run("attachment inside the working directory is accepted", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("chart.png", []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		if err := ensureAttachmentWithinWorkdir(newCmd(), "chart.png"); err != nil {
+			t.Fatalf("expected in-workdir attachment to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("attachment outside the working directory is rejected", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "stale.png"
+		if err := os.WriteFile(path, []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		err := ensureAttachmentWithinWorkdir(newCmd(), path)
+		if err == nil {
+			t.Fatalf("expected rejection for attachment outside the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
+		}
+	})
+
+	t.Run("--allow-external-file permits an attachment outside the working directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "external.png"
+		if err := os.WriteFile(path, []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newCmd()
+		_ = c.Flags().Set("allow-external-file", "true")
+		if err := ensureAttachmentWithinWorkdir(c, path); err != nil {
+			t.Fatalf("expected override to permit external attachment, got %v", err)
+		}
+	})
+}
+
+func newIssueCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+// TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads is the MUL-4252
+// P2 guard: `comment add` must validate every --attachment BEFORE uploading any,
+// so a valid attachment followed by an invalid (external) one aborts the call
+// with ZERO upload requests and no comment — the pre-refactor loop uploaded the
+// first file, orphaning it as an issue attachment, then failed on the second.
+func TestRunIssueCommentAddRejectsExternalAttachmentWithZeroUploads(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	var uploads, comments int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TST-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			uploads++
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "att-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			comments++
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	// mat_ prefix clears the daemon-managed execution-context guard both in CI
+	// and when the suite runs inside an agent task (leftover daemon marker).
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	// A valid attachment inside the workdir, FOLLOWED BY an external one.
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("good.png", []byte("good"), 0o644); err != nil {
+		t.Fatalf("write good attachment: %v", err)
+	}
+	external := t.TempDir() + string(os.PathSeparator) + "bad.png"
+	if err := os.WriteFile(external, []byte("bad"), 0o644); err != nil {
+		t.Fatalf("write external attachment: %v", err)
+	}
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "hello")
+	_ = cmd.Flags().Set("attachment", "good.png")
+	_ = cmd.Flags().Set("attachment", external)
+
+	err := runIssueCommentAdd(cmd, []string{issueID})
+	if err == nil {
+		t.Fatalf("expected rejection for an external attachment")
+	}
+	if !strings.Contains(err.Error(), "allow-external-file") {
+		t.Errorf("error should point at --allow-external-file, got %v", err)
+	}
+	if uploads != 0 {
+		t.Errorf("expected ZERO upload requests when a later attachment is invalid, got %d", uploads)
+	}
+	if comments != 0 {
+		t.Errorf("expected no comment to be posted, got %d", comments)
+	}
+}
+
 func newIssueCreateTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "create"}
 	cmd.Flags().String("title", "", "")

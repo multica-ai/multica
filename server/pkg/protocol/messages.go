@@ -3,7 +3,8 @@ package protocol
 import "encoding/json"
 
 const (
-	DaemonCapabilitySkillBundlesV1 = "skill-bundles-v1"
+	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
+	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
 )
 
 // Message is the envelope for all WebSocket messages.

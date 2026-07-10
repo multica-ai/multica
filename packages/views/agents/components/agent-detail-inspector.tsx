@@ -142,6 +142,7 @@ export function AgentDetailInspector({
         <ThinkingPropRow
           runtimeId={agent.runtime_id}
           runtimeOnline={!!isOnline}
+          provider={runtime?.provider ?? ""}
           model={agent.model ?? ""}
           value={agent.thinking_level ?? ""}
           canEdit={canEdit}
