@@ -489,7 +489,7 @@ export function AgentTranscriptDialog({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <div className="flex min-w-0 items-center gap-2">
               {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size={24} />
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" />
               ) : (
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
                   <Bot className="h-3.5 w-3.5" />

@@ -1039,13 +1039,21 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return false
 	}
 
-	// Member authors are their own originator; agent-authored triggers have no
-	// request context here, so the originator is left empty (canInvokeAgent
-	// then fails closed for member/team targets — a workspace target still
-	// admits the agent as a workspace principal).
+	// The gate must judge the SAME top-of-chain human the enqueue path will
+	// persist on the leader task row, or it drifts: an agent-created issue that
+	// correctly inherits its originator (MUL-4305) would still be denied here
+	// if the gate used an empty originator. Member authors are their own
+	// originator; for agent/system-triggered assigns we resolve the originator
+	// exactly like EnqueueTaskForSquadLeader* does (via the issue's origin
+	// link). triggerCommentID is always empty on the assign/promote path, so we
+	// pass an invalid UUID to match. A still-unresolved originator leaves
+	// leaderOriginator empty, which correctly fails closed for member/team
+	// targets while a workspace target still admits the agent principal.
 	leaderOriginator := ""
 	if authorType == "member" {
 		leaderOriginator = authorID
+	} else {
+		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID)) {
 		return false

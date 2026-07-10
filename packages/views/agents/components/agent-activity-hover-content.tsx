@@ -104,7 +104,7 @@ export function AgentActivityHoverContent({
                 initials={getActorInitials("agent", task.agent_id)}
                 avatarUrl={getActorAvatarUrl("agent", task.agent_id)}
                 isAgent
-                size={18}
+                size="sm"
               />
               <span className="flex-1 truncate font-medium">
                 {getActorName("agent", task.agent_id)}

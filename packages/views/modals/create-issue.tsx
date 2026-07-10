@@ -161,7 +161,7 @@ function CreateRunHint({
             <ActorAvatar
               actorType={avatarType}
               actorId={avatarId}
-              size={16}
+              size="sm"
               profileLink={false}
             />
           )}

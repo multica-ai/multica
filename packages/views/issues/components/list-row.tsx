@@ -139,7 +139,7 @@ function ListRowContent({
             <ActorAvatar
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
-              size={20}
+              size="sm"
               enableHoverCard
             />
           )}

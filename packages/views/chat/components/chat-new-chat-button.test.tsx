@@ -11,7 +11,7 @@ vi.mock("../../common/actor-avatar", () => ({
   ),
 }));
 
-import { AgentDropdown } from "./chat-window";
+import { NewChatButton } from "./new-chat-button";
 
 const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
 
@@ -50,31 +50,29 @@ const agents = [
   makeAgent({ id: "other-gamma", name: "Gamma", owner_id: "user-2" }),
 ];
 
-function renderDropdown(onSelect = vi.fn()) {
+// The ⊕ button carries the localized "New chat" label as its accessible name.
+const NEW_CHAT_LABEL = enChat.window.new_chat_tooltip;
+
+function renderPicker(onStart = vi.fn()) {
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <AgentDropdown
-        agents={agents}
-        activeAgent={agents[0]!}
-        userId="user-1"
-        onSelect={onSelect}
-      />
+      <NewChatButton agents={agents} userId="user-1" onStart={onStart} />
     </I18nProvider>,
   );
-  fireEvent.click(screen.getByText("Alpha"));
-  return { onSelect };
+  fireEvent.click(screen.getByRole("button", { name: NEW_CHAT_LABEL }));
+  return { onStart };
 }
 
-describe("AgentDropdown", () => {
-  it("opens the shared picker upward from the chat input", async () => {
-    renderDropdown();
+describe("NewChatButton", () => {
+  it("opens the agent picker below the ⊕ trigger", async () => {
+    renderPicker();
 
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveAttribute("data-side", "top");
+    expect(dialog).toHaveAttribute("data-side", "bottom");
   });
 
   it("filters both My agents and Others by agent name", async () => {
-    renderDropdown();
+    renderPicker();
 
     const input = await screen.findByRole("textbox", { name: "Filter options" });
     fireEvent.change(input, { target: { value: "ta" } });
@@ -88,7 +86,7 @@ describe("AgentDropdown", () => {
   });
 
   it("matches My agents by pinyin", async () => {
-    renderDropdown();
+    renderPicker();
 
     const input = await screen.findByRole("textbox", { name: "Filter options" });
     fireEvent.change(input, { target: { value: "zhang" } });
@@ -101,7 +99,7 @@ describe("AgentDropdown", () => {
   });
 
   it("shows the shared empty state when no agents match", async () => {
-    renderDropdown();
+    renderPicker();
 
     const input = await screen.findByRole("textbox", { name: "Filter options" });
     fireEvent.change(input, { target: { value: "missing" } });
@@ -111,31 +109,34 @@ describe("AgentDropdown", () => {
     expect(screen.queryByText("Others")).not.toBeInTheDocument();
   });
 
-  it("left-aligns agent picker rows", async () => {
-    renderDropdown();
-
-    const dialog = await screen.findByRole("dialog");
-    const alphaRow = Array.from(
-      dialog.querySelectorAll<HTMLButtonElement>("button[data-picker-item]"),
-    ).find((row) => row.textContent?.includes("Alpha"));
-
-    expect(alphaRow).toBeDefined();
-    expect(alphaRow).toHaveClass("text-left");
-  });
-
-  it("keeps the current agent marked and selects another agent", async () => {
-    const { onSelect } = renderDropdown();
+  it("pre-checks no agent (a new chat has no current) and reports the chosen agent", async () => {
+    const { onStart } = renderPicker();
 
     const dialog = screen.getByRole("dialog");
+    // No agent should carry a visible check mark for a fresh new chat.
     const alphaRow = within(dialog).getByText("Alpha").closest("button");
     expect(alphaRow).not.toBeNull();
-    expect(alphaRow!.querySelector("svg:not(.invisible)")).not.toBeNull();
+    expect(alphaRow!.querySelector("svg:not(.invisible)")).toBeNull();
 
     fireEvent.click(within(dialog).getByText("Beta"));
 
-    expect(onSelect).toHaveBeenCalledWith(agents[2]);
+    expect(onStart).toHaveBeenCalledWith(agents[2]);
     await waitFor(() => {
       expect(screen.queryByRole("textbox", { name: "Filter options" })).not.toBeInTheDocument();
     });
+  });
+
+  it("starts immediately without a picker when only one agent exists", () => {
+    const onStart = vi.fn();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <NewChatButton agents={[agents[0]!]} userId="user-1" onStart={onStart} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: NEW_CHAT_LABEL }));
+
+    expect(onStart).toHaveBeenCalledWith(agents[0]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

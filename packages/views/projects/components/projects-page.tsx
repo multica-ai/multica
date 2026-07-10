@@ -408,7 +408,7 @@ function ProjectTableRow({
                 className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-accent/60"
               >
                 {project.lead_type && project.lead_id ? (
-                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={18} enableHoverCard />
+                  <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
                 ) : (
                   <span className="inline-flex h-[18px] w-[18px] rounded-full border border-dashed border-muted-foreground/30" />
                 )}
@@ -623,7 +623,7 @@ function ProjectCard({
           renderTrigger={(leadName) => (
             <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -1070,7 +1070,7 @@ export function ProjectsPage() {
                           className={FILTER_ITEM_CLASS}
                         >
                           <HoverCheck checked={filters.leads.includes(value)} />
-                          <ActorAvatar actorType={type} actorId={id} size={16} />
+                          <ActorAvatar actorType={type} actorId={id} size="sm" />
                           <span className="min-w-0 truncate">{getActorName(type, id)}</span>
                           {countBadge(count)}
                         </DropdownMenuCheckboxItem>

@@ -103,29 +103,32 @@ func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
 	}
 }
 
-func TestCodexStaticModelsExposesGPT55(t *testing.T) {
-	// Codex CLI has no `models list` subcommand so the catalog is
-	// hand-maintained. Regression guard for multica-ai/multica#2009 —
-	// GPT-5.5 must be selectable, and the badge default must point at
-	// the latest release rather than lagging a version behind.
+func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
+	// This fallback is used for Codex <0.122.0 and whenever dynamic bundled
+	// discovery fails. Keep the latest verified visible models plus 5.3 Codex
+	// for older installations, but do not resurrect guessed/nonexistent IDs.
 	models := codexStaticModels()
 	ids := map[string]Model{}
 	for _, m := range models {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
-		"gpt-5.5", "gpt-5.5-mini",
-		"gpt-5.4", "gpt-5.4-mini",
-		"gpt-5.3-codex", "gpt-5",
-		"o3", "o3-mini",
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
+		"gpt-5.3-codex", "gpt-5.2",
 	} {
 		if _, ok := ids[want]; !ok {
 			t.Errorf("missing expected Codex model %q in: %+v", want, models)
 		}
 	}
-	latest, ok := ids["gpt-5.5"]
+	for _, unwanted := range []string{"gpt-5.5-mini", "gpt-5", "o3", "o3-mini"} {
+		if _, ok := ids[unwanted]; ok {
+			t.Errorf("unexpected stale/invalid Codex model %q in fallback: %+v", unwanted, models)
+		}
+	}
+	latest, ok := ids["gpt-5.6-sol"]
 	if !ok || !latest.Default {
-		t.Errorf("expected `gpt-5.5` to be the default Codex entry, got %+v", latest)
+		t.Errorf("expected `gpt-5.6-sol` to be the default Codex entry, got %+v", latest)
 	}
 	defaults := 0
 	for _, m := range models {
@@ -138,6 +141,15 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+	if got := ids["gpt-5.6-sol"].Thinking; got == nil || got.DefaultLevel != "low" || !hasThinkingLevel(got, "max") || !hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.6-sol thinking catalog: %+v", got)
+	}
+	if got := ids["gpt-5.6-luna"].Thinking; got == nil || !hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.6-luna thinking catalog: %+v", got)
+	}
+	if got := ids["gpt-5.3-codex"].Thinking; got == nil || !hasThinkingLevel(got, "xhigh") || hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
+		t.Errorf("unexpected gpt-5.3-codex thinking catalog: %+v", got)
 	}
 }
 

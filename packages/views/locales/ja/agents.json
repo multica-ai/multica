@@ -470,7 +470,9 @@
     "runtime_label": "ランタイム",
     "skills_label": "スキル",
     "owner_label": "オーナー",
-    "unknown_runtime": "不明なランタイム"
+    "unknown_runtime": "不明なランタイム",
+    "model_label": "モデル",
+    "model_unset": "ランタイム既定"
   },
   "live_peek": {
     "current_issue_label": "現在の作業",

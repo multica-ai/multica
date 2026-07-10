@@ -63,6 +63,71 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 	})
 }
 
+// TestNewAPIClient_WorkdirParentEscapeFailsClosed reproduces the confirmed
+// impersonation escape: a sandbox fault strips every MULTICA_* env var from
+// an agent subprocess, which then runs `multica` from the *parent* directory
+// of its workdir. The per-workdir marker sits below cwd, so the upward walk
+// used to find no daemon signal and silently fell back to the user's config
+// PAT, posting agent writes as the workspace owner (author_type=member).
+//
+// The daemon now writes a persistent marker at the workspaces root
+// (execenv.EnsureWorkspacesRootMarker), so every cwd inside the
+// daemon-owned tree — task dir, workspace dir, sibling task dirs, the root
+// itself — carries the fail-closed signal. This test builds that tree shape
+// and asserts the CLI refuses the config-PAT fallback from the escaped cwd.
+func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
+	// Seed a user config with a mul_ PAT that must never be picked up.
+	t.Setenv("HOME", t.TempDir())
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	// Daemon-owned tree: {root}/.multica marker + {root}/{ws}/{task}/workdir
+	// with its own per-workdir marker, exactly as the daemon lays it out.
+	root := t.TempDir()
+	if err := execenv.EnsureWorkspacesRootMarker(root); err != nil {
+		t.Fatalf("write root marker: %v", err)
+	}
+	taskDir := filepath.Join(root, "ws-1", "task-1")
+	workDir := filepath.Join(taskDir, "workdir")
+	workdirMarker := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(workdirMarker), 0o755); err != nil {
+		t.Fatalf("create workdir marker dir: %v", err)
+	}
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	if err := os.WriteFile(workdirMarker, data, 0o644); err != nil {
+		t.Fatalf("write workdir marker: %v", err)
+	}
+
+	// The escape: cwd is the workdir's parent, all daemon env vars gone.
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(taskDir); err != nil {
+		t.Fatalf("chdir task dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(prev); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	if got := resolveToken(testCmd()); got != "" {
+		t.Fatalf("resolveToken() = %q, want empty (config PAT must not leak into an escaped daemon subprocess)", got)
+	}
+	if _, err := newAPIClient(testCmd()); err == nil {
+		t.Fatal("newAPIClient(): expected fail-closed error from workdir-parent escape, got nil")
+	} else if !strings.Contains(err.Error(), "mat_") {
+		t.Fatalf("error should demand a task-scoped mat_ token; got %q", err.Error())
+	}
+}
+
 // TestNewAPIClient_LeftoverMarkerActionableError verifies that a stale
 // daemon-task marker with no daemon env (the local_directory crash-leftover
 // case) fails closed with an actionable message that names the marker file,

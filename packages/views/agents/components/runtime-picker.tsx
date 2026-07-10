@@ -277,7 +277,7 @@ export function RuntimePicker({
                                 <ActorAvatar
                                   actorType="member"
                                   actorId={ownerMember.user_id}
-                                  size={14}
+                                  size="xs"
                                 />
                                 <span className="truncate">
                                   {ownerMember.name}
