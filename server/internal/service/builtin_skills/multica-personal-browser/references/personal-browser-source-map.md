@@ -54,6 +54,9 @@ all) and the authoritative PER-ACTION gate (may this agent drive this host now).
 | Pane focuses the window + asks renderer to open the Browser tab | `apps/desktop/src/main/cerebro-browser-pane.ts` (`requestOpenTab`) |
 | Renderer opens the Browser route when the agent asks | `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` (`onOpenTab`) |
 | Audit log `~/.multica/logs/cerebro-browser-audit.log` (never logs typed values) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`audit`, `/agent/fill` handler) |
+| Secure fill confines plaintext to desktop injection and returns only audit metadata | `apps/desktop/src/main/cerebro-browser-secure-fill.ts`; `cerebro-browser-control-server.ts` (`/agent/secure-fill`) |
+| Exact-vault + `browser-testers` group gate and server-only Agent Vault fetch | `server/internal/handler/personal_browser_authorize_cerebro.go` (`SecureFillPersonalBrowser`); `server/internal/cerebro/agentvault/client.go` (`RevealCredential`) |
+| Agent-facing secure-fill accepts references only | `server/cmd/multica/cerebro_browser.go` (`secure-fill`) |
 | Pane drives the same logged-in view over CDP | `apps/desktop/src/main/cerebro-browser-pane.ts` (`agentSnapshot` / `agentClick` / `agentFill` / `agentNavigate`) |
 | Per-session isolated partition `persist:cerebro-browser[-<id>]` | `apps/desktop/src/main/cerebro-browser-pane.ts` (`partitionFor`) |
 | logout / clear-cookies wipe only the personal-browser partition | `apps/desktop/src/main/cerebro-browser-pane.ts` (`logout`, `clearCookies`) |

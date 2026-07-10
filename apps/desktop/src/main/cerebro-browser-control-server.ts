@@ -30,7 +30,8 @@ import { mkdir, writeFile, appendFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getCerebroBrowserPane } from "./cerebro-browser-pane";
-import { getTargetApiBaseUrl } from "./daemon-manager";
+import { getTargetApiBaseUrl, getTargetApiToken } from "./daemon-manager";
+import { performSecureFill } from "./cerebro-browser-secure-fill";
 
 const MULTICA_DIR = join(homedir(), ".multica");
 const SIDECAR_PATH = join(MULTICA_DIR, "cerebro-browser-control.json");
@@ -191,6 +192,35 @@ function buildRoutes(): Record<string, Route> {
         // logged-in session. Record only that a fill happened, and where.
         await audit("fill", { sessionId: sessionOf(b), ref, valueLength: value.length });
         return { ok: true };
+      },
+    },
+    "/agent/secure-fill": {
+      action: "secure-fill",
+      hostFor: (b) => requirePane().currentUrl(sessionOf(b)),
+      run: async (b) => {
+        const ref = strField(b, "ref");
+        const vault = strField(b, "vault");
+        const key = strField(b, "key");
+        const agentToken = strField(b, "agentToken");
+        if (!ref || !vault || !key || !agentToken) {
+          throw new Error("ref, vault and key are required");
+        }
+        const host = requirePane().currentUrl(sessionOf(b));
+        const serverUrl = getTargetApiBaseUrl();
+        if (!serverUrl) throw new Error("the Multica desktop app is not signed in");
+        const desktopToken = await getTargetApiToken();
+        if (!desktopToken) throw new Error("the Multica desktop app is not signed in");
+        return performSecureFill({
+          serverUrl,
+          agentToken,
+          desktopToken,
+          host,
+          ref,
+          vault,
+          key,
+          fill: (targetRef, value) => requirePane().agentFill(targetRef, value, sessionOf(b)),
+          audit: (detail) => audit("secure-fill", { sessionId: sessionOf(b), ...detail }),
+        });
       },
     },
     "/agent/navigate": {

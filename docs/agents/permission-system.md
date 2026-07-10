@@ -190,6 +190,13 @@ Keep these apart. This doc answers question 2 honestly.
 
 ## What is enforced LIVE today (no flag required)
 
+The personal browser's `secure-fill` action has an additional always-on floor:
+the agent owner's membership in the `browser-testers` group plus an explicit
+`credential.reveal` Allow on the exact
+`agentvault-vault:Shared/browser-login/<app>` resource. It never accepts a
+plaintext CLI argument and never returns the value to the agent; the backend
+sends it only to the trusted desktop bridge for direct Chromium injection.
+
 Every row here actively allows or denies an agent action right now, with default
 configuration. Verified against the code.
 

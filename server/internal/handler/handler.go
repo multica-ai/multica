@@ -253,6 +253,9 @@ type Handler struct {
 	ConnectionClaimResolver CerebroConnectionClaimResolver
 	// CEREBRO-PATCH(handler-agentvault-broker): TECH-3196 per-agent secret brokering at claim.
 	AgentVaultBroker AgentVaultBroker
+	// PersonalBrowserSecrets is the server-only Agent Vault reader used by
+	// secure-fill. Its returned value must never enter an agent response or log.
+	PersonalBrowserSecrets PersonalBrowserSecretReader
 	// CEREBRO-PATCH(handler-capability-card-tools): TECH-3642 capabilities card reuses the tool-policy table.
 	CapabilityToolPolicy AgentCapabilityToolTabler
 	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.
@@ -419,7 +422,7 @@ type PrivateAgentRunRequesterInvoker interface {
 type ChannelListenInvoker interface {
 	EnqueueChannelListenerTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string)
 	FilterArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow, includeArchived bool) []db.ListChannelsForUserRow
-	OnlyArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow) []db.ListChannelsForUserRow // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2791 archived-only channel list
+	OnlyArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow) []db.ListChannelsForUserRow         // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2791 archived-only channel list
 	MaybeUnarchiveForUser(ctx context.Context, channelID, userID pgtype.UUID, workspaceID, actorType, actorID, triggerNotifType string) // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2321 diagnostics param
 	// CEREBRO-PATCH(handler-dm-promote-iface): JEH-1131 — seam for the
 	// DM-to-channel promotion that runs after mention dispatch.

@@ -22,6 +22,7 @@ package handler
 // single marked route line in router.go.
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -29,9 +30,108 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
+
+type PersonalBrowserSecretReader interface {
+	RevealCredential(ctx context.Context, workspaceID pgtype.UUID, vault, key string) (string, error)
+}
+
+type personalBrowserSecureFillRequest struct {
+	Host       string `json:"host"`
+	Vault      string `json:"vault"`
+	Key        string `json:"key"`
+	Action     string `json:"action"`
+	AgentToken string `json:"agentToken"`
+}
+
+// SecureFillPersonalBrowser returns one secret exclusively to the trusted
+// desktop bridge. The bridge injects it into Chromium and reduces its own
+// response to success + non-sensitive audit metadata before the CLI sees it.
+func (h *Handler) SecureFillPersonalBrowser(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Actor-Source") != "" {
+		writeError(w, http.StatusForbidden, "secure fill requires the signed-in desktop app")
+		return
+	}
+	memberID, ok := parseUUIDOrBadRequest(w, r.Header.Get("X-User-ID"), "user_id")
+	if !ok {
+		return
+	}
+	var req personalBrowserSecureFillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Action != "secure-fill" {
+		writeError(w, http.StatusBadRequest, "invalid action")
+		return
+	}
+	if !strings.HasPrefix(req.AgentToken, "mat_") {
+		writeError(w, http.StatusForbidden, "invalid agent token")
+		return
+	}
+	taskToken, err := h.Queries.GetTaskTokenByHash(r.Context(), auth.HashToken(req.AgentToken))
+	if err != nil || taskToken.UserID != memberID {
+		writeError(w, http.StatusForbidden, "invalid agent token")
+		return
+	}
+	agentID, wsID := taskToken.AgentID, taskToken.WorkspaceID
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil || agent.WorkspaceID != wsID {
+		writeError(w, http.StatusForbidden, "agent does not belong to this workspace")
+		return
+	}
+	groups, err := h.CerebroQueries.ListCerebroGroupsForUser(r.Context(), cerebrodb.ListCerebroGroupsForUserParams{WorkspaceID: wsID, UserID: agent.OwnerID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+	resource := agentvault.VaultResourcePrefix + strings.TrimSpace(req.Vault)
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	groupIDs := make([]pgtype.UUID, 0, len(groups))
+	groupGranted := false
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.ID)
+		if !strings.EqualFold(strings.TrimSpace(group.Name), "browser-testers") {
+			continue
+		}
+		rows, listErr := store.ListForSubject(r.Context(), wsID, toolpolicy.LayerGroup, group.ID)
+		if listErr != nil {
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return
+		}
+		for _, row := range rows {
+			if row.ToolKey == "credential.reveal" && row.ResourcePattern == resource && row.Setting == toolpolicy.SettingAllow {
+				groupGranted = true
+			}
+		}
+	}
+	if !groupGranted {
+		writeError(w, http.StatusForbidden, "secure fill is not granted for this vault and group")
+		return
+	}
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{WorkspaceID: wsID, ToolKey: "credential.reveal", ResourcePattern: resource, RuntimeID: agent.RuntimeID, AgentID: agentID, UserID: agent.OwnerID, GroupIDs: groupIDs, RequestContext: toolpolicy.RequestContext{Host: toolpolicy.HostOf(req.Host), Action: "reveal"}, Base: toolpolicy.SettingAllow})
+	if err != nil || !eff.Allowed() {
+		writeError(w, http.StatusForbidden, "secure fill is not allowed")
+		return
+	}
+	if h.PersonalBrowserSecrets == nil {
+		writeError(w, http.StatusServiceUnavailable, "secure fill is not configured")
+		return
+	}
+	value, err := h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, req.Vault, req.Key)
+	if err != nil {
+		h.auditPersonalBrowser(wsID, agentID, toolpolicy.HostOf(req.Host), "secure-fill", "deny", "credential unavailable")
+		writeError(w, http.StatusBadGateway, "credential unavailable")
+		return
+	}
+	h.auditPersonalBrowser(wsID, agentID, toolpolicy.HostOf(req.Host), "secure-fill", "allow", "vault and group grant matched")
+	writeJSON(w, http.StatusOK, map[string]any{"value": value, "vault": req.Vault, "key": req.Key})
+}
 
 type personalBrowserAuthorizeRequest struct {
 	// Host is the target host of the action (the site the agent is opening or

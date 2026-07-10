@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 )
+
+var browserLoginCredentialKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 // connectionResolver resolves a workspace's enabled connections server-side. It
 // is satisfied by *connections.Store — the SAME seam the MCP relay uses to
@@ -77,6 +80,76 @@ func (c *Client) ListVaults(ctx context.Context, workspaceID pgtype.UUID) ([]Vau
 		return nil, fmt.Errorf("agentvault list vaults: %w", err)
 	}
 	return out.Vaults, nil
+}
+
+// RevealCredential reads one value for the secure browser-fill bridge. The
+// value is returned only to the trusted server caller; handlers must never
+// serialize it to an agent-facing response or log it.
+func (c *Client) RevealCredential(ctx context.Context, workspaceID pgtype.UUID, vault, key string) (string, error) {
+	vault = strings.TrimSpace(vault)
+	key = strings.TrimSpace(key)
+	const prefix = "Shared/browser-login/"
+	app := strings.TrimPrefix(vault, prefix)
+	if app == vault || app == "" || strings.Contains(app, "/") {
+		return "", fmt.Errorf("agentvault: vault must be Shared/browser-login/<app>")
+	}
+	if !browserLoginCredentialKey.MatchString(key) {
+		return "", fmt.Errorf("agentvault: invalid credential key")
+	}
+	conn, ok, err := c.resolveConnection(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("agentvault: connection is not configured")
+	}
+	bearer := strings.TrimSpace(conn.AuthConfig.BearerToken)
+	if bearer == "" {
+		return "", fmt.Errorf("agentvault: %q connection has no bearer token", conn.Name)
+	}
+	base := strings.TrimRight(strings.TrimSpace(conn.URL), "/")
+	params := url.Values{"vault": {vault}, "reveal": {"true"}, "key": {key}}
+	var out struct {
+		Credentials []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"credentials"`
+	}
+	if err := c.getSensitive(ctx, base+"/v1/credentials?"+params.Encode(), bearer, &out); err != nil {
+		return "", fmt.Errorf("agentvault reveal credential: %w", err)
+	}
+	if len(out.Credentials) != 1 || out.Credentials[0].Key != key {
+		return "", fmt.Errorf("agentvault: credential not found")
+	}
+	return out.Credentials[0].Value, nil
+}
+
+// getSensitive is intentionally separate from get: an upstream error body on
+// a credential endpoint may itself contain sensitive material and must never
+// be propagated into server logs or an agent-facing error.
+func (c *Client) getSensitive(ctx context.Context, fullURL, bearer string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(payload, out); err != nil {
+		return fmt.Errorf("decode response")
+	}
+	return nil
 }
 
 // resolveConnection finds the enabled "Agent Vault" connection for the workspace:
