@@ -38,7 +38,9 @@ interface Props {
 }
 
 export function ChatTimeline({ items, isStreaming = false }: Props) {
-  const processSteps = items.filter((i) => i.type !== "text");
+  const processSteps = items.filter(
+    (i) => i.type !== "text" || i.text_phase === "commentary",
+  );
   if (processSteps.length === 0) return null;
 
   return (
@@ -80,6 +82,8 @@ function StepRow({ item }: { item: TaskMessagePayload }) {
   switch (item.type) {
     case "thinking":
       return <ThinkingRow item={item} />;
+    case "text":
+      return <CommentaryRow item={item} />;
     case "tool_use":
       return <ToolCallRow item={item} />;
     case "tool_result":
@@ -89,6 +93,34 @@ function StepRow({ item }: { item: TaskMessagePayload }) {
     default:
       return null;
   }
+}
+
+function CommentaryRow({ item }: { item: TaskMessagePayload }) {
+  const text = item.content ?? "";
+  if (!text) return null;
+  const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  return (
+    <Collapsible>
+      <CollapsibleTrigger asChild>
+        <View className="py-0.5 flex-row items-start gap-1.5 active:opacity-70">
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={12}
+            color="#a1a1aa"
+            style={{ marginTop: 2 }}
+          />
+          <Text className="flex-1 text-xs text-muted-foreground" numberOfLines={1}>
+            {preview}
+          </Text>
+        </View>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <Text className="ml-4 mt-0.5 text-xs text-muted-foreground">
+          {text}
+        </Text>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 function ThinkingRow({ item }: { item: TaskMessagePayload }) {

@@ -9,6 +9,17 @@ const text = (seq: number, content: string): ChatTimelineItem => ({
   content,
 });
 
+const phasedText = (
+  seq: number,
+  content: string,
+  text_phase: string,
+): ChatTimelineItem => ({
+  seq,
+  type: "text",
+  content,
+  text_phase,
+});
+
 const thinking = (seq: number, content = "..."): ChatTimelineItem => ({
   seq,
   type: "thinking",
@@ -79,6 +90,15 @@ describe("splitTimeline", () => {
     expect(out.middle).toEqual([u]);
     expect(out.final).toEqual([f]);
   });
+
+  it("folds explicit commentary text while keeping final_answer text visible", () => {
+    const c = phasedText(1, "checking context", "commentary");
+    const f = phasedText(2, "final answer", "final_answer");
+    const out = splitTimeline([c, f]);
+    expect(out.preface).toEqual([]);
+    expect(out.middle).toEqual([c]);
+    expect(out.final).toEqual([f]);
+  });
 });
 
 describe("extractCopyText", () => {
@@ -130,5 +150,14 @@ describe("extractCopyText", () => {
         text(3, "para 2"),
       ]),
     ).toBe("para 1\n\npara 2");
+  });
+
+  it("copies final_answer text and omits explicit commentary text", () => {
+    expect(
+      extractCopyText(message(""), [
+        phasedText(1, "checking context", "commentary"),
+        phasedText(2, "final answer", "final_answer"),
+      ]),
+    ).toBe("final answer");
   });
 });

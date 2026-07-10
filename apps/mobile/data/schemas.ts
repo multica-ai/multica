@@ -305,6 +305,7 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   type: z
     .enum(["text", "thinking", "tool_use", "tool_result", "error"])
     .catch("text"),
+  text_phase: z.string().optional(),
   tool: z.string().optional(),
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),

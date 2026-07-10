@@ -12,6 +12,17 @@ function message(seq: number, type: TaskMessagePayload["type"], content?: string
   };
 }
 
+function textPhase(seq: number, content: string, text_phase: string): TaskMessagePayload {
+  return {
+    task_id: "task-1",
+    issue_id: "issue-1",
+    seq,
+    type: "text",
+    content,
+    text_phase,
+  };
+}
+
 describe("task transcript timeline", () => {
   it("merges adjacent text and thinking fragments split by streaming flushes", () => {
     const items = buildTimeline([
@@ -42,6 +53,18 @@ describe("task transcript timeline", () => {
       "after",
       "failed",
       "done",
+    ]);
+  });
+
+  it("does not merge text chunks with different phases", () => {
+    const items = buildTimeline([
+      textPhase(1, "checking context", "commentary"),
+      textPhase(2, "final answer", "final_answer"),
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({ seq: 1, type: "text", text_phase: "commentary" }),
+      expect.objectContaining({ seq: 2, type: "text", text_phase: "final_answer" }),
     ]);
   });
 

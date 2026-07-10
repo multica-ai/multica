@@ -807,6 +807,7 @@ type TaskMessage struct {
 	TaskID    pgtype.UUID        `json:"task_id"`
 	Seq       int32              `json:"seq"`
 	Type      string             `json:"type"`
+	TextPhase pgtype.Text        `json:"text_phase"`
 	Tool      pgtype.Text        `json:"tool"`
 	Content   pgtype.Text        `json:"content"`
 	Input     []byte             `json:"input"`

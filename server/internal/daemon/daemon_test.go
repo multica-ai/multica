@@ -950,6 +950,80 @@ func (b *fakeBackend) Execute(_ context.Context, _ string, opts agent.ExecOption
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
+type messageBackend struct {
+	messages []agent.Message
+	result   agent.Result
+}
+
+func (b messageBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, len(b.messages))
+	resCh := make(chan agent.Result, 1)
+	go func() {
+		for _, msg := range b.messages {
+			msgCh <- msg
+		}
+		close(msgCh)
+		time.Sleep(50 * time.Millisecond)
+		resCh <- b.result
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrainPreservesTextPhase(t *testing.T) {
+	reportedCh := make(chan []TaskMessageData, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/tasks/task-phase/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Messages []TaskMessageData `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode task messages: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		reportedCh <- body.Messages
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	backend := messageBackend{
+		messages: []agent.Message{
+			{Type: agent.MessageText, Content: "checking context", TextPhase: "commentary"},
+			{Type: agent.MessageText, Content: "final answer", TextPhase: "final_answer"},
+		},
+		result: agent.Result{Status: "completed", Output: "final answer"},
+	}
+
+	result, _, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{}, slog.Default(), "task-phase")
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q", result.Status)
+	}
+
+	var reported []TaskMessageData
+	timeout := time.After(5 * time.Second)
+	for len(reported) < 2 {
+		select {
+		case batch := <-reportedCh:
+			reported = append(reported, batch...)
+		case <-timeout:
+			t.Fatalf("timeout waiting for reported messages, got %#v", reported)
+		}
+	}
+	if reported[0].Content != "checking context" || reported[0].TextPhase != "commentary" {
+		t.Fatalf("commentary message = %#v", reported[0])
+	}
+	if reported[1].Content != "final answer" || reported[1].TextPhase != "final_answer" {
+		t.Fatalf("final message = %#v", reported[1])
+	}
+}
+
 func newTestDaemon(t *testing.T) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
