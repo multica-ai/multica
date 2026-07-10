@@ -454,11 +454,24 @@ type MulticaIssueToLabel struct {
 }
 
 type MulticaMember struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Role        string             `json:"role"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	UserID              pgtype.UUID        `json:"user_id"`
+	Role                string             `json:"role"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	Source              string             `json:"source"`
+	Status              string             `json:"status"`
+	ExternalUserID      pgtype.Text        `json:"external_user_id"`
+	ExternalUniversalID pgtype.Text        `json:"external_universal_id"`
+	EmployeeID          pgtype.Text        `json:"employee_id"`
+	OrgDisplayName      pgtype.Text        `json:"org_display_name"`
+	DeptID              pgtype.Text        `json:"dept_id"`
+	DeptName            pgtype.Text        `json:"dept_name"`
+	DeptPath            pgtype.Text        `json:"dept_path"`
+	Position            pgtype.Text        `json:"position"`
+	IsMainDepartment    bool               `json:"is_main_department"`
+	DeptUserStatus      pgtype.Int4        `json:"dept_user_status"`
+	LastSyncedAt        pgtype.Timestamptz `json:"last_synced_at"`
 }
 
 type MulticaNotificationPreference struct {
@@ -650,6 +663,7 @@ type MulticaUser struct {
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
 	Timezone           pgtype.Text `json:"timezone"`
 	SubjectID          pgtype.Text `json:"subject_id"`
+	CasdoorUniversalID pgtype.Text `json:"casdoor_universal_id"`
 	CanManageWorkflows bool        `json:"can_manage_workflows"`
 }
 

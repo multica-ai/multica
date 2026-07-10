@@ -69,6 +69,43 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 	return rows[0].ResourceCount
 }
 
+func (h *Handler) validateProjectLeadPair(ctx context.Context, workspaceID pgtype.UUID, leadType pgtype.Text, leadID pgtype.UUID) (int, string) {
+	if !leadType.Valid && !leadID.Valid {
+		return 0, ""
+	}
+	if leadType.Valid != leadID.Valid {
+		return http.StatusBadRequest, "lead_type and lead_id must be provided together"
+	}
+	switch leadType.String {
+	case "member":
+		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      leadID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "lead_id does not refer to a member of this workspace"
+		}
+		if !isActiveMember(member) {
+			return http.StatusBadRequest, "cannot set an inactive workspace member as project lead"
+		}
+		return 0, ""
+	case "agent":
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          leadID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "lead_id does not refer to an agent of this workspace"
+		}
+		if agent.ArchivedAt.Valid {
+			return http.StatusBadRequest, "cannot set an archived agent as project lead"
+		}
+		return 0, ""
+	default:
+		return http.StatusBadRequest, "lead_type must be member or agent"
+	}
+}
+
 type CreateProjectRequest struct {
 	Title       string                                `json:"title"`
 	Description *string                               `json:"description"`
@@ -219,6 +256,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	if statusCode, msg := h.validateProjectLeadPair(r.Context(), wsUUID, leadType, leadID); statusCode != 0 {
+		writeError(w, statusCode, msg)
 		return
 	}
 
@@ -419,6 +460,17 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, leadTypeTouched := rawFields["lead_type"]; leadTypeTouched {
+		if statusCode, msg := h.validateProjectLeadPair(r.Context(), wsUUID, params.LeadType, params.LeadID); statusCode != 0 {
+			writeError(w, statusCode, msg)
+			return
+		}
+	} else if _, leadIDTouched := rawFields["lead_id"]; leadIDTouched {
+		if statusCode, msg := h.validateProjectLeadPair(r.Context(), wsUUID, params.LeadType, params.LeadID); statusCode != 0 {
+			writeError(w, statusCode, msg)
+			return
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)

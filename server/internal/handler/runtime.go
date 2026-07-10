@@ -700,9 +700,9 @@ func (h *Handler) requireRuntimePermission(w http.ResponseWriter, r *http.Reques
 }
 
 type MyRuntimePermissionResponse struct {
-	Role       string              `json:"role"`
-	CanControl bool                `json:"can_control"`
-	CanObserve bool                `json:"can_observe"`
+	Role       string `json:"role"`
+	CanControl bool   `json:"can_control"`
+	CanObserve bool   `json:"can_observe"`
 }
 
 // GetRuntimePermissionForMe handles GET /api/runtimes/{runtimeId}/permission.
@@ -835,6 +835,18 @@ func (h *Handler) CreateRuntimePermission(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "cannot grant permission to yourself")
 		return
 	}
+	targetMember, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: rt.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "user is not a member of this workspace")
+		return
+	}
+	if !isActiveMember(targetMember) {
+		writeError(w, http.StatusBadRequest, "cannot grant permission to an inactive workspace member")
+		return
+	}
 
 	perm, err := h.Queries.CreateRuntimePermission(r.Context(), db.CreateRuntimePermissionParams{
 		RuntimeID: rt.ID,
@@ -878,6 +890,18 @@ func (h *Handler) UpdateRuntimePermission(w http.ResponseWriter, r *http.Request
 	}
 	if req.Role != string(RuntimeRoleAdmin) && req.Role != string(RuntimeRoleOperator) && req.Role != string(RuntimeRoleViewer) {
 		writeError(w, http.StatusBadRequest, "role must be admin, operator, or viewer")
+		return
+	}
+	targetMember, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: rt.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "user is not a member of this workspace")
+		return
+	}
+	if !isActiveMember(targetMember) {
+		writeError(w, http.StatusBadRequest, "cannot update permission for an inactive workspace member")
 		return
 	}
 

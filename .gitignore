@@ -38,6 +38,9 @@ server/multica
 test-results/
 apps/web/test-results/
 
+# playwright-cli skill workspace
+.playwright-cli/
+
 # context (agent workspace)
 .context
 

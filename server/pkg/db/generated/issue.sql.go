@@ -720,17 +720,17 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listIssueDescendants = `-- name: ListIssueDescendants :many
-WITH RECURSIVE descendants AS (
-    SELECT id, workspace_id, parent_issue_id::uuid, 0::int AS depth
-    FROM multica_issue
-    WHERE parent_issue_id = $1 AND workspace_id = $2
+WITH RECURSIVE descendants(id, workspace_id, parent_issue_id, depth) AS (
+    SELECT i.id, i.workspace_id, i.parent_issue_id::uuid, 0::int AS depth
+    FROM multica_issue i
+    WHERE i.parent_issue_id = $1 AND i.workspace_id = $2
     UNION ALL
     SELECT i.id, i.workspace_id, i.parent_issue_id, d.depth + 1
     FROM multica_issue i
     JOIN descendants d ON i.parent_issue_id = d.id
     WHERE i.workspace_id = $2
 )
-SELECT id, workspace_id, parent_issue_id, depth FROM descendants
+SELECT descendants.id, descendants.workspace_id, descendants.parent_issue_id, descendants.depth FROM descendants
 ORDER BY depth DESC
 `
 
@@ -746,6 +746,12 @@ type ListIssueDescendantsRow struct {
 	Depth         int32       `json:"depth"`
 }
 
+// Recursively finds all descendants of an issue. Ordered deepest-first so
+// the caller can delete leaves before their parents, avoiding FK violations.
+// The workspace_id filter on both the anchor and recursive legs serves as a
+// tenant guard: descendants that cross workspace boundaries are impossible by
+// construction (parent_issue_id always points within the same workspace), but
+// the filter makes the invariant a SQL-layer guarantee.
 func (q *Queries) ListIssueDescendants(ctx context.Context, arg ListIssueDescendantsParams) ([]ListIssueDescendantsRow, error) {
 	rows, err := q.db.Query(ctx, listIssueDescendants, arg.ParentIssueID, arg.WorkspaceID)
 	if err != nil {

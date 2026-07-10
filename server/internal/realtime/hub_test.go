@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -356,6 +357,7 @@ func TestCheckOrigin(t *testing.T) {
 	prev := allowedWSOrigins.Load().([]string)
 	SetAllowedOrigins([]string{
 		"http://localhost:3000",
+		"http://localhost:3001",
 		"https://multica.ai",
 	})
 	t.Cleanup(func() { SetAllowedOrigins(prev) })
@@ -371,6 +373,7 @@ func TestCheckOrigin(t *testing.T) {
 		{"same-origin allowed (https)", "api.multica.ai", "https://api.multica.ai", true},
 		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Multica.AI", "https://api.multica.ai", true},
 		{"whitelisted origin allowed (web cross-origin)", "localhost:8080", "http://localhost:3000", true},
+		{"whitelisted origin allowed (alternate Next dev port)", "localhost:8080", "http://localhost:3001", true},
 		{"whitelisted origin allowed (prod web)", "api.multica.ai", "https://multica.ai", true},
 		{"unknown origin rejected (CSWSH defense)", "api.multica.ai", "https://evil.com", false},
 		{"different port rejected", "localhost:8080", "http://localhost:9999", false},
@@ -387,5 +390,38 @@ func TestCheckOrigin(t *testing.T) {
 				t.Fatalf("checkOrigin(host=%q, origin=%q) = %v, want %v", tc.host, tc.origin, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadAllowedOriginsIncludesAlternateNextDevPort(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	origins := loadAllowedOrigins()
+	if !slices.Contains(origins, "http://localhost:3001") {
+		t.Fatalf("loadAllowedOrigins() = %v, want localhost:3001 for alternate Next dev server", origins)
+	}
+}
+
+func TestLoadAllowedOriginsExpandsLocalConfiguredOrigin(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	origins := loadAllowedOrigins()
+	if !slices.Contains(origins, "http://localhost:3001") {
+		t.Fatalf("loadAllowedOrigins() = %v, want localhost:3001 when local dev origin is configured", origins)
+	}
+}
+
+func TestLoadAllowedOriginsDoesNotExpandProductionOrigin(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	origins := loadAllowedOrigins()
+	if slices.Contains(origins, "http://localhost:3001") {
+		t.Fatalf("loadAllowedOrigins() = %v, did not want localhost:3001 for production origin", origins)
 	}
 }

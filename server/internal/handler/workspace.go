@@ -75,20 +75,40 @@ func workspaceToResponse(w db.MulticaWorkspace) WorkspaceResponse {
 }
 
 type MemberResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	UserID      string `json:"user_id"`
-	Role        string `json:"role"`
-	CreatedAt   string `json:"created_at"`
+	ID                  string  `json:"id"`
+	WorkspaceID         string  `json:"workspace_id"`
+	UserID              string  `json:"user_id"`
+	Role                string  `json:"role"`
+	Source              string  `json:"source"`
+	Status              string  `json:"status"`
+	ExternalUserID      *string `json:"external_user_id"`
+	ExternalUniversalID *string `json:"external_universal_id"`
+	EmployeeID          *string `json:"employee_id"`
+	OrgDisplayName      *string `json:"org_display_name"`
+	DeptID              *string `json:"dept_id"`
+	DeptName            *string `json:"dept_name"`
+	DeptPath            *string `json:"dept_path"`
+	Position            *string `json:"position"`
+	CreatedAt           string  `json:"created_at"`
 }
 
 func memberToResponse(m db.MulticaMember) MemberResponse {
 	return MemberResponse{
-		ID:          uuidToString(m.ID),
-		WorkspaceID: uuidToString(m.WorkspaceID),
-		UserID:      uuidToString(m.UserID),
-		Role:        m.Role,
-		CreatedAt:   timestampToString(m.CreatedAt),
+		ID:                  uuidToString(m.ID),
+		WorkspaceID:         uuidToString(m.WorkspaceID),
+		UserID:              uuidToString(m.UserID),
+		Role:                m.Role,
+		Source:              m.Source,
+		Status:              m.Status,
+		ExternalUserID:      textToPtr(m.ExternalUserID),
+		ExternalUniversalID: textToPtr(m.ExternalUniversalID),
+		EmployeeID:          textToPtr(m.EmployeeID),
+		OrgDisplayName:      textToPtr(m.OrgDisplayName),
+		DeptID:              textToPtr(m.DeptID),
+		DeptName:            textToPtr(m.DeptName),
+		DeptPath:            textToPtr(m.DeptPath),
+		Position:            textToPtr(m.Position),
+		CreatedAt:           timestampToString(m.CreatedAt),
 	}
 }
 
@@ -318,14 +338,24 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 type MemberWithUserResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	UserID      string  `json:"user_id"`
-	Role        string  `json:"role"`
-	CreatedAt   string  `json:"created_at"`
-	Name        string  `json:"name"`
-	Email       string  `json:"email"`
-	AvatarURL   *string `json:"avatar_url"`
+	ID                  string  `json:"id"`
+	WorkspaceID         string  `json:"workspace_id"`
+	UserID              string  `json:"user_id"`
+	Role                string  `json:"role"`
+	Source              string  `json:"source"`
+	Status              string  `json:"status"`
+	ExternalUserID      *string `json:"external_user_id"`
+	ExternalUniversalID *string `json:"external_universal_id"`
+	EmployeeID          *string `json:"employee_id"`
+	OrgDisplayName      *string `json:"org_display_name"`
+	DeptID              *string `json:"dept_id"`
+	DeptName            *string `json:"dept_name"`
+	DeptPath            *string `json:"dept_path"`
+	Position            *string `json:"position"`
+	CreatedAt           string  `json:"created_at"`
+	Name                string  `json:"name"`
+	Email               string  `json:"email"`
+	AvatarURL           *string `json:"avatar_url"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -343,15 +373,29 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]MemberWithUserResponse, len(members))
 	for i, m := range members {
+		name := m.UserName.String
+		if name == "" {
+			name = m.OrgDisplayName.String
+		}
 		resp[i] = MemberWithUserResponse{
-			ID:          uuidToString(m.ID),
-			WorkspaceID: uuidToString(m.WorkspaceID),
-			UserID:      uuidToString(m.UserID),
-			Role:        m.Role,
-			CreatedAt:   timestampToString(m.CreatedAt),
-			Name:        m.UserName,
-			Email:       m.UserEmail,
-			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			ID:                  uuidToString(m.ID),
+			WorkspaceID:         uuidToString(m.WorkspaceID),
+			UserID:              uuidToString(m.UserID),
+			Role:                m.Role,
+			Source:              m.Source,
+			Status:              m.Status,
+			ExternalUserID:      textToPtr(m.ExternalUserID),
+			ExternalUniversalID: textToPtr(m.ExternalUniversalID),
+			EmployeeID:          textToPtr(m.EmployeeID),
+			OrgDisplayName:      textToPtr(m.OrgDisplayName),
+			DeptID:              textToPtr(m.DeptID),
+			DeptName:            textToPtr(m.DeptName),
+			DeptPath:            textToPtr(m.DeptPath),
+			Position:            textToPtr(m.Position),
+			CreatedAt:           timestampToString(m.CreatedAt),
+			Name:                name,
+			Email:               m.UserEmail.String,
+			AvatarURL:           textToPtr(m.UserAvatarUrl),
 		}
 	}
 
@@ -365,14 +409,24 @@ type CreateMemberRequest struct {
 
 func memberWithUserResponse(member db.MulticaMember, user db.MulticaUser) MemberWithUserResponse {
 	return MemberWithUserResponse{
-		ID:          uuidToString(member.ID),
-		WorkspaceID: uuidToString(member.WorkspaceID),
-		UserID:      uuidToString(member.UserID),
-		Role:        member.Role,
-		CreatedAt:   timestampToString(member.CreatedAt),
-		Name:        user.Name,
-		Email:       user.Email,
-		AvatarURL:   textToPtr(user.AvatarUrl),
+		ID:                  uuidToString(member.ID),
+		WorkspaceID:         uuidToString(member.WorkspaceID),
+		UserID:              uuidToString(member.UserID),
+		Role:                member.Role,
+		Source:              member.Source,
+		Status:              member.Status,
+		ExternalUserID:      textToPtr(member.ExternalUserID),
+		ExternalUniversalID: textToPtr(member.ExternalUniversalID),
+		EmployeeID:          textToPtr(member.EmployeeID),
+		OrgDisplayName:      textToPtr(member.OrgDisplayName),
+		DeptID:              textToPtr(member.DeptID),
+		DeptName:            textToPtr(member.DeptName),
+		DeptPath:            textToPtr(member.DeptPath),
+		Position:            textToPtr(member.Position),
+		CreatedAt:           timestampToString(member.CreatedAt),
+		Name:                user.Name,
+		Email:               user.Email,
+		AvatarURL:           textToPtr(user.AvatarUrl),
 	}
 }
 
@@ -503,6 +557,10 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 	if (target.Role == "owner" || role == "owner") && requester.Role != "owner" {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+	if !isActiveMember(target) {
+		writeError(w, http.StatusBadRequest, "cannot update role for an inactive workspace member")
 		return
 	}
 

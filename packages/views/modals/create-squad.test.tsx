@@ -220,12 +220,13 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string; owner
   };
 }
 
-function makeMember(user_id: string, name: string): MemberWithUser {
+function makeMember(user_id: string, name: string, status: MemberWithUser["status"] = "active"): MemberWithUser {
   return {
     id: `m-${user_id}`,
     user_id,
     workspace_id: "ws-1",
     role: "member",
+    status,
     name,
     email: `${user_id}@example.com`,
     avatar_url: null,
@@ -456,6 +457,18 @@ describe("CreateSquadModal", () => {
     });
     expect(mocks.toastWarning).toHaveBeenCalledTimes(1);
     expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/squads/sq-2");
+  });
+
+  it("does not offer pending workspace members as additional squad members", () => {
+    mocks.members = [
+      makeMember("user-active", "Active Member", "active"),
+      makeMember("user-pending", "Pending Member", "pending_activation"),
+    ];
+
+    renderModal();
+
+    expect(screen.getByText("Active Member")).toBeInTheDocument();
+    expect(screen.queryByText("Pending Member")).not.toBeInTheDocument();
   });
 
   it("on createSquad failure shows an error toast, does not navigate, and re-enables submit", async () => {

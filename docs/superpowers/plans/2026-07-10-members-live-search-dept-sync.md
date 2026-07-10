@@ -82,6 +82,13 @@ func seedSearchData(t *testing.T) {
 	if err := db.DB.Create(&users).Error; err != nil {
 		t.Fatalf("seed users: %v", err)
 	}
+	// Force U004 to inactive. GORM skips zero-value fields that have a default
+	// tag on Create (Status has default:1), so an explicit Update is required.
+	if err := db.DB.Model(&model.UserDepartment{}).
+		Where("user_id = ? AND dept_id = ?", "U004", "D002").
+		Update("status", 0).Error; err != nil {
+		t.Fatalf("set U004 inactive: %v", err)
+	}
 }
 
 func TestQueryService_SearchUsers_ByChineseName(t *testing.T) {
@@ -1016,7 +1023,7 @@ Expected: `{"success":true,"code":"","data":[ ... ]}` with matched users / depar
 
 - [ ] **Step 4: End-to-end in Multica (manual)**
 
-Start both services, open a dept-backed workspace → members page → admin "add member from department directory" box → type a name/email. Expected: live results from costrict-dept-sync, one row per person; selecting and adding still upserts into `multica_member` (unchanged).
+Start both services, open a workspace → members page → admin "add member from department directory" box → type a name/email. Expected: live results from costrict-dept-sync, one row per person; selecting and adding still upserts into `multica_member` (unchanged).
 
 ---
 
@@ -1026,4 +1033,4 @@ Start both services, open a dept-backed workspace → members page → admin "ad
 - **Batch-add benefits for free.** `BatchAddDeptMembers` resolves refs through `SearchUsers`, so it inherits the faster single-call path with no extra change.
 - **Cross-dialect case-insensitivity** is handled by `LOWER(col) LIKE LOWER(?)` (works on Postgres and SQLite). Chinese names are unaffected by case.
 - **`dept_path` format:** search results return the `dept_path` stored by costrict-dept-sync (no client-side rebuild). Accepted per spec.
-- **Out of scope (per spec):** pinyin search; removing the dead `GET .../members/search` endpoint; redesigning `/dept-sync`; pagination beyond the `limit` clamp.
+- **Out of scope (per spec):** pinyin search and pagination beyond the `limit` clamp.

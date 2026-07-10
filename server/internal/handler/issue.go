@@ -3,13 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -793,14 +793,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:    wsUUID,
-			Priority:       priorityFilter,
-			AssigneeID:     assigneeFilter,
-			AssigneeIds:    assigneeIdsFilter,
-			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
-			InvolvesUserID: involvesUserFilter,
-			MetadataFilter: metadataFilter,
+			WorkspaceID:           wsUUID,
+			Priority:              priorityFilter,
+			AssigneeID:            assigneeFilter,
+			AssigneeIds:           assigneeIdsFilter,
+			CreatorID:             creatorFilter,
+			ProjectID:             projectFilter,
+			InvolvesUserID:        involvesUserFilter,
+			MetadataFilter:        metadataFilter,
 			ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 		})
 		if err != nil {
@@ -858,18 +858,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:    wsUUID,
-		Limit:          int32(limit),
-		Offset:         int32(offset),
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
+		WorkspaceID:           wsUUID,
+		Limit:                 int32(limit),
+		Offset:                int32(offset),
+		Status:                statusFilter,
+		Priority:              priorityFilter,
+		AssigneeID:            assigneeFilter,
+		AssigneeIds:           assigneeIdsFilter,
+		CreatorID:             creatorFilter,
+		ProjectID:             projectFilter,
+		InvolvesUserID:        involvesUserFilter,
+		Scheduled:             scheduledFilter,
+		MetadataFilter:        metadataFilter,
 		ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 	})
 	if err != nil {
@@ -879,16 +879,16 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Get the true total count for pagination awareness.
 	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID:    wsUUID,
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
+		WorkspaceID:           wsUUID,
+		Status:                statusFilter,
+		Priority:              priorityFilter,
+		AssigneeID:            assigneeFilter,
+		AssigneeIds:           assigneeIdsFilter,
+		CreatorID:             creatorFilter,
+		ProjectID:             projectFilter,
+		InvolvesUserID:        involvesUserFilter,
+		Scheduled:             scheduledFilter,
+		MetadataFilter:        metadataFilter,
 		ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 	})
 	if err != nil {
@@ -2532,11 +2532,15 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	}
 	switch assigneeType.String {
 	case "member":
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID:      assigneeID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			return http.StatusBadRequest, "assignee_id does not refer to a member of this workspace"
+		}
+		if !isActiveMember(member) {
+			return http.StatusBadRequest, "cannot assign to an inactive workspace member"
 		}
 		return 0, ""
 	case "agent":
@@ -3178,24 +3182,24 @@ func (h *Handler) createWorkflowSubIssue(
 	}
 
 	return qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-		WorkspaceID:    wsUUID,
-		Title:          subTitle,
-		Description:    parentIssue.Description,
-		Status:         "todo",
-		Priority:       parentIssue.Priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    "member",
-		CreatorID:      parentIssue.CreatorID,
-		ParentIssueID:  parentIssue.ID,
-		Position:       0,
-		Number:         issueNumber,
-		ProjectID:      parentIssue.ProjectID,
-		OriginType:     pgtype.Text{String: "workflow", Valid: true},
-		OriginID:       nodeRun.ID,
-		WorkflowID:     node.WorkflowID,
-		WorkflowRunID:  nodeRun.WorkflowRunID,
-		StageID:        node.StageID,
+		WorkspaceID:   wsUUID,
+		Title:         subTitle,
+		Description:   parentIssue.Description,
+		Status:        "todo",
+		Priority:      parentIssue.Priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   "member",
+		CreatorID:     parentIssue.CreatorID,
+		ParentIssueID: parentIssue.ID,
+		Position:      0,
+		Number:        issueNumber,
+		ProjectID:     parentIssue.ProjectID,
+		OriginType:    pgtype.Text{String: "workflow", Valid: true},
+		OriginID:      nodeRun.ID,
+		WorkflowID:    node.WorkflowID,
+		WorkflowRunID: nodeRun.WorkflowRunID,
+		StageID:       node.StageID,
 	})
 }
 

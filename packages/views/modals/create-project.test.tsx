@@ -1,12 +1,22 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 const longRepoUrl =
   "https://github.com/multica-ai/a-very-long-repository-name-that-needs-a-tooltip";
 
+const mocks = vi.hoisted(() => ({
+  members: [] as unknown[],
+  agents: [] as unknown[],
+}));
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => {
+    const key = options.queryKey ?? [];
+    if (Array.isArray(key) && key.includes("members")) return { data: mocks.members };
+    if (Array.isArray(key) && key.includes("agents")) return { data: mocks.agents };
+    return { data: [] };
+  },
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({
@@ -159,10 +169,45 @@ vi.mock("sonner", () => ({
 import { CreateProjectModal } from "./create-project";
 
 describe("CreateProjectModal", () => {
+  beforeEach(() => {
+    mocks.members = [];
+    mocks.agents = [];
+  });
+
   it("exposes full repository URLs in the repository picker", () => {
     render(<CreateProjectModal onClose={vi.fn()} />);
 
     expect(screen.getByTitle(longRepoUrl)).toHaveTextContent(longRepoUrl);
     expect(screen.getByRole("tooltip", { name: longRepoUrl })).toBeInTheDocument();
+  });
+
+  it("does not offer pending workspace members as project leads", () => {
+    mocks.members = [
+      {
+        id: "m-active",
+        workspace_id: "workspace-1",
+        user_id: "user-active",
+        role: "member",
+        status: "active",
+        name: "Active Lead",
+        email: "active@example.test",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "m-pending",
+        workspace_id: "workspace-1",
+        user_id: "user-pending",
+        role: "member",
+        status: "pending_activation",
+        name: "Pending Lead",
+        email: "pending@example.test",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    render(<CreateProjectModal onClose={vi.fn()} />);
+
+    expect(screen.getByText("Active Lead")).toBeInTheDocument();
+    expect(screen.queryByText("Pending Lead")).not.toBeInTheDocument();
   });
 });

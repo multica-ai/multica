@@ -39,7 +39,9 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
       : null;
   const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
   const canSubmit =
-    name.trim().length > 0 && slug.trim().length > 0 && !slugError;
+    name.trim().length > 0 &&
+    slug.trim().length > 0 &&
+    !slugError;
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -57,8 +59,12 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
 
   const handleCreate = () => {
     if (!canSubmit) return;
+    const payload = {
+      name: name.trim(),
+      slug: slug.trim(),
+    };
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      payload,
       {
         onSuccess,
         onError: (error) => {

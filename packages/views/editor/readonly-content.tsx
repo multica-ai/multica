@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { Suspense, isValidElement, lazy, memo, useMemo, useRef } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -38,7 +38,6 @@ import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
-import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { Attachment as AttachmentRenderer } from "./attachment";
@@ -50,6 +49,12 @@ import "./content-editor.css";
 // ---------------------------------------------------------------------------
 
 const lowlight = createLowlight(common);
+
+const MermaidDiagram = lazy(() =>
+  import("./mermaid-diagram").then((module) => ({
+    default: module.MermaidDiagram,
+  })),
+);
 
 // Code fences that the `code` renderer returns as a non-<code> React element
 // (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
@@ -257,7 +262,11 @@ function buildComponents({
         node.position.start.line !== node.position.end.line;
 
       if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+        return (
+          <Suspense fallback={<div className="mermaid-diagram-loading" />}>
+            <MermaidDiagram chart={String(children).replace(/\n$/, "")} />
+          </Suspense>
+        );
       }
       if (isBlock && lang === "html") {
         // Like Mermaid, return the React element directly here and rely on

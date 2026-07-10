@@ -4,6 +4,7 @@ import { useState } from "react";
 import { UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
@@ -28,7 +29,7 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
 
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
+  const filteredMembers = members.filter((m) => isActiveWorkspaceMember(m) && (m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery)));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const leadId = project.lead_id;

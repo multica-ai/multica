@@ -42,7 +42,7 @@ type ScopeAuthorizer interface {
 // SubjectResolver maps a Casdoor subject ID (the "sub" claim from the JWT)
 // to a Multica user UUID. This is the same contract as middleware.SubjectResolver
 // but lives in the realtime package to avoid an import cycle.
-type SubjectResolver func(ctx context.Context, subjectID, name, email string) (userID string, err error)
+type SubjectResolver func(ctx context.Context, subjectID, universalID, name, email string) (userID string, err error)
 
 var allowedWSOrigins atomic.Value // holds []string
 
@@ -61,6 +61,7 @@ func loadAllowedOrigins() []string {
 	if raw == "" {
 		return []string{
 			"http://localhost:3000",
+			"http://localhost:3001",
 			"http://localhost:5173",
 			"http://localhost:5174",
 		}
@@ -74,7 +75,38 @@ func loadAllowedOrigins() []string {
 			origins = append(origins, origin)
 		}
 	}
-	return origins
+	return withLocalDevOrigins(origins)
+}
+
+func withLocalDevOrigins(origins []string) []string {
+	defaults := []string{
+		"http://localhost:3000",
+		"http://localhost:3001",
+		"http://localhost:5173",
+		"http://localhost:5174",
+	}
+	hasLocalOrigin := false
+	seen := make(map[string]bool, len(origins)+len(defaults))
+	out := make([]string, 0, len(origins)+len(defaults))
+	for _, origin := range origins {
+		if seen[origin] {
+			continue
+		}
+		seen[origin] = true
+		out = append(out, origin)
+		if strings.Contains(origin, "://localhost:") || strings.Contains(origin, "://127.0.0.1:") {
+			hasLocalOrigin = true
+		}
+	}
+	if !hasLocalOrigin {
+		return out
+	}
+	for _, origin := range defaults {
+		if !seen[origin] {
+			out = append(out, origin)
+		}
+	}
+	return out
 }
 
 // SetAllowedOrigins overrides the WebSocket origin whitelist.
@@ -713,7 +745,7 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		if casdoorToken != "" && !strings.HasPrefix(casdoorToken, "mul_") {
 			userInfo, err := auth.ParseCasdoorJWT(casdoorToken, jwks)
 			if err == nil {
-				uid, err := subjectResolver(r.Context(), userInfo.SubjectID, userInfo.Name, userInfo.Email)
+				uid, err := subjectResolver(r.Context(), userInfo.SubjectID, userInfo.UniversalID, userInfo.Name, userInfo.Email)
 				if err == nil && uid != "" {
 					if !mc.IsMember(r.Context(), uid, workspaceID) {
 						http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)

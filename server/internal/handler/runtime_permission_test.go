@@ -32,9 +32,14 @@ func helperTestUser(t *testing.T, name, email string) string {
 // helperAddUserToWorkspace adds an existing user to the test workspace.
 func helperAddUserToWorkspace(t *testing.T, userID, role string) {
 	t.Helper()
+	helperAddUserToWorkspaceWithStatus(t, userID, role, "active")
+}
+
+func helperAddUserToWorkspaceWithStatus(t *testing.T, userID, role, status string) {
+	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		`INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, $3)`,
-		testWorkspaceID, userID, role,
+		`INSERT INTO multica_member (workspace_id, user_id, role, status) VALUES ($1, $2, $3, $4)`,
+		testWorkspaceID, userID, role, status,
 	); err != nil {
 		t.Fatalf("add user to workspace: %v", err)
 	}
@@ -126,12 +131,12 @@ func TestCanControlRuntime(t *testing.T) {
 
 func TestCanObserveRuntime(t *testing.T) {
 	tests := []struct {
-		name           string
-		memberRole     string
-		isOwner        bool
-		explicitRole   string
-		visibility     string
-		want           bool
+		name         string
+		memberRole   string
+		isOwner      bool
+		explicitRole string
+		visibility   string
+		want         bool
 	}{
 		{"workspace owner private", "owner", false, "", "private", true},
 		{"explicit viewer private", "member", false, "viewer", "private", true},
@@ -300,6 +305,25 @@ func TestCreateRuntimePermission_Duplicate(t *testing.T) {
 func TestCreateRuntimePermission_SelfGrant(t *testing.T) {
 	runtimeID := handlerTestRuntimeID(t)
 	body := map[string]string{"user_id": testUserID, "role": "viewer"}
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/permissions", body)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	rr := httptest.NewRecorder()
+	router := chi.NewRouter()
+	router.Post("/api/runtimes/{runtimeId}/permissions", testHandler.CreateRuntimePermission)
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCreateRuntimePermission_RejectsInactiveWorkspaceMember(t *testing.T) {
+	runtimeID := handlerTestRuntimeID(t)
+	pendingUser := helperTestUser(t, "Pending Runtime User", "pending-runtime@multica.ai")
+	helperAddUserToWorkspaceWithStatus(t, pendingUser, "member", "pending_activation")
+
+	body := map[string]string{"user_id": pendingUser, "role": "viewer"}
 	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/permissions", body)
 	req = withURLParam(req, "runtimeId", runtimeID)
 

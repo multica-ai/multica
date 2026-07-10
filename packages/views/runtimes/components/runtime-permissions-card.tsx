@@ -8,6 +8,7 @@ import type { AgentRuntime, RuntimePermissionRole, MemberWithUser } from "@multi
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import {
   runtimePermissionsOptions,
   myRuntimePermissionOptions,
@@ -73,6 +74,7 @@ function PermissionRow({
   const { t } = useT("runtimes");
   const roleLabel = useRoleLabel();
   const member = members.find((m) => m.user_id === permission.user_id);
+  const memberIsActive = !member || isActiveWorkspaceMember(member);
   const name = permission.user_name ?? member?.name ?? permission.user_email ?? permission.user_id;
   const email = permission.user_email ?? member?.email;
 
@@ -100,7 +102,7 @@ function PermissionRow({
               <DropdownMenuItem
                 key={role}
                 onClick={() => onRoleChange(role)}
-                disabled={busy || permission.role === role}
+                disabled={busy || permission.role === role || !memberIsActive}
               >
                 {roleLabel(role)}
                 {permission.role === role && (
@@ -150,7 +152,7 @@ export function RuntimePermissionsCard({ runtime }: { runtime: AgentRuntime }) {
   const eligibleMembers = useMemo(
     () =>
       members.filter(
-        (m) => m.user_id !== user?.id && !permissionUserIds.has(m.user_id),
+        (m) => isActiveWorkspaceMember(m) && m.user_id !== user?.id && !permissionUserIds.has(m.user_id),
       ),
     [members, permissionUserIds, user?.id],
   );

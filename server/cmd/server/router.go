@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/deptsync"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -32,6 +33,7 @@ import (
 
 var defaultOrigins = []string{
 	"http://localhost:3000", // Next.js dev
+	"http://localhost:3001", // Next.js dev (alternate local port)
 	"http://localhost:5173", // electron-vite dev
 	"http://localhost:5174", // electron-vite dev (fallback port)
 }
@@ -56,7 +58,32 @@ func allowedOrigins() []string {
 	if len(origins) == 0 {
 		return defaultOrigins
 	}
-	return origins
+	return withLocalDevOrigins(origins)
+}
+
+func withLocalDevOrigins(origins []string) []string {
+	hasLocalOrigin := false
+	seen := make(map[string]bool, len(origins)+len(defaultOrigins))
+	out := make([]string, 0, len(origins)+len(defaultOrigins))
+	for _, origin := range origins {
+		if seen[origin] {
+			continue
+		}
+		seen[origin] = true
+		out = append(out, origin)
+		if strings.Contains(origin, "://localhost:") || strings.Contains(origin, "://127.0.0.1:") {
+			hasLocalOrigin = true
+		}
+	}
+	if !hasLocalOrigin {
+		return out
+	}
+	for _, origin := range defaultOrigins {
+		if !seen[origin] {
+			out = append(out, origin)
+		}
+	}
+	return out
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
@@ -173,6 +200,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
+	h.DeptSync = deptsync.NewClient(deptsync.Config{
+		BaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("DEPT_SYNC_BASE_URL")), "/"),
+		QueryKey: os.Getenv("DEPT_SYNC_QUERY_KEY"),
+		Timeout:  envDuration("DEPT_SYNC_TIMEOUT", 10*time.Second),
+	})
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
 	// (invalidate). DaemonTokenCache backs the DaemonAuth mdt_ path. Both
@@ -329,11 +361,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/node-runs/{nodeRunId}/session", h.BindNodeRunSession)
 	})
 
-
-		// GitLab credential for CLI credential helper (gitlab-credential-multica).
-		// Requires daemon token or valid user token to access — workspace is derived from the token.
-		r.With(middleware.DaemonAuth(queries, patCache, daemonTokenCache, opts.JWKSProvider, opts.SubjectResolver)).
-			Get("/api/gitlab/credential", h.HandleGitlabCredential)
+	// GitLab credential for CLI credential helper (gitlab-credential-multica).
+	// Requires daemon token or valid user token to access — workspace is derived from the token.
+	r.With(middleware.DaemonAuth(queries, patCache, daemonTokenCache, opts.JWKSProvider, opts.SubjectResolver)).
+		Get("/api/gitlab/credential", h.HandleGitlabCredential)
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
@@ -366,6 +397,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Put("/api/workflow-admins", h.UpdateWorkflowAdmins)
 		r.Post("/api/workflow-admins/invite", h.InviteWorkflowAdmin)
 
+		r.Get("/api/dept/departments/search", h.SearchDeptDepartments)
+		r.Get("/api/dept/departments/{id}/users", h.ListDeptDepartmentUsers)
+		r.Get("/api/dept/users/search", h.SearchDeptUsers)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -389,6 +424,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
+					r.Post("/dept-members", h.BatchAddDeptMembers)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
@@ -536,16 +572,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/edges", h.ListWorkflowEdges)
 					r.Post("/edges", h.CreateWorkflowEdge)
 					r.Delete("/edges/{edgeId}", h.DeleteWorkflowEdge)
-						// Stages
-						r.Post("/stages", h.CreateWorkflowStage)
-						r.Get("/stages", h.ListWorkflowStages)
-						r.Put("/stages/reorder", h.ReorderWorkflowStages)
-						r.Route("/stages/{stageId}", func(r chi.Router) {
-							r.Put("/", h.UpdateWorkflowStage)
-							r.Delete("/", h.DeleteWorkflowStage)
-						})
-						// Node stage assignment
-						r.Put("/nodes/{nodeId}/stage", h.AssignNodeToStage)
+					// Stages
+					r.Post("/stages", h.CreateWorkflowStage)
+					r.Get("/stages", h.ListWorkflowStages)
+					r.Put("/stages/reorder", h.ReorderWorkflowStages)
+					r.Route("/stages/{stageId}", func(r chi.Router) {
+						r.Put("/", h.UpdateWorkflowStage)
+						r.Delete("/", h.DeleteWorkflowStage)
+					})
+					// Node stage assignment
+					r.Put("/nodes/{nodeId}/stage", h.AssignNodeToStage)
 					// Runs
 					r.Get("/runs", h.ListWorkflowRuns)
 					r.Post("/runs", h.StartWorkflowRun)

@@ -66,6 +66,16 @@ export interface MemberWithUser {
   workspace_id: string;
   user_id: string;
   role: MemberRole;
+  source?: "manual" | "dept";
+  status?: "active" | "pending_activation" | "inactive";
+  external_user_id?: string | null;
+  external_universal_id?: string | null;
+  employee_id?: string | null;
+  org_display_name?: string | null;
+  dept_id?: string | null;
+  dept_name?: string | null;
+  dept_path?: string | null;
+  position?: string | null;
   created_at: string;
   name: string;
   email: string;

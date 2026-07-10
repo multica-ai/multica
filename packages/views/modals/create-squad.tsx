@@ -14,6 +14,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import {
   Dialog,
@@ -443,7 +444,7 @@ function AdditionalMembersPicker({
 
   const filteredMine = myAgents.filter(agentMatches);
   const filteredOthers = otherAgents.filter(agentMatches);
-  const filteredMembers = members.filter(memberMatches);
+  const filteredMembers = members.filter((m) => isActiveWorkspaceMember(m) && memberMatches(m));
   const anyResults =
     filteredMine.length + filteredOthers.length + filteredMembers.length > 0;
 

@@ -10,6 +10,7 @@ import (
 // CasdoorUserInfo holds identity claims extracted from a Casdoor-issued JWT.
 type CasdoorUserInfo struct {
 	SubjectID         string // from "sub" (required)
+	UniversalID       string // from "universal_id"
 	Name              string // from "name"
 	PreferredUsername string // from "preferred_username"
 	Email             string // from "email"
@@ -51,6 +52,7 @@ func ParseCasdoorJWT(tokenString string, jwks *JWKSProvider) (*CasdoorUserInfo, 
 
 	return &CasdoorUserInfo{
 		SubjectID:         sub,
+		UniversalID:       stringClaim(claims, "universal_id"),
 		Name:              stringClaim(claims, "name"),
 		PreferredUsername: stringClaim(claims, "preferred_username"),
 		Email:             stringClaim(claims, "email"),

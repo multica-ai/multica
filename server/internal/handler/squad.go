@@ -583,10 +583,15 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if _, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
 			UserID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "member not found in this workspace")
+			return
+		}
+		if !isActiveMember(member) {
+			writeError(w, http.StatusBadRequest, "cannot add an inactive workspace member to a squad")
 			return
 		}
 	}
@@ -687,6 +692,24 @@ func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) 
 	memberUUID, ok := parseUUIDOrBadRequest(w, req.MemberID, "member_id")
 	if !ok {
 		return
+	}
+	if req.MemberType == "member" {
+		wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+		if !ok {
+			return
+		}
+		member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      memberUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "member not found in this workspace")
+			return
+		}
+		if !isActiveMember(member) {
+			writeError(w, http.StatusBadRequest, "cannot update role for an inactive squad member")
+			return
+		}
 	}
 
 	sm, err := h.Queries.UpdateSquadMemberRole(r.Context(), db.UpdateSquadMemberRoleParams{

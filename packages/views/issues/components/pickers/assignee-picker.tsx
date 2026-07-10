@@ -11,6 +11,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { workflowActiveListOptions, workflowTemplateListOptions, workflowNodesOptions } from "@multica/core/workflows/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -137,6 +138,7 @@ export function AssigneePicker({
 
   const query = filter.trim().toLowerCase();
   const filteredMembers = members
+    .filter((m) => !!m.user_id && isActiveWorkspaceMember(m))
     .filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
   const filteredAgents = agents

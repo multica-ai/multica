@@ -178,6 +178,46 @@ export interface CreateMemberRequest {
   role?: MemberRole;
 }
 
+export interface CreateWorkspaceRequest {
+  name: string;
+  slug: string;
+  description?: string;
+  context?: string;
+}
+
+export interface DeptDepartment {
+  dept_id: string;
+  dept_name: string;
+  dept_path?: string | null;
+  parent_dept_id?: string | null;
+  dept_level?: number;
+  child_dept_count?: number;
+}
+
+export interface DeptUser {
+  user_id: string;
+  username: string;
+  universal_id?: string | null;
+  dept_id?: string | null;
+  dept_name?: string | null;
+  dept_path?: string | null;
+  is_main?: number;
+  position?: string | null;
+  status?: number;
+}
+
+export interface BatchAddDeptMembersRequest {
+  users: Array<{
+    external_user_id: string;
+    external_universal_id?: string;
+  }>;
+}
+
+export interface BatchAddDeptMembersResponse {
+  added: number;
+  skipped: number;
+}
+
 export interface UpdateMemberRequest {
   role: MemberRole;
 }

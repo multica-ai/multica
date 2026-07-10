@@ -23,6 +23,7 @@ import {
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -387,7 +388,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
+  const filteredMembers = members.filter((m) => isActiveWorkspaceMember(m) && (m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery)));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const handleUpdateField = useCallback(

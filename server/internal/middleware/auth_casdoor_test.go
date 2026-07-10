@@ -88,7 +88,7 @@ func signRS256(t *testing.T, key *rsa.PrivateKey, kid string, claims jwt.MapClai
 // unexpected subject.
 func stubResolver(t *testing.T, wantSubject, multicaUUID string) SubjectResolver {
 	t.Helper()
-	return func(_ context.Context, subjectID, name, email string) (string, error) {
+	return func(_ context.Context, subjectID, universalID, name, email string) (string, error) {
 		if subjectID != wantSubject {
 			t.Fatalf("resolver called with subject %q, want %q", subjectID, wantSubject)
 		}
@@ -102,9 +102,9 @@ func TestCasdoorAuth_ValidCookie(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	const (
-		kid          = "casdoor-test-kid"
-		subjectID    = "casdoor-user-42"
-		multicaUUID  = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+		kid         = "casdoor-test-kid"
+		subjectID   = "casdoor-user-42"
+		multicaUUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	)
 	jwks := setupTestJWKS(t, &key.PublicKey, kid)
 	resolver := stubResolver(t, subjectID, multicaUUID)
@@ -141,20 +141,28 @@ func TestCasdoorAuth_ValidCookie(t *testing.T) {
 	}
 }
 
-func TestCasdoorAuth_NoCookie_Returns401(t *testing.T) {
+func TestCasdoorAuth_NoCookiePassesThrough(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
 	jwks := setupTestJWKS(t, &key.PublicKey, "kid")
-	resolver := func(_ context.Context, _, _, _ string) (string, error) {
+	resolver := func(_ context.Context, _, _, _, _ string) (string, error) {
 		t.Fatal("resolver should not be called when no token is present")
 		return "", nil
 	}
 
 	mw := CasdoorAuth(jwks, resolver)
+	called := false
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("next handler should not be called")
+		called = true
+		if uid := r.Header.Get("X-User-ID"); uid != "" {
+			t.Errorf("X-User-ID should not be set without Casdoor token, got %q", uid)
+		}
+		if sid := r.Header.Get("X-Subject-ID"); sid != "" {
+			t.Errorf("X-Subject-ID should not be set without Casdoor token, got %q", sid)
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
@@ -162,20 +170,11 @@ func TestCasdoorAuth_NoCookie_Returns401(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", w.Code)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 pass-through, got %d; body=%s", w.Code, w.Body.String())
 	}
-	body := w.Body.String()
-	if body == "" {
-		t.Fatal("expected non-empty error body")
-	}
-	// Body should be valid JSON with an "error" key.
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		t.Fatalf("response body is not JSON: %v; raw=%q", err, body)
-	}
-	if _, ok := resp["error"]; !ok {
-		t.Errorf("expected 'error' key in response, got %v", resp)
+	if !called {
+		t.Fatal("next handler was not called without Casdoor token")
 	}
 }
 
@@ -187,7 +186,7 @@ func TestCasdoorAuth_PATTokenPassesThrough(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	jwks := setupTestJWKS(t, &key.PublicKey, "kid")
-	resolver := func(_ context.Context, _, _, _ string) (string, error) {
+	resolver := func(_ context.Context, _, _, _, _ string) (string, error) {
 		t.Fatal("resolver should not be called for PAT tokens")
 		return "", nil
 	}

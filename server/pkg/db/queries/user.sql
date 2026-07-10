@@ -72,8 +72,17 @@ SELECT * FROM multica_user
 WHERE subject_id = $1
 LIMIT 1;
 
+-- name: GetUserByCasdoorUniversalID :one
+SELECT * FROM multica_user
+WHERE casdoor_universal_id = $1
+LIMIT 1;
+
 -- name: SetUserSubjectID :exec
 UPDATE multica_user SET subject_id = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: SetUserCasdoorUniversalID :exec
+UPDATE multica_user SET casdoor_universal_id = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: SetStarterContentState :one

@@ -709,7 +709,7 @@ func (q *Queries) ListTemplates(ctx context.Context) ([]MulticaWorkflow, error) 
 
 const listWorkflowAdminUsers = `-- name: ListWorkflowAdminUsers :many
 
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id, can_manage_workflows FROM multica_user
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id, casdoor_universal_id, can_manage_workflows FROM multica_user
 WHERE can_manage_workflows = TRUE
 ORDER BY name ASC
 `
@@ -742,6 +742,7 @@ func (q *Queries) ListWorkflowAdminUsers(ctx context.Context) ([]MulticaUser, er
 			&i.ProfileDescription,
 			&i.Timezone,
 			&i.SubjectID,
+			&i.CasdoorUniversalID,
 			&i.CanManageWorkflows,
 		); err != nil {
 			return nil, err
@@ -1150,7 +1151,7 @@ const setUserWorkflowAdmin = `-- name: SetUserWorkflowAdmin :one
 UPDATE multica_user SET
     can_manage_workflows = $2
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id, casdoor_universal_id, can_manage_workflows
 `
 
 type SetUserWorkflowAdminParams struct {
@@ -1177,6 +1178,7 @@ func (q *Queries) SetUserWorkflowAdmin(ctx context.Context, arg SetUserWorkflowA
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.SubjectID,
+		&i.CasdoorUniversalID,
 		&i.CanManageWorkflows,
 	)
 	return i, err

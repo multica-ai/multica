@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/deptsync"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -101,6 +102,13 @@ type cloudRuntimeProxy interface {
 	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
 }
 
+type workspaceDeptClient interface {
+	Configured() bool
+	SearchDepartments(ctx context.Context, query string, limit int) ([]deptsync.Department, error)
+	ListDepartmentUsers(ctx context.Context, deptID string, includeChildren bool) ([]deptsync.User, error)
+	SearchUsers(ctx context.Context, query string, limit int) ([]deptsync.User, error)
+}
+
 type Handler struct {
 	Queries               *db.Queries
 	DB                    dbExecutor
@@ -127,6 +135,7 @@ type Handler struct {
 	WebhookRateLimiter    WebhookRateLimiter
 	WebhookIPRateLimiter  WebhookRateLimiter
 	CloudRuntime          cloudRuntimeProxy
+	DeptSync              workspaceDeptClient
 	cfg                   Config
 }
 
@@ -445,6 +454,10 @@ func countOwners(members []db.MulticaMember) int {
 	return owners
 }
 
+func isActiveMember(member db.MulticaMember) bool {
+	return member.Status == "active"
+}
+
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.MulticaMember, error) {
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
@@ -458,6 +471,17 @@ func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID st
 		UserID:      userUUID,
 		WorkspaceID: wsUUID,
 	})
+}
+
+func (h *Handler) getActiveWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.MulticaMember, error) {
+	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
+	if err != nil {
+		return db.MulticaMember{}, err
+	}
+	if !isActiveMember(member) {
+		return db.MulticaMember{}, pgx.ErrNoRows
+	}
+	return member, nil
 }
 
 func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string) (db.MulticaMember, bool) {
@@ -516,6 +540,14 @@ func (h *Handler) isWorkspaceEntity(ctx context.Context, userType, userID, works
 	default:
 		return false
 	}
+}
+
+func (h *Handler) isActiveWorkspaceEntity(ctx context.Context, userType, userID, workspaceID string) bool {
+	if userType != "member" {
+		return h.isWorkspaceEntity(ctx, userType, userID, workspaceID)
+	}
+	_, err := h.getActiveWorkspaceMember(ctx, userID, workspaceID)
+	return err == nil
 }
 
 func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issueID string) (db.MulticaIssue, bool) {

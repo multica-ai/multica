@@ -79,7 +79,17 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		targetUserType = *req.UserType
 	}
 
-	if !h.isWorkspaceEntity(r.Context(), targetUserType, targetUserID, workspaceID) {
+	if targetUserType == "member" {
+		targetMember, err := h.getWorkspaceMember(r.Context(), targetUserID, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "target user is not a member of this workspace")
+			return
+		}
+		if !isActiveMember(targetMember) {
+			writeError(w, http.StatusBadRequest, "cannot subscribe an inactive workspace member")
+			return
+		}
+	} else if !h.isWorkspaceEntity(r.Context(), targetUserType, targetUserID, workspaceID) {
 		writeError(w, http.StatusForbidden, "target user is not a member of this workspace")
 		return
 	}

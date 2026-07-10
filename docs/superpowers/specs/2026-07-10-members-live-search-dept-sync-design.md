@@ -4,7 +4,7 @@
 
 Member search on the members page must run **live against costrict-dept-sync**, at the data source, in real time. Multica must not pull the whole organization into its own process to filter it, and must not depend on a synced snapshot of the directory for search. Only members who have actually been added to a workspace live in Multica's database.
 
-This delivers the promise made in [2026-07-08-dept-backed-workspace-members-design.md](../specs/2026-07-08-dept-backed-workspace-members-design.md): *"Until dept exposes a first-class search endpoint, Multica may provide a scoped search over the bound department import snapshot."* dept-sync now exposes that first-class endpoint, so search moves off the snapshot.
+This replaces the earlier snapshot-based search direction: dept-sync now exposes a first-class endpoint, so search moves off any Multica-side import snapshot.
 
 ## Background
 
@@ -90,15 +90,12 @@ Multica currently rebuilds `dept_path` client-side as "ancestor names / current 
 ## What does NOT change
 
 - Multica's `multica_member` table and the add → upsert (`UpsertDeptMember`) path. Only added members persist in Multica.
-- The `/dept-sync` full-reconciliation feature for dept-bound workspaces.
 - The frontend members page and the existing 200ms debounce (already "real-time" enough).
 - Casdoor ⇄ dept identity linking via `universal_id`.
 
 ## Out of scope
 
 - Pinyin matching for this search box (it has none today; the assignee-picker's client-side pinyin is a separate surface).
-- Removing the dead `GET /api/workspaces/{id}/members/search` endpoint and its unused `memberSearchOptions` hook (search over Multica's own DB). Candidate for a later cleanup; not touched here.
-- Removing or redesigning the `/dept-sync` full sync.
 - Server-side pagination beyond the simple `limit` clamp (no infinite-scroll UX is needed for this picker).
 
 ## Risks

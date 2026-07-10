@@ -23,6 +23,7 @@
     "./workspace/queries": "./workspace/queries.ts",
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/hooks": "./workspace/hooks.ts",
+    "./workspace/members": "./workspace/members.ts",
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",

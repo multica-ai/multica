@@ -36,6 +36,21 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
   },
+  webpack(config) {
+    config.resolve = config.resolve || {};
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      "langium/lib/utils/cancellation.js": resolve(
+        __dirname,
+        "webpack-shims/langium-cancellation.js",
+      ),
+      "langium/lib/utils/event.js": resolve(
+        __dirname,
+        "webpack-shims/langium-event.js",
+      ),
+    };
+    return config;
+  },
   async rewrites() {
     return {
       // Run before file-system routes so /docs isn't shadowed by the

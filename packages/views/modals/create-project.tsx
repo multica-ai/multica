@@ -32,6 +32,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -153,7 +154,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [leadFilter, setLeadFilter] = useState("");
 
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
+  const filteredMembers = members.filter((m) => isActiveWorkspaceMember(m) && (m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery)));
   const filteredAgents = agents.filter(
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );

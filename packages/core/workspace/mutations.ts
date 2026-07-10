@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Workspace } from "../types";
+import type { CreateWorkspaceRequest, Workspace } from "../types";
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { workspaceKeys } from "./queries";
@@ -7,7 +7,7 @@ import { workspaceKeys } from "./queries";
 export function useCreateWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; slug: string; description?: string }) =>
+    mutationFn: (data: CreateWorkspaceRequest) =>
       api.createWorkspace(data),
     // Seed the workspace list cache BEFORE callers navigate to /{newWs.slug}/issues.
     // The destination [workspaceSlug]/layout queries by slug from this cache;

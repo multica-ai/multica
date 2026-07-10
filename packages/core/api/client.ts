@@ -9,6 +9,11 @@ import type {
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
+  CreateWorkspaceRequest,
+  DeptDepartment,
+  DeptUser,
+  BatchAddDeptMembersRequest,
+  BatchAddDeptMembersResponse,
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
@@ -141,6 +146,7 @@ import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
+  BatchAddDeptMembersResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CloudRuntimeNodeListSchema,
@@ -153,8 +159,11 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_BATCH_ADD_DEPT_MEMBERS_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
+  EMPTY_DEPT_DEPARTMENT_LIST,
+  EMPTY_DEPT_USER_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -165,6 +174,8 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   EMPTY_WORKFLOW_STAGES_RESPONSE,
   GroupedIssuesResponseSchema,
+  DeptDepartmentListSchema,
+  DeptUserListSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -1297,10 +1308,31 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
+  async createWorkspace(data: CreateWorkspaceRequest): Promise<Workspace> {
     return this.fetch("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async searchDeptDepartments(query: string): Promise<DeptDepartment[]> {
+    const raw = await this.fetch<unknown>(`/api/dept/departments/search?q=${encodeURIComponent(query)}`);
+    return parseWithFallback(raw, DeptDepartmentListSchema, EMPTY_DEPT_DEPARTMENT_LIST, {
+      endpoint: "GET /api/dept/departments/search",
+    });
+  }
+
+  async searchDeptUsers(query: string): Promise<DeptUser[]> {
+    const raw = await this.fetch<unknown>(`/api/dept/users/search?q=${encodeURIComponent(query)}`);
+    return parseWithFallback(raw, DeptUserListSchema, EMPTY_DEPT_USER_LIST, {
+      endpoint: "GET /api/dept/users/search",
+    });
+  }
+
+  async listDeptDepartmentUsers(deptId: string): Promise<DeptUser[]> {
+    const raw = await this.fetch<unknown>(`/api/dept/departments/${encodeURIComponent(deptId)}/users`);
+    return parseWithFallback(raw, DeptUserListSchema, EMPTY_DEPT_USER_LIST, {
+      endpoint: "GET /api/dept/departments/{id}/users",
     });
   }
 
@@ -1314,6 +1346,16 @@ export class ApiClient {
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
+  }
+
+  async batchAddDeptMembers(workspaceId: string, data: BatchAddDeptMembersRequest): Promise<BatchAddDeptMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/dept-members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, BatchAddDeptMembersResponseSchema, EMPTY_BATCH_ADD_DEPT_MEMBERS_RESPONSE, {
+      endpoint: "POST /api/workspaces/{id}/dept-members",
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {

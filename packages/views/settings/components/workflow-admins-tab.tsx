@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { useWorkflowAdmins, useUpdateWorkflowAdmins } from "@multica/core/workflows/queries";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
@@ -29,6 +30,7 @@ function AdminRow({
   userId,
   isChecked,
   busy,
+  disabled,
   onToggle,
 }: {
   name: string;
@@ -36,6 +38,7 @@ function AdminRow({
   userId: string;
   isChecked: boolean;
   busy: boolean;
+  disabled?: boolean;
   onToggle: (checked: boolean) => void;
 }) {
   return (
@@ -49,7 +52,7 @@ function AdminRow({
         size="sm"
         checked={isChecked}
         onCheckedChange={onToggle}
-        disabled={busy}
+        disabled={busy || disabled}
       />
     </div>
   );
@@ -110,6 +113,11 @@ export function WorkflowAdminsTab() {
     if (!initialized) return false;
     return !arraysEqual(selectedIds, admins.map((a) => a.id));
   }, [selectedIds, admins, initialized]);
+
+  const visibleMembers = useMemo(
+    () => members.filter((member) => isActiveWorkspaceMember(member) || selectedIds.includes(member.user_id)),
+    [members, selectedIds],
+  );
 
   const handleToggle = (userId: string, checked: boolean) => {
     setSelectedIds((prev) =>
@@ -205,18 +213,23 @@ export function WorkflowAdminsTab() {
         </div>
 
         <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
-          {members.map((member, i) => (
-            <div key={member.user_id} className={i > 0 ? "border-t border-border/50" : ""}>
-              <AdminRow
-                name={member.name}
-                email={member.email}
-                userId={member.user_id}
-                isChecked={selectedIds.includes(member.user_id)}
-                busy={updateMutation.isPending}
-                onToggle={(checked) => handleToggle(member.user_id, checked)}
-              />
-            </div>
-          ))}
+          {visibleMembers.map((member, i) => {
+            const active = isActiveWorkspaceMember(member);
+            const checked = selectedIds.includes(member.user_id);
+            return (
+              <div key={member.user_id} className={i > 0 ? "border-t border-border/50" : ""}>
+                <AdminRow
+                  name={member.name}
+                  email={member.email}
+                  userId={member.user_id}
+                  isChecked={checked}
+                  busy={updateMutation.isPending}
+                  disabled={!active && !checked}
+                  onToggle={(nextChecked) => handleToggle(member.user_id, nextChecked)}
+                />
+              </div>
+            );
+          })}
         </div>
       </section>
 

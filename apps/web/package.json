@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

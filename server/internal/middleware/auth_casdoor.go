@@ -20,7 +20,7 @@ const CasdoorCookieName = "zgsmAdminToken"
 // Implementations typically look up the user in the database by subject_id.
 // name and email are extracted from the Casdoor JWT claims; they are used
 // for auto-provisioning and updating the user's profile.
-type SubjectResolver func(ctx context.Context, subjectID, name, email string) (userID string, err error)
+type SubjectResolver func(ctx context.Context, subjectID, universalID, name, email string) (userID string, err error)
 
 // CasdoorAuth returns Chi middleware that validates Casdoor-issued RS256 JWTs
 // and resolves the Casdoor subject to a Multica user.
@@ -63,7 +63,7 @@ func CasdoorAuth(jwks *auth.JWKSProvider, resolver SubjectResolver) func(http.Ha
 				return
 			}
 
-			multicaUserID, err := resolver(r.Context(), userInfo.SubjectID, userInfo.Name, userInfo.Email)
+			multicaUserID, err := resolver(r.Context(), userInfo.SubjectID, userInfo.UniversalID, userInfo.Name, userInfo.Email)
 			if err != nil {
 				slog.Warn("casdoor auth: subject resolution failed",
 					"path", r.URL.Path,

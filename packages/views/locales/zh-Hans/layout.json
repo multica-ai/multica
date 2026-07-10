@@ -11,7 +11,8 @@
     "runtimes": "运行时",
     "skills": "Skill",
     "workflows": "工作流",
-    "settings": "设置"
+    "settings": "设置",
+    "members": "成员"
   },
   "help": {
     "trigger": "帮助",

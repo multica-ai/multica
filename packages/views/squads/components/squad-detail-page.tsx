@@ -8,6 +8,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
@@ -207,7 +208,7 @@ export function SquadDetailPage() {
   }
 
   const availableAgents = agents.filter((a: Agent) => !a.archived_at && !members.some((m) => m.member_type === "agent" && m.member_id === a.id));
-  const availableMembers = wsMembers.filter((m) => !members.some((sm) => sm.member_type === "member" && sm.member_id === m.user_id));
+  const availableMembers = wsMembers.filter((m) => isActiveWorkspaceMember(m) && !members.some((sm) => sm.member_type === "member" && sm.member_id === m.user_id));
   const isLeader = (m: SquadMember) => m.member_type === "agent" && squad.leader_id === m.member_id;
 
   const initials = squad.name

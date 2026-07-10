@@ -11,9 +11,14 @@ const TEST_RESOURCES = {
   en: { common: enCommon, workspace: enWorkspace },
 };
 
-const mockMutate = vi.fn();
+const mocks = vi.hoisted(() => ({
+  mutate: vi.fn(),
+}));
 vi.mock("@multica/core/workspace/mutations", () => ({
-  useCreateWorkspace: () => ({ mutate: mockMutate, isPending: false }),
+  useCreateWorkspace: () => ({ mutate: mocks.mutate, isPending: false }),
+}));
+vi.mock("@multica/core/api", () => ({
+  api: {},
 }));
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -35,7 +40,9 @@ function renderForm(onSuccess = vi.fn()) {
 }
 
 describe("CreateWorkspaceForm", () => {
-  beforeEach(() => mockMutate.mockReset());
+  beforeEach(() => {
+    mocks.mutate.mockReset();
+  });
 
   it("auto-generates slug from name until user edits slug", () => {
     renderForm();
@@ -58,7 +65,7 @@ describe("CreateWorkspaceForm", () => {
 
   it("calls onSuccess with the created workspace", async () => {
     const onSuccess = vi.fn();
-    mockMutate.mockImplementation((_args, opts) => {
+    mocks.mutate.mockImplementation((_args, opts) => {
       opts?.onSuccess?.({ id: "ws-1", slug: "acme", name: "Acme" });
     });
     renderForm(onSuccess);
@@ -73,8 +80,17 @@ describe("CreateWorkspaceForm", () => {
     );
   });
 
+  it("does not expose dept selection during workspace creation", () => {
+    renderForm();
+
+    expect(
+      screen.queryByRole("button", { name: /dept managed/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/department/i)).not.toBeInTheDocument();
+  });
+
   it("shows slug-conflict error inline on 409", async () => {
-    mockMutate.mockImplementation((_args, opts) => {
+    mocks.mutate.mockImplementation((_args, opts) => {
       opts?.onError?.({ status: 409 });
     });
     renderForm();

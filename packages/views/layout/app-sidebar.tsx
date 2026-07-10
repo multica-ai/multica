@@ -36,6 +36,7 @@ import {
   X,
   // Hidden per 2026-06-16 product decision.
   // Zap,
+  IdCard,
   Users,
   GitBranch,
 } from "lucide-react";
@@ -114,6 +115,7 @@ type NavKey =
   | "projects"
   | "autopilots"
   | "agents"
+  | "members"
   | "squads"
   | "usage"
   | "runtimes"
@@ -129,6 +131,7 @@ type NavLabelKey =
   | "projects"
   | "autopilots"
   | "agents"
+  | "members"
   | "squads"
   | "usage"
   | "runtimes"
@@ -148,6 +151,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   // { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "workflows", labelKey: "workflows", icon: GitBranch },
   { key: "agents", labelKey: "agents", icon: Bot },
+  { key: "members", labelKey: "members", icon: IdCard },
   { key: "squads", labelKey: "squads", icon: Users },
   // Hidden per 2026-06-16 product decision.
   // { key: "usage", labelKey: "usage", icon: BarChart3 },

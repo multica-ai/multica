@@ -75,6 +75,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { isActiveWorkspaceMember } from "@multica/core/workspace/members";
 import { workflowStagesOptions, workflowNodeRunsOptions } from "@multica/core/workflows/queries";
 import type { WorkflowNodeRun } from "@multica/core/types";
 import { NodeRunControlActions } from "../../workflows/components/node-run-control-actions";
@@ -101,7 +102,7 @@ function SubscriberPopoverContent({
   toggleSubscriber,
   t,
 }: {
-  members: { user_id: string; name: string }[];
+  members: { user_id: string; name: string; status?: string }[];
   agents: { id: string; name: string; archived_at?: string | null }[];
   subscribers: { user_type: string; user_id: string }[];
   toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
@@ -110,7 +111,7 @@ function SubscriberPopoverContent({
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
 
-  const uniqueMembers = members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i);
+  const uniqueMembers = members.filter((m, i, arr) => isActiveWorkspaceMember(m) && arr.findIndex((x) => x.user_id === m.user_id) === i);
   const activeAgents = agents.filter((a) => !a.archived_at);
 
   const filteredMembers = q

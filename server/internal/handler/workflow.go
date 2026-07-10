@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // ── Request types ────────────────────────────────────────────────────────────
@@ -30,30 +30,30 @@ type UpdateWorkflowRequest struct {
 }
 
 type CreateNodeRequest struct {
-	Title              string          `json:"title"`
-	Description        string          `json:"description"`
-	PositionX          float64         `json:"position_x"`
-	PositionY          float64         `json:"position_y"`
-	FormatSchema       json.RawMessage `json:"format_schema"`
-	WorkerType         string          `json:"worker_type"`
-	WorkerID           *string         `json:"worker_id"`
-	CriticType         string          `json:"critic_type"`
-	CriticID           *string         `json:"critic_id"`
-	CriticApiURL       *string         `json:"critic_api_url"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	PositionX    float64         `json:"position_x"`
+	PositionY    float64         `json:"position_y"`
+	FormatSchema json.RawMessage `json:"format_schema"`
+	WorkerType   string          `json:"worker_type"`
+	WorkerID     *string         `json:"worker_id"`
+	CriticType   string          `json:"critic_type"`
+	CriticID     *string         `json:"critic_id"`
+	CriticApiURL *string         `json:"critic_api_url"`
 }
 
 type UpdateNodeRequest struct {
-	Title              *string         `json:"title"`
-	Description        *string         `json:"description"`
-	PositionX          *float64        `json:"position_x"`
-	PositionY          *float64        `json:"position_y"`
-	FormatSchema       json.RawMessage `json:"format_schema"`
-	WorkerType         *string         `json:"worker_type"`
-	WorkerID           *string         `json:"worker_id"`
-	CriticType         *string         `json:"critic_type"`
-	CriticID           *string         `json:"critic_id"`
-	CriticApiURL       *string         `json:"critic_api_url"`
-	SortOrder          *int32          `json:"sort_order"`
+	Title        *string         `json:"title"`
+	Description  *string         `json:"description"`
+	PositionX    *float64        `json:"position_x"`
+	PositionY    *float64        `json:"position_y"`
+	FormatSchema json.RawMessage `json:"format_schema"`
+	WorkerType   *string         `json:"worker_type"`
+	WorkerID     *string         `json:"worker_id"`
+	CriticType   *string         `json:"critic_type"`
+	CriticID     *string         `json:"critic_id"`
+	CriticApiURL *string         `json:"critic_api_url"`
+	SortOrder    *int32          `json:"sort_order"`
 }
 
 type CreateEdgeRequest struct {
@@ -81,22 +81,22 @@ type WorkflowResponse struct {
 }
 
 type WorkflowNodeResponse struct {
-	ID                 string          `json:"id"`
-	WorkflowID         string          `json:"workflow_id"`
-	Title              string          `json:"title"`
-	Description        string          `json:"description"`
-	PositionX          float64         `json:"position_x"`
-	PositionY          float64         `json:"position_y"`
-	FormatSchema       json.RawMessage `json:"format_schema"`
-	WorkerType         string          `json:"worker_type"`
-	WorkerID           *string         `json:"worker_id"`
-	CriticType         string          `json:"critic_type"`
-	CriticID           *string         `json:"critic_id"`
-	CriticApiURL       *string         `json:"critic_api_url"`
-	SortOrder          int32           `json:"sort_order"`
-	StageID            *string         `json:"stage_id"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
+	ID           string          `json:"id"`
+	WorkflowID   string          `json:"workflow_id"`
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	PositionX    float64         `json:"position_x"`
+	PositionY    float64         `json:"position_y"`
+	FormatSchema json.RawMessage `json:"format_schema"`
+	WorkerType   string          `json:"worker_type"`
+	WorkerID     *string         `json:"worker_id"`
+	CriticType   string          `json:"critic_type"`
+	CriticID     *string         `json:"critic_id"`
+	CriticApiURL *string         `json:"critic_api_url"`
+	SortOrder    int32           `json:"sort_order"`
+	StageID      *string         `json:"stage_id"`
+	CreatedAt    string          `json:"created_at"`
+	UpdatedAt    string          `json:"updated_at"`
 }
 
 type WorkflowEdgeResponse struct {
@@ -174,22 +174,22 @@ func workflowToResponse(wf db.MulticaWorkflow, nodeCount int64) WorkflowResponse
 
 func workflowNodeToResponse(node db.MulticaWorkflowNode) WorkflowNodeResponse {
 	return WorkflowNodeResponse{
-		ID:                 uuidToString(node.ID),
-		WorkflowID:         uuidToString(node.WorkflowID),
-		Title:              node.Title,
-		Description:        node.Description,
-		PositionX:          node.PositionX,
-		PositionY:          node.PositionY,
-		FormatSchema:       node.FormatSchema,
-		WorkerType:         node.WorkerType,
-		WorkerID:           uuidToPtr(node.WorkerID),
-		CriticType:         node.CriticType,
-		CriticID:           uuidToPtr(node.CriticID),
-		CriticApiURL:       textToPtr(node.CriticApiUrl),
-		SortOrder:          node.SortOrder,
-		StageID:            uuidToPtr(node.StageID),
-		CreatedAt:          timestampToString(node.CreatedAt),
-		UpdatedAt:          timestampToString(node.UpdatedAt),
+		ID:           uuidToString(node.ID),
+		WorkflowID:   uuidToString(node.WorkflowID),
+		Title:        node.Title,
+		Description:  node.Description,
+		PositionX:    node.PositionX,
+		PositionY:    node.PositionY,
+		FormatSchema: node.FormatSchema,
+		WorkerType:   node.WorkerType,
+		WorkerID:     uuidToPtr(node.WorkerID),
+		CriticType:   node.CriticType,
+		CriticID:     uuidToPtr(node.CriticID),
+		CriticApiURL: textToPtr(node.CriticApiUrl),
+		SortOrder:    node.SortOrder,
+		StageID:      uuidToPtr(node.StageID),
+		CreatedAt:    timestampToString(node.CreatedAt),
+		UpdatedAt:    timestampToString(node.UpdatedAt),
 	}
 }
 
@@ -555,19 +555,28 @@ func (h *Handler) CreateWorkflowNode(w http.ResponseWriter, r *http.Request) {
 		criticID = cID
 	}
 
+	if err := h.validateWorkflowHumanActor(r.Context(), req.WorkerType, workerID, workspaceID, "worker"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.validateWorkflowHumanActor(r.Context(), req.CriticType, criticID, workspaceID, "critic"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	node, err := h.Queries.CreateWorkflowNode(r.Context(), db.CreateWorkflowNodeParams{
-		WorkflowID:         wf.ID,
-		Title:              req.Title,
-		Description:        nonNullText(req.Description),
-		PositionX:          req.PositionX,
-		PositionY:          req.PositionY,
-		FormatSchema:       req.FormatSchema,
-		WorkerType:         req.WorkerType,
-		WorkerID:           workerID,
-		CriticType:         req.CriticType,
-		CriticID:           criticID,
-		CriticApiUrl:       nonNullText(stringOrEmpty(req.CriticApiURL)),
-		SortOrder:          0,
+		WorkflowID:   wf.ID,
+		Title:        req.Title,
+		Description:  nonNullText(req.Description),
+		PositionX:    req.PositionX,
+		PositionY:    req.PositionY,
+		FormatSchema: req.FormatSchema,
+		WorkerType:   req.WorkerType,
+		WorkerID:     workerID,
+		CriticType:   req.CriticType,
+		CriticID:     criticID,
+		CriticApiUrl: nonNullText(stringOrEmpty(req.CriticApiURL)),
+		SortOrder:    0,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create node")
@@ -587,7 +596,7 @@ func (h *Handler) UpdateWorkflowNode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	nID, ok := parseUUIDOrBadRequest(w, nodeID, "node ID")
+	currentNode, ok := h.loadWorkflowNode(w, r, wfID, nodeID)
 	if !ok {
 		return
 	}
@@ -601,19 +610,58 @@ func (h *Handler) UpdateWorkflowNode(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, _ := requireUserID(w, r)
 
+	workerType := currentNode.WorkerType
+	if req.WorkerType != nil {
+		workerType = *req.WorkerType
+	}
+	workerID := currentNode.WorkerID
+	var workerIDParam pgtype.UUID
+	if req.WorkerID != nil {
+		parsed, ok := parseUUIDOrBadRequest(w, *req.WorkerID, "worker_id")
+		if !ok {
+			return
+		}
+		workerID = parsed
+		workerIDParam = parsed
+	}
+
+	criticType := currentNode.CriticType
+	if req.CriticType != nil {
+		criticType = *req.CriticType
+	}
+	criticID := currentNode.CriticID
+	var criticIDParam pgtype.UUID
+	if req.CriticID != nil {
+		parsed, ok := parseUUIDOrBadRequest(w, *req.CriticID, "critic_id")
+		if !ok {
+			return
+		}
+		criticID = parsed
+		criticIDParam = parsed
+	}
+
+	if err := h.validateWorkflowHumanActor(r.Context(), workerType, workerID, workspaceID, "worker"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.validateWorkflowHumanActor(r.Context(), criticType, criticID, workspaceID, "critic"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	params := db.UpdateWorkflowNodeParams{
-		ID:                 nID,
-		Title:              ptrToText(req.Title),
-		Description:        ptrToText(req.Description),
-		PositionX:          float64ToFloat8(req.PositionX),
-		PositionY:          float64ToFloat8(req.PositionY),
-		FormatSchema:       req.FormatSchema,
-		WorkerType:         ptrToText(req.WorkerType),
-		WorkerID:           ptrStrToUUID(req.WorkerID),
-		CriticType:         ptrToText(req.CriticType),
-		CriticID:           ptrStrToUUID(req.CriticID),
-		CriticApiUrl:       ptrToText(req.CriticApiURL),
-		SortOrder:          int32ToInt4(req.SortOrder),
+		ID:           currentNode.ID,
+		Title:        ptrToText(req.Title),
+		Description:  ptrToText(req.Description),
+		PositionX:    float64ToFloat8(req.PositionX),
+		PositionY:    float64ToFloat8(req.PositionY),
+		FormatSchema: req.FormatSchema,
+		WorkerType:   ptrToText(req.WorkerType),
+		WorkerID:     workerIDParam,
+		CriticType:   ptrToText(req.CriticType),
+		CriticID:     criticIDParam,
+		CriticApiUrl: ptrToText(req.CriticApiURL),
+		SortOrder:    int32ToInt4(req.SortOrder),
 	}
 
 	updated, err := h.Queries.UpdateWorkflowNode(r.Context(), params)
@@ -1027,7 +1075,6 @@ func (h *Handler) loadWorkflowNode(w http.ResponseWriter, r *http.Request, wfID,
 	return node, true
 }
 
-
 // ── Template ───────────────────────────────────────────────────────────────────
 
 // validateNodeAgentIsBuiltin checks that a workflow node's worker or critic
@@ -1061,6 +1108,16 @@ func (h *Handler) validateNodeAgentIsBuiltin(ctx context.Context, agentType stri
 		if !leader.IsBuiltin {
 			return fmt.Errorf("node %q %s squad %q leader %q is not a built-in agent — only built-in agents are allowed in templates", nodeTitle, role, squad.Name, leader.Name)
 		}
+	}
+	return nil
+}
+
+func (h *Handler) validateWorkflowHumanActor(ctx context.Context, actorType string, actorID pgtype.UUID, workspaceID string, role string) error {
+	if actorType != "human" || !actorID.Valid {
+		return nil
+	}
+	if _, err := h.getActiveWorkspaceMember(ctx, uuidToString(actorID), workspaceID); err != nil {
+		return fmt.Errorf("cannot assign inactive workspace member as workflow %s", role)
 	}
 	return nil
 }
@@ -1287,4 +1344,3 @@ func ptrStrToUUID(s *string) pgtype.UUID {
 	}
 	return u
 }
-

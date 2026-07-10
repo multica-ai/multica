@@ -203,6 +203,37 @@ func TestSubscriberAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("SubscribeInactiveWorkspaceMember", func(t *testing.T) {
+		issueID := createIssue(t)
+		defer deleteIssue(t, issueID)
+
+		inactiveUserID := helperTestUser(t, "Inactive Subscriber", "inactive-subscriber@multica.ai")
+		helperAddUserToWorkspaceWithStatus(t, inactiveUserID, "member", "pending_activation")
+
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/subscribe", map[string]any{
+			"user_id":   inactiveUserID,
+			"user_type": "member",
+		})
+		req = withURLParam(req, "id", issueID)
+		testHandler.SubscribeToIssue(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("SubscribeToIssue with inactive member: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+
+		subscribed, err := testHandler.Queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+			IssueID:  parseUUID(issueID),
+			UserType: "member",
+			UserID:   parseUUID(inactiveUserID),
+		})
+		if err != nil {
+			t.Fatalf("IsIssueSubscriber: %v", err)
+		}
+		if subscribed {
+			t.Fatal("inactive workspace member should NOT be subscribed in DB")
+		}
+	})
+
 	t.Run("UnsubscribeCrossWorkspaceUser", func(t *testing.T) {
 		issueID := createIssue(t)
 		defer deleteIssue(t, issueID)

@@ -6,7 +6,6 @@ import {
   SlidersHorizontal,
   Key,
   Settings,
-  Users,
   FolderGit2,
   // Hidden per 2026-06-16 product decision.
   // FlaskConical,
@@ -24,7 +23,6 @@ import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
-import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
 import { GitlabTab } from "./gitlab-tab";
@@ -54,7 +52,6 @@ const WORKSPACE_TAB_KEYS = [
   // Hidden per 2026-06-16 product decision.
   // "integrations",
   // "labs",
-  "members",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
@@ -64,7 +61,6 @@ const WORKSPACE_TAB_VALUES = {
   // Hidden per 2026-06-16 product decision.
   // integrations: "integrations",
   // labs: "labs",
-  members: "members",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -74,7 +70,6 @@ const WORKSPACE_TAB_ICONS = {
   // Hidden per 2026-06-16 product decision.
   // integrations: Plug,
   // labs: FlaskConical,
-  members: Users,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -201,7 +196,6 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           {/* Hidden per 2026-06-16 product decision. */}
           {/* <TabsContent value="integrations"><IntegrationsTab /></TabsContent> */}
           {/* <TabsContent value="labs"><LabsTab /></TabsContent> */}
-          <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

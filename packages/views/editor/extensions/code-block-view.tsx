@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { MermaidDiagram } from "../mermaid-diagram";
 import { CodeBlockIframe } from "../code-block-iframe";
+
+const MermaidDiagram = lazy(() =>
+  import("../mermaid-diagram").then((module) => ({
+    default: module.MermaidDiagram,
+  })),
+);
 
 // Coalesces fast keystrokes before re-rendering live previews.
 // `mermaid.initialize()` mutates a process-global config, so back-to-back
@@ -69,7 +74,9 @@ function CodeBlockView({ node }: NodeViewProps) {
           contentEditable={false}
           className="mermaid-diagram-preview mb-1"
         >
-          <MermaidDiagram chart={debouncedChart} />
+          <Suspense fallback={<div className="mermaid-diagram-loading" />}>
+            <MermaidDiagram chart={debouncedChart} />
+          </Suspense>
         </div>
       )}
       {isHtml && showHtmlPreview && (
