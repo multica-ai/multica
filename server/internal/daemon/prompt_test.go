@@ -309,6 +309,28 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	})
 }
 
+func TestBuildChatPromptAgentIntro(t *testing.T) {
+	// The proactive self-introduction chat (MUL-4230) has no user message: the
+	// prompt must tell the agent to open the conversation itself, and must NOT
+	// carry the generic "respond to their message" framing or an empty
+	// "User message:" section that would confuse the agent.
+	out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatIntro: true})
+	for _, want := range []string{
+		"You were just created",
+		"you are opening the conversation",
+		"introduce yourself",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("intro prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"Respond to their message", "User message:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("intro prompt should not contain %q\n--- output ---\n%s", unwanted, out)
+		}
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
@@ -577,5 +599,264 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	}
 	if strings.Contains(out, "Read the triggering conversation first") {
 		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
+	}
+}
+
+// TestBuildCommentPromptCoalescedCrossThread pins MUL-4195 review should-fix #3:
+// when a run coalesces comments that span MULTIPLE threads, the prompt must
+// embed each folded comment's content with its OWN thread id instead of
+// claiming they all live in the triggering thread. The earlier version told the
+// agent "they are in the triggering thread" and handed a single `--thread`
+// command — wrong (and lossy) when the folded comments came from different
+// threads.
+func TestBuildCommentPromptCoalescedCrossThread(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-xthread-1",
+		TriggerCommentID:      "trigger-newest",
+		TriggerThreadID:       "thread-root-A",
+		TriggerCommentContent: "latest instruction",
+		TriggerAuthorType:     "member",
+		CoalescedCommentIDs:   []string{"c-old-1", "c-old-2"},
+		CoalescedComments: []CoalescedCommentData{
+			{ID: "c-old-1", ThreadID: "thread-root-A", AuthorType: "member", AuthorName: "Alice", Content: "first earlier comment", CreatedAt: "2026-07-08T01:00:00Z"},
+			{ID: "c-old-2", ThreadID: "thread-root-B", AuthorType: "member", AuthorName: "Bob", Content: "comment in a different thread", CreatedAt: "2026-07-08T02:00:00Z"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+
+	// The stale same-thread assumption must be gone.
+	if strings.Contains(out, "they are in the triggering thread") {
+		t.Errorf("prompt must not assume coalesced comments share the triggering thread, got:\n%s", out)
+	}
+	// Each folded comment's content is embedded directly, so the agent never
+	// has to guess which thread to read to find it.
+	for _, want := range []string{"first earlier comment", "comment in a different thread"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt must embed coalesced comment content %q, got:\n%s", want, out)
+		}
+	}
+	// Each distinct thread id is surfaced so a follow-up fetch targets the
+	// right thread — including the OTHER thread (B), not just the trigger's.
+	for _, want := range []string{"thread-root-A", "thread-root-B"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt must surface coalesced comment thread id %q, got:\n%s", want, out)
+		}
+	}
+	// Both coalesced comment ids remain referenced.
+	for _, id := range []string{"c-old-1", "c-old-2"} {
+		if !strings.Contains(out, id) {
+			t.Errorf("prompt must reference coalesced comment id %s, got:\n%s", id, out)
+		}
+	}
+}
+
+// TestBuildCommentPromptCoalescedIDsOnlyFallback pins the old-server fallback:
+// when only coalesced ids are shipped (no embedded detail), the prompt must
+// still NOT assume a shared thread and must point at an issue-wide fetch.
+func TestBuildCommentPromptCoalescedIDsOnlyFallback(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-fallback-1",
+		TriggerCommentID:      "trigger-newest",
+		TriggerThreadID:       "thread-root-A",
+		TriggerCommentContent: "latest instruction",
+		TriggerAuthorType:     "member",
+		CoalescedCommentIDs:   []string{"c-old-1", "c-old-2"},
+	}
+	out := BuildPrompt(task, "claude")
+
+	if strings.Contains(out, "they are in the triggering thread") {
+		t.Errorf("id-only fallback must not assume a shared thread, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--recent 30") {
+		t.Errorf("id-only fallback must point at an issue-wide fetch (--recent 30), got:\n%s", out)
+	}
+	for _, id := range []string{"c-old-1", "c-old-2"} {
+		if !strings.Contains(out, id) {
+			t.Errorf("id-only fallback must reference coalesced comment id %s, got:\n%s", id, out)
+		}
+	}
+}
+
+// TestCommentReplyThreadsGrouping pins the server-side grouping that drives
+// per-thread reply routing (MUL-4348). The invariants:
+//   - three distinct root threads → three targets, each replying to its own
+//     thread (the trigger's thread replies under the trigger comment itself).
+//   - multiple coalesced follow-ups in the SAME thread → a single group, so the
+//     caller keeps the single-parent path and the reply is never duplicated.
+//   - no coalesced comments (ordinary single comment) → nil.
+func TestCommentReplyThreadsGrouping(t *testing.T) {
+	t.Run("three distinct root threads fan out", func(t *testing.T) {
+		task := Task{
+			TriggerCommentID: "c3",
+			TriggerThreadID:  "c3", // a root comment is its own thread
+			CoalescedComments: []CoalescedCommentData{
+				{ID: "c1", ThreadID: "c1", Content: "背一首宋词"},
+				{ID: "c2", ThreadID: "c2", Content: "毛泽东诗词背一首"},
+			},
+		}
+		targets := commentReplyThreads(task)
+		if len(targets) != 3 {
+			t.Fatalf("want 3 targets, got %d: %+v", len(targets), targets)
+		}
+		wantParent := map[string]string{"c1": "c1", "c2": "c2", "c3": "c3"}
+		for _, tgt := range targets {
+			if wantParent[tgt.ThreadID] != tgt.ParentID {
+				t.Errorf("thread %s: parent = %s, want %s", tgt.ThreadID, tgt.ParentID, wantParent[tgt.ThreadID])
+			}
+		}
+	})
+
+	t.Run("same-thread follow-ups consolidate to a single group", func(t *testing.T) {
+		task := Task{
+			TriggerCommentID: "c3",
+			TriggerThreadID:  "thread-A",
+			CoalescedComments: []CoalescedCommentData{
+				{ID: "c1", ThreadID: "thread-A", Content: "追问 1"},
+				{ID: "c2", ThreadID: "thread-A", Content: "追问 2"},
+			},
+		}
+		if targets := commentReplyThreads(task); targets != nil {
+			t.Fatalf("same-thread follow-ups must not fan out; got %d targets: %+v", len(targets), targets)
+		}
+	})
+
+	t.Run("mixed: trigger thread plus one other thread", func(t *testing.T) {
+		task := Task{
+			TriggerCommentID: "c3",
+			TriggerThreadID:  "thread-A",
+			CoalescedComments: []CoalescedCommentData{
+				{ID: "c1", ThreadID: "thread-A", Content: "same-thread follow-up"},
+				{ID: "c2", ThreadID: "thread-B", Content: "other thread"},
+			},
+		}
+		targets := commentReplyThreads(task)
+		if len(targets) != 2 {
+			t.Fatalf("want 2 targets (thread-A, thread-B), got %d: %+v", len(targets), targets)
+		}
+		got := map[string]string{}
+		for _, tgt := range targets {
+			got[tgt.ThreadID] = tgt.ParentID
+		}
+		// The trigger's own thread replies under the trigger comment, not its root.
+		if got["thread-A"] != "c3" {
+			t.Errorf("trigger thread parent = %q, want c3 (the trigger comment)", got["thread-A"])
+		}
+		// The other thread replies under the specific comment that mentioned the
+		// agent (a mid-thread reply), not the thread root — fixes the placement
+		// asymmetry from the first cut.
+		if got["thread-B"] != "c2" {
+			t.Errorf("other thread parent = %q, want c2 (the specific mentioning comment)", got["thread-B"])
+		}
+	})
+
+	t.Run("no coalesced comments → nil", func(t *testing.T) {
+		task := Task{TriggerCommentID: "c1", TriggerThreadID: "thread-A"}
+		if targets := commentReplyThreads(task); targets != nil {
+			t.Fatalf("ordinary single-comment run must not fan out; got %+v", targets)
+		}
+	})
+
+	t.Run("non-trigger thread replies under its newest mention, not root", func(t *testing.T) {
+		// Two mid-thread mentions in thread-B (oldest c1, newer c2); the reply
+		// should target the newest specific comment (c2), not the root thread-B.
+		task := Task{
+			TriggerCommentID: "c9",
+			TriggerThreadID:  "thread-A",
+			CoalescedComments: []CoalescedCommentData{
+				{ID: "c1", ThreadID: "thread-B", Content: "older mention", CreatedAt: "2026-07-10T01:00:00Z"},
+				{ID: "c2", ThreadID: "thread-B", Content: "newer mention", CreatedAt: "2026-07-10T02:00:00Z"},
+			},
+		}
+		targets := commentReplyThreads(task)
+		got := map[string]string{}
+		for _, tgt := range targets {
+			got[tgt.ThreadID] = tgt.ParentID
+		}
+		if got["thread-B"] != "c2" {
+			t.Errorf("thread-B parent = %q, want newest mention c2 (not root)", got["thread-B"])
+		}
+		if got["thread-A"] != "c9" {
+			t.Errorf("trigger thread parent = %q, want trigger c9", got["thread-A"])
+		}
+	})
+}
+
+// TestBuildCommentPromptCrossThreadFansOutReplies is the end-to-end prompt
+// assertion for the screenshot scenario: three separate root comments coalesced
+// into one run must produce a per-thread reply plan (one reply per thread),
+// explicitly overriding the "one comment per run" rule, instead of the single
+// --parent cookbook.
+func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-xthread-2",
+		TriggerCommentID:      "c3",
+		TriggerThreadID:       "c3",
+		TriggerCommentContent: "莎士比亚名言来一句",
+		TriggerAuthorType:     "member",
+		CoalescedCommentIDs:   []string{"c1", "c2"},
+		CoalescedComments: []CoalescedCommentData{
+			{ID: "c1", ThreadID: "c1", AuthorType: "member", AuthorName: "Yushen", Content: "背一首宋词", CreatedAt: "2026-07-10T01:00:00Z"},
+			{ID: "c2", ThreadID: "c2", AuthorType: "member", AuthorName: "Yushen", Content: "毛泽东诗词背一首", CreatedAt: "2026-07-10T02:00:00Z"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"3 DISTINCT threads",
+		"Post ONE reply per thread",
+		"OVERRIDES",
+		"--parent c1",
+		"--parent c2",
+		"--parent c3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cross-thread prompt must contain %q, got:\n%s", want, out)
+		}
+	}
+	// The single-parent cookbook must NOT be used when fanning out.
+	if strings.Contains(out, "always use the trigger comment ID below") {
+		t.Errorf("cross-thread prompt must not emit the single-parent reply cookbook, got:\n%s", out)
+	}
+
+	// Chronological ordering (MUL-4348 test-round-2 problem #1): replies must be
+	// posted oldest thread first, the newest (triggering) thread last — so the
+	// coalesced comments c1 (oldest) and c2 come before the trigger c3.
+	if !strings.Contains(out, "OLDEST thread first") {
+		t.Errorf("cross-thread prompt must instruct oldest-first chronological order, got:\n%s", out)
+	}
+	posC1 := strings.Index(out, "--parent c1")
+	posC2 := strings.Index(out, "--parent c2")
+	posC3 := strings.Index(out, "--parent c3")
+	if !(posC1 >= 0 && posC1 < posC2 && posC2 < posC3) {
+		t.Errorf("reply targets must be listed oldest-first (c1 < c2 < c3); got positions c1=%d c2=%d c3=%d\n%s", posC1, posC2, posC3, out)
+	}
+}
+
+// TestBuildCommentPromptSameThreadKeepsSingleReply pins the hard requirement:
+// multiple @mentions coalesced from the SAME thread must keep the ordinary
+// single-parent reply path (one reply, under the trigger comment) and must NOT
+// trigger the multi-thread fan-out.
+func TestBuildCommentPromptSameThreadKeepsSingleReply(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-samethread-1",
+		TriggerCommentID:      "c3",
+		TriggerThreadID:       "thread-A",
+		TriggerCommentContent: "追问 3",
+		TriggerAuthorType:     "member",
+		CoalescedCommentIDs:   []string{"c1", "c2"},
+		CoalescedComments: []CoalescedCommentData{
+			{ID: "c1", ThreadID: "thread-A", AuthorType: "member", AuthorName: "Yushen", Content: "追问 1", CreatedAt: "2026-07-10T01:00:00Z"},
+			{ID: "c2", ThreadID: "thread-A", AuthorType: "member", AuthorName: "Yushen", Content: "追问 2", CreatedAt: "2026-07-10T02:00:00Z"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+
+	if strings.Contains(out, "DISTINCT threads") {
+		t.Errorf("same-thread coalescing must not emit the multi-thread fan-out block, got:\n%s", out)
+	}
+	// The single-parent cookbook is used, threading the one reply under the
+	// trigger comment.
+	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {
+		t.Errorf("same-thread run must keep the single --parent=trigger reply cookbook, got:\n%s", out)
 	}
 }

@@ -247,6 +247,9 @@
     "runtime_cloud_badge": "云端",
     "runtime_private_badge": "私有",
     "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
+    "runtime_search_placeholder": "搜索机器…",
+    "runtime_no_results": "没有匹配的机器",
+    "runtime_group_online": "{{online}}/{{total}} 在线",
     "duplicate_copy_suffix": "（副本）",
     "create": "创建",
     "creating": "创建中...",
@@ -475,7 +478,9 @@
     "runtime_label": "运行时",
     "skills_label": "Skills",
     "owner_label": "所有者",
-    "unknown_runtime": "未知运行时"
+    "unknown_runtime": "未知运行时",
+    "model_label": "模型",
+    "model_unset": "运行时默认"
   },
   "live_peek": {
     "current_issue_label": "正在处理",

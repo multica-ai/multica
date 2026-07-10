@@ -95,7 +95,6 @@ vi.mock("../../navigation", () => ({
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -372,6 +371,67 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
+  // MUL-4290: `cancelled` is a first-class default status. Status columns come
+  // from `visibleStatuses` in ALL_STATUSES order, so the Cancelled column
+  // renders by default (ordered last) and is only dropped when the status
+  // filter narrows to a subset that excludes it.
+  const cancelledOrphan: Issue = {
+    id: "cancelled-orphan",
+    workspace_id: "ws-1",
+    number: 9,
+    identifier: "PROJ-9",
+    title: "Cancelled Orphan",
+    description: "A cancelled orphan",
+    status: "cancelled",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 400,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("renders a Cancelled column and its cards by default", () => {
+    renderWithI18n(
+      // No visibleStatuses prop → default (ALL_STATUSES) includes cancelled.
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
+  });
+
+  it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        visibleStatuses={[
+          "backlog",
+          "todo",
+          "in_progress",
+          "in_review",
+          "done",
+          "blocked",
+        ]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancelled Orphan")).not.toBeInTheDocument();
+  });
+
   it("renders parent swimlanes and orphans section", () => {
     renderWithI18n(
       <SwimLaneView
@@ -507,7 +567,7 @@ describe("SwimLaneView", () => {
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 6; // BOARD_STATUSES default
+    const visibleStatusCount = 7; // ALL_STATUSES default (cancelled included)
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);

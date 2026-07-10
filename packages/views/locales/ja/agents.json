@@ -239,6 +239,9 @@
     "runtime_cloud_badge": "クラウド",
     "runtime_private_badge": "非公開",
     "runtime_private_locked_tooltip": "非公開ランタイムです。オーナーまたはワークスペースの admin のみがこのランタイム上にエージェントを作成できます。共有するには、オーナーに公開へ切り替えるよう依頼してください。",
+    "runtime_search_placeholder": "マシンを検索…",
+    "runtime_no_results": "一致するマシンがありません",
+    "runtime_group_online": "{{online}}/{{total}} オンライン",
     "duplicate_copy_suffix": " (コピー)",
     "create": "作成",
     "creating": "作成中...",
@@ -467,7 +470,9 @@
     "runtime_label": "ランタイム",
     "skills_label": "スキル",
     "owner_label": "オーナー",
-    "unknown_runtime": "不明なランタイム"
+    "unknown_runtime": "不明なランタイム",
+    "model_label": "モデル",
+    "model_unset": "ランタイム既定"
   },
   "live_peek": {
     "current_issue_label": "現在の作業",

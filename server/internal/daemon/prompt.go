@@ -66,6 +66,7 @@ func buildQuickCreatePrompt(task Task) string {
 	b.WriteString("     CC exception: `multica issue create` has no `--subscriber` flag, and the platform auto-subscribes members whose `[@Name](mention://member/<uuid>)` link appears in the description. When the user wrote \"cc @Y\", strip the verbal \"cc\" wrapper from the User request body and append a final `CC: <mention link(s)>` line to the description so the cc routing still fires.\n\n")
 	b.WriteString("  2. **Context** — include ONLY when the input cited external resources AND you successfully fetched them AND they produced verifiable facts worth recording. Summarize facts only (e.g. \"PR #45 changes auth to JWT\"), not interpretation or unsolicited reference implementations. If you have nothing factual to add, omit the section entirely — never use it as an apology log for resources you could not fetch.\n\n")
 	b.WriteString("  Hard rules: never invent requirements, implementation details, or acceptance criteria the user did not express; never reduce multi-sentence input to a single vague sentence; never echo the title.\n\n")
+	b.WriteString("  Passing the description: a short, single-line body with no code, quotes, backticks, `$()`, or other special characters may go inline via `--description \"...\"`. Anything multi-line, or containing code snippets / file paths / quotes / backticks / `$()` / special characters, or otherwise long — which quick-create descriptions usually are — MUST be written to `./description.md` and passed with `--description-file ./description.md`; passing rich text inline lets the shell rewrite or truncate it (MUL-2904). That file MUST live inside your current working directory (e.g. `./description.md`) — never `/tmp` or any machine-shared path, where a different run may have left a stale file that would silently become this issue's description. If the file write fails for any reason, stop and fix it; never run `--description-file` against a file whose write did not succeed.\n\n")
 
 	// priority
 	b.WriteString("- **priority**: one of `urgent`, `high`, `medium`, `low`, or omit. Map P0/P1 → urgent/high; \"asap\" → urgent. If unspecified, omit.\n\n")
@@ -158,6 +159,44 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+		// MUL-4195: comments that arrived before this run started were folded
+		// into it rather than dropped. The trigger above is the newest; the
+		// agent must ALSO address these earlier ones so no deliberate user
+		// instruction is silently lost. Prefer the embedded detail so the agent
+		// does not have to guess which thread each folded comment lives in
+		// (they may span multiple threads — review should-fix #3); fall back to
+		// a thread-agnostic issue-wide fetch hint for old servers that only send
+		// the ids.
+		if len(task.CoalescedComments) > 0 {
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
+			for _, cc := range task.CoalescedComments {
+				authorLabel := "A user"
+				if cc.AuthorType == "agent" {
+					name := cc.AuthorName
+					if name == "" {
+						name = "another agent"
+					}
+					authorLabel = fmt.Sprintf("Another agent (%s)", name)
+				} else if cc.AuthorName != "" {
+					authorLabel = cc.AuthorName
+				}
+				fmt.Fprintf(&b, "- comment %s", cc.ID)
+				if cc.CreatedAt != "" {
+					fmt.Fprintf(&b, " (%s, %s)", authorLabel, cc.CreatedAt)
+				} else {
+					fmt.Fprintf(&b, " (%s)", authorLabel)
+				}
+				if cc.ThreadID != "" {
+					fmt.Fprintf(&b, " [thread %s]", cc.ThreadID)
+				}
+				b.WriteString(":\n")
+				fmt.Fprintf(&b, "  > %s\n", strings.ReplaceAll(strings.TrimSpace(cc.Content), "\n", "\n  > "))
+			}
+			fmt.Fprintf(&b, "\nIf you need the surrounding discussion for any of them, fetch its thread with `multica issue comment list %s --thread <thread-id> --tail 30 --output json` using the thread id shown above.\n\n", task.IssueID)
+		} else if len(task.CoalescedCommentIDs) > 0 {
+			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above: %s. These may be in DIFFERENT threads, so do not assume they share the triggering thread; fetch each by pulling the issue-wide discussion with `multica issue comment list %s --recent 30 --output json` (expand with `--full` if a thread is folded) and locate the ids above.\n\n",
+				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "), task.IssueID)
+		}
 		if task.TriggerAuthorType == "agent" {
 			b.WriteString("⚠️ The triggering comment was posted by another agent. Decide whether a reply is warranted. If you produced actual work this turn (investigated, fixed something, answered a real question), post the result as a normal reply — that is NOT a noise comment, and the standard rule that final results must be delivered via comment still applies. If the triggering comment was a pure acknowledgment, thanks, or sign-off AND you produced no work this turn, do NOT reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is the preferred way to end agent-to-agent threads. If you do reply, do not @mention the other agent as a sign-off (that re-triggers them and starts a loop).\n\n")
 		}
@@ -181,12 +220,93 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n\n", task.IssueID)
 	}
-	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+	// Reply routing. When this run coalesced comments spanning MORE THAN ONE
+	// root thread, answer each thread in its own thread instead of dumping one
+	// merged comment (MUL-4348). Same-thread follow-ups collapse to a single
+	// group upstream, so they keep the ordinary single-parent path below and can
+	// never be split into duplicate replies.
+	if targets := commentReplyThreads(task); len(targets) >= 2 {
+		b.WriteString(execenv.BuildMultiThreadCommentReplyInstructions(task.IssueID, targets))
+	} else {
+		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+	}
 	return b.String()
+}
+
+// commentReplyThreads groups this run's trigger + coalesced comments by their
+// root thread, in first-seen order (coalesced comments oldest-first, the newest
+// trigger last). A run that coalesced several @mentions from the SAME thread
+// yields a single group, so same-thread follow-ups get exactly one consolidated
+// reply and can never be split into duplicates; comments from different root
+// threads yield one group each so the agent replies inside each thread instead
+// of merging them into one blob (MUL-4348).
+//
+// The reply for each thread targets the NEWEST comment that triggered this run
+// in that thread (coalesced comments arrive oldest-first and the trigger is the
+// newest overall, so a simple last-write-wins yields the newest per thread).
+// That nests the answer next to the most recent question in the thread rather
+// than at the thread root, and makes the trigger's own thread (--parent =
+// trigger comment) consistent with every other thread instead of a special
+// case. Returns nil when there is no trigger or only a single distinct thread —
+// the caller then keeps the existing single-parent reply path unchanged.
+func commentReplyThreads(task Task) []execenv.ThreadReplyTarget {
+	if task.TriggerCommentID == "" {
+		return nil
+	}
+	// A comment with no explicit thread id is a root comment: it is its own
+	// thread, so fall back to the comment id itself as the thread key.
+	threadKey := func(threadID, commentID string) string {
+		if threadID != "" {
+			return threadID
+		}
+		return commentID
+	}
+
+	order := make([]string, 0, len(task.CoalescedComments)+1)
+	parentByThread := make(map[string]string, len(task.CoalescedComments)+1)
+	// note records first-seen order but lets the newest comment win the reply
+	// target: inputs are chronological (coalesced oldest-first, trigger last),
+	// so the last write for a thread is its newest triggering comment.
+	note := func(threadID, parentID string) {
+		if _, ok := parentByThread[threadID]; !ok {
+			order = append(order, threadID)
+		}
+		parentByThread[threadID] = parentID
+	}
+
+	// Coalesced (older) comments first: reply under the specific comment that
+	// mentioned the agent, not the thread root, so a mid-thread mention gets its
+	// answer next to the question.
+	for _, cc := range task.CoalescedComments {
+		note(threadKey(cc.ThreadID, cc.ID), cc.ID)
+	}
+	// The newest trigger last: it always wins its own thread's reply target,
+	// overriding any earlier coalesced comment that shared the trigger's thread.
+	note(threadKey(task.TriggerThreadID, task.TriggerCommentID), task.TriggerCommentID)
+
+	if len(order) <= 1 {
+		return nil
+	}
+	targets := make([]execenv.ThreadReplyTarget, 0, len(order))
+	for _, tid := range order {
+		targets = append(targets, execenv.ThreadReplyTarget{ThreadID: tid, ParentID: parentByThread[tid]})
+	}
+	return targets
 }
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
 func buildChatPrompt(task Task) string {
+	// Proactive self-introduction: the agent was just created and is opening the
+	// conversation. There is no user message to reply to — the agent sends the
+	// first message so the thread reads as the agent messaging its creator, not
+	// the creator prompting the agent (MUL-4230).
+	if task.ChatIntro {
+		var b strings.Builder
+		b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
+		b.WriteString("You were just created, and this is the very first message in a direct chat with the person who created you. They have not written anything yet — you are opening the conversation. Send a short, warm, first-person introduction: who you are, what you're good at, and how they can work with you. Do NOT phrase it as an answer to a question or repeat any prompt back; just introduce yourself as if you reached out first.\n")
+		return b.String()
+	}
+
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")

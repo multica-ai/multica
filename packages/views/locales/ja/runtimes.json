@@ -58,6 +58,19 @@
       "cli": "CLI",
       "cloud_worker": "クラウドワーカー",
       "local_daemon": "ローカルデーモン"
+    },
+    "rename": "マシンの名前を変更",
+    "rename_dialog": {
+      "title": "マシンの名前を変更",
+      "description": "このマシンに分かりやすい名前を付けます。このマシン上のすべてのランタイムに適用され、エージェントのランタイム選択時にも表示されます。",
+      "placeholder": "例：私の MacBook",
+      "hint": "空欄にするとデバイスのデフォルト名を使用します。",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "saving": "保存中...",
+      "toast_saved": "マシンの名前を変更しました",
+      "toast_cleared": "マシン名をクリアしました",
+      "toast_failed": "マシンの名前変更に失敗しました"
     }
   },
   "health": {

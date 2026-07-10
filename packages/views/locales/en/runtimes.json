@@ -62,6 +62,19 @@
       "cli": "CLI",
       "cloud_worker": "Cloud worker",
       "local_daemon": "Local daemon"
+    },
+    "rename": "Rename machine",
+    "rename_dialog": {
+      "title": "Rename machine",
+      "description": "Give this machine a name you'll recognize. It applies to every runtime on this machine and shows up when you pick a runtime for an agent.",
+      "placeholder": "e.g. Bohan's MacBook",
+      "hint": "Leave empty to use the device's default name.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving...",
+      "toast_saved": "Machine renamed",
+      "toast_cleared": "Machine name cleared",
+      "toast_failed": "Failed to rename machine"
     }
   },
   "health": {

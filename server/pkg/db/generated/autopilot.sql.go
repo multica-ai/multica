@@ -81,6 +81,17 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 	return err
 }
 
+const archiveAutopilot = `-- name: ArchiveAutopilot :exec
+UPDATE autopilot
+SET status = 'archived', updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, archiveAutopilot, id)
+	return err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -211,7 +222,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id
 `
 
 type CreateAutopilotTaskParams struct {
@@ -270,6 +281,9 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.FireAt,
 		&i.OriginatorUserID,
 		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
 	)
 	return i, err
 }
@@ -331,15 +345,6 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		&i.EventFilters,
 	)
 	return i, err
-}
-
-const deleteAutopilot = `-- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1
-`
-
-func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAutopilot, id)
-	return err
 }
 
 const deleteAutopilotCollaborator = `-- name: DeleteAutopilotCollaborator :exec
@@ -888,7 +893,10 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND ($2::text IS NULL OR a.status = $2)
+  AND (
+    ($2::text IS NULL AND a.status <> 'archived')
+    OR a.status = $2
+  )
 ORDER BY a.created_at DESC
 `
 

@@ -7,13 +7,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
-const cursorWorkspaceTrustedFile = ".workspace-trusted"
+const (
+	// CursorMcpAuthSourceEnv is an agent custom_env key the daemon consumes
+	// before launching cursor-agent. When set, it must point at an explicit
+	// mcp-auth.json file, or at a Cursor project data directory containing one.
+	// The key is intentionally not MULTICA_* because custom_env blocks those
+	// from being set by users.
+	CursorMcpAuthSourceEnv = "CURSOR_MCP_AUTH_SOURCE"
+
+	cursorWorkspaceTrustedFile = ".workspace-trusted"
+	cursorMcpAuthFile          = "mcp-auth.json"
+)
 
 type cursorMcpConfigFile struct {
 	McpServers map[string]json.RawMessage `json:"mcpServers"`
@@ -22,7 +34,7 @@ type cursorMcpConfigFile struct {
 // prepareCursorMcpConfig writes the Cursor-native MCP sidecars for agents that
 // have an explicit managed mcp_config saved. A nil/null mcp_config means "let
 // Cursor behave normally", so no .cursor/mcp.json or CURSOR_DATA_DIR is created.
-func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, manifest *sidecarManifest) (string, error) {
+func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, mcpAuthSource string, manifest *sidecarManifest) (string, error) {
 	if !hasManagedCursorMcpConfig(mcpConfig) {
 		return "", nil
 	}
@@ -56,6 +68,9 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	if err := os.MkdirAll(projectDataDir, 0o700); err != nil {
 		return "", fmt.Errorf("create cursor project data dir: %w", err)
 	}
+	if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
+		return "", err
+	}
 	approvals, err := cursorMcpApprovalKeys(projectRoot, servers)
 	if err != nil {
 		return "", err
@@ -78,8 +93,100 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	if err := os.WriteFile(filepath.Join(projectDataDir, cursorWorkspaceTrustedFile), trustData, 0o600); err != nil {
 		return "", fmt.Errorf("write cursor workspace trust: %w", err)
 	}
+	if strings.TrimSpace(mcpAuthSource) != "" {
+		if err := seedCursorMcpAuthFile(projectDataDir, mcpAuthSource); err != nil {
+			return "", err
+		}
+	}
 
 	return cursorDataDir, nil
+}
+
+func seedCursorMcpAuthFile(projectDataDir, source string) error {
+	sourcePath, err := resolveCursorMcpAuthSource(source)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
+	if err := os.Symlink(sourcePath, target); err == nil {
+		return nil
+	}
+	if err := copyCursorMcpAuthFile(target, sourcePath); err != nil {
+		return fmt.Errorf("seed cursor mcp auth file: %w", err)
+	}
+	return nil
+}
+
+func removeCursorMcpAuthFile(projectDataDir string) error {
+	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
+	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove prior cursor mcp auth file: %w", err)
+	}
+	return nil
+}
+
+func resolveCursorMcpAuthSource(source string) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", fmt.Errorf("%s is empty", CursorMcpAuthSourceEnv)
+	}
+	if source == "~" || strings.HasPrefix(source, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve %s home directory: %w", CursorMcpAuthSourceEnv, err)
+		}
+		if source == "~" {
+			source = home
+		} else {
+			source = filepath.Join(home, source[2:])
+		}
+	}
+	if !filepath.IsAbs(source) {
+		return "", fmt.Errorf("%s must be an absolute path to %s or its containing Cursor project directory", CursorMcpAuthSourceEnv, cursorMcpAuthFile)
+	}
+	source = filepath.Clean(source)
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", CursorMcpAuthSourceEnv, err)
+	}
+	if info.IsDir() {
+		source = filepath.Join(source, cursorMcpAuthFile)
+		info, err = os.Stat(source)
+		if err != nil {
+			return "", fmt.Errorf("stat %s %s: %w", CursorMcpAuthSourceEnv, cursorMcpAuthFile, err)
+		}
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s must resolve to a file, got directory %s", CursorMcpAuthSourceEnv, source)
+	}
+	if filepath.Base(source) != cursorMcpAuthFile {
+		return "", fmt.Errorf("%s must point at %s, got %s", CursorMcpAuthSourceEnv, cursorMcpAuthFile, filepath.Base(source))
+	}
+	return source, nil
+}
+
+func copyCursorMcpAuthFile(target, source string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(target)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(target)
+		return closeErr
+	}
+	return nil
 }
 
 func hasManagedCursorMcpConfig(raw json.RawMessage) bool {

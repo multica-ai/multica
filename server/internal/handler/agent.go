@@ -310,6 +310,9 @@ type AgentTaskResponse struct {
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
 	RelativeWorkDir          string               `json:"relative_work_dir,omitempty"`
 	TriggerCommentID         *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
+	CoalescedCommentIDs      []string             `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
+	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`        // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
+	DeliveredCommentIDs      []string             `json:"delivered_comment_ids"`                 // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
 	TriggerThreadID          string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
 	TriggerCommentContent    string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
 	TriggerSummary           *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -322,6 +325,7 @@ type AgentTaskResponse struct {
 	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // true for the agent's proactive self-introduction chat (is_agent_intro session, no user message); the daemon builds an intro prompt instead of a reply prompt
 	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
 	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
 	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
@@ -384,6 +388,25 @@ type ChatAttachmentMeta struct {
 	ContentType string `json:"content_type,omitempty"`
 }
 
+// CoalescedCommentData carries the full detail of a comment that was folded
+// into a not-yet-started run (MUL-4195) so the daemon can embed it directly in
+// the prompt. The earlier merge path only shipped comment IDs plus a
+// "they are in the triggering thread" hint, which is WRONG when the folded
+// comments span multiple threads (an issue's assignee can be triggered from
+// different threads). Shipping thread_id / author / created_at / content lets
+// the prompt address each folded comment without assuming a single thread or
+// relying on a `--recent N` window that may not cover them all. The mirror
+// struct on the daemon side lives in internal/daemon/types.go with the same
+// JSON field names.
+type CoalescedCommentData struct {
+	ID         string `json:"id"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	AuthorType string `json:"author_type,omitempty"`
+	AuthorName string `json:"author_name,omitempty"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at,omitempty"`
+}
+
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
@@ -429,29 +452,31 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
-		ID:               uuidToString(t.ID),
-		AgentID:          uuidToString(t.AgentID),
-		RuntimeID:        uuidToString(t.RuntimeID),
-		IssueID:          uuidToString(t.IssueID),
-		WorkspaceID:      workspaceID,
-		Status:           t.Status,
-		Priority:         t.Priority,
-		DispatchedAt:     timestampToPtr(t.DispatchedAt),
-		StartedAt:        timestampToPtr(t.StartedAt),
-		CompletedAt:      timestampToPtr(t.CompletedAt),
-		Result:           result,
-		Error:            textToPtr(t.Error),
-		FailureReason:    failureReason,
-		Attempt:          t.Attempt,
-		MaxAttempts:      t.MaxAttempts,
-		ParentTaskID:     uuidToPtr(t.ParentTaskID),
-		IsLeaderTask:     t.IsLeaderTask,
-		CreatedAt:        timestampToString(t.CreatedAt),
-		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
-		TriggerSummary:   textToPtr(t.TriggerSummary),
-		HandoffNote:      handoffNote,
-		WorkDir:          workDir,
-		RelativeWorkDir:  relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
+		ID:                  uuidToString(t.ID),
+		AgentID:             uuidToString(t.AgentID),
+		RuntimeID:           uuidToString(t.RuntimeID),
+		IssueID:             uuidToString(t.IssueID),
+		WorkspaceID:         workspaceID,
+		Status:              t.Status,
+		Priority:            t.Priority,
+		DispatchedAt:        timestampToPtr(t.DispatchedAt),
+		StartedAt:           timestampToPtr(t.StartedAt),
+		CompletedAt:         timestampToPtr(t.CompletedAt),
+		Result:              result,
+		Error:               textToPtr(t.Error),
+		FailureReason:       failureReason,
+		Attempt:             t.Attempt,
+		MaxAttempts:         t.MaxAttempts,
+		ParentTaskID:        uuidToPtr(t.ParentTaskID),
+		IsLeaderTask:        t.IsLeaderTask,
+		CreatedAt:           timestampToString(t.CreatedAt),
+		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
+		CoalescedCommentIDs: uuidsToStrings(t.CoalescedCommentIds),
+		DeliveredCommentIDs: uuidStringsOrEmpty(t.DeliveredCommentIds),
+		TriggerSummary:      textToPtr(t.TriggerSummary),
+		HandoffNote:         handoffNote,
+		WorkDir:             workDir,
+		RelativeWorkDir:     relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -870,10 +895,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// thinking_level validation: provider-level enum only. Per-model gaps
-	// are enforced by the daemon at execution time (MUL-2339, Trump's
-	// review note — keep API behaviour consistent: literal-invalid →
-	// always 400; combination-invalid → daemon-side task error).
+	// thinking_level validation: fixed-enum providers reject unknown literals;
+	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
+	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
@@ -977,6 +1002,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
+	// Kick off a "meet your new agent" chat so the agent introduces itself
+	// (LLM-generated via a real run, not a canned template). Best effort.
+	h.sendAgentWelcomeChat(r.Context(), created, ownerID, workspaceID)
+
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 		ownerID,
 		workspaceID,
@@ -992,6 +1021,36 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		suppressComposioToolkitAllowlist(&resp)
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// sendAgentWelcomeChat creates a "meet your new agent" chat: a session owned by
+// the agent's creator, flagged is_agent_intro, then enqueues a real agent run so
+// the agent introduces itself — the intro is LLM-generated by the agent, not a
+// static template. No user message is persisted: the intro run is driven
+// server-side (the daemon builds a self-introduction prompt for is_agent_intro
+// sessions, see buildChatPrompt) so the thread reads as the agent proactively
+// messaging its creator, not the creator prompting the agent (MUL-4230). Best
+// effort: any failure is logged and never blocks the (already-committed) agent
+// creation.
+func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, creatorID, workspaceID string) {
+	if !agent.RuntimeID.Valid {
+		return // no runtime → the agent can't run; skip the welcome
+	}
+	session, err := h.Queries.CreateChatSession(ctx, db.CreateChatSessionParams{
+		WorkspaceID:  parseUUID(workspaceID),
+		AgentID:      agent.ID,
+		CreatorID:    parseUUID(creatorID),
+		Title:        "👋 " + agent.Name,
+		IsAgentIntro: true,
+	})
+	if err != nil {
+		slog.Warn("agent welcome: create session failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+
+	if _, err := h.TaskService.EnqueueChatTask(ctx, session, parseUUID(creatorID), false); err != nil {
+		slog.Warn("agent welcome: enqueue task failed", "chat_session_id", uuidToString(session.ID), "error", err)
+	}
 }
 
 type UpdateAgentRequest struct {
@@ -1382,15 +1441,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
 	//     runtime change in this same request would make the *existing*
-	//     value literal-invalid for the new provider, reject 400. This
-	//     closes the gap Elon's review flagged: previously, switching a
-	//     Claude agent storing `max` to a Codex runtime would silently
-	//     keep `max` and forward it to the daemon.
+	//     value invalid for the new provider's fixed enum or token syntax,
+	//     reject 400. Exact dynamic-catalog compatibility is daemon-owned.
 	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
-	//   - field set to value → validate against the target runtime's provider
-	//     enum; reject literal-invalid with 400. Per-model combination checks
-	//     run in the daemon at execution time, not here — see Trump's review
-	//     constraint that API behaviour stays consistent across change paths.
+	//   - field set to value → validate against the target runtime's fixed enum
+	//     or dynamic-token syntax; reject literal-invalid with 400. Per-model
+	//     combination checks run in the daemon at execution time, not here.
 	shouldClearThinkingLevel := false
 	if req.ThinkingLevel != nil {
 		value := *req.ThinkingLevel

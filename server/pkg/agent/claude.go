@@ -65,6 +65,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -236,13 +240,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
 		// non-empty failure message; callers upstream surface this as the
 		// task's error field, which is the only place users see it.
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
 		if reportedSessionID != sessionID {
 			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
 				"requested_resume", opts.ResumeSessionID,
@@ -633,20 +638,69 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 
 // resolveSessionID decides which session id to report on the Result. When the
 // caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land (claude prints
-// "No conversation found with session ID: ..." to stderr, generates a fresh
-// session, and exits). Returning "" in that case keeps the daemon's
-// retry-with-fresh-session fallback able to trigger, instead of silently
-// persisting a brand-new id as if resume had succeeded.
-func resolveSessionID(requestedResume, emitted string, failed bool) string {
+// AND the run failed, the resume did not land. Claude can also report the
+// requested id while printing "No conversation found with session ID: ..." to
+// stderr. Returning "" in those cases keeps the daemon's retry-with-fresh-
+// session fallback able to trigger instead of persisting the dead resume id.
+func resolveSessionID(requestedResume, emitted string, failed bool, stderrTail ...string) string {
+	if failed && requestedResume != "" && claudeNoConversationFound(stderrTail...) {
+		return ""
+	}
 	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
 		return ""
 	}
 	return emitted
 }
 
+func claudeNoConversationFound(stderrTail ...string) bool {
+	for _, tail := range stderrTail {
+		if strings.Contains(strings.ToLower(tail), "no conversation found") {
+			return true
+		}
+	}
+	return false
+}
+
 func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
+}
+
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func mergeEnv(base []string, extra map[string]string) []string {

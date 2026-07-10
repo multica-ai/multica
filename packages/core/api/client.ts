@@ -67,10 +67,12 @@ import type {
   TaskMessagePayload,
   Attachment,
   ChatSession,
+  ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
   ChatPendingTask,
   PendingChatTasksResponse,
+  HasPendingChatTasksResponse,
   SendChatMessageResponse,
   CancelTaskResponse,
   Project,
@@ -145,6 +147,7 @@ import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  AgentTaskListSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -1151,7 +1154,17 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { visibility?: "private" | "public" },
+    patch: {
+      visibility?: "private" | "public";
+      /**
+       * Custom display name. Pass an empty string to clear it (the server
+       * reverts to the default name). Omit to leave it unchanged — a JSON
+       * `null` is treated as "unchanged", not "clear". See MUL-4217.
+       */
+      custom_name?: string;
+      /** Apply custom_name to every runtime on the same machine. */
+      apply_to_machine?: boolean;
+    },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -1457,7 +1470,10 @@ export class ApiClient {
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
-    return this.fetch(`/api/issues/${issueId}/task-runs`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs`);
+    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
+      endpoint: "GET /api/issues/:id/task-runs",
+    });
   }
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
@@ -1775,6 +1791,36 @@ export class ApiClient {
     });
   }
 
+  async setChatSessionPinned(id: string, pinned: boolean): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}/pin`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    });
+  }
+
+  async setChatSessionArchived(id: string, archived: boolean): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}/archive`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived }),
+    });
+  }
+
+  // Quick-agent bar: per-user pinned agents.
+  async listChatPinnedAgents(): Promise<ChatPinnedAgent[]> {
+    return this.fetch("/api/chat/pinned-agents");
+  }
+
+  async pinChatAgent(agentId: string): Promise<ChatPinnedAgent> {
+    return this.fetch("/api/chat/pinned-agents", {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+  }
+
+  async unpinChatAgent(agentId: string): Promise<void> {
+    await this.fetch(`/api/chat/pinned-agents/${agentId}`, { method: "DELETE" });
+  }
+
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }
@@ -1831,6 +1877,10 @@ export class ApiClient {
 
   async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
     return this.fetch(`/api/chat/pending-tasks`);
+  }
+
+  async hasAnyPendingChatTasks(): Promise<HasPendingChatTasksResponse> {
+    return this.fetch(`/api/chat/pending-tasks/has-any`);
   }
 
   async markChatSessionRead(sessionId: string): Promise<void> {

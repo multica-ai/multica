@@ -35,7 +35,6 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 vi.mock("@multica/core/api", () => ({ api: {} }));
-vi.mock("@multica/core/analytics", () => ({ captureFeedbackOpened: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/platform", () => ({
   formatShortcut: () => "⌘↵",

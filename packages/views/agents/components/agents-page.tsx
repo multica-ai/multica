@@ -342,8 +342,8 @@ function NameCell({ row }: { row: AgentListRow }) {
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
-        size={32}
-        className={`shrink-0 rounded-md ${isArchived ? "opacity-50 grayscale" : ""}`}
+        size="lg"
+        className={`shrink-0 ${isArchived ? "opacity-50 grayscale" : ""}`}
         showStatusDot
       />
       <div className="min-w-0 flex-1">
@@ -434,7 +434,7 @@ function OwnerCell({ row }: { row: AgentListRow }) {
   }
   return (
     <ListGridCell className="hidden gap-1.5 @2xl:flex">
-      <ActorAvatar actorType="member" actorId={agent.owner_id} size={18} />
+      <ActorAvatar actorType="member" actorId={agent.owner_id} size="sm" />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {owner?.name ?? agent.owner_id.slice(0, 8)}
       </span>
@@ -627,7 +627,7 @@ function LoadingSkeleton() {
         <ListGridRow key={i} className="h-16 hover:bg-transparent">
           <span aria-hidden="true" className="hidden @2xl:inline" />
           <ListGridCell className="gap-3">
-            <Skeleton className="size-8 rounded-md" />
+            <Skeleton className="size-8 rounded-full" />
             <div className="min-w-0 flex-1 space-y-1.5">
               <Skeleton className="h-3.5 w-32 max-w-full" />
               <Skeleton className="h-3 w-48 max-w-full" />

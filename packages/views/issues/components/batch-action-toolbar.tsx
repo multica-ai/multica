@@ -89,21 +89,18 @@ export function BatchActionToolbar({
     }
   };
 
-  // Status and agent/squad assignment can fan out runs across the selection, so
-  // route them through the pre-trigger confirm modal (aggregate "将启动 N 个" +
-  // collective handoff note for assign + 暂不开始). The modal applies the batch
-  // itself. Priority, member assign, and unassign never start a run — direct.
+  // Batch status changes apply directly — no run-confirm modal (MUL-4155).
+  // done/cancelled can never start a run, and a backlog → active promotion now
+  // starts its run the same way a single-issue status change or the CLI does,
+  // without an extra confirmation step (product decision on MUL-4155). The
+  // status change was previously routed through the pre-trigger modal, which for
+  // the common done/cancelled case only rendered a misleading "现在开始处理？ →
+  // 不会开始处理" box. Agent/squad assignment still confirms via
+  // handleBatchAssignee — that is the only batch action that should preview a
+  // run fan-out.
   const handleBatchStatus = (updates: Partial<UpdateIssueRequest>) => {
     if (!updates.status) return;
-    // Backlog is the parking lot — a move into backlog never starts a run
-    // (server/internal/service/issue_trigger.go), so the confirm modal would
-    // only render an empty "won't start" box with a single Apply button. Apply
-    // directly, matching the single-issue status path.
-    if (updates.status === "backlog") {
-      void handleBatchUpdate(updates);
-      return;
-    }
-    openModal("issue-run-confirm", { issueIds: ids, mode: "status", status: updates.status });
+    void handleBatchUpdate(updates);
   };
 
   const handleBatchAssignee = (updates: Partial<UpdateIssueRequest>) => {

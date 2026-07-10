@@ -62,6 +62,7 @@
     "show_error_details_label": "显示错误详情",
     "show_details": "显示详情",
     "replied_in": "{{time}} 后回复",
+    "finished_in": "{{time}} 后完成",
     "failed_after": "{{time}} 后失败"
   },
   "session_actions": {

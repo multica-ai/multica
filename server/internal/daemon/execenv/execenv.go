@@ -47,6 +47,10 @@ type PrepareParams struct {
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
 	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource is an explicit opt-in path to a Cursor mcp-auth.json
+	// file, or the Cursor project data directory containing it. Only Cursor's
+	// managed MCP path consumes it.
+	CursorMcpAuthSource string
 	// OpenclawGateway pins the OpenClaw Gateway endpoint inside the per-task
 	// wrapper. Only consulted when Provider == "openclaw" and the agent's
 	// runtime_config selected gateway mode (issue #3260). Zero means "inherit
@@ -65,9 +69,18 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID                 string
-	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
-	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	IssueID          string
+	TriggerCommentID string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	// CommentReplyTargets is set for a comment run that coalesced comments
+	// spanning MORE THAN ONE root thread (MUL-4348). When it has >=2 entries the
+	// workflow's reply step fans out — one reply per thread — instead of the
+	// single --parent=trigger cookbook, keeping this persistent brief in sync
+	// with the per-turn prompt so a cross-thread run cannot get one source
+	// telling it "one comment" and the other "one per thread". Same-thread
+	// follow-ups collapse to a single group upstream, so this stays empty and
+	// the single-parent path is used (no duplicate replies).
+	CommentReplyTargets     []ThreadReplyTarget
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
@@ -196,6 +209,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
 
+	// Self-heal the root-level daemon marker on every task start so a marker
+	// removed while the daemon runs is restored before the agent spawns. The
+	// per-workdir marker written below only covers cwds inside the workdir;
+	// the root marker keeps the CLI fail-closed guard active for subprocesses
+	// that lose all MULTICA_* env vars AND escape above the workdir. Non-fatal:
+	// without it the workdir marker still protects the common case.
+	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
+	}
+
 	// Remove existing env if present (defensive — task IDs are unique).
 	if _, err := os.Stat(envRoot); err == nil {
 		if err := os.RemoveAll(envRoot); err != nil {
@@ -257,7 +280,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs.
 	if params.Provider == "cursor" {
-		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
 		}
@@ -295,15 +318,22 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	// WorkspacesRoot is the daemon-owned root under which all task envs live.
+	// Passed on reuse so the root-level fail-closed marker is self-healed here
+	// too — a marker removed while the daemon runs is restored before a reused
+	// task spawns, not only on the fresh-Prepare path.
+	WorkspacesRoot string
+	WorkDir        string
+	Provider       string
+	CodexVersion   string // only used when Provider == "codex"
+	OpenclawBin    string // only used when Provider == "openclaw"; empty = PATH lookup
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
 	// the old MCP set in play.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource mirrors PrepareParams.CursorMcpAuthSource on reuse.
+	CursorMcpAuthSource string
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
 	OpenclawGateway OpenclawGatewayPin
@@ -321,6 +351,17 @@ type ReuseParams struct {
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
+	}
+
+	// Self-heal the root-level daemon marker on the reuse path too, so a marker
+	// removed while the daemon runs is restored before a reused task spawns —
+	// otherwise reuse could run without the fail-closed guard until the next
+	// fresh Prepare. Non-fatal: the per-workdir marker still protects the common
+	// case, and an empty WorkspacesRoot (legacy callers) simply skips this.
+	if params.WorkspacesRoot != "" {
+		if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+			logger.Warn("execenv: workspaces root marker not written on reuse; fail-closed guard limited to the task workdir", "error", err)
+		}
 	}
 
 	rootDir := filepath.Dir(params.WorkDir)
@@ -411,7 +452,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
 	if params.Provider == "cursor" && env.RootDir != "" {
-		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
 			return nil

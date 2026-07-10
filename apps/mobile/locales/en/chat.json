@@ -62,6 +62,7 @@
     "show_error_details_label": "Show error details",
     "show_details": "Show details",
     "replied_in": "Replied in {{time}}",
+    "finished_in": "Finished in {{time}}",
     "failed_after": "Failed after {{time}}"
   },
   "session_actions": {

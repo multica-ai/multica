@@ -247,6 +247,9 @@
     "runtime_cloud_badge": "클라우드",
     "runtime_private_badge": "비공개",
     "runtime_private_locked_tooltip": "비공개 런타임입니다. 소유자 또는 워크스페이스 관리자만 이 런타임에 에이전트를 만들 수 있습니다. 공유하려면 소유자에게 공개로 전환해 달라고 요청하세요.",
+    "runtime_search_placeholder": "기기 검색…",
+    "runtime_no_results": "일치하는 기기가 없습니다",
+    "runtime_group_online": "{{online}}/{{total}} 온라인",
     "duplicate_copy_suffix": " (사본)",
     "create": "만들기",
     "creating": "만드는 중...",
@@ -475,7 +478,9 @@
     "runtime_label": "런타임",
     "skills_label": "스킬",
     "owner_label": "소유자",
-    "unknown_runtime": "알 수 없는 런타임"
+    "unknown_runtime": "알 수 없는 런타임",
+    "model_label": "모델",
+    "model_unset": "런타임 기본값"
   },
   "live_peek": {
     "current_issue_label": "현재 작업",

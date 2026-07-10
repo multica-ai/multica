@@ -234,20 +234,20 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 	}
 }
 
-// RecordEvent enqueues a PostHog event AND increments the matching Prometheus
-// counter so the two cannot drift. Pass `client = nil` (no PostHog) or
-// `m = nil` (no metrics) safely; both sides are best-effort and never block
-// the request path.
+// RecordEvent increments the matching Prometheus counter and, for any event
+// that still ships to PostHog, enqueues the PostHog event too — so the two
+// cannot drift. Pass `client = nil` (no PostHog) or `m = nil` (no metrics)
+// safely; both sides are best-effort and never block the request path.
 //
-// Operational / execution-lifecycle events flagged by analytics.IsMetricsOnly
-// (runtime_*, autopilot_run_*) still increment their Prometheus counter but are
-// NOT shipped to PostHog — Grafana already covers them and their high volume is
-// not worth the per-event PostHog ingestion cost. PostHog is reserved for
-// user/product-behaviour events.
+// As of MUL-4127 every server-side event is flagged by analytics.IsMetricsOnly
+// (all product events plus the runtime_* / autopilot_run_* lifecycle), so the
+// client.Capture below is skipped for all of them — server analytics is served
+// from the DB and Grafana, not PostHog. The Capture path is retained only so a
+// future non-metrics-only event name would still ship.
 //
-// This is the canonical way to emit any of the funnel / community / commercial
-// PostHog events from server code. Direct analytics.Client.Capture(...) with
-// an event constructed from analytics.* is rejected by the lint test in
+// This is the canonical way to record any funnel / community / commercial event
+// from server code. Direct analytics.Client.Capture(...) with an event
+// constructed from analytics.* is rejected by the lint test in
 // business_pairing_test.go.
 func RecordEvent(client analytics.Client, m *BusinessMetrics, ev analytics.Event) {
 	if client != nil && !analytics.IsMetricsOnly(ev.Name) {
