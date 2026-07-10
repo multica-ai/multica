@@ -72,6 +72,7 @@ import { canAssignAgent } from "@/lib/can-assign-agent";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
+import { WorkspaceSwitcherButton } from "@/components/workspace/workspace-switcher-button";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
 import { ChatSessionActions } from "@/components/chat/chat-session-actions";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
@@ -365,6 +366,7 @@ export default function ChatTab() {
   return (
     <View className="flex-1 bg-background">
       <Header
+        left={<WorkspaceSwitcherButton />}
         center={
           <ChatTitleButton
             currentSession={activeSession}
