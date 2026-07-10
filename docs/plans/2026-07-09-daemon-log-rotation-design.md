@@ -16,7 +16,7 @@ Option 3 is selected. It is the smallest change that addresses the actual append
 
 - The background parent passes the resolved log path to the foreground daemon through `MULTICA_DAEMON_LOG_PATH`.
 - The foreground daemon performs one rotation check before starting work, then checks periodically while running.
-- When the active log exceeds 25 MiB, the daemon copies it to `daemon.log.1`, shifts the previous archive to `daemon.log.2`, and truncates the active file in place.
+- When the active log exceeds 25 MiB, the daemon copies only its most recent 25 MiB to `daemon.log.1`, shifts the previous archive to `daemon.log.2`, and truncates the active file in place. Bounding the temporary copy and every numbered archive avoids needing free space proportional to an already-oversized source log.
 - Rotation failures are warnings and never prevent the daemon from running.
 - Manual foreground runs do not rotate because they have no background log path environment variable.
 
@@ -24,8 +24,9 @@ Option 3 is selected. It is the smallest change that addresses the actual append
 
 - The archive copy is written to a temporary file and synced before backup names change.
 - The active log is truncated only after the archive has been installed, so a pre-truncate failure preserves the source log.
-- In-place truncation keeps inherited append-only file descriptors valid.
-- Tests cover below-threshold no-op behavior, archive shifting, content preservation, and active-file truncation.
+- The rotator truncates the source through its opened descriptor rather than resolving the pathname again. This keeps inherited append-only file descriptors on the same active inode even if the path changes concurrently.
+- Copy-truncate has an accepted small race window: bytes appended after the source size snapshot are outside the bounded archive and may be removed by truncation. Daemon logs are best-effort operational output, and preserving the inherited inode without introducing a process-wide logging rewrite is the chosen tradeoff.
+- Tests cover below-threshold no-op behavior, bounded-tail archive shifting, and appending through a descriptor held open across in-place truncation.
 
 ## Operational companion
 

@@ -39,7 +39,7 @@ func TestRotateDaemonLogCopiesTruncatesAndShiftsBackups(t *testing.T) {
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "daemon.log")
-	if err := os.WriteFile(logPath, []byte("current log content\n"), 0o640); err != nil {
+	if err := os.WriteFile(logPath, []byte("0123456789abcdef"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(logPath+".1", []byte("previous archive\n"), 0o640); err != nil {
@@ -68,8 +68,8 @@ func TestRotateDaemonLogCopiesTruncatesAndShiftsBackups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(archive1) != "current log content\n" {
-		t.Fatalf("archive .1 = %q, want current log content", archive1)
+	if string(archive1) != "89abcdef" {
+		t.Fatalf("archive .1 = %q, want bounded tail", archive1)
 	}
 	archive2, err := os.ReadFile(logPath + ".2")
 	if err != nil {
@@ -77,6 +77,46 @@ func TestRotateDaemonLogCopiesTruncatesAndShiftsBackups(t *testing.T) {
 	}
 	if string(archive2) != "previous archive\n" {
 		t.Fatalf("archive .2 = %q, want previous .1 content", archive2)
+	}
+}
+
+func TestRotateDaemonLogKeepsOpenAppendHandleOnActiveInode(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	if err := os.WriteFile(logPath, []byte("before rotation"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+
+	rotated, err := rotateDaemonLogIfNeeded(logPath, 6, 2)
+	if err != nil {
+		t.Fatalf("rotateDaemonLogIfNeeded: %v", err)
+	}
+	if !rotated {
+		t.Fatal("rotateDaemonLogIfNeeded did not rotate an over-limit log")
+	}
+	if _, err := writer.WriteString("after rotation\n"); err != nil {
+		t.Fatalf("append through pre-rotation descriptor: %v", err)
+	}
+
+	active, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(active) != "after rotation\n" {
+		t.Fatalf("active log = %q, want append through original descriptor", active)
+	}
+	archive, err := os.ReadFile(logPath + ".1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(archive) != "tation" {
+		t.Fatalf("archive = %q, want bounded pre-rotation tail", archive)
 	}
 }
 

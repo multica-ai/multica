@@ -149,31 +149,40 @@ const (
 	daemonLogPathEnv       = "MULTICA_DAEMON_LOG_PATH"
 )
 
-// rotateDaemonLogIfNeeded archives an oversized daemon log and truncates the
-// active file in place. In-place truncation is intentional: background daemon
-// stdout/stderr hold append-only descriptors for the active inode, so renaming
-// the file alone would let the process keep writing to an unbounded archive.
+// rotateDaemonLogIfNeeded archives the bounded tail of an oversized daemon log
+// and truncates the active file in place. In-place truncation is intentional:
+// background daemon stdout/stderr hold append-only descriptors for the active
+// inode, so renaming the file alone would let the process keep writing to an
+// unbounded archive.
+//
+// Copy-truncate has a small accepted loss window: bytes appended after the
+// source size is captured are not included in the archive and may be removed by
+// the subsequent truncation. Keeping the existing inode is more important here
+// because daemon output is best-effort operational logging.
 func rotateDaemonLogIfNeeded(logPath string, maxBytes int64, backupCount int) (bool, error) {
 	if logPath == "" || maxBytes <= 0 || backupCount < 1 {
 		return false, nil
 	}
 
-	info, err := os.Stat(logPath)
+	source, err := os.OpenFile(logPath, os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
+	if err != nil {
+		return false, fmt.Errorf("open daemon log for rotation: %w", err)
+	}
+	defer source.Close()
+
+	info, err := source.Stat()
 	if err != nil {
 		return false, fmt.Errorf("stat daemon log: %w", err)
 	}
 	if info.Size() <= maxBytes {
 		return false, nil
 	}
-
-	source, err := os.Open(logPath)
-	if err != nil {
-		return false, fmt.Errorf("open daemon log for rotation: %w", err)
+	if _, err := source.Seek(info.Size()-maxBytes, io.SeekStart); err != nil {
+		return false, fmt.Errorf("seek daemon log tail: %w", err)
 	}
-	defer source.Close()
 
 	temp, err := os.CreateTemp(filepath.Dir(logPath), ".daemon-log-rotate-*")
 	if err != nil {
@@ -188,8 +197,8 @@ func rotateDaemonLogIfNeeded(logPath string, maxBytes int64, backupCount int) (b
 	if err := temp.Chmod(info.Mode().Perm()); err != nil {
 		return false, fmt.Errorf("set daemon log archive mode: %w", err)
 	}
-	if _, err := io.Copy(temp, source); err != nil {
-		return false, fmt.Errorf("copy daemon log archive: %w", err)
+	if _, err := io.CopyN(temp, source, maxBytes); err != nil {
+		return false, fmt.Errorf("copy daemon log tail: %w", err)
 	}
 	if err := temp.Sync(); err != nil {
 		return false, fmt.Errorf("sync daemon log archive: %w", err)
@@ -214,7 +223,7 @@ func rotateDaemonLogIfNeeded(logPath string, maxBytes int64, backupCount int) (b
 	}
 	tempPath = ""
 
-	if err := os.Truncate(logPath, 0); err != nil {
+	if err := source.Truncate(0); err != nil {
 		return false, fmt.Errorf("truncate active daemon log: %w", err)
 	}
 	return true, nil

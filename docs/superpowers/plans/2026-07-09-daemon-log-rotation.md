@@ -16,7 +16,7 @@
 - Modify: `server/cmd/multica/cmd_daemon_test.go`
 - Test: `server/cmd/multica/cmd_daemon_test.go`
 
-- [ ] **Step 1: Write failing tests** for a below-limit no-op and an over-limit copy-truncate rotation that keeps two numbered backups.
+- [ ] **Step 1: Write failing tests** for a below-limit no-op and an over-limit copy-truncate rotation that keeps a bounded tail in two numbered backups.
 - [ ] **Step 2: Run the focused tests** with `go test ./cmd/multica -run 'TestRotateDaemonLog' -count=1` and confirm they fail because the helper does not exist.
 
 ### Task 2: Implement and wire daemon log rotation
@@ -25,7 +25,7 @@
 - Modify: `server/cmd/multica/cmd_daemon.go`
 - Modify: `server/cmd/multica/cmd_daemon_test.go`
 
-- [ ] **Step 1: Implement the minimal helper** using a temporary archive, `io.Copy`, `Sync`, numbered backup shifting, and in-place truncation.
+- [ ] **Step 1: Implement the minimal helper** using a bounded tail copy, `Sync`, numbered backup shifting, and truncation through the opened source descriptor. Document the accepted copy-truncate concurrent-write loss window.
 - [ ] **Step 2: Pass the profile log path** to every spawned background/restart child with `MULTICA_DAEMON_LOG_PATH`.
 - [ ] **Step 3: Run an initial rotation check and ticker** only when that environment variable is present.
 - [ ] **Step 4: Run focused tests** and confirm they pass.
