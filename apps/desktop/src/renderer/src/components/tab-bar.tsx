@@ -464,6 +464,9 @@ export function TabBar() {
   const activeTabId = group?.activeTabId ?? "";
   const tabIds = tabs.map((t) => t.id);
   const tabOrder = tabIds.join("\0");
+  const tabLayoutKey = tabs
+    .map((tab) => `${tab.id}:${tab.pinned ? "pinned" : "unpinned"}`)
+    .join("\0");
   const addedTabIds = getAddedTabIds(
     previousTabsRef.current,
     activeWorkspaceSlug,
@@ -502,7 +505,13 @@ export function TabBar() {
     }
 
     keepTabVisible(tabScrollRef.current);
-  }, [activeWorkspaceSlug, activeTabId, shouldReduceMotion, tabOrder]);
+  }, [
+    activeWorkspaceSlug,
+    activeTabId,
+    shouldReduceMotion,
+    tabLayoutKey,
+    tabOrder,
+  ]);
 
   useEffect(() => {
     const scroller = tabScrollRef.current;
