@@ -504,6 +504,33 @@ bareword-only-line
 	}
 }
 
+// CEREBRO-PATCH(pi-model-discovery-stable-dir): FIR-2992
+func TestDiscoverPiModelsRunsFromUserHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+if [ "$PWD" != "$HOME" ]; then
+  echo "Error: invalid working directory"
+  exit 1
+fi
+echo "provider model context max-out thinking images"
+echo "xai-auth grok-4.5 500K 131.1K yes yes"
+`))
+
+	models, err := discoverPiModels(context.Background(), fakePath)
+	if err != nil {
+		t.Fatalf("discoverPiModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "xai-auth/grok-4.5" {
+		t.Fatalf("expected Pi catalog discovered from user home, got %+v", models)
+	}
+}
+
 // TestDiscoverPiModelsNonZeroExit verifies that discoverPiModels still returns
 // the resolvable catalog when `pi --list-models` exits non-zero. Pi exits
 // non-zero (and warns) when an agent config references stale provider/model
