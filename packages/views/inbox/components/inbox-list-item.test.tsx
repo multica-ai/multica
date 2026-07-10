@@ -238,6 +238,24 @@ describe("InboxListItem (issue variant)", () => {
     expect(screen.getByText("Reminder")).toBeInTheDocument();
     expect(screen.getByText("old comment preview")).toBeInTheDocument();
   });
+
+  it('shows the reactor name and emoji for reaction rows', () => {
+    render(
+      <InboxListItem
+        item={makeIssueInboxItem({
+          type: "reaction_added",
+          actor_id: "alice",
+          details: { emoji: "👍" },
+          read: true,
+        })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("User-alic Reacted with 👍")).toBeInTheDocument();
+  });
 });
 
 describe("ChannelListItem", () => {

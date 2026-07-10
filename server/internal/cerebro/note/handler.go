@@ -675,6 +675,39 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FIR-2810 follow-up: a save that changes nothing can never conflict.
+	// The editor's blur + debounce autosaves (and the author-code stamper)
+	// can re-send an identical body while an earlier save's response is in
+	// flight; answering 409 on those surfaced a bogus "two people edited this
+	// note" merge dialog to a user typing alone. Answer with the current
+	// state instead so the client re-syncs its base timestamp.
+	if (req.Body == nil || *req.Body == artifact.Body) &&
+		(req.Title == nil || *req.Title == artifact.Title) {
+		noteRow, err := h.Cerebro.GetNote(r.Context(), noteID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update note")
+			return
+		}
+		writeJSON(w, http.StatusOK, NoteResponse{
+			ID:          uuidStr(artifact.ID),
+			WorkspaceID: uuidStr(artifact.WorkspaceID),
+			FolderID:    uuidPtr(artifact.FolderID),
+			Title:       artifact.Title,
+			Body:        artifact.Body,
+			OwnerID:     uuidStr(noteRow.OwnerID),
+			Visibility:  noteRow.Visibility,
+			Pinned:      noteRow.Pinned,
+			CanEdit:     true, // caller just passed requireCanEdit
+			IssueID:     uuidPtr(artifact.IssueID),
+			ProjectID:   uuidPtr(artifact.ProjectID),
+			CreatedAt:   tsStr(artifact.CreatedAt),
+			UpdatedAt:   tsStr(artifact.UpdatedAt),
+			AuthorCodes: noteRow.AuthorCodes,
+			LineAttrs:   h.ensureLineAttrs(r.Context(), noteID, artifact.Body),
+		})
+		return
+	}
+
 	// FIR-1317 Plan A — optimistic concurrency: if the client sent the
 	// updated_at it last saw and it doesn't match, someone else saved in the
 	// meantime. Return 409 with the server's current content so the frontend

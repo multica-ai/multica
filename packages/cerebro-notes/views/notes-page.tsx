@@ -1016,8 +1016,9 @@ export function NoteEditor({
   const showGutter = lineAuthorsEnabled && showLineAuthors;
   const editorWrapRef = React.useRef<HTMLDivElement>(null);
   // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or touch
-  // and pull right on the body (mobile) to peek at the gutter; it springs back
-  // on release. Disabled while the permanent toggle already shows it.
+  // and pull right on the body (mobile). Released past the threshold it stays
+  // open; a small pull back to the left closes it. Disabled while the
+  // permanent toggle already shows it.
   const contentSlideRef = React.useRef<HTMLDivElement>(null);
   const gutterBoxRef = React.useRef<HTMLDivElement>(null);
   const pull = useLineAuthorsPull({
@@ -1105,9 +1106,30 @@ export function NoteEditor({
   // FIR-1317 Plan A: sends base_updated_at (when conflict merge is on) so the
   // backend can detect if someone else saved in the meantime. On a 409 the
   // NoteConflictError is caught and the merge dialog opens.
+  //
+  // FIR-2810 follow-up: saves are SERIALIZED — at most one in flight, the
+  // newest body queued behind it. Firing a second save before the first
+  // response refreshed baseUpdatedAt made the backend see a stale base and
+  // answer 409, so the "two people edited this note" dialog opened for a user
+  // typing alone (the author-code stamp plus the blur + debounce double-save
+  // made this frequent). lastSentBody additionally drops no-change saves.
+  const saveInFlight = React.useRef(false);
+  const queuedBody = React.useRef<string | null>(null);
+  const lastSentBody = React.useRef<string | null>(note.body);
+
   function saveBody(markdown: string) {
     setLiveBody(markdown);
-    if (markdown === note.body) return;
+    pushSave(markdown);
+  }
+
+  function pushSave(markdown: string) {
+    if (saveInFlight.current) {
+      queuedBody.current = markdown;
+      return;
+    }
+    if (markdown === lastSentBody.current) return;
+    saveInFlight.current = true;
+    lastSentBody.current = markdown;
     updateNote.mutate(
       {
         id: note.id,
@@ -1121,8 +1143,20 @@ export function NoteEditor({
         },
         onError: (err) => {
           if (err instanceof NoteConflictError) {
+            // The dialog takes over; anything queued predates the conflict
+            // and must not fire behind the user's resolution.
+            queuedBody.current = null;
             setConflict(err.conflict);
+          } else {
+            // Failed save: forget the body so the next edit retries it.
+            lastSentBody.current = null;
           }
+        },
+        onSettled: () => {
+          saveInFlight.current = false;
+          const next = queuedBody.current;
+          queuedBody.current = null;
+          if (next !== null) pushSave(next);
         },
       },
     );
@@ -1390,7 +1424,7 @@ export function NoteEditor({
               the body shifts right to make room for the attribution column.
               With it off, a click-and-drag on the left-edge handle (desktop)
               or a touch-and-pull right on the body (mobile) slides the body
-              aside for a temporary peek that springs back on release. */}
+              aside; past the threshold it latches open until pulled back. */}
           <div
             ref={editorWrapRef}
             {...pull.wrapperProps}
@@ -1576,6 +1610,11 @@ export function NoteEditor({
             setConflict(null);
             // Save the resolved body without the base_updated_at check so it
             // goes through unconditionally (the user just made the decision).
+            // Runs through the same in-flight bookkeeping as pushSave so a
+            // queued autosave can never race the resolution.
+            saveInFlight.current = true;
+            lastSentBody.current = resolvedBody;
+            queuedBody.current = null;
             updateNote.mutate(
               { id: note.id, body: resolvedBody },
               {
@@ -1584,6 +1623,12 @@ export function NoteEditor({
                   setLiveBody(resolvedBody);
                   // Remount the editor so it shows the resolved content.
                   setReplaceToken((t) => t + 1);
+                },
+                onSettled: () => {
+                  saveInFlight.current = false;
+                  const next = queuedBody.current;
+                  queuedBody.current = null;
+                  if (next !== null) pushSave(next);
                 },
               },
             );

@@ -89,6 +89,9 @@ export type InboxActionEntry =
       channel: {
         id: string;
         unread_count: number;
+        // FIR-2010 — smart-unread: true when the channel has any unread message,
+        // even when unread_count is mention-only. Absent on older servers → false.
+        has_unread_activity?: boolean;
         last_message?: { author_type: "member" | "agent"; author_id: string } | null;
       };
     };
@@ -143,8 +146,13 @@ export function classifyInboxAction(
       return "calm";
     case "channel":
       // Channel unread counts are literal; mention state no longer changes the
-      // bucket label because the bucket itself is named Unread.
-      if (entry.channel.unread_count > 0) return "act_now";
+      // bucket label because the bucket itself is named Unread. FIR-2010 —
+      // under smart-unread the row is bolded on has_unread_activity while
+      // unread_count stays mention-only, so a non-mention message would land
+      // in Done while looking unread. Honor has_unread_activity so the group
+      // matches the row's unread rendering.
+      if (entry.channel.unread_count > 0 || entry.channel.has_unread_activity === true)
+        return "act_now";
       // A read channel is Pending when we sent the last message (waiting for a
       // reply) or when an agent sent it (still in flight). It is Done only when
       // another human had the last word — we've seen their response.
