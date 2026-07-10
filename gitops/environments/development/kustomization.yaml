@@ -40,4 +40,4 @@ images:
     newTag: "cade75d5"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "4b4efbd5"
+    newTag: "cade75d5"
