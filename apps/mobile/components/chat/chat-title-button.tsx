@@ -27,7 +27,11 @@ export function ChatTitleButton({
   const subtitle = currentSession?.title || t("title_button.new_chat_subtitle");
 
   const content = (
-    <View className="flex-row items-center gap-2 py-1 pr-2 rounded-lg">
+    // -ml-2: react-native-screens' native-stack has no JS-exposed prop for
+    // the Toolbar's default content-inset-after-back-button on Android (the
+    // remaining gap once headerTitleAlign is "left" — see _layout.tsx). This
+    // pulls our own content left to visually close roughly half of it.
+    <View className="flex-row items-center gap-2 py-1 pr-2 -ml-2 rounded-lg">
       <ActorAvatar
         type={currentAgent ? "agent" : null}
         id={currentAgent?.id ?? null}
