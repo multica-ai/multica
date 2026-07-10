@@ -27,7 +27,7 @@ export function ChatTitleButton({
   const subtitle = currentSession?.title || t("title_button.new_chat_subtitle");
 
   const content = (
-    <View className="flex-row items-center gap-2 px-2 py-1 rounded-lg">
+    <View className="flex-row items-center gap-2 py-1 pr-2 rounded-lg">
       <ActorAvatar
         type={currentAgent ? "agent" : null}
         id={currentAgent?.id ?? null}

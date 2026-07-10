@@ -300,6 +300,7 @@ export default function WorkspaceLayout() {
           options={{
             title: tChat("title_button.default_agent_name"),
             headerBackTitle: tCommon("nav.back"),
+            headerTitleAlign: "left",
           }}
         />
         <Stack.Screen
@@ -307,6 +308,7 @@ export default function WorkspaceLayout() {
           options={{
             title: tChat("title_button.default_agent_name"),
             headerBackTitle: tCommon("nav.back"),
+            headerTitleAlign: "left",
           }}
         />
         {/* Workspace switcher — reached from the More popover's collapsed

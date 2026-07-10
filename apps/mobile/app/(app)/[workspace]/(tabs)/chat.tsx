@@ -106,7 +106,7 @@ export default function ChatListPage() {
             const archived = session.status === "archived";
             return (
               <View key={session.id}>
-                {index > 0 ? <View className="h-px bg-border ml-4" /> : null}
+                {index > 0 ? <View className="h-px bg-border ml-2.5" /> : null}
                 <Pressable
                   onPress={() => {
                     if (!wsSlug) return;
@@ -116,7 +116,7 @@ export default function ChatListPage() {
                     });
                   }}
                   onLongPress={() => confirmDelete(session)}
-                  className="flex-row items-center gap-3 px-4 py-4 active:bg-secondary"
+                  className="flex-row items-center gap-3 px-2.5 py-4 active:bg-secondary"
                 >
                   <View
                     className={cn(
