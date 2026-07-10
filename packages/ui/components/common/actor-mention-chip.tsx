@@ -42,7 +42,7 @@ export interface ActorMentionChipProps {
 }
 
 const BASE_CLASS =
-  "actor-mention-chip inline-flex min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium";
+  "actor-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium";
 
 const TYPE_STYLES: Record<ActorMentionType, string> = {
   member: "bg-muted border-border",
