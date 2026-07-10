@@ -595,6 +595,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connection-tool-resolver-brief-flip): FIR-2441 the Flip (slice 1) — the claim brief now resolves through the unified ConnectionToolResolver (api half via the reused APIConnectionResolver), behind the same default-off cerebro_api_connection_tools flag; reversible (flag off ⇒ identical nil result).
 	cerebroConnToolResolver := cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil, nil)
 	h.APIConnectionBrief = cerebroConnToolResolver
+	h.ConnectionInstructionsBrief = cerebroConnectionsHandler.Store                       // CEREBRO-PATCH(connection-instructions-brief): FIR-2760 permission-scoped connection guidance.
 	h.MemoryAutoRecall = &cerebroruntime.CerebroMemoryAutoRecall{Cerebro: cerebroQueries} // CEREBRO-PATCH(memory-autorecall-wire): FIR-1794 layer 3 — auto-recall seam for daemon claims
 	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools handler for the Multica MCP server; FIR-2441 the Flip (slice 3) — the local handler now resolves through the unified ConnectionToolResolver (api half), the same resolver the brief (slice 1) and cloud executor (slice 2) use, behind the same default-off cerebro_api_connection_tools flag.
 	cerebroConnectionToolsHandler := cerebroconnectiontools.NewHandler(cerebroconnectiontools.NewQueriesAgentResolver(queries), cerebroConnToolResolver)
@@ -968,6 +969,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
+		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage) // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
@@ -1746,6 +1748,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/impact", h.GetSkillImpact)
 					// CEREBRO-PATCH(skill-observations-route): TECH-3077 — learning observations.
 					r.Get("/observations", h.GetSkillObservations)
+					// CEREBRO-PATCH(skill-autolearn-route): TECH-3692 — toggle self-learning switch.
+					r.Post("/auto-learn", h.SetSkillAutoLearn)
 					r.Get("/forks", h.ListSkillForks)
 					r.Post("/forks", h.CreateSkillFork)
 					// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage for the web UI.
@@ -1766,8 +1770,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
 			// the rollup to a single project.
 			r.Route("/api/dashboard", func(r chi.Router) {
+				r.Get("/usage/explorer", h.GetDashboardUsageExplorer) // CEREBRO-PATCH(usage-explorer): FIR-2996 canonical filters, facets, savings and runs.
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
+				r.Get("/usage/skills", h.GetDashboardSkillUsage) // CEREBRO-PATCH(dashboard-skill-usage-route): FIR-2996 filterable skill usage.
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})

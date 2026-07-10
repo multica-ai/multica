@@ -100,6 +100,40 @@ delta_type values:
 		}
 		return mcp.TextResult("recorded"), nil
 	})
+
+	// CEREBRO-PATCH(skill-autolearn-mcp): TECH-3692 — let agents toggle a skill's
+	// self-learning switch themselves, so it shows up in the agent tool list.
+	srv.RegisterTool(mcp.Tool{
+		Name: "skill_set_auto_learn",
+		Description: `Turn a skill's self-learning (auto-learn) switch on or off.
+When on, the skill records behavioral observations and the nightly learning
+review proposes durable improvements for the owner to approve. Turn it on for a
+skill that humans keep correcting the same way; turn it off to stop collecting.
+Only the skill owner, an approver, or a workspace admin may toggle it.`,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"skill_id", "enabled"},
+			"properties": map[string]any{
+				"skill_id": map[string]any{"type": "string", "description": "Skill ID or name"},
+				"enabled":  map[string]any{"type": "boolean", "description": "true = turn auto-learn on, false = off"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "skill_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		enabled, ok := args["enabled"].(bool)
+		if !ok {
+			return mcp.ErrorResult("enabled (boolean) is required"), nil
+		}
+		var result any
+		if err := client.PostJSON(ctx, "/api/skills/"+id+"/auto-learn", map[string]any{"enabled": enabled}, &result); err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("set auto-learn: %v", err)), nil
+		}
+		b, _ := json.Marshal(result)
+		return mcp.TextResult(string(b)), nil
+	})
 }
 
 func optFloat(args map[string]any, key string, def float64) float64 {

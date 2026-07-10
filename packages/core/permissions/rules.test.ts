@@ -116,10 +116,11 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
 describe("canEditAgent", () => {
   const agent = makeAgent({ owner_id: ALICE });
 
-  it("denies the agent owner when they are a plain member", () => {
+  // FIR-1416: ownership, not visibility, decides management rights. A member
+  // who owns a workspace-visible agent can manage it (was previously denied).
+  it("allows the agent owner who is a plain member (workspace-visible agent)", () => {
     const d = canEditAgent(agent, { userId: ALICE, role: "member" });
-    expect(d.allowed).toBe(false);
-    expect(d.reason).toBe("not_admin_role");
+    expect(d.allowed).toBe(true);
   });
   it("allows workspace owner", () => {
     expect(canEditAgent(agent, { userId: BOB, role: "owner" }).allowed).toBe(

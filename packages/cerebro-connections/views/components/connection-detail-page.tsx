@@ -55,6 +55,7 @@ function detectAuthType(auth: Connection["auth_config"]): AuthType {
 const EMPTY_FORM = {
   name: "",
   display_name: "",
+  instructions: "",
   type: "mcp_http" as ConnectionType,
   url: "",
   internal: false,
@@ -489,6 +490,13 @@ function ConnectionFormBody({
                 )}
             </div>
           )}
+
+          {/* Internal toggle */}
+          <div className="space-y-1.5">
+            <Label htmlFor="conn-instructions">Instructions</Label>
+            <textarea id="conn-instructions" value={form.instructions} onChange={(e) => setForm((f) => ({ ...f, instructions: e.target.value }))} rows={5} maxLength={4000} className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder="Tell permitted agents when and how to use this connection." />
+            <p className="text-xs text-muted-foreground">Added to an agent's instructions only when that agent can use at least one tool from this connection.</p>
+          </div>
 
           {/* Internal toggle */}
           <div className="flex items-center gap-3">
@@ -974,6 +982,7 @@ export function ConnectionCreatePage() {
     const input: CreateConnectionInput = {
       name: form.name,
       display_name: form.display_name,
+      instructions: form.instructions,
       type: form.type,
       url: form.url,
       internal: form.internal,
@@ -1050,6 +1059,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
   const initialForm = {
     name: conn.name,
     display_name: conn.display_name,
+    instructions: conn.instructions,
     type: conn.type as ConnectionType,
     url: conn.url,
     internal: conn.internal,
@@ -1074,6 +1084,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
   ) {
     const input: UpdateConnectionInput = {
       display_name: form.display_name,
+      instructions: form.instructions,
       url: form.url,
       internal: form.internal,
       auth_config: buildAuthConfig(form, authType, existingAuth),

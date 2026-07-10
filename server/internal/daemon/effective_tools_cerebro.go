@@ -12,10 +12,13 @@ import "github.com/multica-ai/multica/server/internal/daemon/execenv"
 // TaskToolBriefEntry is the wire shape of one resolved non-CLI tool in the claim
 // response. It mirrors handler.AgentTaskToolEntry and execenv.ToolBriefEntry.
 type TaskToolBriefEntry struct {
-	Family      string `json:"family"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Verdict     string `json:"verdict,omitempty"`
+	// CEREBRO-PATCH(connection-instructions-wire): FIR-2760 carries permission-scoped guidance to execenv.
+	Family       string `json:"family"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	Connection   string `json:"connection,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // effectiveToolsForEnv converts the claim-response tool entries into the execenv
@@ -27,10 +30,12 @@ func effectiveToolsForEnv(entries []TaskToolBriefEntry) []execenv.ToolBriefEntry
 	out := make([]execenv.ToolBriefEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, execenv.ToolBriefEntry{
-			Family:      e.Family,
-			Name:        e.Name,
-			Description: e.Description,
-			Verdict:     e.Verdict,
+			Family:       e.Family,
+			Name:         e.Name,
+			Description:  e.Description,
+			Verdict:      e.Verdict,
+			Connection:   e.Connection,
+			Instructions: e.Instructions,
 		})
 	}
 	return out

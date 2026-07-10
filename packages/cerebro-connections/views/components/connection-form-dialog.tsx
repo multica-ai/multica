@@ -41,6 +41,7 @@ function detectAuthType(auth: Connection["auth_config"]): AuthType {
 const EMPTY_FORM = {
   name: "",
   display_name: "",
+  instructions: "",
   type: "mcp_http" as ConnectionType,
   url: "",
   internal: false,
@@ -63,6 +64,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
       ? {
           name: existing.name,
           display_name: existing.display_name,
+          instructions: existing.instructions,
           type: existing.type as ConnectionType,
           url: existing.url,
           internal: existing.internal,
@@ -107,6 +109,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
       if (isEdit) {
         const input: UpdateConnectionInput = {
           display_name: form.display_name,
+          instructions: form.instructions,
           url: form.url,
           internal: form.internal,
           auth_config,
@@ -123,6 +126,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
         const input: CreateConnectionInput = {
           name: form.name,
           display_name: form.display_name,
+          instructions: form.instructions,
           type: form.type,
           url: form.url,
           internal: form.internal,

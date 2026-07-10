@@ -907,6 +907,8 @@ var catalog = []Capability{
 			"DELETE /api/skills/{id}/files/{fileId}",
 			// CEREBRO-PATCH(skill-observations-catalog): TECH-3077 agent runtime learning signal.
 			"POST /api/skill-observations",
+			// CEREBRO-PATCH(skill-autolearn-catalog): TECH-3692 — toggle a skill's self-learning switch.
+			"POST /api/skills/{id}/auto-learn",
 		},
 	},
 
@@ -1179,6 +1181,7 @@ var excluded = map[string]string{
 	"POST /api/daemon/tasks/{taskId}/session":                                      "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/start":                                        "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/usage":                                        "daemon-token — runtime daemon callback",
+	"POST /api/daemon/tasks/{taskId}/skill-usage":                                  "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/wait-local-directory":                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/workspaces/{workspaceId}/repo/check":                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/workspaces/{workspaceId}/tool-policy/resolve":                "daemon-token — runtime daemon callback; the local-runtime per-tool resolve seam itself runs the tool-policy gate internally (TECH-3173)",

@@ -32,10 +32,13 @@ import (
 // "allow" or "ask" — "ask" tools are listed but pause for human approval when
 // called, mirroring how Ask works everywhere else.
 type ToolBriefEntry struct {
-	Family      string
-	Name        string
-	Description string
-	Verdict     string
+	// CEREBRO-PATCH(connection-instructions-brief): FIR-2760 carries permission-scoped connection guidance.
+	Family       string
+	Name         string
+	Description  string
+	Verdict      string
+	Connection   string
+	Instructions string
 }
 
 // familyOrder fixes the heading order so the rendered section is deterministic
@@ -125,6 +128,25 @@ func cerebroToolsBrief(entries []ToolBriefEntry) string { // CEREBRO-PATCH(cereb
 	// When the agent has MCP tools but no connection tools, state the zero
 	// explicitly here too so the empty Connections family is never ambiguous.
 	b.WriteString(zeroConnectionsNote)
+	// CEREBRO-PATCH(connection-instructions-brief): Render each permitted connection's guidance once.
+	instructions := map[string]string{}
+	for _, e := range entries {
+		if strings.TrimSpace(e.Connection) != "" && strings.TrimSpace(e.Instructions) != "" {
+			instructions[strings.TrimSpace(e.Connection)] = strings.TrimSpace(e.Instructions)
+		}
+	}
+	if len(instructions) > 0 {
+		b.WriteString("**Connection instructions**\n")
+		names := make([]string, 0, len(instructions))
+		for name := range instructions {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			b.WriteString(fmt.Sprintf("- **%s**: %s\n", name, instructions[name]))
+		}
+		b.WriteString("\n")
+	}
 
 	for _, fam := range fams {
 		list := byFamily[fam]

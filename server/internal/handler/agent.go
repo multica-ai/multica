@@ -1116,10 +1116,10 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 	if !ok {
 		return db.Member{}, false
 	}
-	// CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 — owner can manage own private agent.
-	ownsPrivate := agent.Visibility == "private" && uuidToString(agent.OwnerID) == uuidToString(member.UserID)
-	if !roleAllowed(member.Role, "owner", "admin") && !ownsPrivate {
-		writeError(w, http.StatusForbidden, "only workspace owners/admins or the personal agent owner can manage agents")
+	// CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 + FIR-1416 — owner can manage own agent (any visibility).
+	ownsAgent := uuidToString(agent.OwnerID) == uuidToString(member.UserID)
+	if !roleAllowed(member.Role, "owner", "admin") && !ownsAgent {
+		writeError(w, http.StatusForbidden, "only workspace owners/admins or the agent owner can manage agents")
 		return db.Member{}, false
 	}
 	return member, true

@@ -501,6 +501,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "skill_list_versions", Description: "List a skill's version history.", Status: ToolStatusExcluded},
 	{Name: "skill_propose_change", Description: "Propose a versioned change request to a skill.", Status: ToolStatusExcluded},
 	{Name: "skill_record_observation", Description: "Record an observation about a skill.", Status: ToolStatusImplemented},
+	{Name: "skill_set_auto_learn", Description: "Enable or disable self-learning for a skill.", Status: ToolStatusImplemented}, // CEREBRO-PATCH(skill-autolearn-mcp): TECH-3692 inventory parity.
 	{Name: "skill_review_change_request", Description: "Approve or reject a skill change request.", Status: ToolStatusExcluded},
 	{Name: "skill_set_ownership", Description: "Set a skill's owner and/or approvers. CLI-runtime MCP tool over PUT /api/skills/{id}/ownership.", Status: ToolStatusExcluded},
 	{Name: "skill_update", Description: "Directly update a skill's name/description/content/config, bypassing review. CLI-runtime MCP tool over PUT /api/skills/{id}.", Status: ToolStatusExcluded},

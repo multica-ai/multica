@@ -14,6 +14,8 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 // CEREBRO-PATCH(display-currency-dashboard): FIR-40 cost shown in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { SkillUsagePanel, skillUsageOptions, UsageExplorerPanel, usageExplorerOptions } from "@multica/cerebro-usage"; // CEREBRO-PATCH(usage-skill-telemetry): FIR-2996 runtime-reported skill usage panel.
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
@@ -44,6 +46,7 @@ import {
   todayIso,
 } from "../../runtimes/utils";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 import {
   aggregateAgentTokens,
   aggregateDailyCost,
@@ -154,6 +157,8 @@ function Segmented<T extends string | number>({
 export function DashboardPage() {
   const { t } = useT("usage");
   const wsId = useWorkspaceId();
+  const navigation = useNavigation(); // CEREBRO-PATCH(usage-skill-filter-url): FIR-2996 shareable include/exclude skill filter.
+  const skillUsageEnabled = useFeatureFlag("cerebro_dashboard");
   // CEREBRO-PATCH(display-currency-dashboard): FIR-40 — fmtMoney now converts to
   // the workspace display currency (compact: drops decimals >= 100 as before).
   const { formatUsdCompact: fmtMoney } = useCostFormatter();
@@ -205,6 +210,39 @@ export function DashboardPage() {
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId),
   );
+  const skillUsageQuery = useQuery(skillUsageOptions(skillUsageEnabled ? wsId : "", days, projectId, navigation.searchParams.getAll("skill"), navigation.searchParams.getAll("exclude.skill")));
+  const explorerQueryString = useMemo(() => {
+    const params = new URLSearchParams(navigation.searchParams);
+    params.set("days", String(days)); params.set("grain", dim); params.set("limit", "50");
+    if (projectId) params.set("project", projects.find((p) => p.id === projectId)?.title ?? projectId);
+    else params.delete("project");
+    return params.toString();
+  }, [navigation.searchParams, days, dim, projectId, projects]);
+  const explorerQuery = useQuery(usageExplorerOptions(wsId, explorerQueryString));
+
+  const selectExplorerValue = (dimension: string, value: string, mode: "include" | "exclude") => {
+    const params = new URLSearchParams(navigation.searchParams);
+    const key = mode === "include" ? dimension : `exclude.${dimension}`;
+    const otherKey = mode === "include" ? `exclude.${dimension}` : dimension;
+    const values = new Set(params.getAll(key)); values.has(value) ? values.delete(value) : values.add(value);
+    params.delete(key); [...values].sort().forEach((item) => params.append(key, item));
+    const other = params.getAll(otherKey).filter((item) => item !== value); params.delete(otherKey); other.forEach((item) => params.append(otherKey, item));
+    navigation.replace(`${navigation.pathname}?${params}`);
+  };
+
+  const selectSkill = (skill: string, mode: "include" | "exclude") => {
+    const params = new URLSearchParams(navigation.searchParams);
+    const ownKey = mode === "include" ? "skill" : "exclude.skill";
+    const otherKey = mode === "include" ? "exclude.skill" : "skill";
+    const selected = new Set(params.getAll(ownKey));
+    selected.has(skill) ? selected.delete(skill) : selected.add(skill);
+    params.delete(ownKey);
+    [...selected].sort().forEach((value) => params.append(ownKey, value));
+    const other = params.getAll(otherKey).filter((value) => value !== skill);
+    params.delete(otherKey);
+    other.forEach((value) => params.append(otherKey, value));
+    navigation.replace(`${navigation.pathname}?${params}`);
+  };
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
@@ -349,6 +387,8 @@ export function DashboardPage() {
         <div className="mx-auto max-w-6xl space-y-5 p-6">
           <p className="text-xs text-muted-foreground">{t(($) => $.subtitle)}</p>
 
+          <UsageExplorerPanel data={explorerQuery.data ?? { summary:{runs:0,tokens:0,actual_cost_cents:0,calculated_cost_runs:0,missing_cost_runs:0}, facets:{},runs:[],total:0,savings:[] }} onSelect={selectExplorerValue} />
+
           {isLoading ? (
             <DashboardSkeleton />
           ) : hasNoData ? (
@@ -417,6 +457,7 @@ export function DashboardPage() {
                 agents={agents}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
+              {skillUsageEnabled && <SkillUsagePanel rows={skillUsageQuery.data ?? []} isLoading={skillUsageQuery.isLoading} onSelect={selectSkill} />}
             </>
           )}
         </div>
