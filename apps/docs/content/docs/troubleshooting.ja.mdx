@@ -279,9 +279,12 @@ netstat -ano | findstr :8080    # Windows
 | 構成要素 | 場所 | コマンド |
 |---|---|---|
 | **デーモン** | `~/.multica/daemon.log`（バックグラウンドモード）またはフォアグラウンドの stdout | `multica daemon logs -f --lines 100` |
+| **デーモン（クラッシュ）** | `~/.multica/daemon.err.log` | 直接開く——パニックや起動初期のエラーはここに記録されます |
 | **サーバー（Docker）** | コンテナの stdout | `docker logs -f <container>` |
 | **サーバー（systemd）** | journal | `journalctl -u multica-server -f` |
 | **フロントエンド（dev）** | `pnpm dev` を実行中のターミナル | 直接確認 |
 | **フロントエンド（ブラウザ）** | DevTools → Console | `F12` を押す |
 
-より詳細なデーモンログが必要な場合は、デーモンをバックグラウンドからフォアグラウンドに移してください: `multica daemon stop && multica daemon start --foreground`。
+バックグラウンドモードでは `daemon.log` はサイズでローテーションされ（デフォルトは 20MB × gzip バックアップ 5 世代。`MULTICA_DAEMON_LOG_MAX_SIZE_MB` / `_MAX_BACKUPS` / `_MAX_AGE_DAYS` で調整可能）、開けないほど大きくなることはありません。Go ランタイムのパニックや logger 初期化前のエラーは、独立した上限付きの `daemon.err.log` に出力されます。
+
+より詳細なデーモンログが必要な場合は、デーモンをバックグラウンドからフォアグラウンドに移してください: `multica daemon stop && multica daemon start --foreground`。フォアグラウンドで実行すると、ログはローテーションファイルではなくターミナルにリアルタイムで出力されます。
