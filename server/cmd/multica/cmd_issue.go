@@ -986,6 +986,40 @@ func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
 	return nil
 }
 
+// pendingAttachment is a local --attachment file that passed URL filtering and
+// the workdir guard and has been read into memory, ready to upload.
+type pendingAttachment struct {
+	path string
+	data []byte
+}
+
+// collectLocalAttachments validates and reads ALL local --attachment paths up
+// front, before any upload. URL-shaped values are warned and skipped (the API
+// only accepts local paths). Each remaining path is run through the MUL-4252
+// workdir guard and read into memory; the first invalid or unreadable path
+// returns an error with nothing uploaded. Both `issue create` and
+// `comment add` share this so an invalid attachment can never leave an earlier
+// one uploaded as an orphaned issue attachment while the issue/comment is never
+// created (which would duplicate on retry).
+func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendingAttachment, error) {
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return nil, err
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+	return pending, nil
+}
+
 func appendUniqueStrings(dst []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(dst)+len(values))
 	out := make([]string, 0, len(dst)+len(values))
@@ -1121,37 +1155,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["attachment_ids"] = attachmentIDs
 	}
 
-	// Pre-validate attachments BEFORE creating the issue so a bad path
-	// can never produce a half-created issue (which would otherwise
-	// trigger callers — especially the agent doing quick-create — to
-	// retry the whole `issue create` and end up with duplicates).
-	//
-	//   - http(s) URLs are not local files; the API only accepts local
-	//     paths here. Warn and skip rather than fail — a markdown image
-	//     URL embedded in the prompt should never be re-attached, and
-	//     skipping is the safest outcome for that case.
-	//   - Anything else is treated as a local path and read upfront.
-	//     A read failure here is a real user/agent mistake (typo,
-	//     missing file) and we surface it pre-create so the issue
-	//     never lands.
-	type pendingAttachment struct {
-		path string
-		data []byte
-	}
-	pending := make([]pendingAttachment, 0, len(attachments))
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
-			return err
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	// Pre-validate attachments BEFORE creating the issue so a bad path can
+	// never produce a half-created issue (which would otherwise trigger
+	// callers — especially the agent doing quick-create — to retry the whole
+	// `issue create` and end up with duplicates). URLs are warned+skipped, the
+	// workdir guard is applied, and every local path is read upfront; a failure
+	// here surfaces pre-create so the issue never lands.
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
 	}
 
 	var result map[string]any
@@ -1923,31 +1935,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	issueID := issueRef.ID
 
-	// Upload attachments and collect their IDs. URLs are skipped with a
-	// warning — `--attachment` only accepts local file paths, and a
-	// markdown image URL embedded in agent-supplied content should never
-	// be re-uploaded as if it were a file. Unlike `issue create`, this
-	// path uploads BEFORE posting the comment, so a hard failure on a
-	// real (local) attachment correctly aborts the whole call.
+	// Validate and read ALL attachments before uploading any. URLs are skipped
+	// with a warning — `--attachment` only accepts local file paths. Reading
+	// everything up front means a later invalid path (external / symlink escape
+	// caught by the workdir guard) aborts the call with ZERO uploads, instead
+	// of leaving an earlier file uploaded as an orphaned issue attachment while
+	// the comment is never posted (which would duplicate on retry — MUL-4252).
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
+	}
 	var attachmentIDs []string
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
-			return err
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		id, uploadErr := client.UploadFile(ctx, data, filePath, issueID)
+	for _, att := range pending {
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
 		if uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
+			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
 		attachmentIDs = append(attachmentIDs, id)
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	body := map[string]any{"content": content}
