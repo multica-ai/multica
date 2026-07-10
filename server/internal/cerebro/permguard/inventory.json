@@ -2341,6 +2341,14 @@
       "gate": "via:PUT /api/artifacts/{id}"
     },
     {
+      "id": "feature get",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
+    },
+    {
+      "id": "feature list",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
+    },
+    {
       "id": "group agent add",
       "gate": "via:POST /api/groups/{id}/agents"
     },
