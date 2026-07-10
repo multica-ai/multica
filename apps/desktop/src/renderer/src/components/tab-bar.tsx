@@ -7,21 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-  X,
-  Plus,
-  Pin,
-  PinOff,
-  ListX,
-  type LucideIcon,
-} from "lucide-react";
+import { X, Plus, Pin, PinOff, ListX } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -55,17 +41,13 @@ import {
   resolveRouteIcon,
   type Tab,
 } from "@/stores/tab-store";
-import { paths } from "@multica/core/paths";
+import { paths, type RouteIconName } from "@multica/core/paths";
+import { ROUTE_ICON_COMPONENTS } from "@multica/views/layout/route-icon-components";
 
-const TAB_ICONS: Record<string, LucideIcon> = {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-};
+// Icon components come from the shared registry in @multica/views, keyed by the
+// icon names the tab store persists (resolved via @multica/core's
+// resolveRouteIconName). This is the same registry the sidebar nav uses, so a
+// route's tab icon always matches its sidebar icon — see route-icon-components.tsx.
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
@@ -204,7 +186,9 @@ function SortableTabItem({
   // pinned" indicator (RFC §3 D1v-iv FINAL). The route information is still
   // present in the title, and this avoids a hard left accent border that read
   // as visually heavy in light mode.
-  const LeadingIcon = tab.pinned ? Pin : TAB_ICONS[tab.icon];
+  const LeadingIcon = tab.pinned
+    ? Pin
+    : ROUTE_ICON_COMPONENTS[tab.icon as RouteIconName];
 
   const style = {
     transform: CSS.Transform.toString(transform),

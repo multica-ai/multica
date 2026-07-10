@@ -107,7 +107,11 @@ vi.mock("@multica/core/chat", () => ({
     { getState: () => chatStore.current },
   ),
 }));
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  // Spread the real module so pure helpers (e.g. resolveRouteIconName, used by
+  // the nav to resolve icons) stay intact; only the workspace/context hooks are
+  // stubbed below to control routes in tests.
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({

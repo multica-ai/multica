@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
-import { isReservedSlug } from "@multica/core/paths";
+import { isReservedSlug, resolveRouteIconName } from "@multica/core/paths";
 import type { DataRouter } from "react-router-dom";
 import { createTabRouter } from "../routes";
 
@@ -131,30 +131,17 @@ interface TabStore {
 // Route → icon mapping (title comes from document.title, not from here)
 // ---------------------------------------------------------------------------
 
-const ROUTE_ICONS: Record<string, string> = {
-  inbox: "Inbox",
-  "my-issues": "CircleUser",
-  issues: "ListTodo",
-  projects: "FolderKanban",
-  autopilots: "ListTodo",
-  agents: "Bot",
-  runtimes: "Monitor",
-  skills: "BookOpenText",
-  settings: "Settings",
-};
-
 /**
- * Resolve a route icon from a pathname.
+ * Resolve a route icon *name* from a pathname.
  *
- * Tab paths are always workspace-scoped: `/{slug}/{route}/...`, so the route
- * segment lives at index 1. Pre-workspace flows (create, invite) are rendered
- * by the window overlay, never as tabs.
- *
- * Title is NOT determined here — it comes from document.title.
+ * Thin wrapper over the shared `resolveRouteIconName` in `@multica/core/paths`,
+ * which is the single source of truth shared with the sidebar nav. Kept as a
+ * named export so existing tab callers/tests keep working; the returned string
+ * is what gets persisted in `Tab.icon` and later looked up in
+ * `ROUTE_ICON_COMPONENTS` by the tab bar.
  */
 export function resolveRouteIcon(pathname: string): string {
-  const segments = pathname.split("/").filter(Boolean);
-  return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
+  return resolveRouteIconName(pathname);
 }
 
 /** Extract the leading workspace slug from a path, or null if the path

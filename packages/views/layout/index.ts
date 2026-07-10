@@ -4,6 +4,7 @@ export {
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "./collection-page";
+export { ROUTE_ICON_COMPONENTS } from "./route-icon-components";
 export { DashboardGuard } from "./dashboard-guard";
 export { DashboardLayout } from "./dashboard-layout";
 export { useDashboardGuard } from "./use-dashboard-guard";
