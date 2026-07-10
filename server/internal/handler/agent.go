@@ -312,6 +312,7 @@ type AgentTaskResponse struct {
 	TriggerCommentID         *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
 	CoalescedCommentIDs      []string             `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
 	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`        // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
+	DeliveredCommentIDs      []string             `json:"delivered_comment_ids"`                 // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
 	TriggerThreadID          string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
 	TriggerCommentContent    string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
 	TriggerSummary           *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -471,6 +472,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CreatedAt:           timestampToString(t.CreatedAt),
 		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
 		CoalescedCommentIDs: uuidsToStrings(t.CoalescedCommentIds),
+		DeliveredCommentIDs: uuidStringsOrEmpty(t.DeliveredCommentIds),
 		TriggerSummary:      textToPtr(t.TriggerSummary),
 		HandoffNote:         handoffNote,
 		WorkDir:             workDir,
@@ -893,10 +895,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// thinking_level validation: provider-level enum only. Per-model gaps
-	// are enforced by the daemon at execution time (MUL-2339, Trump's
-	// review note — keep API behaviour consistent: literal-invalid →
-	// always 400; combination-invalid → daemon-side task error).
+	// thinking_level validation: fixed-enum providers reject unknown literals;
+	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
+	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
+	// combination-invalid values are logged and omitted from the invocation.
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
@@ -1439,15 +1441,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
 	//     runtime change in this same request would make the *existing*
-	//     value literal-invalid for the new provider, reject 400. This
-	//     closes the gap Elon's review flagged: previously, switching a
-	//     Claude agent storing `max` to a Codex runtime would silently
-	//     keep `max` and forward it to the daemon.
+	//     value invalid for the new provider's fixed enum or token syntax,
+	//     reject 400. Exact dynamic-catalog compatibility is daemon-owned.
 	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
-	//   - field set to value → validate against the target runtime's provider
-	//     enum; reject literal-invalid with 400. Per-model combination checks
-	//     run in the daemon at execution time, not here — see Trump's review
-	//     constraint that API behaviour stays consistent across change paths.
+	//   - field set to value → validate against the target runtime's fixed enum
+	//     or dynamic-token syntax; reject literal-invalid with 400. Per-model
+	//     combination checks run in the daemon at execution time, not here.
 	shouldClearThinkingLevel := false
 	if req.ThinkingLevel != nil {
 		value := *req.ThinkingLevel

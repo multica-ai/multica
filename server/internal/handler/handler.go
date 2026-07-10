@@ -369,6 +369,18 @@ func uuidsToStrings(us []pgtype.UUID) []string {
 	return out
 }
 
+// uuidStringsOrEmpty preserves the distinction between a modern, authoritative
+// empty UUID-array value (`[]`) and a field omitted by a legacy server. Delivery
+// receipts use this so clients never mistake zero delivered comments for an
+// unknown receipt and fall back to the enqueue-time plan.
+func uuidStringsOrEmpty(us []pgtype.UUID) []string {
+	out := uuidsToStrings(us)
+	if out == nil {
+		return []string{}
+	}
+	return out
+}
+
 func int8ToPtr(v pgtype.Int8) *int64 { return util.Int8ToPtr(v) }
 func int4ToPtr(v pgtype.Int4) *int32 { return util.Int4ToPtr(v) }
 func ptrToInt4(v *int32) pgtype.Int4 { return util.PtrToInt4(v) }

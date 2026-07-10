@@ -3,7 +3,8 @@ package protocol
 import "encoding/json"
 
 const (
-	DaemonCapabilitySkillBundlesV1 = "skill-bundles-v1"
+	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
+	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
 )
 
 // Message is the envelope for all WebSocket messages.
@@ -88,11 +89,30 @@ type ChatMessagePayload struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+// Chat message kinds (chat_message.message_kind). Additive: unknown values
+// degrade to ChatMessageKindMessage on older readers.
+const (
+	// ChatMessageKindMessage is an ordinary user/assistant message.
+	ChatMessageKindMessage = "message"
+	// ChatMessageKindNoResponse marks a direct-chat turn the agent completed
+	// without any text reply — a visible, deliberate terminal outcome rather
+	// than a silently-dropped turn (MUL-4351).
+	ChatMessageKindNoResponse = "no_response"
+)
+
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
 // message. Carries the freshly-persisted assistant ChatMessage so the client
 // can write it into the messages cache inline — avoids a refetch round-trip
 // during the live-timeline → AssistantMessage handoff that previously caused
 // a visible flicker (#2123).
+//
+// MessageKind is additive (MUL-4351): older clients ignore it and fall back to
+// the non-empty Content the server always sends, so a no_response turn still
+// renders a real bubble instead of an empty one. Because direct-chat completion
+// now always writes exactly one assistant row (message or no_response),
+// MessageID/Content/CreatedAt/ElapsedMs are always populated for direct chat —
+// the omitempty tags only elide fields for the legacy paths that broadcast
+// without a row.
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	TaskID        string `json:"task_id"`
@@ -100,6 +120,7 @@ type ChatDonePayload struct {
 	Content       string `json:"content,omitempty"`
 	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
 	CreatedAt     string `json:"created_at,omitempty"`
+	MessageKind   string `json:"message_kind,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.

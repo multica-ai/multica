@@ -45,7 +45,6 @@ var legacyDuplicateMigrationStems = map[string][]string{
 	"124": {"124_autopilot_run_planned_at", "124_channel_generalization", "124_task_prepare_lease"},
 	"127": {"127_issue_pull_request_reference_only", "127_task_squad_id", "127_user_composio_connection"},
 	"128": {"128_agent_task_queue_runtime_mcp_overlay", "128_autopilot_collaborator", "128_comment_routing_escalation"},
-	"145": {"145_agent_runtime_custom_name", "145_agent_task_coalesced_comments", "145_chat_read_cursor"},
 }
 
 var migrationPrefixPattern = regexp.MustCompile(`^(\d+)_`)
@@ -176,7 +175,7 @@ func isKnownLegacyPrefix(prefix string) bool {
 		"105", "106", "107", "108", "110", "114", "115", "116", "117", "118",
 		"119", "121", "123", "125", "126", "129", "130", "131", "132", "133",
 		"134", "135", "136", "137", "138", "139", "140", "141", "142", "143",
-		"144", "146", "147", "148":
+		"144", "145", "146", "147", "148":
 		return true
 	default:
 		return false

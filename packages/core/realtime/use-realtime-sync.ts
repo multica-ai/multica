@@ -138,6 +138,10 @@ export function applyChatDoneToCache(
       task_id: taskId,
       created_at: payload.created_at ?? new Date().toISOString(),
       elapsed_ms: payload.elapsed_ms ?? null,
+      // Carry the kind so a no_response turn renders its placeholder inline
+      // without waiting for the reconciling refetch (MUL-4351). Missing →
+      // "message" for older servers.
+      message_kind: payload.message_kind ?? "message",
     };
     qc.setQueryData<ChatMessage[] | undefined>(
       chatKeys.messages(sessionId),

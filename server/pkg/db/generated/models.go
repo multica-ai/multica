@@ -126,6 +126,8 @@ type AgentTaskQueue struct {
 	// Non-secret per-task connected app metadata corresponding to runtime_mcp_overlay, used by the daemon brief to tell agents which app capabilities are mounted. Cleared with runtime_mcp_overlay after task completion.
 	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
+	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
+	ChatInputTaskID      pgtype.UUID   `json:"chat_input_task_id"`
 }
 
 type Attachment struct {
@@ -304,6 +306,7 @@ type ChatMessage struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	FailureReason pgtype.Text        `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
+	MessageKind   string             `json:"message_kind"`
 }
 
 type ChatPinnedAgent struct {
@@ -326,6 +329,7 @@ type ChatSession struct {
 	Status       string             `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince  pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID    pgtype.UUID        `json:"runtime_id"`
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`

@@ -43,3 +43,54 @@ func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
 		}
 	}
 }
+
+func TestPriceForModelAliasCodexGPT56(t *testing.T) {
+	// Official rates from OpenAI's GPT-5.6 announcement: cache read = 0.1x
+	// input (90% cached-input discount), cache write = 1.25x input.
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "gpt-5.6-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
+		},
+		{
+			model: "openai:gpt-5.6-terra",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.5, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15},
+		},
+		{
+			model: "openai/gpt-5.6-luna",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1.25, OutputPerM: 6},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// Unknown suffixed variants must NOT borrow a 5.6 tier — the alias is an
+	// anchored exact match, mirroring the frontend's exact-match resolver.
+	// The dash-normalized ids (`gpt-5-6-luna`) must also miss: the real Codex
+	// slug is always dotted and the frontend does not dash-normalize, so both
+	// sides surface these as unmapped instead of silently pricing them.
+	for _, model := range []string{
+		"gpt-5.6-luna-pro",
+		"gpt-5.6-luna/unknown",
+		"gpt-5.6-sol-high",
+		"gpt-5.6-mini",
+		"gpt-5-6-luna",
+		"gpt-5-6-sol",
+		"gpt-5-6-terra",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}

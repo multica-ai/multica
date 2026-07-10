@@ -5,6 +5,7 @@ import type { CommentTriggerPreviewAgent } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
 import {
   Popover,
   PopoverContent,
@@ -22,7 +23,10 @@ import { useT } from "../../i18n";
 // a click-opened Popover so the layer survives consecutive clicks.
 // Suppression is communicated by brightness alone: lit = will trigger,
 // dimmed = skipped.
-const AVATAR_SIZE = 16;
+// The single-agent avatar renders at the `xs` tier; the `+N` overflow chip
+// and stack overlap below reuse that tier's pixel diameter so the collapsed
+// stack lines up exactly with the avatars.
+const AVATAR_SIZE = AVATAR_SIZE_PX.xs;
 const MAX_STACK_HEADS = 4;
 
 interface CommentTriggerChipsProps {
@@ -340,9 +344,9 @@ function TriggerAgentAvatar({
         initials=""
         avatarUrl={agent.avatar_url}
         isAgent
-        size={AVATAR_SIZE}
+        size="xs"
       />
-      {showDot && !suppressed && <AgentStatusDot agentId={agent.id} size={AVATAR_SIZE} />}
+      {showDot && !suppressed && <AgentStatusDot agentId={agent.id} size="xs" />}
     </span>
   );
 }

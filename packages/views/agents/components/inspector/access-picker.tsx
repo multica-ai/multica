@@ -307,7 +307,7 @@ export function AccessPicker({
                   <ActorAvatar
                     actorType="member"
                     actorId={m.user_id}
-                    size={18}
+                    size="sm"
                   />
                   <span className="min-w-0 flex-1 truncate">{m.name}</span>
                 </label>

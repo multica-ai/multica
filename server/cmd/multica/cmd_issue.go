@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,9 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return body, true, nil
 	}
 	if filePath != "" {
+		if err := ensureFileFlagWithinWorkdir(cmd, fileFlag, flagName, filePath); err != nil {
+			return "", false, err
+		}
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
@@ -83,6 +87,79 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+// ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
+// outside the current working directory, unless --allow-external-file is set.
+//
+// Agent task workdirs are isolated per profile and per task; machine-shared
+// scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
+// leak to exactly this gap: a quick-create run wrote its description to a fixed
+// /tmp/desc.md, the write silently failed because a *different* environment's
+// run had left a stale file there minutes earlier, and --description-file then
+// fed that stale content into the new issue. Requiring the file to live under
+// the workdir turns "silently read another run's file" into a loud command
+// failure — an "incorrect content" bug becomes a "command errored" bug.
+func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--%s path %q resolves outside the current working directory; "+
+				"write agent temp files inside the task workdir (e.g. ./%s.md) rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be read by mistake. "+
+				"Pass --allow-external-file to override.",
+			fileFlag, filePath, flagName)
+	}
+	return nil
+}
+
+// fileWithinWorkingDir reports whether filePath resolves to a location inside
+// the process working directory. Both sides are symlink-resolved so aliased
+// roots (e.g. macOS /tmp -> /private/tmp) and symlinks planted inside the
+// workdir fail closed. A path that does not exist yet is judged on its cleaned
+// absolute form so the caller's os.ReadFile still surfaces the real not-found
+// error afterwards.
+func fileWithinWorkingDir(filePath string) (bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false, err
+	}
+	base := cwd
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		base = resolved
+	}
+	abs := filePath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	} else {
+		// The file may not exist yet (the caller's os.ReadFile surfaces that).
+		// Resolve symlinks on the parent directory instead so the comparison
+		// base and the candidate share the same canonical prefix — otherwise a
+		// workdir under a symlinked root (e.g. macOS temp dirs) would falsely
+		// read as "outside". A missing parent falls back to a plain clean.
+		if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(abs)); perr == nil {
+			abs = filepath.Join(resolvedParent, filepath.Base(abs))
+		} else {
+			abs = filepath.Clean(abs)
+		}
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil {
+		return false, err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 var issueCmd = &cobra.Command{
@@ -383,7 +460,8 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
-	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -402,7 +480,8 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
-	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -459,7 +538,8 @@ func init() {
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -880,6 +960,66 @@ func isHTTPURL(path string) bool {
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
 }
 
+// ensureAttachmentWithinWorkdir applies the same workdir containment guard as
+// --description-file / --content-file (MUL-4252) to a local --attachment path.
+// An agent that writes a chart/report to a machine-shared path like /tmp and
+// then attaches it could otherwise pick up another run's — possibly another
+// workspace's — stale file (the image version of the /tmp/desc.md leak). URL
+// values are filtered by the caller and never reach here. --allow-external-file
+// overrides, mirroring the text-flag escape hatch.
+func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--attachment path %q resolves outside the current working directory; "+
+				"attach files generated inside the task workdir rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be attached by mistake. "+
+				"Pass --allow-external-file to override.",
+			filePath)
+	}
+	return nil
+}
+
+// pendingAttachment is a local --attachment file that passed URL filtering and
+// the workdir guard and has been read into memory, ready to upload.
+type pendingAttachment struct {
+	path string
+	data []byte
+}
+
+// collectLocalAttachments validates and reads ALL local --attachment paths up
+// front, before any upload. URL-shaped values are warned and skipped (the API
+// only accepts local paths). Each remaining path is run through the MUL-4252
+// workdir guard and read into memory; the first invalid or unreadable path
+// returns an error with nothing uploaded. Both `issue create` and
+// `comment add` share this so an invalid attachment can never leave an earlier
+// one uploaded as an orphaned issue attachment while the issue/comment is never
+// created (which would duplicate on retry).
+func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendingAttachment, error) {
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return nil, err
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+	return pending, nil
+}
+
 func appendUniqueStrings(dst []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(dst)+len(values))
 	out := make([]string, 0, len(dst)+len(values))
@@ -1015,34 +1155,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["attachment_ids"] = attachmentIDs
 	}
 
-	// Pre-validate attachments BEFORE creating the issue so a bad path
-	// can never produce a half-created issue (which would otherwise
-	// trigger callers — especially the agent doing quick-create — to
-	// retry the whole `issue create` and end up with duplicates).
-	//
-	//   - http(s) URLs are not local files; the API only accepts local
-	//     paths here. Warn and skip rather than fail — a markdown image
-	//     URL embedded in the prompt should never be re-attached, and
-	//     skipping is the safest outcome for that case.
-	//   - Anything else is treated as a local path and read upfront.
-	//     A read failure here is a real user/agent mistake (typo,
-	//     missing file) and we surface it pre-create so the issue
-	//     never lands.
-	type pendingAttachment struct {
-		path string
-		data []byte
-	}
-	pending := make([]pendingAttachment, 0, len(attachments))
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	// Pre-validate attachments BEFORE creating the issue so a bad path can
+	// never produce a half-created issue (which would otherwise trigger
+	// callers — especially the agent doing quick-create — to retry the whole
+	// `issue create` and end up with duplicates). URLs are warned+skipped, the
+	// workdir guard is applied, and every local path is read upfront; a failure
+	// here surfaces pre-create so the issue never lands.
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
 	}
 
 	var result map[string]any
@@ -1814,28 +1935,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	issueID := issueRef.ID
 
-	// Upload attachments and collect their IDs. URLs are skipped with a
-	// warning — `--attachment` only accepts local file paths, and a
-	// markdown image URL embedded in agent-supplied content should never
-	// be re-uploaded as if it were a file. Unlike `issue create`, this
-	// path uploads BEFORE posting the comment, so a hard failure on a
-	// real (local) attachment correctly aborts the whole call.
+	// Validate and read ALL attachments before uploading any. URLs are skipped
+	// with a warning — `--attachment` only accepts local file paths. Reading
+	// everything up front means a later invalid path (external / symlink escape
+	// caught by the workdir guard) aborts the call with ZERO uploads, instead
+	// of leaving an earlier file uploaded as an orphaned issue attachment while
+	// the comment is never posted (which would duplicate on retry — MUL-4252).
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
+	}
 	var attachmentIDs []string
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		id, uploadErr := client.UploadFile(ctx, data, filePath, issueID)
+	for _, att := range pending {
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
 		if uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
+			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
 		attachmentIDs = append(attachmentIDs, id)
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	body := map[string]any{"content": content}

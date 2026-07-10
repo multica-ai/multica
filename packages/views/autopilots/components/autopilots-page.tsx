@@ -267,7 +267,7 @@ function AssigneeCell({ autopilot }: { autopilot: Autopilot }) {
       <ActorAvatar
         actorType={autopilot.assignee_type}
         actorId={autopilot.assignee_id}
-        size={18}
+        size="sm"
         enableHoverCard={autopilot.assignee_type === "agent"}
         showStatusDot={autopilot.assignee_type === "agent"}
       />
@@ -408,7 +408,7 @@ function CreatorCell({ autopilot }: { autopilot: Autopilot }) {
       <ActorAvatar
         actorType={autopilot.created_by_type}
         actorId={autopilot.created_by_id}
-        size={18}
+        size="sm"
       />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {getActorName(autopilot.created_by_type, autopilot.created_by_id)}

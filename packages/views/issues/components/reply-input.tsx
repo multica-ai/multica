@@ -12,6 +12,7 @@ import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
+import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -152,7 +153,7 @@ function ReplyInput({
     }
   };
 
-  const avatarSize = size === "sm" ? 22 : 28;
+  const avatarSize: AvatarSize = size === "sm" ? "sm" : "md";
 
   return (
     <div className="group/editor flex items-start gap-2.5">

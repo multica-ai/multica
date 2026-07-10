@@ -86,8 +86,25 @@ describe("applyChatDoneToCache", () => {
         task_id: taskId,
         created_at: "2026-05-13T05:00:02Z",
         elapsed_ms: 1234,
+        // Additive kind carried on the inline-inserted assistant message so a
+        // no_response turn renders without a refetch (MUL-4351); defaults to
+        // "message" when the server omits it.
+        message_kind: "message",
       },
     ]);
+  });
+
+  it("carries message_kind=no_response on the inline assistant message", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+
+    applyChatDoneToCache(
+      qc,
+      donePayload({ content: "", message_kind: "no_response" }),
+    );
+
+    const msgs = qc.getQueryData<ChatMessage[]>(messagesKey);
+    expect(msgs?.[1]?.message_kind).toBe("no_response");
   });
 
   it("does not duplicate a replayed chat done event", () => {

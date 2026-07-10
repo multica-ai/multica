@@ -9,6 +9,7 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  estimateCostBreakdown,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -236,6 +237,43 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
+  it("prices the gpt-5.6 series per OpenAI's official cache-aware rates", () => {
+    // Official announcement rates. 5.6 is the first OpenAI generation to bill
+    // cache writes separately: cacheRead = 0.1x input, cacheWrite = 1.25x
+    // input. Cover every model x every token category so a wrong cache rate
+    // can't hide behind an input-only assertion. `total` is 1M of each of the
+    // four categories priced at its own rate.
+    const cases = [
+      { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
+      { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
+      { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
+    ];
+    for (const c of cases) {
+      const breakdown = estimateCostBreakdown({
+        ...zeroUsage,
+        model: c.model,
+        input_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      });
+      expect(breakdown.input).toBeCloseTo(c.input, 5);
+      expect(breakdown.cacheRead).toBeCloseTo(c.cacheRead, 5);
+      expect(breakdown.cacheWrite).toBeCloseTo(c.cacheWrite, 5);
+      expect(breakdown.output).toBeCloseTo(c.output, 5);
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model: c.model,
+          input_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(c.total, 5);
+    }
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
@@ -256,6 +294,12 @@ describe("estimateCost", () => {
     // silently inherit `gpt-5` pricing.
     expect(isModelPriced("gpt-5.99-codex")).toBe(false);
     expect(isModelPriced("gpt-5-foo")).toBe(false);
+    // Dash-normalized 5.6 ids must also miss: the real Codex slug is dotted
+    // (`gpt-5.6-luna`) and this resolver does NOT dash-normalize non-claude
+    // ids, so a dashed variant surfaces as unmapped — matching the backend's
+    // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
+    expect(isModelPriced("gpt-5-6-luna")).toBe(false);
+    expect(isModelPriced("gpt-5-6-sol")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,

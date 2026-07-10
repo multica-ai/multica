@@ -75,7 +75,7 @@ export function QuickAgentBar({
             <ActorAvatar
               actorType="agent"
               actorId={agent.id}
-              size={34}
+              size="lg"
               showStatusDot
               enableHoverCard
               profileLink={false}
