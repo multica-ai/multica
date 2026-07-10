@@ -299,6 +299,20 @@ export default function WorkspaceLayout() {
         <Stack.Screen name="issues-filter" options={SHEET_OPTIONS} />
         {/* Chat session-switch sheet. */}
         <Stack.Screen name="chat-sessions" options={SHEET_OPTIONS} />
+        <Stack.Screen
+          name="chat/[id]"
+          options={{
+            title: tChat("title_button.default_agent_name"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="chat/new"
+          options={{
+            title: tChat("title_button.default_agent_name"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
         {/* Workspace switcher — reached from the More popover's collapsed
             WorkspaceCard. Two-step (pick → iOS Alert confirm → switch). */}
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
