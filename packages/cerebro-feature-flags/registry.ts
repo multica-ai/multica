@@ -368,6 +368,9 @@ export type CerebroFlagKey =
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
   | "cerebro_comment_drafts"
+  // FIR-2648: per-device draft persistence for the issue description editor —
+  // recovers text that never reached the server (e.g. session expired mid-edit).
+  | "cerebro_description_drafts"
   // TECH-3698: per-channel permission settings (who may rename / add-remove
   // participants / leave) surfaced in the channel settings sheet and the
   // create-channel dialog. Gates only the configuration UI.
@@ -773,6 +776,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is the intended behaviour change. Off restores the old "lose it on navigate"
   // behaviour and hides the "Kladde gemt" hint.
   cerebro_comment_drafts: true,
+  // FIR-2648: ON by default — recovering a description edit that never
+  // reached the server is the whole point of the feature. Off restores the
+  // old "lose it on session expiry" behaviour and hides the restore banner.
+  cerebro_description_drafts: true,
   // TECH-3582: OFF by default. Ships dormant — the Workspace copy console only
   // appears in Settings once an admin opts in to run a one-time workspace merge.
   cerebro_workspace_copy: false,
@@ -1671,6 +1678,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
+  },
+  // FIR-2648: per-device drafts for the issue description editor.
+  {
+    key: "cerebro_description_drafts",
+    label: "Recover unsaved description edits",
+    group: "issues",
+    description:
+      "Keep what you have typed into an issue description on this device, independent of whether the save actually reached the server. If the last save never reached the backend (e.g. the Cloudflare Access session expired mid-edit), a small banner offers to restore or discard it the next time the description editor is opened. Saved on this device only (not synced across devices). Off restores the old behaviour where an edit that never saved is silently lost. FIR-2648.",
   },
   // TECH-3582: Workspace copy console — one-time workspace merge tool.
   {
