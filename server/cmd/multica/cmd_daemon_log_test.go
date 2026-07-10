@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// TestEnvIntOrDefault locks in the parse-or-fallback behaviour the log
-// rotation knobs rely on: unset/blank/malformed/negative all fall back to the
-// default, and a valid non-negative integer (including 0) is honoured.
-func TestEnvIntOrDefault(t *testing.T) {
+// TestEnvPositiveIntOrDefault locks in the parse-or-fallback behaviour the log
+// rotation knobs rely on. Critically, an explicit 0 falls back to the default
+// (not through to lumberjack, where 0 means 100MB / keep-everything), so the
+// retention footguns can't be tripped from the environment.
+func TestEnvPositiveIntOrDefault(t *testing.T) {
 	const key = "MULTICA_TEST_ENV_INT"
 	cases := []struct {
 		name string
@@ -23,7 +24,7 @@ func TestEnvIntOrDefault(t *testing.T) {
 		{"blank", true, "", 20, 20},
 		{"whitespace", true, "   ", 20, 20},
 		{"valid", true, "50", 20, 50},
-		{"zero", true, "0", 20, 0},
+		{"zero_falls_back", true, "0", 20, 20},
 		{"negative", true, "-1", 20, 20},
 		{"malformed", true, "abc", 20, 20},
 		{"padded", true, "  7 ", 20, 7},
@@ -34,10 +35,64 @@ func TestEnvIntOrDefault(t *testing.T) {
 			if c.set {
 				t.Setenv(key, c.val)
 			}
-			if got := envIntOrDefault(key, c.def); got != c.want {
-				t.Errorf("envIntOrDefault(%q, %d) = %d, want %d", c.val, c.def, got, c.want)
+			if got := envPositiveIntOrDefault(key, c.def); got != c.want {
+				t.Errorf("envPositiveIntOrDefault(%q, %d) = %d, want %d", c.val, c.def, got, c.want)
 			}
 		})
+	}
+}
+
+// TestOpenBoundedErrLogRolls verifies the raw crash sink is bounded: once it is
+// at/over the cap, opening it rolls the old contents to a single ".1" backup
+// and starts fresh, so a crash loop can't grow daemon.err.log without limit.
+func TestOpenBoundedErrLogRolls(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.err.log")
+
+	// Seed an over-cap file.
+	big := make([]byte, errLogMaxBytes+1024)
+	if err := os.WriteFile(path, big, 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	f, err := openBoundedErrLog(path)
+	if err != nil {
+		t.Fatalf("openBoundedErrLog: %v", err)
+	}
+	f.Close()
+
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("expected rolled backup %s.1: %v", path, err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat active: %v", err)
+	}
+	if fi.Size() != 0 {
+		t.Errorf("active err log = %d bytes after roll, want 0", fi.Size())
+	}
+}
+
+// TestOpenBoundedErrLogKeepsSmall confirms a below-cap file is appended to, not
+// rolled — the common healthy-daemon case.
+func TestOpenBoundedErrLogKeepsSmall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.err.log")
+	if err := os.WriteFile(path, []byte("prior crash\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	f, err := openBoundedErrLog(path)
+	if err != nil {
+		t.Fatalf("openBoundedErrLog: %v", err)
+	}
+	f.WriteString("next line\n")
+	f.Close()
+
+	if _, err := os.Stat(path + ".1"); !os.IsNotExist(err) {
+		t.Errorf("did not expect a rolled backup for a small file")
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "prior crash") || !strings.Contains(string(data), "next line") {
+		t.Errorf("expected append, got %q", data)
 	}
 }
 

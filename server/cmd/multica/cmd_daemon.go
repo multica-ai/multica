@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -157,11 +158,17 @@ func daemonStderrLogPathForProfile(profile string) string {
 
 // Daemon log rotation policy. Defaults keep the active daemon.log small enough
 // to open in an editor while retaining recent history; each is overridable via
-// env so operators can tune retention without a rebuild.
+// env so operators can tune retention without a rebuild. Whichever of backups
+// / age is hit first prunes a rotated file.
 const (
 	defaultDaemonLogMaxSizeMB  = 20 // rotate the active daemon.log once it reaches this size
 	defaultDaemonLogMaxBackups = 5  // how many rotated files to keep
 	defaultDaemonLogMaxAgeDays = 30 // drop rotated files older than this
+	// errLogMaxBytes bounds daemon.err.log (raw crash/panic sink). It is
+	// enforced by rolling the file to a single ".1" backup at open time, so a
+	// crash loop that repeatedly appends panic output can't reintroduce the
+	// unbounded-growth problem on a different file.
+	errLogMaxBytes = 5 * 1024 * 1024
 )
 
 // newDaemonLogRotator builds the size-based rotating writer backing daemon.log.
@@ -172,25 +179,41 @@ const (
 func newDaemonLogRotator(logPath string) *lumberjack.Logger {
 	return &lumberjack.Logger{
 		Filename:   logPath,
-		MaxSize:    envIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
-		MaxBackups: envIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
-		MaxAge:     envIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
+		MaxSize:    envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
+		MaxBackups: envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
+		MaxAge:     envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
 		Compress:   true,
 	}
 }
 
-// envIntOrDefault reads a non-negative integer env var, falling back to def
-// when unset, blank, or malformed.
-func envIntOrDefault(key string, def int) int {
+// envPositiveIntOrDefault reads a strictly positive integer env var, falling
+// back to def when unset, blank, malformed, zero, or negative. Zero is treated
+// as "use default" on purpose: lumberjack reads MaxSize=0 as 100MB and
+// MaxBackups=0 / MaxAge=0 as "keep everything", so honoring a literal 0 would
+// silently disable retention and reintroduce unbounded growth.
+func envPositiveIntOrDefault(key string, def int) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
+	if err != nil || n <= 0 {
 		return def
 	}
 	return n
+}
+
+// openBoundedErrLog rolls daemon.err.log to a single ".1" backup when it has
+// grown past errLogMaxBytes, then opens it for appending. This keeps the raw
+// crash sink bounded across restarts (see errLogMaxBytes) without pulling in a
+// second rotating writer — the file is only ever written by inherited fds.
+func openBoundedErrLog(path string) (*os.File, error) {
+	if fi, err := os.Stat(path); err == nil && fi.Size() >= errLogMaxBytes {
+		// Best-effort roll; ignore errors and fall through to append so a
+		// rename failure never blocks daemon startup.
+		_ = os.Rename(path, path+".1")
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
 // healthPortForProfile returns the health check port for the given profile.
@@ -255,7 +278,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	// crash output, which goes to a separate, non-rotated sink so it never
 	// holds daemon.log open (see daemonStderrLogPathForProfile).
 	errLogPath := daemonStderrLogPathForProfile(profile)
-	logFile, err := os.OpenFile(errLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openBoundedErrLog(errLogPath)
 	if err != nil {
 		return fmt.Errorf("open log file %s: %w", errLogPath, err)
 	}
@@ -395,13 +418,33 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	profile := resolveProfile(cmd)
 
-	// Set up the size-bounded, rotating daemon.log sink early, and route both
-	// this process's structured logger and the package-global slog default
-	// through it, so every log line — including LoadConfig's slog.Warn below —
-	// is captured and rotated instead of appended to an ever-growing file.
-	logRotator := newDaemonLogRotator(daemonLogPathForProfile(profile))
-	defer logRotator.Close()
-	logger := logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
+	// keeps live, colored logging on their terminal (a documented debugging
+	// path — see docs troubleshooting). A detached/background child, whose
+	// stderr the launcher redirected to a file, instead routes structured logs
+	// into the size-bounded, rotating daemon.log so the file can't grow without
+	// limit. We distinguish the two by whether stderr is a terminal.
+	var (
+		logger     *slog.Logger
+		logRotator *lumberjack.Logger
+	)
+	if logger_pkg.StderrIsTerminal() {
+		logger = logger_pkg.NewLogger("daemon")
+	} else {
+		// An older self-update launcher may have handed this process daemon.log
+		// itself as stdout/stderr. On Windows that inherited handle lacks
+		// FILE_SHARE_DELETE and would block the rotator's rename, so re-point
+		// our standard handles at the bounded crash sink first, leaving
+		// daemon.log solely owned by the rotator. No-op on Unix, where an open
+		// fd never blocks rename.
+		repointStdioToErrLog(daemonStderrLogPathForProfile(profile))
+		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
+		defer logRotator.Close()
+		// Route both this process's structured logger and the package-global
+		// slog default through the rotator, so every log line — including
+		// LoadConfig's slog.Warn below — is captured and rotated.
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+	}
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if serverURL == "" {
@@ -471,6 +514,17 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if restartBin := d.RestartBinary(); restartBin != "" {
 		logger.Info("restarting daemon with updated binary", "path", restartBin)
 
+		// The successor will open daemon.log through its own rotating writer,
+		// and lumberjack does not support two writers managing one file. Stop
+		// writing to our rotator before the successor starts: close it and move
+		// this process's remaining handoff logs to the crash sink (stderr),
+		// including the package-global slog default (which would otherwise
+		// reopen daemon.log on its next write).
+		if logRotator != nil {
+			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			_ = logRotator.Close()
+		}
+
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
 
@@ -478,7 +532,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// through its own rotating writer; hand it the raw-stderr sink so its
 		// inherited fds don't hold daemon.log open (see runDaemonBackground).
 		errLogPath := daemonStderrLogPathForProfile(profile)
-		logFile, err := os.OpenFile(errLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		logFile, err := openBoundedErrLog(errLogPath)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
 			// Runtimes were already deregistered by triggerRestart() before handoff.

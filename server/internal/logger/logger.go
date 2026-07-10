@@ -50,6 +50,15 @@ func NewLogger(component string) *slog.Logger {
 	return slog.New(handler).With("component", component)
 }
 
+// StderrIsTerminal reports whether this process's stderr is attached to a
+// terminal. The daemon uses it to distinguish a user running
+// `daemon start --foreground` in a shell (log live to the terminal) from a
+// detached/background child whose stderr is redirected to a file (rotate into
+// daemon.log instead).
+func StderrIsTerminal() bool {
+	return isTerminal(os.Stderr)
+}
+
 // NewWriterLoggerDefault builds a named slog logger that writes structured,
 // color-free output to w, and installs the same handler as the global slog
 // default so bare slog.Info/Warn/... calls (e.g. from LoadConfig) land in the
