@@ -43,6 +43,7 @@ import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/iss
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
+import { RunUsageInline, type RunUsage } from "./issue-token-usage-section";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -127,6 +128,19 @@ interface CommentCardProps {
   onResolvedExpandChange?: (rootId: string, expand: boolean) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  /**
+   * 1-based position of this thread among the timeline's comment threads.
+   * Renders as a muted `#2` chip on the root header and `#2.1` on replies,
+   * matching the sidebar Token-usage run labels. Absent = no chips.
+   */
+  threadNumber?: number;
+  /**
+   * Per-task token usage keyed by task id (folded from the issue usage
+   * query in issue-detail). Comments with a matching `source_task_id`
+   * render a one-line usage summary under their body. Stable reference —
+   * only changes when the usage query refetches.
+   */
+  taskUsage?: ReadonlyMap<string, RunUsage>;
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +494,8 @@ function CommentRow({
   canModerate = false,
   isResolution = false,
   isHighlighted = false,
+  numberLabel,
+  usage,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -493,6 +509,10 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
+  /** Timeline position chip ("2.1"); see CommentCardProps.threadNumber. */
+  numberLabel?: string;
+  /** Token usage of the run that produced this comment, when known. */
+  usage?: RunUsage;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -538,6 +558,9 @@ function CommentRow({
             {new Date(entry.created_at).toLocaleString()}
           </TooltipContent>
         </Tooltip>
+        {numberLabel && (
+          <span className="shrink-0 text-[11px] text-muted-foreground/70">#{numberLabel}</span>
+        )}
 
         {isResolution && (
           <span className="text-xs font-medium text-success">
@@ -679,6 +702,11 @@ function CommentRow({
               className="mt-2 pl-12 pr-4"
             />
           )}
+          {usage && (
+            <div className="mt-1.5 flex pl-12 pr-4 text-[11px]">
+              <RunUsageInline usage={usage} />
+            </div>
+          )}
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -711,6 +739,8 @@ function CommentCardImpl({
   expandedResolvedIds,
   onResolvedExpandChange,
   highlightedCommentId,
+  threadNumber,
+  taskUsage,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -728,6 +758,15 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const allNestedReplies = replies;
+
+  // Reply chips are numbered by render position within the thread ("2.1",
+  // "2.2"), so they stay consistent across the folded/expanded resolution
+  // views, which reorder or hide rows.
+  const replyNumberById = threadNumber
+    ? new Map(allNestedReplies.map((r, i) => [r.id, `${threadNumber}.${i + 1}`]))
+    : null;
+  const usageFor = (e: TimelineEntry): RunUsage | undefined =>
+    e.source_task_id ? taskUsage?.get(e.source_task_id) : undefined;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -813,6 +852,9 @@ function CommentCardImpl({
                   {new Date(entry.created_at).toLocaleString()}
                 </TooltipContent>
               </Tooltip>
+              {threadNumber != null && (
+                <span className="shrink-0 text-[11px] text-muted-foreground/70">#{threadNumber}</span>
+              )}
 
               {!open && contentPreview && (
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -969,6 +1011,11 @@ function CommentCardImpl({
                     className="mt-2 pl-10"
                   />
                 )}
+                {usageFor(entry) && (
+                  <div className="mt-1.5 flex pl-10 text-[11px]">
+                    <RunUsageInline usage={usageFor(entry)!} />
+                  </div>
+                )}
                 <ReactionBar
                   reactions={reactions}
                   currentUserId={currentUserId}
@@ -1013,6 +1060,8 @@ function CommentCardImpl({
                     canModerate={canModerate}
                     isResolution
                     isHighlighted={highlightedCommentId === resolutionReply.id}
+                    numberLabel={replyNumberById?.get(resolutionReply.id)}
+                    usage={usageFor(resolutionReply)}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
@@ -1052,6 +1101,8 @@ function CommentCardImpl({
                     canModerate={canModerate}
                     isResolution={reply.id === replyResolutionId}
                     isHighlighted={highlightedCommentId === reply.id}
+                    numberLabel={replyNumberById?.get(reply.id)}
+                    usage={usageFor(reply)}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}

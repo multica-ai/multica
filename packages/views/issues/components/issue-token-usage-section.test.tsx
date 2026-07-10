@@ -26,7 +26,7 @@ const USAGE: IssueUsageSummary = {
       task_id: "t2",
       created_at: "2026-07-08T10:00:00Z",
       comment_triggered: true,
-      comment_number: 2,
+      trigger_comment_id: "c2",
       provider: "anthropic",
       model: "claude-sonnet-4.6",
       input_tokens: 2000,
@@ -38,7 +38,7 @@ const USAGE: IssueUsageSummary = {
       task_id: "t1",
       created_at: "2026-07-08T09:00:00Z",
       comment_triggered: false,
-      comment_number: 0,
+      trigger_comment_id: "",
       provider: "anthropic",
       model: "claude-sonnet-4.6",
       input_tokens: 1000,
@@ -64,9 +64,10 @@ describe("IssueTokenUsageSection", () => {
   });
 
   it("expands a per-run breakdown with cost and token split per run", () => {
-    render(wrap(<IssueTokenUsageSection usage={USAGE} />));
+    const labels = new Map([["c2", "2.1"]]);
+    render(wrap(<IssueTokenUsageSection usage={USAGE} commentLabels={labels} />));
     fireEvent.click(screen.getByText("2 runs"));
-    expect(screen.getByText("Comment 2")).toBeInTheDocument();
+    expect(screen.getByText("Comment 2.1")).toBeInTheDocument();
     expect(screen.getByText("Assignment")).toBeInTheDocument();
     // t2: cost (2000*3 + 100*15 + 30000*0.3 + 5000*3.75) / 1e6 ≈ $0.035,
     // then 2000 in, 100 out, 30k read / 5k write on the same line

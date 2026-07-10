@@ -642,10 +642,10 @@ export interface IssueTaskUsage {
   task_id: string;
   created_at: string;
   comment_triggered: boolean;
-  /** 1-based position of the trigger comment among the issue's top-level
-   *  comments (replies inherit their root's number); 0 when not
-   *  comment-triggered or the comment was deleted. */
-  comment_number: number;
+  /** ID of the comment that triggered this run; "" for assignment runs or
+   *  older backends. The client resolves it to a timeline position
+   *  ("2", "2.1") against the loaded comment list. */
+  trigger_comment_id: string;
   provider: string;
   model: string;
   input_tokens: number;

@@ -11,12 +11,9 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
-// One run can span multiple models (one task_usage row per model); fold the
-// rows back into per-run entries for the breakdown list.
-interface RunEntry {
-  taskId: string;
-  commentTriggered: boolean;
-  commentNumber: number;
+// Token/cost totals for one agent run. Shared with the timeline, which
+// renders the same inline summary under agent response comments.
+export interface RunUsage {
   input: number;
   output: number;
   cacheRead: number;
@@ -24,13 +21,21 @@ interface RunEntry {
   cost: number;
 }
 
-function foldRuns(tasks: IssueTaskUsage[]): RunEntry[] {
+// One run can span multiple models (one task_usage row per model); fold the
+// rows back into per-run entries for the breakdown list.
+export interface RunEntry extends RunUsage {
+  taskId: string;
+  commentTriggered: boolean;
+  triggerCommentId: string;
+}
+
+export function foldRuns(tasks: IssueTaskUsage[]): RunEntry[] {
   const byTask = new Map<string, RunEntry>();
   for (const t of tasks) {
     const entry = byTask.get(t.task_id) ?? {
       taskId: t.task_id,
       commentTriggered: t.comment_triggered,
-      commentNumber: t.comment_number,
+      triggerCommentId: t.trigger_comment_id,
       input: 0,
       output: 0,
       cacheRead: 0,
@@ -51,7 +56,48 @@ function formatCost(cost: number): string {
   return cost >= 0.01 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
 }
 
-export function IssueTokenUsageSection({ usage }: { usage: IssueUsageSummary }) {
+/**
+ * One-line usage summary for a single run: `$0.89 · in 210k · out 18k ·
+ * cache 10.3M`, with the cost prefix dropped at zero and the cache segment
+ * split into read/write only when writes exist. Used by the sidebar's
+ * per-run breakdown and under agent response comments in the timeline.
+ */
+export function RunUsageInline({ usage }: { usage: RunUsage }) {
+  const { t } = useT("issues");
+  const segments = [
+    t(($) => $.detail.usage_seg_input, { n: formatTokenCount(usage.input) }),
+    t(($) => $.detail.usage_seg_output, { n: formatTokenCount(usage.output) }),
+  ];
+  if (usage.cacheWrite > 0) {
+    segments.push(
+      t(($) => $.detail.usage_seg_cache_rw, {
+        read: formatTokenCount(usage.cacheRead),
+        write: formatTokenCount(usage.cacheWrite),
+      }),
+    );
+  } else if (usage.cacheRead > 0) {
+    segments.push(t(($) => $.detail.usage_seg_cache, { n: formatTokenCount(usage.cacheRead) }));
+  }
+  if (usage.cost > 0) segments.unshift(formatCost(usage.cost));
+  return (
+    <span
+      className="truncate text-muted-foreground"
+      title={t(($) => $.detail.usage_run_split_tooltip)}
+    >
+      {segments.join(" · ")}
+    </span>
+  );
+}
+
+export function IssueTokenUsageSection({
+  usage,
+  commentLabels,
+}: {
+  usage: IssueUsageSummary;
+  /** Timeline position per comment id ("2", "2.1"), computed in issue-detail
+   *  from the loaded comment list so labels always match the timeline. */
+  commentLabels?: ReadonlyMap<string, string>;
+}) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [runsOpen, setRunsOpen] = useState(false);
@@ -115,38 +161,19 @@ export function IssueTokenUsageSection({ usage }: { usage: IssueUsageSummary }) 
               </button>
               {runsOpen &&
                 runs.map((run) => {
-                  const segments = [
-                    t(($) => $.detail.usage_seg_input, { n: formatTokenCount(run.input) }),
-                    t(($) => $.detail.usage_seg_output, { n: formatTokenCount(run.output) }),
-                  ];
-                  if (run.cacheWrite > 0) {
-                    segments.push(
-                      t(($) => $.detail.usage_seg_cache_rw, {
-                        read: formatTokenCount(run.cacheRead),
-                        write: formatTokenCount(run.cacheWrite),
-                      }),
-                    );
-                  } else if (run.cacheRead > 0) {
-                    segments.push(
-                      t(($) => $.detail.usage_seg_cache, { n: formatTokenCount(run.cacheRead) }),
-                    );
-                  }
-                  if (run.cost > 0) segments.unshift(formatCost(run.cost));
+                  const commentLabel = commentLabels?.get(run.triggerCommentId);
                   return (
                     <PropRow
                       key={run.taskId}
                       label={
                         run.commentTriggered
-                          ? run.commentNumber > 0
-                            ? t(($) => $.detail.usage_run_comment_numbered, { n: run.commentNumber })
+                          ? commentLabel
+                            ? t(($) => $.detail.usage_run_comment_numbered, { n: commentLabel })
                             : t(($) => $.detail.usage_run_comment)
                           : t(($) => $.detail.usage_run_assignment)
                       }
-                      title={t(($) => $.detail.usage_run_split_tooltip)}
                     >
-                      <span className="truncate text-muted-foreground">
-                        {segments.join(" · ")}
-                      </span>
+                      <RunUsageInline usage={run} />
                     </PropRow>
                   );
                 })}

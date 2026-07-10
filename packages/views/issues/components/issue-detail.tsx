@@ -61,7 +61,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
-import { IssueTokenUsageSection } from "./issue-token-usage-section";
+import { IssueTokenUsageSection, foldRuns } from "./issue-token-usage-section";
 import { PullRequestList } from "./pull-request-list";
 import { MergeRequestList } from "./merge-request-list";
 import { GitLabIssueBadge } from "./gitlab-issue-badge";
@@ -1015,8 +1015,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { threadReplies, groups };
+    // Number comment threads old -> new in render order ("#2" chips and the
+    // sidebar's "Comment 2" run labels both derive from this).
+    const threadNumbers = new Map<string, number>();
+    let threadCounter = 0;
+    for (const group of groups) {
+      if (group.type === "comment" && group.entries[0]) {
+        threadNumbers.set(group.entries[0].id, ++threadCounter);
+      }
+    }
+
+    return { threadReplies, groups, threadNumbers };
   }, [timeline]);
+
+  // commentId -> timeline position ("2" for thread roots, "2.1" for replies).
+  // Single source of truth for run labels in the Token-usage sidebar; must
+  // stay in sync with the #chips rendered by CommentCard (same inputs).
+  const commentLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const [rootId, n] of timelineView.threadNumbers) {
+      labels.set(rootId, `${n}`);
+      const replies = timelineView.threadReplies.get(rootId) ?? [];
+      replies.forEach((reply, i) => labels.set(reply.id, `${n}.${i + 1}`));
+    }
+    return labels;
+  }, [timelineView]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1088,6 +1111,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+
+  // taskId -> folded run usage, for the inline summary under agent response
+  // comments (matched via comment.source_task_id). Stable per usage refetch
+  // so CommentCard memo only busts when usage actually changes.
+  const taskUsage = useMemo(() => {
+    if (!usage) return undefined;
+    return new Map(foldRuns(usage.tasks).map((run) => [run.taskId, run]));
+  }, [usage]);
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
@@ -1641,7 +1672,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ExecutionLogSection issueId={id} />
 
       {/* Token usage */}
-      {usage && <IssueTokenUsageSection usage={usage} />}
+      {usage && <IssueTokenUsageSection usage={usage} commentLabels={commentLabels} />}
 
       {/* Metadata — agent-facing free-form KV bag. The values almost
           never mean anything to humans, so the trigger row matches the
@@ -1710,6 +1741,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
+            threadNumber={timelineView.threadNumbers.get(item.id)}
+            taskUsage={taskUsage}
           />
         </div>
       );

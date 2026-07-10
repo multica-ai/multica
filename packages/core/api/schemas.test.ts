@@ -528,7 +528,7 @@ describe("IssueUsageSummarySchema", () => {
     expect(task.model).toBe("claude-sonnet-4.6");
     expect(task.input_tokens).toBe(0);
     expect(task.comment_triggered).toBe(false);
-    expect(task.comment_number).toBe(0);
+    expect(task.trigger_comment_id).toBe("");
   });
 
   it("rejects a non-array tasks field", () => {

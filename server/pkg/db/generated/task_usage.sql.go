@@ -398,14 +398,7 @@ SELECT
     tu.task_id,
     atq.created_at,
     (atq.trigger_comment_id IS NOT NULL)::bool AS comment_triggered,
-    COALESCE((
-        SELECT COUNT(*)
-        FROM comment c
-        WHERE c.issue_id = atq.issue_id
-          AND c.type = 'comment'
-          AND c.parent_id IS NULL
-          AND (c.created_at, c.id) <= (root.created_at, root.id)
-    ), 0)::int AS comment_number,
+    atq.trigger_comment_id,
     tu.provider,
     tu.model,
     tu.input_tokens,
@@ -414,8 +407,6 @@ SELECT
     tu.cache_write_tokens
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
-LEFT JOIN comment tc ON tc.id = atq.trigger_comment_id
-LEFT JOIN comment root ON root.id = COALESCE(tc.parent_id, tc.id)
 WHERE atq.issue_id = $1
 ORDER BY atq.created_at DESC, tu.model
 `
@@ -424,7 +415,7 @@ type ListIssueTaskUsageRow struct {
 	TaskID           pgtype.UUID        `json:"task_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	CommentTriggered bool               `json:"comment_triggered"`
-	CommentNumber    int32              `json:"comment_number"`
+	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	Provider         string             `json:"provider"`
 	Model            string             `json:"model"`
 	InputTokens      int64              `json:"input_tokens"`
@@ -435,11 +426,10 @@ type ListIssueTaskUsageRow struct {
 
 // Per-task per-model usage rows for one issue, newest task first. Powers the
 // per-run breakdown in the issue sidebar's Token usage section.
-// comment_triggered distinguishes comment-cycle runs from assignment runs.
-// comment_number is the trigger comment's 1-based position among the issue's
-// top-level user comments (replies inherit their root comment's number); 0
-// when the run wasn't comment-triggered or the comment is gone. Deleting a
-// comment shifts later numbers, matching what the timeline shows.
+// comment_triggered distinguishes comment-cycle runs from assignment runs;
+// trigger_comment_id lets the client label the run with the comment's
+// position in the timeline (numbering is computed client-side from the
+// loaded comment list so it always matches what the timeline renders).
 func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) ([]ListIssueTaskUsageRow, error) {
 	rows, err := q.db.Query(ctx, listIssueTaskUsage, issueID)
 	if err != nil {
@@ -453,7 +443,7 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 			&i.TaskID,
 			&i.CreatedAt,
 			&i.CommentTriggered,
-			&i.CommentNumber,
+			&i.TriggerCommentID,
 			&i.Provider,
 			&i.Model,
 			&i.InputTokens,

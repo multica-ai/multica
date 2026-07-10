@@ -1602,7 +1602,7 @@ func TestGetIssueUsage_PerTaskBreakdown(t *testing.T) {
 			TaskID           string `json:"task_id"`
 			CreatedAt        string `json:"created_at"`
 			CommentTriggered bool   `json:"comment_triggered"`
-			CommentNumber    int32  `json:"comment_number"`
+			TriggerCommentID string `json:"trigger_comment_id"`
 			Provider         string `json:"provider"`
 			Model            string `json:"model"`
 			InputTokens      int64  `json:"input_tokens"`
@@ -1628,14 +1628,14 @@ func TestGetIssueUsage_PerTaskBreakdown(t *testing.T) {
 	if resp.Tasks[0].TaskID != commentTaskID || !resp.Tasks[0].CommentTriggered {
 		t.Fatalf("expected first row = comment task %s with comment_triggered=true, got %+v", commentTaskID, resp.Tasks[0])
 	}
-	if resp.Tasks[0].CommentNumber != 1 {
-		t.Fatalf("expected first row comment_number 1, got %d", resp.Tasks[0].CommentNumber)
+	if resp.Tasks[0].TriggerCommentID != commentID {
+		t.Fatalf("expected first row trigger_comment_id %s, got %q", commentID, resp.Tasks[0].TriggerCommentID)
 	}
 	if resp.Tasks[1].TaskID != assignmentTaskID || resp.Tasks[1].CommentTriggered {
 		t.Fatalf("expected second row = assignment task %s with comment_triggered=false, got %+v", assignmentTaskID, resp.Tasks[1])
 	}
-	if resp.Tasks[1].CommentNumber != 0 {
-		t.Fatalf("expected second row comment_number 0, got %d", resp.Tasks[1].CommentNumber)
+	if resp.Tasks[1].TriggerCommentID != "" {
+		t.Fatalf("expected second row empty trigger_comment_id, got %q", resp.Tasks[1].TriggerCommentID)
 	}
 	if resp.Tasks[0].InputTokens != 2000 || resp.Tasks[0].Model != "claude-sonnet-4.6" {
 		t.Fatalf("unexpected first row fields: %+v", resp.Tasks[0])
