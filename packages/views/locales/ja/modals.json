@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "スクワッドを作成",
     "description": "リーダーエージェントと任意の追加メンバーで協働スクワッドを作成します。",
+    "space_label": "スペース",
     "name_label": "名前",
     "name_placeholder": "例: フロントエンドチーム",
     "description_label": "説明",

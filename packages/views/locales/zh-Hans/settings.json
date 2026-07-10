@@ -119,7 +119,8 @@
       "members": "成员",
       "labels": "标签",
       "properties": "属性",
-      "spaces": "空间"
+      "spaces": "空间",
+      "autopilot_templates": "自动化模板"
     }
   },
   "properties": {
@@ -230,6 +231,38 @@
       "confirm": "删除标签",
       "failed": "无法删除标签"
     }
+  },
+  "autopilot_templates": {
+    "title": "自动化模板",
+    "description": "工作区级的可复用执行手册。Space、项目、执行者、订阅者和 Integration 权限在每个自动化实例中单独选择。",
+    "new": "新建模板",
+    "name": "名称",
+    "runbook": "执行手册",
+    "issue_title_template": "issue 标题模板",
+    "issue_title_template_placeholder": "每周报告 — {{date}}",
+    "execution_mode": "执行模式",
+    "execution_mode_create_issue": "创建 issue",
+    "execution_mode_run_only": "仅运行",
+    "trigger": "触发方式",
+    "trigger_schedule": "定时",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 表达式",
+    "timezone": "时区",
+    "cancel": "取消",
+    "save": "保存模板",
+    "loading": "正在加载模板…",
+    "empty": "还没有工作区模板。",
+    "no_runbook": "暂无执行手册",
+    "toast_saved": "模板已保存",
+    "toast_save_failed": "保存模板失败",
+    "toast_deleted": "模板已删除",
+    "toast_delete_failed": "删除模板失败"
+  },
+  "integration_bindings": {
+    "title": "Space 访问范围",
+    "description": "选择哪些 Space 可以引用每个工作区连接。此操作不会复制凭据，也不会扩大第三方账号本身的权限。",
+    "toast_saved": "Integration 的 Space 访问范围已更新",
+    "toast_failed": "更新 Integration 的 Space 访问范围失败"
   },
   "spaces": {
     "title": "空间",

@@ -661,6 +661,9 @@ export const EMPTY_RUNTIME_LIST: RuntimeDevice[] = [];
 export const SquadSchema: z.ZodType<Squad> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
+  // Older servers omitted Space ownership. Defaulting keeps identity-only
+  // surfaces resilient while selection surfaces always query by Space.
+  space_id: z.string().default(""),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),

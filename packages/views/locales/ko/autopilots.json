@@ -2,6 +2,7 @@
   "page": {
     "title": "오토파일럿",
     "new_autopilot": "새 오토파일럿",
+    "workspace_templates": "템플릿",
     "start_blank": "처음부터 시작",
     "table": {
       "name": "이름",
@@ -277,6 +278,9 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "section_project": "프로젝트",
+    "issue_title_template": "이슈 제목 템플릿",
+    "issue_title_template_placeholder": "주간 보고서 — {{date}}",
+    "issue_title_template_hint": "선택 사항입니다. {{date}}로 트리거 날짜를 넣으며, 비워 두면 자동화 이름을 사용합니다.",
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
     "subscribers_hint": "이 오토파일럿이 만드는 모든 이슈를 자동으로 구독합니다",

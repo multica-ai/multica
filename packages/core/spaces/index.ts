@@ -10,6 +10,8 @@ export {
   useCreateSpace,
   useUpdateSpace,
   useArchiveSpace,
+  useRestoreSpace,
+  useResumeSpaceAutopilots,
   useUpdateSpaceMembership,
   useUpdateSpacePreference,
   useReplaceSpaceMembers,

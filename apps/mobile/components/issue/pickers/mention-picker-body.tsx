@@ -37,6 +37,7 @@ import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
 import { api } from "@/data/api";
+import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import {
   useMentionDraftStore,
@@ -44,6 +45,7 @@ import {
   type MentionTargetType,
 } from "@/data/stores/mention-draft-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
+import { canAssignAgent } from "@/lib/can-assign-agent";
 import { THEME } from "@/lib/theme";
 
 const AVATAR_SIZE = 36;
@@ -64,13 +66,19 @@ interface Props {
    *  there generates unintended notifications. Only Issues remain useful
    *  in chat as "reference this ticket for context". */
   mode?: "comment" | "chat";
+  spaceId?: string | null;
 }
 
-export function MentionPickerBody({ query, mode = "comment" }: Props) {
+export function MentionPickerBody({
+  query,
+  mode = "comment",
+  spaceId,
+}: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId, spaceId));
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
   const checkColor =
@@ -78,6 +86,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
 
   const selected = useMentionDraftStore((s) => s.mentions);
   const toggle = useMentionDraftStore((s) => s.toggle);
+  const memberRole = members.find((m) => m.user_id === userId)?.role;
 
   // Server-side issue search (mirrors web's mention-suggestion.tsx). Empty
   // query → no fetch + no issues section. Debounced 200ms; in-flight
@@ -140,14 +149,24 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
         out.push({ kind: "section", label: "People" }, ...memberRows);
       }
       const agentRows = [...agents]
-        .filter((a) => matchName(a.name))
+        .filter(
+          (a) =>
+            !a.archived_at &&
+            matchName(a.name) &&
+            canAssignAgent(a, userId, memberRole, spaceId),
+        )
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((a): Row => ({ kind: "agent", agent: a }));
       if (agentRows.length > 0) {
         out.push({ kind: "section", label: "Agents" }, ...agentRows);
       }
       const squadRows = [...squads]
-        .filter((s) => !s.archived_at && matchName(s.name))
+        .filter(
+          (s) =>
+            !s.archived_at &&
+            s.space_id === spaceId &&
+            matchName(s.name),
+        )
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((s): Row => ({ kind: "squad", squad: s }));
       if (squadRows.length > 0) {
@@ -162,7 +181,17 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }
     }
     return out;
-  }, [mode, members, agents, squads, issueResults, query]);
+  }, [
+    mode,
+    members,
+    agents,
+    squads,
+    issueResults,
+    query,
+    userId,
+    memberRole,
+    spaceId,
+  ]);
 
   const pick = (row: Row) => {
     let chip: MentionChipDraft | null = null;

@@ -56,14 +56,33 @@ WHERE a.workspace_id = $1
   )
 ORDER BY a.created_at DESC;
 
--- name: CountActiveAutopilotsBySpace :one
--- Counts non-archived autopilots pinned to a Space. Used to block archiving a
--- Space that still drives live autopilots (mirrors CountActiveProjectAutopilotsBySpace,
--- which scopes the same liveness column to a single project).
+-- name: PauseActiveAutopilotsBySpace :execrows
+UPDATE autopilot SET
+  status_before_space_archive = status,
+  status = 'paused',
+  paused_by_space_at = now(),
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND status = 'active'
+  AND paused_by_space_at IS NULL;
+
+-- name: CountAutopilotsPausedBySpace :one
 SELECT count(*) FROM autopilot
 WHERE workspace_id = $1
   AND space_id = $2
-  AND status <> 'archived';
+  AND paused_by_space_at IS NOT NULL;
+
+-- name: ResumeAutopilotsPausedBySpace :execrows
+UPDATE autopilot SET
+  status = COALESCE(status_before_space_archive, 'active'),
+  status_before_space_archive = NULL,
+  paused_by_space_at = NULL,
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND paused_by_space_at IS NOT NULL
+  AND status = 'paused';
 
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
@@ -91,6 +110,14 @@ UPDATE autopilot SET
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
+    paused_by_space_at = CASE
+      WHEN sqlc.narg('status')::text IS NOT NULL THEN NULL
+      ELSE paused_by_space_at
+    END,
+    status_before_space_archive = CASE
+      WHEN sqlc.narg('status')::text IS NOT NULL THEN NULL
+      ELSE status_before_space_archive
+    END,
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),

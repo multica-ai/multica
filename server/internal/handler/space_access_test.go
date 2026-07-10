@@ -263,3 +263,137 @@ func TestSpaceFollowersAreDynamicIssueNotificationRecipients(t *testing.T) {
 		t.Fatal("unfollowed member remained in issue notification recipients")
 	}
 }
+
+func TestSpaceArchiveRestoreLifecyclePreservesIntent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	space := createSpaceForAccessTest(t, "Lifecycle Probe", "LIFEAP", "open")
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load Agent: %v", err)
+	}
+
+	squad, err := testHandler.Queries.CreateSquad(ctx, db.CreateSquadParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		SpaceID:     parseUUID(space.ID),
+		Name:        "Lifecycle Squad",
+		Description: "",
+		LeaderID:    parseUUID(agentID),
+		CreatorID:   parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create Squad: %v", err)
+	}
+	active, err := testHandler.Queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		Title:         "Lifecycle active Autopilot",
+		AssigneeType:  "agent",
+		AssigneeID:    parseUUID(agentID),
+		Status:        "active",
+		ExecutionMode: "run_only",
+		SpaceID:       parseUUID(space.ID),
+		CreatedByType: "member",
+		CreatedByID:   parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create active Autopilot: %v", err)
+	}
+	manualPaused, err := testHandler.Queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		Title:         "Lifecycle manually paused Autopilot",
+		AssigneeType:  "agent",
+		AssigneeID:    parseUUID(agentID),
+		Status:        "paused",
+		ExecutionMode: "run_only",
+		SpaceID:       parseUUID(space.ID),
+		CreatedByType: "member",
+		CreatedByID:   parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create paused Autopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = ANY($1::uuid[])`, []string{uuidToString(active.ID), uuidToString(manualPaused.ID)})
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squad.ID)
+	})
+
+	archive := httptest.NewRecorder()
+	testHandler.ArchiveSpace(archive, withURLParam(newRequest(http.MethodDelete, "/api/spaces/"+space.ID, nil), "id", space.ID))
+	if archive.Code != http.StatusOK {
+		t.Fatalf("ArchiveSpace: expected 200, got %d: %s", archive.Code, archive.Body.String())
+	}
+
+	archivedSquad, err := testHandler.Queries.GetSquad(ctx, squad.ID)
+	if err != nil || !archivedSquad.ArchivedAt.Valid || !archivedSquad.ArchivedBySpaceAt.Valid {
+		t.Fatalf("Squad archive marker = %+v, err=%v", archivedSquad, err)
+	}
+	activeAfterArchive, err := testHandler.Queries.GetAutopilot(ctx, active.ID)
+	if err != nil || activeAfterArchive.Status != "paused" || !activeAfterArchive.PausedBySpaceAt.Valid || activeAfterArchive.StatusBeforeSpaceArchive.String != "active" {
+		t.Fatalf("active Autopilot after archive = %+v, err=%v", activeAfterArchive, err)
+	}
+	pausedAfterArchive, err := testHandler.Queries.GetAutopilot(ctx, manualPaused.ID)
+	if err != nil || pausedAfterArchive.Status != "paused" || pausedAfterArchive.PausedBySpaceAt.Valid {
+		t.Fatalf("manually paused Autopilot after archive = %+v, err=%v", pausedAfterArchive, err)
+	}
+
+	update := httptest.NewRecorder()
+	testHandler.UpdateSpace(update, withURLParam(newRequest(http.MethodPatch, "/api/spaces/"+space.ID, map[string]any{"name": "Must stay read-only"}), "id", space.ID))
+	if update.Code != http.StatusConflict {
+		t.Fatalf("UpdateSpace(archived): expected 409, got %d: %s", update.Code, update.Body.String())
+	}
+
+	restore := httptest.NewRecorder()
+	testHandler.RestoreSpace(restore, withURLParam(newRequest(http.MethodPost, "/api/spaces/"+space.ID+"/restore", nil), "id", space.ID))
+	if restore.Code != http.StatusOK {
+		t.Fatalf("RestoreSpace: expected 200, got %d: %s", restore.Code, restore.Body.String())
+	}
+	var restoreResponse struct {
+		PausedAutopilotCount int64 `json:"paused_autopilot_count"`
+	}
+	if err := json.Unmarshal(restore.Body.Bytes(), &restoreResponse); err != nil {
+		t.Fatalf("decode restore response: %v", err)
+	}
+	if restoreResponse.PausedAutopilotCount != 1 {
+		t.Fatalf("paused_autopilot_count = %d, want 1", restoreResponse.PausedAutopilotCount)
+	}
+	restoredSquad, err := testHandler.Queries.GetSquad(ctx, squad.ID)
+	if err != nil || restoredSquad.ArchivedAt.Valid || restoredSquad.ArchivedBySpaceAt.Valid {
+		t.Fatalf("Squad after restore = %+v, err=%v", restoredSquad, err)
+	}
+	activeBeforeConfirmation, err := testHandler.Queries.GetAutopilot(ctx, active.ID)
+	if err != nil || activeBeforeConfirmation.Status != "paused" || !activeBeforeConfirmation.PausedBySpaceAt.Valid {
+		t.Fatalf("auto-paused Autopilot resumed before confirmation: %+v, err=%v", activeBeforeConfirmation, err)
+	}
+
+	resume := httptest.NewRecorder()
+	testHandler.ResumeSpaceAutopilots(resume, withURLParam(newRequest(http.MethodPost, "/api/spaces/"+space.ID+"/resume-autopilots", nil), "id", space.ID))
+	if resume.Code != http.StatusOK {
+		t.Fatalf("ResumeSpaceAutopilots: expected 200, got %d: %s", resume.Code, resume.Body.String())
+	}
+	activeAfterResume, err := testHandler.Queries.GetAutopilot(ctx, active.ID)
+	if err != nil || activeAfterResume.Status != "active" || activeAfterResume.PausedBySpaceAt.Valid || activeAfterResume.StatusBeforeSpaceArchive.Valid {
+		t.Fatalf("active Autopilot after confirmation = %+v, err=%v", activeAfterResume, err)
+	}
+	manualAfterResume, err := testHandler.Queries.GetAutopilot(ctx, manualPaused.ID)
+	if err != nil || manualAfterResume.Status != "paused" {
+		t.Fatalf("manual pause was not preserved: %+v, err=%v", manualAfterResume, err)
+	}
+
+	var auditCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM activity_log
+		WHERE workspace_id = $1
+		  AND action = ANY($2::text[])
+		  AND details->>'space_id' = $3
+	`, testWorkspaceID, []string{"space_archived", "space_restored", "space_autopilots_resumed"}, space.ID).Scan(&auditCount); err != nil {
+		t.Fatalf("count lifecycle audit entries: %v", err)
+	}
+	if auditCount != 3 {
+		t.Fatalf("lifecycle audit count = %d, want 3", auditCount)
+	}
+}

@@ -370,6 +370,61 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("Autopilot templates", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ templates: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listAutopilotTemplates()).resolves.toEqual({
+        templates: [],
+        total: 0,
+      });
+    });
+
+    it("falls back to a safe placeholder after a malformed create response", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      const template = await client.createAutopilotTemplate({
+        name: "Triage",
+        description: "Review incoming work",
+        execution_mode: "run_only",
+        trigger_kind: "webhook",
+      });
+      expect(template.id).toBe("");
+      expect(template.description).toBe("");
+    });
+  });
+
+  describe("Integration Space bindings", () => {
+    it("falls back closed when the response is malformed", async () => {
+      stubFetchJson({ connections: "not-an-array", can_manage: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listIntegrationBindings()).resolves.toEqual({
+        connections: [],
+        can_manage: false,
+      });
+    });
+
+    it("defaults omitted binding fields without dropping future fields", async () => {
+      stubFetchJson({
+        connections: [
+          {
+            provider: "future-provider",
+            connection_id: "connection-1",
+            future_field: "kept",
+          },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listIntegrationBindings();
+      expect(response.can_manage).toBe(false);
+      expect(response.connections[0]?.space_ids).toEqual([]);
+      expect(response.connections[0]).toMatchObject({
+        provider: "future-provider",
+        future_field: "kept",
+      });
+    });
+  });
+
   describe("createAgentFromTemplate", () => {
     it("falls back to an empty agent when the response is malformed", async () => {
       // The agent was created server-side even though the client can't

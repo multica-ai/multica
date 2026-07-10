@@ -17,7 +17,9 @@ export default function IssueProjectPickerRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: issue } = useQuery(issueDetailOptions(wsId, id));
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: projects = [] } = useQuery(
+    projectListOptions(wsId, issue?.space_id ?? null),
+  );
   const updateIssue = useUpdateIssue(id);
   const query = useNativeSearchBar("Search projects", { autoFocus: true });
 

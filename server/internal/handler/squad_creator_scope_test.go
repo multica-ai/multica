@@ -38,6 +38,7 @@ func createSquadAs(t *testing.T, userID, name, leaderID string) SquadResponse {
 	r := squadScopeReq(userID, "POST", "/api/squads", map[string]any{
 		"name":      name,
 		"leader_id": leaderID,
+		"space_id":  defaultSpaceIDForTestWorkspace(t),
 	}, nil)
 	testHandler.CreateSquad(w, r)
 	if w.Code != http.StatusCreated {
@@ -206,6 +207,7 @@ func TestCreateSquad_CreatorPrivateLeaderForbidden(t *testing.T) {
 	r := squadScopeReq(memberID, "POST", "/api/squads", map[string]any{
 		"name":      "Private Leader Squad",
 		"leader_id": privateAgentID,
+		"space_id":  defaultSpaceIDForTestWorkspace(t),
 	}, nil)
 	testHandler.CreateSquad(w, r)
 	if w.Code != http.StatusForbidden {

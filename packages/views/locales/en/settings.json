@@ -119,7 +119,8 @@
       "members": "Members",
       "labels": "Labels",
       "properties": "Properties",
-      "spaces": "Spaces"
+      "spaces": "Spaces",
+      "autopilot_templates": "Autopilot Templates"
     }
   },
   "properties": {
@@ -231,6 +232,38 @@
       "confirm": "Delete label",
       "failed": "Couldn't delete label"
     }
+  },
+  "autopilot_templates": {
+    "title": "Autopilot Templates",
+    "description": "Workspace-owned reusable runbooks. Space, Project, assignee, subscribers, and Integration access are selected on each Autopilot instance.",
+    "new": "New template",
+    "name": "Name",
+    "runbook": "Runbook",
+    "issue_title_template": "Issue title template",
+    "issue_title_template_placeholder": "Weekly report — {{date}}",
+    "execution_mode": "Execution mode",
+    "execution_mode_create_issue": "Create issue",
+    "execution_mode_run_only": "Run only",
+    "trigger": "Trigger",
+    "trigger_schedule": "Schedule",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron expression",
+    "timezone": "Timezone",
+    "cancel": "Cancel",
+    "save": "Save template",
+    "loading": "Loading templates…",
+    "empty": "No Workspace templates yet.",
+    "no_runbook": "No runbook",
+    "toast_saved": "Template saved",
+    "toast_save_failed": "Failed to save template",
+    "toast_deleted": "Template deleted",
+    "toast_delete_failed": "Failed to delete template"
+  },
+  "integration_bindings": {
+    "title": "Space access",
+    "description": "Choose which Spaces may reference each Workspace connection. This does not copy credentials or expand the third-party account's permissions.",
+    "toast_saved": "Integration Space access updated",
+    "toast_failed": "Failed to update Integration Space access"
   },
   "spaces": {
     "title": "Spaces",

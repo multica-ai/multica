@@ -76,6 +76,7 @@ function fakeQc(data: {
     id: string;
     name: string;
     archived_at: string | null;
+    space_id?: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
@@ -566,6 +567,23 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "squad" && i.label === "Jiayuan's Coding Team")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "独立团")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "Archived Squad")).toBe(false);
+  });
+
+  it("includes Squad mentions only from the editor's target Space", () => {
+    const qc = fakeQc({
+      squads: [
+        { id: "s-eng", name: "Engineering", space_id: "space-eng", archived_at: null },
+        { id: "s-design", name: "Design", space_id: "space-design", archived_at: null },
+      ],
+    });
+    const config = createMentionSuggestion(qc, {
+      getTargetSpaceId: () => "space-eng",
+    });
+
+    const squads = (config.items!(itemArgs("")) as MentionItem[]).filter(
+      (item) => item.type === "squad",
+    );
+    expect(squads.map((item) => item.id)).toEqual(["s-eng"]);
   });
 
   it("returns no squads when the squads cache is empty (not yet fetched)", () => {

@@ -68,7 +68,11 @@ export function WorkspaceSpacesTab() {
             </p>
           </div>
           {canManage && (
-            <Button size="sm" render={<AppLink href={paths.spaceNew()} />}>
+            <Button
+              size="sm"
+              render={<AppLink href={paths.spaceNew()} />}
+              nativeButton={false}
+            >
               {tSpaces(($) => $.page.new_space)}
             </Button>
           )}

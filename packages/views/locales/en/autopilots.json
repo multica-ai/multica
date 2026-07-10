@@ -2,6 +2,7 @@
   "page": {
     "title": "Autopilot",
     "new_autopilot": "New autopilot",
+    "workspace_templates": "Templates",
     "start_blank": "Start from scratch",
     "table": {
       "name": "Name",
@@ -277,6 +278,9 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "section_project": "Project",
+    "issue_title_template": "Issue title template",
+    "issue_title_template_placeholder": "Weekly report — {{date}}",
+    "issue_title_template_hint": "Optional. Use {{date}} for the trigger date; otherwise the Autopilot name is used.",
     "no_project": "No project",
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",

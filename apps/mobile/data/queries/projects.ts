@@ -27,14 +27,25 @@ export const projectKeys = {
     [...projectKeys.all(wsId), "detail", id, "resources"] as const,
 };
 
-export const projectListOptions = (wsId: string | null) =>
+export const projectListOptions = (
+  wsId: string | null,
+  spaceId?: string | null,
+) =>
   queryOptions({
-    queryKey: projectKeys.list(wsId),
+    queryKey:
+      typeof spaceId === "string"
+        ? ([...projectKeys.list(wsId), "space", spaceId] as const)
+        : spaceId === null
+          ? ([...projectKeys.list(wsId), "no-space"] as const)
+          : projectKeys.list(wsId),
     queryFn: async ({ signal }) => {
-      const res = await api.listProjects({ signal });
+      const res = await api.listProjects({
+        signal,
+        ...(typeof spaceId === "string" ? { spaceId } : {}),
+      });
       return res.projects;
     },
-    enabled: !!wsId,
+    enabled: !!wsId && spaceId !== null,
   });
 
 export const projectDetailOptions = (wsId: string | null, id: string) =>

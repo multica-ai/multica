@@ -2,6 +2,7 @@
   "page": {
     "title": "自动化",
     "new_autopilot": "新建自动化",
+    "workspace_templates": "模板",
     "start_blank": "从空白开始",
     "table": {
       "name": "名称",
@@ -277,6 +278,9 @@
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "section_project": "关联项目",
+    "issue_title_template": "issue 标题模板",
+    "issue_title_template_placeholder": "每周报告 — {{date}}",
+    "issue_title_template_hint": "可选。使用 {{date}} 插入触发日期；留空时使用自动化名称。",
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",

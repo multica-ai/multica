@@ -112,8 +112,8 @@ func setupInvolvesFixture(t *testing.T) *involvesFixture {
 	// The other workspace needs its own default Space to satisfy the NOT NULL
 	// space_id constraint, mirroring how production backfills one per workspace.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, created_by)
-		VALUES ($1, 'Default', 'OTH', $2)
+		INSERT INTO workspace_space (workspace_id, name, key, created_by, is_default)
+		VALUES ($1, 'Default', 'OTH', $2, true)
 	`, otherWsID, fx.userID); err != nil {
 		t.Fatalf("create other-ws default space: %v", err)
 	}

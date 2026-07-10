@@ -148,6 +148,7 @@ vi.mock("@multica/core/paths", () => ({
     spaceIssues: (key: string) => `/acme/space/${key}/issues`,
     spaceProjects: (key: string) => `/acme/space/${key}/projects`,
     spaceAutopilots: (key: string) => `/acme/space/${key}/autopilots`,
+    spaceSquads: (key: string) => `/acme/space/${key}/squads`,
     spaceSettings: (key: string) => `/acme/space/${key}/settings`,
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,

@@ -667,7 +667,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != parent.SpaceID {
 		return
 	}
 

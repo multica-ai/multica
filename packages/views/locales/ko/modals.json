@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "스쿼드 만들기",
     "description": "리더 에이전트와 선택 멤버로 협업 스쿼드를 만듭니다.",
+    "space_label": "스페이스",
     "name_label": "이름",
     "name_placeholder": "예: 프런트엔드 팀",
     "description_label": "설명",

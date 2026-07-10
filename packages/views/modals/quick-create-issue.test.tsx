@@ -39,7 +39,15 @@ const mockProjectsQuery = vi.hoisted(() => ({
 // exist and one's leader is reachable" and "no squads" cases without
 // re-mocking the whole module.
 const mockSquadsData = vi.hoisted(
-  () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
+  () => ({
+    list: [] as Array<{
+      id: string;
+      name: string;
+      leader_id: string;
+      space_id: string;
+      archived_at: string | null;
+    }>,
+  }),
 );
 
 vi.mock("@tanstack/react-query", () => ({
@@ -424,12 +432,23 @@ describe("AgentCreatePanel", () => {
   // remembers the actor type so the next open defaults back to the squad.
   it("submits squad_id when the user picks a squad in the actor picker", async () => {
     mockSquadsData.list = [
-      { id: "squad-1", name: "Frontend Squad", leader_id: "agent-1", archived_at: null },
+      {
+        id: "squad-1",
+        name: "Frontend Squad",
+        leader_id: "agent-1",
+        space_id: "space-eng",
+        archived_at: null,
+      },
     ];
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+    renderPanel({
+      onClose,
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { space_id: "space-eng" },
+    });
 
     // The picker mock renders both sections inline as buttons; click the
     // squad row directly.
@@ -447,7 +466,9 @@ describe("AgentCreatePanel", () => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         squad_id: "squad-1",
         prompt: "Investigate the regression",
+        space_id: "space-eng",
         project_id: undefined,
+        parent_issue_id: undefined,
       });
     });
     expect(mockSetLastActor).toHaveBeenCalledWith("squad", "squad-1");
@@ -458,12 +479,44 @@ describe("AgentCreatePanel", () => {
   // validateAssigneePair, and showing them invites a confusing dead path.
   it("hides squads whose leader agent is not in the visible-agents list", () => {
     mockSquadsData.list = [
-      { id: "squad-orphan", name: "Orphan Squad", leader_id: "agent-missing", archived_at: null },
+      {
+        id: "squad-orphan",
+        name: "Orphan Squad",
+        leader_id: "agent-missing",
+        space_id: "space-eng",
+        archived_at: null,
+      },
     ];
 
-    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { space_id: "space-eng" },
+    });
 
     expect(screen.queryByRole("button", { name: /Orphan Squad/ })).toBeNull();
+  });
+
+  it("hides squads owned by another Space", () => {
+    mockSquadsData.list = [
+      {
+        id: "squad-design",
+        name: "Design Squad",
+        leader_id: "agent-1",
+        space_id: "space-design",
+        archived_at: null,
+      },
+    ];
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { space_id: "space-eng" },
+    });
+
+    expect(screen.queryByRole("button", { name: /Design Squad/ })).toBeNull();
   });
 
   // If the user's persisted `lastProjectId` points at a project that has

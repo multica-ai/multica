@@ -176,9 +176,12 @@ export function AgentCreatePanel({
   const visibleSquads = useMemo(
     () =>
       squads.filter(
-        (s) => !s.archived_at && visibleAgentIds.has(s.leader_id),
+        (s) =>
+          !s.archived_at &&
+          s.space_id === effectiveSpaceId &&
+          visibleAgentIds.has(s.leader_id),
       ),
-    [squads, visibleAgentIds],
+    [squads, visibleAgentIds, effectiveSpaceId],
   );
 
   // Resolve a candidate actor against the currently-visible agents / squads.

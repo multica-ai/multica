@@ -91,4 +91,22 @@ describe("SettingsPage navigation", () => {
       );
     });
   });
+
+  it("does not enqueue the same canonical redirect again before navigation commits", async () => {
+    navigationRef.current = {
+      pathname: "/acme/settings",
+      searchParams: new URLSearchParams(),
+    };
+
+    const { rerender } = render(<SettingsPage />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(
+        "/acme/settings/account/profile",
+      );
+    });
+
+    rerender(<SettingsPage />);
+
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+  });
 });

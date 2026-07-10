@@ -751,7 +751,13 @@ function SquadListToolbar({
 // Page
 // ---------------------------------------------------------------------------
 
-export function SquadsPage() {
+export function SquadsPage({
+  spaceId,
+  spaceKey,
+}: {
+  spaceId?: string;
+  spaceKey?: string;
+} = {}) {
   const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
@@ -760,7 +766,7 @@ export function SquadsPage() {
   const currentUser = useAuthStore((s) => s.user);
 
   const { data: squads = [], isLoading } = useQuery({
-    ...squadListOptions(wsId),
+    ...squadListOptions(wsId, spaceId),
     enabled: !!wsId,
   });
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -899,7 +905,12 @@ export function SquadsPage() {
           <CollectionPageHeaderAction
             icon={Plus}
             label={t(($) => $.page.new_button)}
-            onClick={() => useModalStore.getState().open("create-squad")}
+            onClick={() =>
+              useModalStore.getState().open(
+                "create-squad",
+                spaceId ? { space_id: spaceId, space_key: spaceKey } : undefined,
+              )
+            }
           />
         }
       />
@@ -913,7 +924,14 @@ export function SquadsPage() {
           actions={
             <Button
               size="sm"
-              onClick={() => useModalStore.getState().open("create-squad")}
+              onClick={() =>
+                useModalStore.getState().open(
+                  "create-squad",
+                  spaceId
+                    ? { space_id: spaceId, space_key: spaceKey }
+                    : undefined,
+                )
+              }
             >
               <Plus aria-hidden="true" className="size-3.5" />
               {t(($) => $.page.new_button)}
@@ -963,7 +981,11 @@ export function SquadsPage() {
                   <ListGridRow
                     key={squad.id}
                     className="cursor-pointer"
-                    {...rowLink(p.squadDetail(squad.id))}
+                    {...rowLink(
+                      spaceKey
+                        ? p.spaceSquadDetail(spaceKey, squad.id)
+                        : p.squadDetail(squad.id),
+                    )}
                   >
                     <NameCell squad={squad} />
                     <LeaderCell

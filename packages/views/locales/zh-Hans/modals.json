@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "创建 Squad",
     "description": "创建一个由 Leader Agent 协调团队的协作 Squad，可选添加成员。",
+    "space_label": "空间",
     "name_label": "名称",
     "name_placeholder": "例如 前端团队",
     "description_label": "描述",

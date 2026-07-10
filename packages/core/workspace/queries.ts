@@ -10,6 +10,8 @@ export const workspaceKeys = {
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
   squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
+  squadsBySpace: (wsId: string, spaceId: string) =>
+    [...workspaceKeys.squads(wsId), "space", spaceId] as const,
   // Per-squad member status. Lives under the workspace key tree so
   // workspace switches naturally drop the cache, and so a broad
   // `["workspaces", wsId, "squads"]` invalidation covers it.
@@ -49,10 +51,12 @@ export function agentListOptions(wsId: string) {
   });
 }
 
-export function squadListOptions(wsId: string) {
+export function squadListOptions(wsId: string, spaceId?: string) {
   return queryOptions<Squad[]>({
-    queryKey: workspaceKeys.squads(wsId),
-    queryFn: () => api.listSquads(),
+    queryKey: spaceId
+      ? workspaceKeys.squadsBySpace(wsId, spaceId)
+      : workspaceKeys.squads(wsId),
+    queryFn: () => api.listSquads(spaceId ? { space_id: spaceId } : undefined),
     enabled: !!wsId,
   });
 }

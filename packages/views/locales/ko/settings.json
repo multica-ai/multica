@@ -116,7 +116,8 @@
       "members": "멤버",
       "labels": "레이블",
       "properties": "속성",
-      "spaces": "스페이스"
+      "spaces": "스페이스",
+      "autopilot_templates": "자동화 템플릿"
     }
   },
   "properties": {
@@ -223,6 +224,38 @@
       "confirm": "레이블 삭제",
       "failed": "레이블을 삭제하지 못했습니다"
     }
+  },
+  "autopilot_templates": {
+    "title": "자동화 템플릿",
+    "description": "워크스페이스에서 재사용하는 런북입니다. 스페이스, 프로젝트, 담당자, 구독자, 연동 접근 권한은 각 자동화 인스턴스에서 선택합니다.",
+    "new": "새 템플릿",
+    "name": "이름",
+    "runbook": "런북",
+    "issue_title_template": "이슈 제목 템플릿",
+    "issue_title_template_placeholder": "주간 보고서 — {{date}}",
+    "execution_mode": "실행 모드",
+    "execution_mode_create_issue": "이슈 생성",
+    "execution_mode_run_only": "실행만",
+    "trigger": "트리거",
+    "trigger_schedule": "일정",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 표현식",
+    "timezone": "시간대",
+    "cancel": "취소",
+    "save": "템플릿 저장",
+    "loading": "템플릿 불러오는 중…",
+    "empty": "아직 워크스페이스 템플릿이 없습니다.",
+    "no_runbook": "런북 없음",
+    "toast_saved": "템플릿을 저장했습니다",
+    "toast_save_failed": "템플릿을 저장하지 못했습니다",
+    "toast_deleted": "템플릿을 삭제했습니다",
+    "toast_delete_failed": "템플릿을 삭제하지 못했습니다"
+  },
+  "integration_bindings": {
+    "title": "스페이스 접근",
+    "description": "각 워크스페이스 연동을 참조할 수 있는 스페이스를 선택합니다. 자격 증명을 복사하거나 외부 계정 권한을 확대하지 않습니다.",
+    "toast_saved": "연동 스페이스 접근을 업데이트했습니다",
+    "toast_failed": "연동 스페이스 접근을 업데이트하지 못했습니다"
   },
   "spaces": {
     "title": "스페이스",

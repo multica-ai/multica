@@ -69,7 +69,7 @@ export function AssigneePickerBody({ value, query, spaceId, onChange }: Props) {
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId, spaceId));
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
   // Tint color for the checkmark accessory. Project uses a monochrome
@@ -98,7 +98,12 @@ export function AssigneePickerBody({ value, query, spaceId, onChange }: Props) {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((a) => ({ kind: "agent" as const, agent: a }));
     const squadRows: Row[] = [...squads]
-      .filter((s) => !s.archived_at && matchName(s.name))
+      .filter(
+        (s) =>
+          !s.archived_at &&
+          s.space_id === spaceId &&
+          matchName(s.name),
+      )
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((s) => ({ kind: "squad" as const, squad: s }));
 

@@ -244,6 +244,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	spaceID = space.ID
 	if p.CreatorType == "member" && p.AssigneeType.Valid && p.AssigneeID.Valid {
 		var assigneeAgent db.Agent
+		squadSpaceMatches := true
 		switch p.AssigneeType.String {
 		case "agent":
 			assigneeAgent, err = qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -257,6 +258,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 				WorkspaceID: p.WorkspaceID,
 			})
 			if err == nil {
+				squadSpaceMatches = squad.SpaceID == spaceID
 				assigneeAgent, err = qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 					ID:          squad.LeaderID,
 					WorkspaceID: p.WorkspaceID,
@@ -264,7 +266,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			}
 		}
 		if (p.AssigneeType.String == "agent" || p.AssigneeType.String == "squad") &&
-			(err != nil || !MemberCanInvokeAgent(ctx, qtx, assigneeAgent, p.WorkspaceID, p.CreatorID) ||
+			(err != nil || !squadSpaceMatches || !MemberCanInvokeAgent(ctx, qtx, assigneeAgent, p.WorkspaceID, p.CreatorID) ||
 				!AgentAvailableInSpace(ctx, qtx, assigneeAgent, p.WorkspaceID, spaceID)) {
 			return IssueCreateResult{}, ErrAssigneeUnavailable
 		}
@@ -599,7 +601,7 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != issue.SpaceID {
 		return false
 	}
 	agent, err := s.Queries.GetAgent(ctx, squad.LeaderID)
@@ -618,7 +620,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != issue.SpaceID {
 		return nil
 	}
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{

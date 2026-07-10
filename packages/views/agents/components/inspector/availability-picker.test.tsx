@@ -112,7 +112,7 @@ describe("AvailabilityPicker", () => {
     expect(screen.queryByRole("button")).toBeNull();
     expect(
       screen.getByLabelText(
-        "This server does not support Space Availability yet.",
+        "This server does not support Agent Space access yet.",
       ),
     ).toBeInTheDocument();
   });

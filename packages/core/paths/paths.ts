@@ -31,6 +31,9 @@ function workspaceScoped(slug: string) {
     spaceIssues: (key: string) => `${ws}/space/${encode(key)}/issues`,
     spaceProjects: (key: string) => `${ws}/space/${encode(key)}/projects`,
     spaceAutopilots: (key: string) => `${ws}/space/${encode(key)}/autopilots`,
+    spaceSquads: (key: string) => `${ws}/space/${encode(key)}/squads`,
+    spaceSquadDetail: (key: string, id: string) =>
+      `${ws}/space/${encode(key)}/squads/${encode(id)}`,
     spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
     spaceSettings: (key: string) => `${ws}/space/${encode(key)}/settings`,
     spacesDirectory: () => `${ws}/spaces`,

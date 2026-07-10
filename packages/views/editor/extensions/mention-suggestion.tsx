@@ -600,7 +600,12 @@ export function createMentionSuggestion(
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
     const squadItems: MentionItem[] = squads
-      .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
+      .filter(
+        (s) =>
+          !s.archived_at &&
+          (targetSpaceId === undefined || s.space_id === targetSpaceId) &&
+          (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)),
+      )
       .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
 
     // Members and agents share a single ranked list — recently mentioned

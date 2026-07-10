@@ -60,7 +60,11 @@ vi.mock("@multica/core/agents", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
-  useWorkspacePaths: () => ({ settings: () => "/ws/settings" }),
+  useWorkspacePaths: () => ({
+    settings: () => "/ws/settings",
+    settingsSection: (scope: string, page: string) =>
+      `/ws/settings/${scope}/${page}`,
+  }),
 }));
 
 vi.mock("../../../navigation", () => ({
@@ -185,7 +189,9 @@ describe("AgentMcpTab", () => {
 
     expect(screen.getByText(/No connected apps yet/i)).toBeTruthy();
     const link = screen.getByTestId("app-link");
-    expect(link.getAttribute("href")).toBe("/ws/settings?tab=integrations");
+    expect(link.getAttribute("href")).toBe(
+      "/ws/settings/workspace/integrations",
+    );
   });
 
   it("renders a defensive hidden state when the allowlist is redacted", () => {

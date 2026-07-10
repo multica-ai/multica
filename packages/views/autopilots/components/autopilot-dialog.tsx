@@ -38,6 +38,7 @@ import {
   PopoverDescription,
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   Select,
   SelectTrigger,
@@ -100,6 +101,7 @@ export interface AutopilotInitial {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  issue_title_template: string | null;
   subscriber_user_ids?: string[];
 }
 
@@ -110,6 +112,7 @@ export type AutopilotDialogProps =
       onOpenChange: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialTriggerConfig?: Partial<TriggerConfig>;
+      initialTriggerKind?: "schedule" | "webhook";
     }
   | {
       mode: "edit";
@@ -306,6 +309,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [issueTitleTemplate, setIssueTitleTemplate] = useState(
+    initial.issue_title_template ?? "",
+  );
   const [subscriberUserIds, setSubscriberUserIds] = useState<string[]>(
     initial.subscriber_user_ids ?? [],
   );
@@ -330,7 +336,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // initialized from the first existing trigger so we render the right
   // panel without surprising the user.
   const initialKind: "schedule" | "webhook" = (() => {
-    if (isCreate) return "schedule";
+    if (isCreate) return props.initialTriggerKind ?? "schedule";
     const first = props.triggers[0];
     if (first?.kind === "webhook") return "webhook";
     return "schedule";
@@ -409,6 +415,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          issue_title_template:
+            executionMode === "create_issue"
+              ? issueTitleTemplate.trim() || undefined
+              : undefined,
           subscribers: subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
             user_id,
@@ -459,10 +469,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || null,
           project_id: executionMode === "create_issue" ? projectId : null,
-          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          issue_title_template:
+            executionMode === "create_issue"
+              ? issueTitleTemplate.trim() || null
+              : null,
           subscribers: subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
             user_id,
@@ -567,7 +580,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <SpacePicker
               spaceId={effectiveSpaceId}
               onChange={setSpaceId}
-              disabled={!!projectId}
+              disabled={!isCreate || !!projectId}
               triggerRender={<PillButton />}
               align="start"
             />
@@ -700,6 +713,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               onChange={handleAssigneeChange}
               selectedName={selectedAssignee?.name}
               selectedDescription={selectedAssignee?.description}
+              spaceId={effectiveSpaceId}
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
@@ -710,6 +724,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 selectedProject={selectedProject}
                 onChange={setProjectId}
                 spaceId={effectiveSpaceId}
+              />
+            )}
+
+            {executionMode === "create_issue" && (
+              <IssueTitleTemplateSection
+                value={issueTitleTemplate}
+                onChange={setIssueTitleTemplate}
               />
             )}
 
@@ -805,12 +826,14 @@ function AgentSection({
   onChange,
   selectedName,
   selectedDescription,
+  spaceId,
 }: {
   selectedType: AutopilotAssigneeType;
   selectedId: string;
   onChange: (next: AssigneeSelection) => void;
   selectedName?: string;
   selectedDescription?: string;
+  spaceId: string | null;
 }) {
   const { t } = useT("autopilots");
   const hasSelection = selectedId.length > 0;
@@ -820,6 +843,7 @@ function AgentSection({
       <AgentPicker
         assignee={hasSelection ? { type: selectedType, id: selectedId } : null}
         onChange={onChange}
+        spaceId={spaceId}
         align="start"
         triggerRender={
           <button
@@ -958,6 +982,31 @@ function ProjectSection({
           </button>
         }
       />
+    </div>
+  );
+}
+
+function IssueTitleTemplateSection({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.issue_title_template)}</SectionLabel>
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t(($) => $.dialog.issue_title_template_placeholder, {
+          date: "{{date}}",
+        })}
+      />
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
+        {t(($) => $.dialog.issue_title_template_hint, { date: "{{date}}" })}
+      </p>
     </div>
   );
 }

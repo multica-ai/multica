@@ -984,6 +984,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            issue_title_template: autopilot.issue_title_template,
             subscriber_user_ids:
               autopilot.subscribers
                 ?.filter((s) => s.user_type === "member")

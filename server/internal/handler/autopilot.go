@@ -34,7 +34,7 @@ type AutopilotResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
-	SpaceID     *string `json:"space_id"`
+	SpaceID     string  `json:"space_id"`
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
@@ -48,6 +48,7 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+	PausedBySpaceAt    *string `json:"paused_by_space_at"`
 
 	// List-endpoint-only derived fields (absent on the detail/create/update
 	// responses and on older servers — clients must treat them as optional).
@@ -188,7 +189,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		ProjectID:          uuidToPtr(a.ProjectID),
-		SpaceID:            uuidToPtr(a.SpaceID),
+		SpaceID:            uuidToString(a.SpaceID),
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
@@ -199,6 +200,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		LastRunAt:          timestampToPtr(a.LastRunAt),
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
+		PausedBySpaceAt:    timestampToPtr(a.PausedBySpaceAt),
 		Subscribers:        subResp,
 	}
 }
@@ -870,11 +872,8 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		params.ProjectID = projectID
 	}
 	if _, ok := rawFields["space_id"]; ok {
-		spaceID, ok := h.resolveAutopilotSpace(w, r, prev.WorkspaceID, req.SpaceID, params.ProjectID, prev.SpaceID)
-		if !ok {
-			return
-		}
-		params.SpaceID = spaceID
+		writeError(w, http.StatusBadRequest, "Autopilot Space cannot be changed")
+		return
 	} else if _, projectTouched := rawFields["project_id"]; projectTouched {
 		if _, ok := h.resolveAutopilotSpace(w, r, prev.WorkspaceID, nil, params.ProjectID, params.SpaceID); !ok {
 			return
@@ -1601,6 +1600,10 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 		// (the leader) and stops referencing the dead squad row.
 		if squad.ArchivedAt.Valid {
 			writeError(w, http.StatusUnprocessableEntity, "squad is archived; pick a different squad")
+			return false
+		}
+		if squad.SpaceID != targetSpaceID {
+			writeError(w, http.StatusConflict, "Squad and Autopilot must belong to the same Space")
 			return false
 		}
 		leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID)

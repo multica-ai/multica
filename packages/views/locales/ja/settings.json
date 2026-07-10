@@ -116,7 +116,8 @@
       "members": "メンバー",
       "labels": "ラベル",
       "properties": "プロパティ",
-      "spaces": "スペース"
+      "spaces": "スペース",
+      "autopilot_templates": "自動化テンプレート"
     }
   },
   "properties": {
@@ -223,6 +224,38 @@
       "confirm": "ラベルを削除",
       "failed": "ラベルを削除できませんでした"
     }
+  },
+  "autopilot_templates": {
+    "title": "自動化テンプレート",
+    "description": "ワークスペースで再利用できるランブックです。スペース、プロジェクト、担当、購読者、連携アクセスは自動化インスタンスごとに選択します。",
+    "new": "新しいテンプレート",
+    "name": "名前",
+    "runbook": "ランブック",
+    "issue_title_template": "issue タイトルテンプレート",
+    "issue_title_template_placeholder": "週次レポート — {{date}}",
+    "execution_mode": "実行モード",
+    "execution_mode_create_issue": "issue を作成",
+    "execution_mode_run_only": "実行のみ",
+    "trigger": "トリガー",
+    "trigger_schedule": "スケジュール",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 式",
+    "timezone": "タイムゾーン",
+    "cancel": "キャンセル",
+    "save": "テンプレートを保存",
+    "loading": "テンプレートを読み込み中…",
+    "empty": "ワークスペーステンプレートはまだありません。",
+    "no_runbook": "ランブックなし",
+    "toast_saved": "テンプレートを保存しました",
+    "toast_save_failed": "テンプレートを保存できませんでした",
+    "toast_deleted": "テンプレートを削除しました",
+    "toast_delete_failed": "テンプレートを削除できませんでした"
+  },
+  "integration_bindings": {
+    "title": "スペースアクセス",
+    "description": "各ワークスペース連携を参照できるスペースを選択します。認証情報のコピーや外部アカウント権限の拡大は行いません。",
+    "toast_saved": "連携のスペースアクセスを更新しました",
+    "toast_failed": "連携のスペースアクセスを更新できませんでした"
   },
   "spaces": {
     "title": "スペース",

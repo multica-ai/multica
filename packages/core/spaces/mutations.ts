@@ -242,3 +242,40 @@ export function useArchiveSpace() {
     },
   });
 }
+
+export function useRestoreSpace() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreSpace(id),
+    onSuccess: ({ space }) => {
+      qc.setQueryData<ListSpacesResponse>(spaceKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              spaces: old.spaces.map((candidate) =>
+                candidate.id === space.id ? space : candidate,
+              ),
+            }
+          : old,
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    },
+  });
+}
+
+export function useResumeSpaceAutopilots() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.resumeSpaceAutopilots(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    },
+  });
+}

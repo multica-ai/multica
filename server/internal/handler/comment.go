@@ -2064,7 +2064,7 @@ func (h *Handler) routeFirstExplicitRootMentionOwner(ctx context.Context, issue 
 				ID:          squadID,
 				WorkspaceID: issue.WorkspaceID,
 			})
-			if err != nil {
+			if err != nil || squad.SpaceID != issue.SpaceID {
 				return commentAgentTrigger{}, true, false
 			}
 			trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, squad.LeaderID, squadID, memberID, opts)
@@ -2097,7 +2097,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 			ID:          squadID,
 			WorkspaceID: issue.WorkspaceID,
-		}); err == nil {
+		}); err == nil && squad.SpaceID == issue.SpaceID {
 			trigger.Squad = &squad
 		}
 	}
@@ -2127,7 +2127,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != issue.SpaceID {
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
@@ -2251,6 +2251,10 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				WorkspaceID: issue.WorkspaceID,
 			})
 			if err != nil {
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
+				continue
+			}
+			if squad.SpaceID != issue.SpaceID {
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}

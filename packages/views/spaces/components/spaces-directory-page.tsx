@@ -67,7 +67,11 @@ export function SpacesDirectoryPage() {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-medium">{t(($) => $.page.title)}</h1>
         </div>
-        <Button size="sm" render={<AppLink href={paths.spaceNew()} />}>
+        <Button
+          size="sm"
+          render={<AppLink href={paths.spaceNew()} />}
+          nativeButton={false}
+        >
           <Plus className="size-3.5" aria-hidden />
           {t(($) => $.page.new_space)}
         </Button>
@@ -185,6 +189,7 @@ export function SpacesDirectoryPage() {
                       size="sm"
                       variant="ghost"
                       render={<AppLink href={paths.spaceDetail(space.key)} />}
+                      nativeButton={false}
                     >
                       {t(($) => $.actions.open)}
                     </Button>

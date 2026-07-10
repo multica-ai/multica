@@ -203,7 +203,10 @@ export default function IssueDetail() {
             highlightCommentId={highlight}
             highlightNonce={h}
           />
-          <InlineCommentComposer issueId={id} />
+          <InlineCommentComposer
+            issueId={id}
+            spaceId={issue.space_id ?? null}
+          />
         </View>
       )}
     </View>

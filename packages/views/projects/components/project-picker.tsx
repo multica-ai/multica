@@ -37,7 +37,10 @@ export function ProjectPicker({
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = projects.find((p) => p.id === projectId);
-  const availableProjects = spaceId ? projects.filter((p) => p.space_id === spaceId) : projects;
+  const availableProjects =
+    spaceId === undefined
+      ? projects
+      : projects.filter((p) => p.space_id === spaceId);
 
   return (
     <DropdownMenu defaultOpen={defaultOpen}>

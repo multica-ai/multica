@@ -12,6 +12,7 @@ import { IssueSurface } from "../../issues/surface/issue-surface";
 import { IssuesSurfaceHeader } from "../../issues/components/issues-page";
 import { ProjectsPage } from "../../projects/components/projects-page";
 import { AutopilotsPage } from "../../autopilots/components/autopilots-page";
+import { SquadsPage } from "../../squads/components/squads-page";
 import { SpaceIcon } from "./space-icon";
 import { useT } from "../../i18n";
 
@@ -90,4 +91,10 @@ export function SpaceAutopilotsPage({ spaceKey }: { spaceKey: string }) {
   const { space, resolved } = useSpaceByKey(spaceKey);
   if (!space) return resolved ? <SpaceNotFound /> : null;
   return <AutopilotsPage spaceId={space.id} />;
+}
+
+export function SpaceSquadsPage({ spaceKey }: { spaceKey: string }) {
+  const { space, resolved } = useSpaceByKey(spaceKey);
+  if (!space) return resolved ? <SpaceNotFound /> : null;
+  return <SquadsPage spaceId={space.id} spaceKey={space.key} />;
 }

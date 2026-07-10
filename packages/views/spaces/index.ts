@@ -5,6 +5,7 @@ export {
   SpaceIssuesPage,
   SpaceProjectsPage,
   SpaceAutopilotsPage,
+  SpaceSquadsPage,
   SpaceOverviewPage,
   SpaceSettingsPage,
   SpacesDirectoryPage,

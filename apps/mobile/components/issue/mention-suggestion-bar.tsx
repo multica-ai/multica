@@ -59,6 +59,9 @@ interface Props {
   visible: boolean;
   query: string;
   onSelect: (mention: MentionMarker) => void;
+  /** The Issue/Project Space receiving the mention. `null` is an explicit
+   * context-free surface and therefore exposes no Space-owned Squads. */
+  spaceId?: string | null;
   /** Default `"comment"` to preserve existing comment-composer and
    *  new-issue behaviour. `"chat"` switches the bar to issue mode. */
   mode?: Mode;
@@ -71,6 +74,7 @@ export function MentionSuggestionBar({
   visible,
   query,
   onSelect,
+  spaceId,
   mode = "comment",
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -86,8 +90,8 @@ export function MentionSuggestionBar({
     enabled: !isChat && !!wsId,
   });
   const { data: squads = [] } = useQuery({
-    ...squadListOptions(wsId),
-    enabled: !isChat && !!wsId,
+    ...squadListOptions(wsId, spaceId),
+    enabled: !isChat && !!wsId && spaceId !== null,
   });
 
   // Chat-mode data.
@@ -164,14 +168,17 @@ export function MentionSuggestionBar({
         (a) =>
           !a.archived_at &&
           (!q || a.name.toLowerCase().includes(q)) &&
-          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+          canAssignAgentToIssue(a, { userId, role: myRole }, spaceId).allowed,
       )
       .sort((a, b) => a.name.localeCompare(b.name));
     // Archived squads are filtered out — matching web (mention-suggestion.tsx:428).
     // A re-activated squad re-appears on the next list refetch.
     const matchedSquads = [...squads]
       .filter(
-        (s) => !s.archived_at && (!q || s.name.toLowerCase().includes(q)),
+        (s) =>
+          !s.archived_at &&
+          s.space_id === spaceId &&
+          (!q || s.name.toLowerCase().includes(q)),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -191,7 +198,17 @@ export function MentionSuggestionBar({
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId]);
+  }, [
+    isChat,
+    query,
+    recentIssues,
+    myIssuesAll,
+    members,
+    agents,
+    squads,
+    userId,
+    spaceId,
+  ]);
 
   if (!visible) return null;
 

@@ -82,7 +82,7 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (MCP servers) — **runtime-consumed**; redacted on read |
 | `visibility` | `agent.visibility` | legacy compatibility input | old clients map `private`/`workspace` to the corresponding invocation and Availability behavior — NOT the runtime prompt |
-| `availability_mode` | `agent.availability_mode` | `private`, `selected_spaces`, or `workspace` | location gate for where the Agent may run; grants no Space data access |
+| `availability_mode` | `agent.availability_mode` | `private`, `selected_spaces`, or `workspace` | Space access policy: where the Agent may work and which Space may be bound to a run |
 | `availability_space_ids` | `agent_available_space` rows | required and non-empty for `selected_spaces`; every Space must be active, in this workspace, and visible to the Agent owner | exact Space allow-list for Issue/Autopilot runs |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
 
@@ -94,17 +94,21 @@ happens in the CLI, not the create handler.
 
 ### Availability and invocation audience
 
-Availability answers **where** an Agent may run and is independent from the
+Space access answers **where** an Agent may work and is independent from the
 legacy invocation audience (`permission_mode` + `invocation_targets`), which
-answers **who** may invoke it. Both gates must pass; Availability never grants
-read access to Space data, integrations, or resources.
+answers **who** may invoke it. Both gates must pass. Adding an Agent to a Space
+authorizes its runs to work with that Space's Multica data, but every concrete
+run is still bound to exactly one Space. A run in Space A cannot read or mutate
+Space B even when the same Agent is assigned to both. Space access does not
+grant credentials or bypass a separate Integration or Resource binding.
 
 - `private`: only the Agent owner may invoke it. For an Issue/Autopilot, the
   owner must still be able to view the active target Space. Context-free direct
   Chat is allowed for the owner.
-- `selected_spaces`: the target Issue/Autopilot Space must exactly match one of
-  `availability_space_ids`, including when the caller is the owner. A concrete
-  Space is mandatory, so direct/context-free Chat is unavailable.
+- `selected_spaces`: the Agent is explicitly added to the Spaces in
+  `availability_space_ids`. The target Issue/Autopilot/Squad Space must exactly
+  match one of them, including when the caller is the owner. A concrete Space
+  is mandatory, so direct/context-free Chat is unavailable.
 - `workspace`: valid in every active Space in the workspace and in direct Chat.
 
 When `availability_mode` is sent explicitly, it is authoritative: `private`

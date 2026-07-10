@@ -11,6 +11,7 @@ import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../../i18n";
 import { SettingsSection, SettingsTab } from "./settings-layout";
+import { IntegrationSpaceBindings } from "./integration-space-bindings";
 
 // Integrations is the single home for third-party platform connections. Each
 // integration owns its description and install flow; adding another provider
@@ -31,6 +32,7 @@ export function IntegrationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
+      <IntegrationSpaceBindings />
       <SettingsSection title={t(($) => $.github.connection_title)}>
         <GitHubTab />
       </SettingsSection>

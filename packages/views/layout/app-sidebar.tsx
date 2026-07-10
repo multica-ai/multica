@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
@@ -116,6 +116,7 @@ function isNavActive(pathname: string, href: string): boolean {
 // `useEffect`/`useMemo` that depends on the value, and can trigger infinite
 // re-render loops when the effect itself calls `setState`.
 const EMPTY_PINS: PinnedItem[] = [];
+const EMPTY_SPACES: Space[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
@@ -169,7 +170,6 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 // their space), so they live under each space below.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "agents", labelKey: "agents", icon: Bot },
-  { key: "squads", labelKey: "squads", icon: Users },
 ];
 
 // Rendered as plain rows alongside workspaceNav (see the Workspace group
@@ -185,6 +185,7 @@ const spaceChildNav = [
   { pathKey: "spaceIssues", labelKey: "issues", icon: ListTodo },
   { pathKey: "spaceProjects", labelKey: "projects", icon: FolderKanban },
   { pathKey: "spaceAutopilots", labelKey: "autopilots", icon: Zap },
+  { pathKey: "spaceSquads", labelKey: "squads", icon: Users },
   { pathKey: "spaceSettings", labelKey: "settings", icon: Settings },
 ] as const;
 
@@ -586,7 +587,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // Spaces section: spaces the user joined or pinned, in personal order.
   // This order is navigation state; the workspace Default Space is configured
   // independently in Settings.
-  const { data: mySpaces = [] } = useQuery({
+  const { data: mySpaces = EMPTY_SPACES } = useQuery({
     ...mySpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
@@ -725,17 +726,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // button below — neither goes through a page's `scope`-aware create
   // handler, so without this they always fell through to the personal
   // default space regardless of which space's pages the user was browsing.
-  const projectRouteMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  const projectRouteId = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/)?.[1];
   const spaceRouteMatch = pathname.match(/^\/[^/]+\/space\/([^/]+)/);
   const routeSpaceKey = spaceRouteMatch?.[1];
-  const routeSpace = routeSpaceKey
-    ? mySpaces.find((s) => s.key.toLowerCase() === routeSpaceKey.toLowerCase())
+  const routeSpaceId = routeSpaceKey
+    ? mySpaces.find((s) => s.key.toLowerCase() === routeSpaceKey.toLowerCase())?.id
     : undefined;
-  const routeCreateDefaults = projectRouteMatch
-    ? { project_id: projectRouteMatch[1] }
-    : routeSpace
-      ? { space_id: routeSpace.id }
-      : undefined;
+  const routeCreateDefaults = useMemo(
+    () =>
+      projectRouteId
+        ? { project_id: projectRouteId }
+        : routeSpaceId
+          ? { space_id: routeSpaceId }
+          : undefined,
+    [projectRouteId, routeSpaceId],
+  );
 
   return (
       <Sidebar variant="inset">

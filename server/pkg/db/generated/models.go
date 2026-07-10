@@ -201,6 +201,9 @@ type Autopilot struct {
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	SpaceID            pgtype.UUID        `json:"space_id"`
+	// Set only when the owning Space auto-pauses an active Autopilot; requires explicit resume after Space restore.
+	PausedBySpaceAt          pgtype.Timestamptz `json:"paused_by_space_at"`
+	StatusBeforeSpaceArchive pgtype.Text        `json:"status_before_space_archive"`
 }
 
 type AutopilotCollaborator struct {
@@ -246,6 +249,21 @@ type AutopilotSubscriber struct {
 	UserType    string             `json:"user_type"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type AutopilotTemplate struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description"`
+	ExecutionMode      string             `json:"execution_mode"`
+	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
+	TriggerKind        string             `json:"trigger_kind"`
+	CronExpression     pgtype.Text        `json:"cron_expression"`
+	Timezone           pgtype.Text        `json:"timezone"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AutopilotTrigger struct {
@@ -563,6 +581,15 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type IntegrationSpaceBinding struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Provider     string             `json:"provider"`
+	ConnectionID pgtype.UUID        `json:"connection_id"`
+	SpaceID      pgtype.UUID        `json:"space_id"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Issue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -878,6 +905,10 @@ type Squad struct {
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Instructions string             `json:"instructions"`
+	// The single Space that owns this Squad. Issues and Autopilots may use it only in this Space.
+	SpaceID pgtype.UUID `json:"space_id"`
+	// Set only when the owning Space archives the Squad; used for non-destructive Space restore.
+	ArchivedBySpaceAt pgtype.Timestamptz `json:"archived_by_space_at"`
 }
 
 type SquadMember struct {

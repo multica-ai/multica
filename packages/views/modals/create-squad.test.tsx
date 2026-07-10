@@ -36,8 +36,23 @@ vi.mock("@tanstack/react-query", () => ({
     if (Array.isArray(key) && key.includes("agents")) {
       return { data: mocks.agents };
     }
+    if (Array.isArray(key) && key.includes("space-members")) {
+      return { data: mocks.members };
+    }
     if (Array.isArray(key) && key.includes("members")) {
       return { data: mocks.members };
+    }
+    if (Array.isArray(key) && key.includes("spaces")) {
+      return {
+        data: [
+          {
+            id: "space-1",
+            key: "ENG",
+            name: "Engineering",
+            is_default: true,
+          },
+        ],
+      };
     }
     return { data: [] };
   },
@@ -48,6 +63,15 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
   workspaceKeys: { squads: (id: string) => ["squads", id] },
+}));
+
+vi.mock("@multica/core/spaces/queries", () => ({
+  activeSpaceListOptions: () => ({ queryKey: ["spaces"] }),
+  spaceMembersOptions: () => ({ queryKey: ["space-members"] }),
+}));
+
+vi.mock("@multica/core/permissions", () => ({
+  canAssignAgentToIssue: () => ({ allowed: true, reason: "allowed", message: "" }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -69,6 +93,8 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     squadDetail: (id: string) => `/test-ws/squads/${id}`,
+    spaceSquadDetail: (key: string, id: string) =>
+      `/test-ws/space/${key}/squads/${id}`,
   }),
 }));
 
@@ -235,6 +261,7 @@ function makeSquad(overrides: Partial<Squad> = {}): Squad {
   return {
     id: "sq-new",
     workspace_id: "ws-1",
+    space_id: "space-1",
     name: "New Squad",
     description: "",
     instructions: "",
@@ -277,7 +304,10 @@ function renderModal() {
   const onClose = vi.fn();
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <CreateSquadModal onClose={onClose} />
+      <CreateSquadModal
+        onClose={onClose}
+        data={{ space_id: "space-1", space_key: "ENG" }}
+      />
     </I18nProvider>,
   );
   return { onClose };
@@ -387,6 +417,7 @@ describe("CreateSquadModal", () => {
 
     await waitFor(() => {
       expect(mocks.createSquad).toHaveBeenCalledWith({
+        space_id: "space-1",
         name: "Swap Squad",
         description: undefined,
         leader_id: "agent-mine-1",
@@ -410,6 +441,7 @@ describe("CreateSquadModal", () => {
 
     await waitFor(() => {
       expect(mocks.createSquad).toHaveBeenCalledWith({
+        space_id: "space-1",
         name: "Solo Squad",
         description: undefined,
         leader_id: "agent-mine-1",
@@ -421,7 +453,7 @@ describe("CreateSquadModal", () => {
     });
     expect(mocks.addSquadMember).not.toHaveBeenCalled();
     expect(mocks.toastWarning).not.toHaveBeenCalled();
-    expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/squads/sq-1");
+    expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/space/ENG/squads/sq-1");
   });
 
   it("on success with partial member failure shows success + warning toasts and still navigates", async () => {
@@ -453,7 +485,7 @@ describe("CreateSquadModal", () => {
       expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
     });
     expect(mocks.toastWarning).toHaveBeenCalledTimes(1);
-    expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/squads/sq-2");
+    expect(mocks.navigationPush).toHaveBeenCalledWith("/test-ws/space/ENG/squads/sq-2");
   });
 
   it("on createSquad failure shows an error toast, does not navigate, and re-enables submit", async () => {

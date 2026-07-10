@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -23,6 +24,7 @@ import (
 type SquadResponse struct {
 	ID            string                       `json:"id"`
 	WorkspaceID   string                       `json:"workspace_id"`
+	SpaceID       string                       `json:"space_id"`
 	Name          string                       `json:"name"`
 	Description   string                       `json:"description"`
 	Instructions  string                       `json:"instructions"`
@@ -63,6 +65,7 @@ func squadToResponse(s db.Squad) SquadResponse {
 	return SquadResponse{
 		ID:            uuidToString(s.ID),
 		WorkspaceID:   uuidToString(s.WorkspaceID),
+		SpaceID:       uuidToString(s.SpaceID),
 		Name:          s.Name,
 		Description:   s.Description,
 		Instructions:  s.Instructions,
@@ -132,15 +135,15 @@ func canManageSquad(member db.Member, squad db.Squad) bool {
 // members' private / non-allow-listed agents are rejected. This stops a
 // creator from smuggling an agent they cannot invoke into a squad and reaching
 // it through squad routing (MUL-4223).
-func (h *Handler) memberCanWireAgent(ctx context.Context, member db.Member, agent db.Agent, workspaceID string) bool {
+func (h *Handler) memberCanWireAgent(ctx context.Context, member db.Member, agent db.Agent, workspaceID string, spaceID pgtype.UUID) bool {
+	if !service.AgentAvailableInSpace(ctx, h.Queries, agent, parseUUID(workspaceID), spaceID) {
+		return false
+	}
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
 	}
 	uid := uuidToString(member.UserID)
-	// Squads are still workspace-scoped in the current schema. Without a
-	// concrete Space context, a Selected Spaces agent must fail closed here;
-	// Phase 3 Squad single-Space ownership will pass its Space explicitly.
-	return h.canInvokeAgent(ctx, agent, "member", uid, uid, workspaceID, pgtype.UUID{})
+	return h.canInvokeAgent(ctx, agent, "member", uid, uid, workspaceID, spaceID)
 }
 
 // loadSquadInWorkspace loads a squad scoped to the current workspace.
@@ -161,6 +164,13 @@ func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "squad not found")
+		return db.Squad{}, "", false
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if !h.requireSpaceView(w, r, wsUUID, squad.SpaceID) {
+			return db.Squad{}, "", false
+		}
+	} else if !h.requireSpaceCollaboration(w, r, wsUUID, squad.SpaceID) {
 		return db.Squad{}, "", false
 	}
 	return squad, workspaceID, true
@@ -196,13 +206,32 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	squads, err := h.Queries.ListSquads(r.Context(), wsUUID)
+	var requestedSpaceID pgtype.UUID
+	if raw := r.URL.Query().Get("space_id"); raw != "" {
+		requestedSpaceID, ok = parseUUIDOrBadRequest(w, raw, "space_id")
+		if !ok {
+			return
+		}
+	}
+	spaceID, ok := h.taskTokenSpaceFilter(w, r, wsUUID, requestedSpaceID)
+	if !ok {
+		return
+	}
+	squads, err := h.Queries.ListSquads(r.Context(), db.ListSquadsParams{
+		WorkspaceID:         wsUUID,
+		ViewerUserID:        parseUUID(requestUserID(r)),
+		SpaceID:             spaceID,
+		TaskTokenAuthorized: r.Header.Get("X-Actor-Source") == "task_token",
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list squads")
 		return
 	}
 
-	previewRows, err := h.Queries.ListSquadMemberPreviewRows(r.Context(), wsUUID)
+	previewRows, err := h.Queries.ListSquadMemberPreviewRows(r.Context(), db.ListSquadMemberPreviewRowsParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list squad member preview")
 		return
@@ -241,6 +270,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description"`
 		LeaderID    string  `json:"leader_id"`
 		AvatarURL   *string `json:"avatar_url"`
+		SpaceID     string  `json:"space_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -254,6 +284,10 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "leader_id is required")
 		return
 	}
+	if req.SpaceID == "" {
+		writeError(w, http.StatusBadRequest, "space_id is required")
+		return
+	}
 
 	leaderUUID, ok := parseUUIDOrBadRequest(w, req.LeaderID, "leader_id")
 	if !ok {
@@ -261,6 +295,13 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, req.SpaceID, "space_id")
+	if !ok {
+		return
+	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, spaceID) {
 		return
 	}
 
@@ -275,7 +316,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	// A non-admin creator may only lead their squad with an agent they can
 	// @-trigger; admins may wire any workspace agent (MUL-4223).
-	if !h.memberCanWireAgent(r.Context(), member, leaderAgent, workspaceID) {
+	if !h.memberCanWireAgent(r.Context(), member, leaderAgent, workspaceID, spaceID) {
 		writeError(w, http.StatusForbidden, "you can only use an agent you have access to as leader")
 		return
 	}
@@ -285,8 +326,17 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
-	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin squad creation")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	squad, err := qtx.CreateSquad(r.Context(), db.CreateSquadParams{
 		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
 		Name:        req.Name,
 		Description: req.Description,
 		LeaderID:    leaderUUID,
@@ -299,12 +349,19 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-add leader as a member with role "leader".
-	h.Queries.AddSquadMember(r.Context(), db.AddSquadMemberParams{
+	if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: "agent",
 		MemberID:   leaderUUID,
 		Role:       "leader",
-	})
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add squad leader")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create squad")
+		return
+	}
 
 	resp, err := h.squadToResponseWithPreview(r.Context(), squad)
 	if err != nil {
@@ -393,7 +450,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// A non-admin creator may only promote an agent they can @-trigger.
-		if !h.memberCanWireAgent(r.Context(), member, newLeader, workspaceID) {
+		if !h.memberCanWireAgent(r.Context(), member, newLeader, workspaceID, squad.SpaceID) {
 			writeError(w, http.StatusForbidden, "you can only use an agent you have access to as leader")
 			return
 		}
@@ -746,7 +803,7 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 		// A non-admin creator may only add agents they can @-trigger (public
 		// or their own / allow-listed agents); admins may add any workspace
 		// agent (MUL-4223).
-		if !h.memberCanWireAgent(r.Context(), member, agent, workspaceID) {
+		if !h.memberCanWireAgent(r.Context(), member, agent, workspaceID, squad.SpaceID) {
 			writeError(w, http.StatusForbidden, "you can only add an agent you have access to")
 			return
 		}
@@ -755,6 +812,15 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 			UserID: memberUUID, WorkspaceID: wsUUID,
 		}); err != nil {
 			writeError(w, http.StatusBadRequest, "member not found in this workspace")
+			return
+		}
+		canCollaborate, err := h.Queries.CanCollaborateInWorkspaceSpace(r.Context(), db.CanCollaborateInWorkspaceSpaceParams{
+			WorkspaceID: wsUUID,
+			ID:          squad.SpaceID,
+			UserID:      memberUUID,
+		})
+		if err != nil || !canCollaborate {
+			writeError(w, http.StatusBadRequest, "member must belong to the Squad Space")
 			return
 		}
 	}
@@ -1039,7 +1105,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != issue.SpaceID {
 		return false
 	}
 

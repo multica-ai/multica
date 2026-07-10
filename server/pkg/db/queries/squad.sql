@@ -1,6 +1,6 @@
 -- name: CreateSquad :one
-INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, avatar_url)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO squad (workspace_id, space_id, name, description, leader_id, creator_id, avatar_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetSquad :one
@@ -10,7 +10,32 @@ SELECT * FROM squad WHERE id = $1;
 SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListSquads :many
-SELECT * FROM squad WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC;
+SELECT * FROM squad s
+WHERE s.workspace_id = sqlc.arg('workspace_id')
+  AND s.archived_at IS NULL
+  AND (sqlc.narg('space_id')::uuid IS NULL OR s.space_id = sqlc.narg('space_id')::uuid)
+  AND (
+    sqlc.arg('task_token_authorized')::boolean
+    OR
+    EXISTS (
+      SELECT 1 FROM workspace_space ws
+      WHERE ws.id = s.space_id
+        AND ws.workspace_id = s.workspace_id
+        AND ws.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = s.space_id
+        AND sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = s.workspace_id
+        AND wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+ORDER BY s.created_at ASC;
 
 -- name: ListSquadMemberPreviewRows :many
 -- Static squad membership summary for list/hover previews. This deliberately
@@ -23,7 +48,9 @@ SELECT
     sm.role
 FROM squad_member sm
 JOIN squad s ON s.id = sm.squad_id
-WHERE s.workspace_id = $1 AND s.archived_at IS NULL
+WHERE s.workspace_id = sqlc.arg('workspace_id')
+  AND s.archived_at IS NULL
+  AND (sqlc.narg('space_id')::uuid IS NULL OR s.space_id = sqlc.narg('space_id')::uuid)
 ORDER BY
     sm.squad_id ASC,
     (sm.member_type = 'agent' AND sm.member_id = s.leader_id) DESC,
@@ -60,6 +87,26 @@ RETURNING *;
 UPDATE squad SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ArchiveSquadsBySpace :execrows
+UPDATE squad SET
+    archived_at = now(),
+    archived_by = $3,
+    archived_by_space_at = now(),
+    updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND archived_at IS NULL;
+
+-- name: RestoreSquadsArchivedBySpace :execrows
+UPDATE squad SET
+    archived_at = NULL,
+    archived_by = NULL,
+    archived_by_space_at = NULL,
+    updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND archived_by_space_at IS NOT NULL;
 
 -- name: AddSquadMember :one
 INSERT INTO squad_member (squad_id, member_type, member_id, role)
@@ -131,12 +178,14 @@ SELECT
     ar.last_seen_at    AS runtime_last_seen_at,
     atq.id             AS task_id,
     atq.status         AS task_status,
-    atq.issue_id       AS task_issue_id,
+    i.id               AS task_issue_id,
     atq.dispatched_at  AS task_dispatched_at,
     i.number           AS issue_number,
     i.title            AS issue_title,
     i.status           AS issue_status
 FROM squad_member sm
+JOIN squad s
+       ON s.id = sm.squad_id
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id
 LEFT JOIN agent_runtime ar
@@ -147,5 +196,6 @@ LEFT JOIN agent_task_queue atq
       AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
 LEFT JOIN issue i
        ON i.id = atq.issue_id
+      AND i.space_id = s.space_id
 WHERE sm.squad_id = $1
 ORDER BY sm.created_at ASC, atq.dispatched_at DESC NULLS LAST;

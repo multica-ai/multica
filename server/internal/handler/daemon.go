@@ -1751,7 +1751,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+				}); err == nil && squad.SpaceID == issue.SpaceID && uuidToString(squad.LeaderID) == resp.Agent.ID {
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
@@ -2562,6 +2562,19 @@ func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTask
 	resp.SpaceID = uuidToString(space.ID)
 	resp.SpaceKey = space.Key
 	resp.SpaceName = space.Name
+	if rows, err := h.Queries.ListIntegrationBindingsForSpace(ctx, db.ListIntegrationBindingsForSpaceParams{
+		WorkspaceID: workspaceID,
+		SpaceID:     spaceID,
+	}); err == nil {
+		resp.IntegrationBindings = make([]IntegrationBindingData, len(rows))
+		for i, row := range rows {
+			resp.IntegrationBindings[i] = IntegrationBindingData{
+				Provider:     row.Provider,
+				ConnectionID: uuidToString(row.ConnectionID),
+				DisplayName:  row.DisplayName,
+			}
+		}
+	}
 }
 
 type resolveSkillBundlesRequest struct {

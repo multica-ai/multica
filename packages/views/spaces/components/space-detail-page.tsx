@@ -9,6 +9,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
 import {
   useArchiveSpace,
+  useRestoreSpace,
+  useResumeSpaceAutopilots,
   useReplaceSpaceMembers,
   useUpdateSpace,
   useUpdateSpaceMemberRole,
@@ -91,6 +93,7 @@ export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
           <Identity space={space} />
           <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
           <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
+          <RestoreSection space={space} />
         </div>
       </div>
     </div>
@@ -107,7 +110,9 @@ function Identity({ space }: { space: Space }) {
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
   const isAdmin = role === "owner" || role === "admin";
-  const canManage = isAdmin || space.member_role === "lead" || space.member_role === "admin";
+  const canManage =
+    !space.archived_at &&
+    (isAdmin || space.member_role === "lead" || space.member_role === "admin");
   const navigation = useNavigation();
   const p = useWorkspacePaths();
   const updateSpace = useUpdateSpace();
@@ -340,7 +345,9 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
   const isAdmin = role === "owner" || role === "admin";
-  const canManage = isAdmin || space.member_role === "lead" || space.member_role === "admin";
+  const canManage =
+    !space.archived_at &&
+    (isAdmin || space.member_role === "lead" || space.member_role === "admin");
   const { data: members = [] } = useQuery(spaceMembersOptions(wsId, space.id));
   const { data: allMembers = [] } = useQuery(memberListOptions(wsId));
   const replaceMembers = useReplaceSpaceMembers();
@@ -649,6 +656,107 @@ function ArchiveSection({
             <Button variant="destructive" onClick={doArchive}>
               {t(($) => $.actions.archive)}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function RestoreSection({ space }: { space: Space }) {
+  const { t } = useT("spaces");
+  const wsId = useWorkspaceId();
+  const { role } = useCurrentMember(wsId);
+  const isAdmin = role === "owner" || role === "admin";
+  const canManage =
+    isAdmin || space.member_role === "lead" || space.member_role === "admin";
+  const restoreSpace = useRestoreSpace();
+  const resumeAutopilots = useResumeSpaceAutopilots();
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [resumeCount, setResumeCount] = useState(0);
+
+  if (!space.archived_at && resumeCount === 0) return null;
+
+  const doRestore = async () => {
+    setRestoreOpen(false);
+    try {
+      const result = await restoreSpace.mutateAsync(space.id);
+      toast.success(t(($) => $.toast_restored));
+      setResumeCount(result.paused_autopilot_count);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.toast_restore_failed),
+      );
+    }
+  };
+
+  const doResume = async () => {
+    try {
+      const result = await resumeAutopilots.mutateAsync(space.id);
+      toast.success(
+        t(($) => $.toast_autopilots_resumed, {
+          count: result.resumed_autopilot_count,
+        }),
+      );
+      setResumeCount(0);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.toast_resume_failed),
+      );
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-xs font-medium text-muted-foreground">
+        {t(($) => $.settings.restore_title)}
+      </h3>
+      <p className="max-w-xl text-xs text-muted-foreground">
+        {t(($) => $.settings.restore_hint)}
+      </p>
+      {space.archived_at && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          disabled={!canManage || restoreSpace.isPending}
+          onClick={() => setRestoreOpen(true)}
+        >
+          {t(($) => $.actions.restore)}
+        </Button>
+      )}
+
+      <Dialog open={restoreOpen} onOpenChange={setRestoreOpen}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogTitle>{t(($) => $.settings.restore_confirm_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.settings.restore_confirm_body, { name: space.name })}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestoreOpen(false)}>
+              {t(($) => $.actions.cancel)}
+            </Button>
+            <Button onClick={doRestore}>{t(($) => $.actions.restore)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={resumeCount > 0} onOpenChange={(open) => !open && setResumeCount(0)}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogTitle>{t(($) => $.settings.resume_confirm_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.settings.resume_confirm_body, { count: resumeCount })}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResumeCount(0)}>
+              {t(($) => $.settings.keep_paused)}
+            </Button>
+            <Button onClick={doResume}>{t(($) => $.settings.resume_autopilots)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

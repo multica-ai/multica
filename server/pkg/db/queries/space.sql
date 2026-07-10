@@ -89,6 +89,16 @@ WHERE id = $1
   AND archived_at IS NULL
 RETURNING *;
 
+-- name: RestoreWorkspaceSpace :one
+UPDATE workspace_space SET
+    archived_at = NULL,
+    archived_by = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND archived_at IS NOT NULL
+RETURNING *;
+
 -- name: IncrementSpaceIssueCounter :one
 UPDATE workspace_space
 SET issue_counter = issue_counter + 1,

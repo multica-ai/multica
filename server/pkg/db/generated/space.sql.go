@@ -885,6 +885,43 @@ func (q *Queries) RemoveWorkspaceSpaceMember(ctx context.Context, arg RemoveWork
 	return result.RowsAffected(), nil
 }
 
+const restoreWorkspaceSpace = `-- name: RestoreWorkspaceSpace :one
+UPDATE workspace_space SET
+    archived_at = NULL,
+    archived_by = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND archived_at IS NOT NULL
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility
+`
+
+type RestoreWorkspaceSpaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RestoreWorkspaceSpace(ctx context.Context, arg RestoreWorkspaceSpaceParams) (WorkspaceSpace, error) {
+	row := q.db.QueryRow(ctx, restoreWorkspaceSpace, arg.ID, arg.WorkspaceID)
+	var i WorkspaceSpace
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Key,
+		&i.Icon,
+		&i.IssueCounter,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
+	)
+	return i, err
+}
+
 const setDefaultWorkspaceSpace = `-- name: SetDefaultWorkspaceSpace :one
 UPDATE workspace_space
 SET is_default = true,

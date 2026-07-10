@@ -6,6 +6,7 @@ import type {
   AgentBuilderSession,
   Attachment,
   AutopilotRun,
+  AutopilotTemplate,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -25,6 +26,8 @@ import type {
   IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
+  ListAutopilotTemplatesResponse,
+  ListIntegrationBindingsResponse,
   ListProjectsResponse,
   ListSpacesResponse,
   ListSpaceMembersResponse,
@@ -38,6 +41,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  IntegrationConnectionBinding,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -502,6 +506,11 @@ export const SpaceSchema = z.object({
   is_pinned: z.boolean().default(false),
   is_followed: z.boolean().default(false),
   sort_order: z.number().default(0),
+}).loose();
+
+export const RestoreSpaceResponseSchema = z.object({
+  space: SpaceSchema,
+  paused_autopilot_count: z.number().default(0),
 }).loose();
 
 // PATCH /api/spaces/{id}/membership — the caller's own sort position.
@@ -1090,6 +1099,9 @@ const SquadMemberPreviewSchema = z.object({
 export const SquadSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  // Older servers predate Space-owned Squads; keep the row visible and let
+  // callers treat an empty ID as legacy/unknown ownership.
+  space_id: z.string().default(""),
   name: z.string(),
   description: z.string().default(""),
   instructions: z.string().default(""),
@@ -1109,6 +1121,7 @@ export const EMPTY_SQUAD_LIST: Squad[] = [];
 export const EMPTY_SQUAD: Squad = {
   id: "",
   workspace_id: "",
+  space_id: "",
   name: "",
   description: "",
   instructions: "",
@@ -1256,7 +1269,8 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
-  space_id: z.string().nullable().optional(),
+  // Installed clients may still connect to a pre-Space Autopilot server.
+  space_id: z.string().default(""),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),
@@ -1269,6 +1283,7 @@ const AutopilotListItemSchema = z.object({
   last_run_at: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
+  paused_by_space_at: z.string().nullable().optional(),
   trigger_kinds: z.array(z.string()).optional(),
   next_run_at: z.string().nullable().optional(),
   last_run_status: z.string().nullable().optional(),
@@ -1325,6 +1340,75 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   trigger_payload: null,
   result: null,
   created_at: "",
+};
+
+// Workspace-owned Autopilot templates and Integration-to-Space bindings are
+// Settings data. Keep their response parsers lenient so an older installed
+// client survives additive server fields and future provider/status values.
+export const AutopilotTemplateSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  execution_mode: z.string().default("create_issue"),
+  issue_title_template: z.string().nullable().optional().transform((v) => v ?? null),
+  trigger_kind: z.string().default("schedule"),
+  cron_expression: z.string().nullable().optional().transform((v) => v ?? null),
+  timezone: z.string().nullable().optional().transform((v) => v ?? null),
+  created_by: z.string(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListAutopilotTemplatesResponseSchema = z.object({
+  templates: z.array(AutopilotTemplateSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_AUTOPILOT_TEMPLATE: AutopilotTemplate = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  execution_mode: "create_issue",
+  issue_title_template: null,
+  trigger_kind: "schedule",
+  cron_expression: null,
+  timezone: null,
+  created_by: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_LIST_AUTOPILOT_TEMPLATES_RESPONSE: ListAutopilotTemplatesResponse = {
+  templates: [],
+  total: 0,
+};
+
+export const IntegrationConnectionBindingSchema = z.object({
+  provider: z.string(),
+  connection_id: z.string(),
+  display_name: z.string().default(""),
+  status: z.string().default(""),
+  space_ids: z.array(z.string()).default([]),
+}).loose();
+
+export const ListIntegrationBindingsResponseSchema = z.object({
+  connections: z.array(IntegrationConnectionBindingSchema).default([]),
+  can_manage: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_INTEGRATION_CONNECTION_BINDING: IntegrationConnectionBinding = {
+  provider: "",
+  connection_id: "",
+  display_name: "",
+  status: "",
+  space_ids: [],
+};
+
+export const EMPTY_LIST_INTEGRATION_BINDINGS_RESPONSE: ListIntegrationBindingsResponse = {
+  connections: [],
+  can_manage: false,
 };
 
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {

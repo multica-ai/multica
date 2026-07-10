@@ -1077,6 +1077,17 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if isLeader {
+		if !squadID.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad leader task requires squad")
+		}
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID: squadID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || squad.SpaceID != issue.SpaceID || squad.LeaderID != agentID || squad.ArchivedAt.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad is not available for issue Space")
+		}
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1276,6 +1287,14 @@ const QuickCreateContextType = "quick_create"
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, spaceID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	if squadID.Valid {
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID: squadID, WorkspaceID: workspaceID,
+		})
+		if err != nil || squad.SpaceID != spaceID || squad.LeaderID != agentID || squad.ArchivedAt.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad is not available for target Space")
+		}
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)

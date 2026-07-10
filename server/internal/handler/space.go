@@ -187,6 +187,24 @@ func (h *Handler) requireSpaceManagement(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
+// requireActiveSpaceMutation keeps an archived Space read-only while still
+// allowing requireSpaceManagement to authorize the explicit restore path.
+func (h *Handler) requireActiveSpaceMutation(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	space, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "space not found")
+		return false
+	}
+	if space.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "restore the Space before changing it")
+		return false
+	}
+	return true
+}
+
 type CreateSpaceRequest struct {
 	Name       string  `json:"name"`
 	Key        string  `json:"key"`
@@ -599,6 +617,9 @@ func (h *Handler) LeaveSpace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireActiveSpaceMutation(w, r, wsUUID, spaceID) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -666,6 +687,9 @@ func (h *Handler) UpdateSpaceMemberRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
+	if !h.requireActiveSpaceMutation(w, r, wsUUID, spaceID) {
 		return
 	}
 	targetUserID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "userId"), "user id")
@@ -915,6 +939,9 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
 		return
 	}
+	if !h.requireActiveSpaceMutation(w, r, wsUUID, spaceID) {
+		return
+	}
 	var req UpdateSpaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1075,23 +1102,6 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "change the workspace default space before archiving this space")
 		return
 	}
-	// Block archiving a Space that still drives live autopilots — without this
-	// an archived Space would leave active autopilots pointing at a Space that
-	// can no longer receive work. Existing issues are intentionally NOT a
-	// blocker: archived-space issues stay readable.
-	activeAutopilots, err := h.Queries.CountActiveAutopilotsBySpace(r.Context(), db.CountActiveAutopilotsBySpaceParams{
-		WorkspaceID: wsUUID,
-		SpaceID:     spaceID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to validate space usage")
-		return
-	}
-	if activeAutopilots > 0 {
-		writeError(w, http.StatusConflict, "cannot archive a space used by active autopilots")
-		return
-	}
-
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive space")
@@ -1115,6 +1125,27 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "cannot archive the last active space in a workspace")
 		return
 	}
+	// A Space owns its operating units. Archive Squads without transferring
+	// assignments, and pause only currently-active Autopilots. Lifecycle marker
+	// columns let restore distinguish these changes from resources that users
+	// had already archived or paused themselves.
+	archivedSquadCount, err := qtx.ArchiveSquadsBySpace(r.Context(), db.ArchiveSquadsBySpaceParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+		ArchivedBy:  parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive Space Squads")
+		return
+	}
+	pausedAutopilotCount, err := qtx.PauseActiveAutopilotsBySpace(r.Context(), db.PauseActiveAutopilotsBySpaceParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to pause Space Autopilots")
+		return
+	}
 
 	space, err = qtx.ArchiveWorkspaceSpace(r.Context(), db.ArchiveWorkspaceSpaceParams{
 		ID:          spaceID,
@@ -1125,6 +1156,20 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "space cannot be archived")
 		return
 	}
+	auditDetails, _ := json.Marshal(map[string]any{
+		"space_id":               uuidToString(space.ID),
+		"space_name":             space.Name,
+		"archived_squad_count":   archivedSquadCount,
+		"paused_autopilot_count": pausedAutopilotCount,
+	})
+	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: wsUUID, IssueID: pgtype.UUID{},
+		ActorType: pgtype.Text{String: "member", Valid: true}, ActorID: parseUUID(userID),
+		Action: "space_archived", Details: auditDetails,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to audit space archive")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive space")
 		return
@@ -1132,4 +1177,145 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 	resp := h.withCallerMembership(r.Context(), spaceToResponse(space), space.ID, userID)
 	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"space": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) RestoreSpace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
+	current, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID: spaceID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "space not found")
+		return
+	}
+	if !current.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "space is not archived")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore space")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	space, err := qtx.RestoreWorkspaceSpace(r.Context(), db.RestoreWorkspaceSpaceParams{
+		ID: spaceID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "space cannot be restored")
+		return
+	}
+	restoredSquadCount, err := qtx.RestoreSquadsArchivedBySpace(r.Context(), db.RestoreSquadsArchivedBySpaceParams{
+		WorkspaceID: wsUUID, SpaceID: spaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore Space Squads")
+		return
+	}
+	pausedCount, err := qtx.CountAutopilotsPausedBySpace(r.Context(), db.CountAutopilotsPausedBySpaceParams{
+		WorkspaceID: wsUUID, SpaceID: spaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect Space Autopilots")
+		return
+	}
+	auditDetails, _ := json.Marshal(map[string]any{
+		"space_id":                         uuidToString(space.ID),
+		"space_name":                       space.Name,
+		"restored_squad_count":             restoredSquadCount,
+		"autopilots_awaiting_confirmation": pausedCount,
+	})
+	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: wsUUID, IssueID: pgtype.UUID{},
+		ActorType: pgtype.Text{String: "member", Valid: true}, ActorID: parseUUID(userID),
+		Action: "space_restored", Details: auditDetails,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to audit space restore")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore space")
+		return
+	}
+	resp := h.withCallerMembership(r.Context(), spaceToResponse(space), space.ID, userID)
+	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"space": resp})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"space":                  resp,
+		"paused_autopilot_count": pausedCount,
+	})
+}
+
+func (h *Handler) ResumeSpaceAutopilots(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
+	space, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID: spaceID, WorkspaceID: wsUUID,
+	})
+	if err != nil || space.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "restore the Space before resuming Autopilots")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resume Space Autopilots")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	count, err := qtx.ResumeAutopilotsPausedBySpace(r.Context(), db.ResumeAutopilotsPausedBySpaceParams{
+		WorkspaceID: wsUUID, SpaceID: spaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resume Space Autopilots")
+		return
+	}
+	auditDetails, _ := json.Marshal(map[string]any{
+		"space_id":                uuidToString(space.ID),
+		"space_name":              space.Name,
+		"resumed_autopilot_count": count,
+	})
+	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: wsUUID, IssueID: pgtype.UUID{},
+		ActorType: pgtype.Text{String: "member", Valid: true}, ActorID: parseUUID(userID),
+		Action: "space_autopilots_resumed", Details: auditDetails,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to audit Autopilot resume")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resume Space Autopilots")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"resumed_autopilot_count": count})
 }

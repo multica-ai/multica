@@ -3,6 +3,7 @@ import {
   SpaceIssuesPage,
   SpaceProjectsPage,
   SpaceAutopilotsPage,
+  SpaceSquadsPage,
   SpaceOverviewPage,
   SpaceSettingsPage,
 } from "@multica/views/spaces";
@@ -26,6 +27,12 @@ export function SpaceAutopilotsRoute() {
   const { spaceKey } = useParams<{ spaceKey: string }>();
   if (!spaceKey) return null;
   return <SpaceAutopilotsPage spaceKey={spaceKey} />;
+}
+
+export function SpaceSquadsRoute() {
+  const { spaceKey } = useParams<{ spaceKey: string }>();
+  if (!spaceKey) return null;
+  return <SpaceSquadsPage spaceKey={spaceKey} />;
 }
 
 export function SpaceDetailRoute() {

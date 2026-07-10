@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "Create Squad",
     "description": "Create a collaborative squad with a leader agent and optional additional members.",
+    "space_label": "Space",
     "name_label": "Name",
     "name_placeholder": "e.g. Frontend Team",
     "description_label": "Description",

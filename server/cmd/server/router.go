@@ -1125,6 +1125,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.With(handler.RequireHumanActor).Patch("/", h.UpdateSpace)
 					r.With(handler.RequireHumanActor).Put("/", h.UpdateSpace)
 					r.With(handler.RequireHumanActor).Delete("/", h.ArchiveSpace)
+					r.With(handler.RequireHumanActor).Post("/restore", h.RestoreSpace)
+					r.With(handler.RequireHumanActor).Post("/resume-autopilots", h.ResumeSpaceAutopilots)
 					r.With(handler.RequireHumanActor).Post("/join", h.JoinSpace)
 					// Caller's own membership row.
 					r.With(handler.RequireHumanActor).Patch("/membership", h.UpdateSpaceMembership)
@@ -1139,16 +1141,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)
-				r.Post("/", h.CreateSquad)
+				r.With(handler.RequireHumanActor).Post("/", h.CreateSquad)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSquad)
-					r.Put("/", h.UpdateSquad)
-					r.Delete("/", h.DeleteSquad)
+					r.With(handler.RequireHumanActor).Put("/", h.UpdateSquad)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteSquad)
 					r.Get("/members", h.ListSquadMembers)
 					r.Get("/members/status", h.ListSquadMemberStatus)
-					r.Post("/members", h.AddSquadMember)
-					r.Delete("/members", h.RemoveSquadMember)
-					r.Patch("/members/role", h.UpdateSquadMemberRole)
+					r.With(handler.RequireHumanActor).Post("/members", h.AddSquadMember)
+					r.With(handler.RequireHumanActor).Delete("/members", h.RemoveSquadMember)
+					r.With(handler.RequireHumanActor).Patch("/members/role", h.UpdateSquadMemberRole)
 				})
 			})
 
@@ -1156,6 +1158,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
 			// Autopilots
+			r.Route("/api/integration-bindings", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListIntegrationBindings)
+				r.Put("/{provider}/{connectionId}", h.ReplaceIntegrationBindings)
+			})
+
+			r.Route("/api/autopilot-templates", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListAutopilotTemplates)
+				r.Post("/", h.CreateAutopilotTemplate)
+				r.Put("/{id}", h.UpdateAutopilotTemplate)
+				r.Delete("/{id}", h.DeleteAutopilotTemplate)
+			})
+
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
 				r.With(handler.RequireHumanActor).Post("/", h.CreateAutopilot)

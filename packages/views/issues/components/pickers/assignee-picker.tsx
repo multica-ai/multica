@@ -110,7 +110,9 @@ function AssigneePickerImpl({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: squads = [] } = useQuery(
+    squadListOptions(wsId, typeof spaceId === "string" ? spaceId : undefined),
+  );
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
@@ -136,7 +138,12 @@ function AssigneePickerImpl({
     .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = squads
-    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
+    .filter(
+      (s) =>
+        !s.archived_at &&
+        (spaceId === undefined || s.space_id === spaceId) &&
+        (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
+    )
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
 
   const isSelected = (type: string, id: string) =>

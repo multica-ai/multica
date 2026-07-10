@@ -44,6 +44,15 @@ export interface ListSpacesResponse {
   total: number;
 }
 
+export interface RestoreSpaceResponse {
+  space: Space;
+  paused_autopilot_count: number;
+}
+
+export interface ResumeSpaceAutopilotsResponse {
+  resumed_autopilot_count: number;
+}
+
 /** Caller's own membership row, as returned by PATCH /api/spaces/{id}/membership. */
 export interface SpaceMembership {
   space_id: string;

@@ -267,7 +267,19 @@ func writeSpaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.SpaceName != "" && ctx.SpaceKey != "" {
 		fmt.Fprintf(b, "This issue belongs to the **%s** Space (key `%s`) — it owns this issue's identifier namespace (`%s-N`).\n\n", ctx.SpaceName, ctx.SpaceKey, ctx.SpaceKey)
 	}
-	b.WriteString("Pass `--space <space-id-or-key>` on `multica issue create` to file a new issue under a specific Space instead of the workspace default. `multica issue update <id> --space <space-id-or-key>` moves an existing issue to another Space — it is renumbered under the target Space, and the old identifier is recorded as an alias that keeps resolving forever, so this is always safe.\n\n")
+	b.WriteString("Pass `--space <space-id-or-key>` on `multica issue create` to file a new issue under a specific Space instead of the workspace default. Issue Space is immutable in this release; do not attempt to move an existing issue between Spaces.\n\n")
+}
+
+func writeIntegrationBindings(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.IntegrationBindings) == 0 {
+		return
+	}
+	b.WriteString("## Space Integration Bindings\n\n")
+	b.WriteString("These Workspace connections are explicitly available to this Space:\n\n")
+	for _, binding := range ctx.IntegrationBindings {
+		fmt.Fprintf(b, "- %s: %s (`%s`)\n", binding.Provider, binding.DisplayName, binding.ConnectionID)
+	}
+	b.WriteString("\nA binding is an allowed connection reference, not a credential grant. Use it only when the matching tool or credential is mounted for this run, and never assume permissions beyond the current member, Agent, and third-party account.\n\n")
 }
 
 // writeProjectContext emits the Project Context section when the issue
@@ -560,6 +572,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
 	writeConnectedApps(&b, ctx)
+	writeIntegrationBindings(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

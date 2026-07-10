@@ -168,9 +168,9 @@ cat > "$CONFIG_DIR/config.json" <<EOF
 }
 EOF
 
-nohup make cli ARGS="daemon start --profile $PROFILE" > "$DAEMON_LOG" 2>&1 &
+nohup make cli MULTICA_ARGS="daemon start --profile $PROFILE" > "$DAEMON_LOG" 2>&1 &
 sleep 3
-make cli ARGS="daemon status --profile $PROFILE"
+make cli MULTICA_ARGS="daemon status --profile $PROFILE"
 ```
 
 `make cli` runs the CLI from the current Go source tree. It does not call a
@@ -225,7 +225,7 @@ Log in with `dev@localhost` and `888888`.
 ## Stop the environment
 
 ```bash
-make cli ARGS="daemon stop --profile $PROFILE"
+make cli MULTICA_ARGS="daemon stop --profile $PROFILE"
 make stop-worktree
 ```
 
@@ -267,4 +267,3 @@ rm -f "/tmp/multica-cookies-${PROFILE}.txt"
 - **Migration drift:** run `ENV_FILE=.env.worktree make migrate-up`.
 - **CLI changes appear stale:** use `make cli` or rebuild before testing a
   packaged binary.
-

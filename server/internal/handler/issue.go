@@ -2118,6 +2118,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// create this issue, on behalf of the squad".
 	var agentUUID pgtype.UUID
 	var squadUUID pgtype.UUID
+	var selectedSquad db.Squad
 	if hasSquad {
 		var ok bool
 		squadUUID, ok = parseUUIDOrBadRequest(w, req.SquadID, "squad_id")
@@ -2136,6 +2137,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "squad is archived")
 			return
 		}
+		selectedSquad = squad
 		agentUUID = squad.LeaderID
 	} else {
 		var ok bool
@@ -2254,11 +2256,21 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	if !h.requireSpaceCollaboration(w, r, wsUUID, space.ID) {
 		return
 	}
+	if hasSquad && selectedSquad.SpaceID != space.ID {
+		writeError(w, http.StatusConflict, "Squad and Issue must belong to the same Space")
+		return
+	}
 	// Reuse the canonical assignment gate only after the final Space is known;
 	// Selected Spaces must match the actual async-created Issue location.
+	assigneeType := "agent"
+	assigneeID := agentUUID
+	if hasSquad {
+		assigneeType = "squad"
+		assigneeID = squadUUID
+	}
 	if status, msg := h.validateAssigneePair(
 		r.Context(), r, workspaceID,
-		pgtype.Text{String: "agent", Valid: true}, agentUUID, space.ID,
+		pgtype.Text{String: assigneeType, Valid: true}, assigneeID, space.ID,
 	); status != 0 {
 		writeError(w, status, msg)
 		return
@@ -3145,6 +3157,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		}
 		if squad.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to an archived squad"
+		}
+		if squad.SpaceID != targetSpaceID {
+			return http.StatusConflict, "Squad and Issue must belong to the same Space"
 		}
 		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil || leader.ArchivedAt.Valid {

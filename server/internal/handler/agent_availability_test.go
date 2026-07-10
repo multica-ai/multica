@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -576,7 +577,7 @@ func TestBacklogPromotionRechecksPrivateAgentInvocation(t *testing.T) {
 	})
 }
 
-func TestAutopilotCollaboratorCannotMoveIntoRestrictedSpace(t *testing.T) {
+func TestAutopilotSpaceCannotChange(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -591,7 +592,10 @@ func TestAutopilotCollaboratorCannotMoveIntoRestrictedSpace(t *testing.T) {
 	})
 	req = withURLParam(req, "id", autopilotID)
 	testHandler.UpdateAutopilot(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("move Autopilot into restricted Space: expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("move Autopilot into another Space: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Autopilot Space cannot be changed") {
+		t.Fatalf("move Autopilot into another Space: unexpected response: %s", w.Body.String())
 	}
 }
