@@ -22,6 +22,7 @@ const (
 	// Agent events
 	EventAgentStatus   = "agent:status"
 	EventAgentCreated  = "agent:created"
+	EventAgentUpdated  = "agent:updated"
 	EventAgentArchived = "agent:archived"
 	EventAgentRestored = "agent:restored"
 
