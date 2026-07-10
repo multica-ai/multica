@@ -73,6 +73,8 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { countUnreadChatMessages } from "@multica/core/chat/unread";
+import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
@@ -369,15 +371,30 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
-  // Chat tab unread badge: number of chat threads with a fresh reply.
+  // Chat tab unread badge: IM-style total of unread *messages* across chat
+  // threads (countUnreadChatMessages is the shared definition — mobile's tab
+  // badge derives from the same function, keeping the platforms in agreement).
   const { data: chatSessions = [] } = useQuery({
     ...chatSessionsOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  // IM-style: total unread *messages* across all chat threads (not thread count).
+  // The session the user is reading right now must not count: the thread list
+  // renders its row badge as 0 (auto mark-read is about to clear it), and a
+  // reply landing in the open conversation would otherwise flash a sidebar
+  // count with no matching row. "Reading right now" = a session is active AND
+  // a chat surface is actually showing it (chat page route or the floating
+  // window). A remembered selection while both surfaces are closed still
+  // counts — auto mark-read won't fire there, so the badge must.
+  const activeChatSessionId = useChatStore((s) => s.activeSessionId);
+  const floatingChatOpen = useChatStore((s) => s.isOpen);
+  const chatHref = p.chat();
+  const viewedChatSessionId =
+    floatingChatOpen || isNavActive(pathname, chatHref)
+      ? activeChatSessionId
+      : null;
   const chatUnreadCount = React.useMemo(
-    () => chatSessions.reduce((sum, s) => sum + (s.unread_count ?? 0), 0),
-    [chatSessions],
+    () => countUnreadChatMessages(chatSessions, viewedChatSessionId),
+    [chatSessions, viewedChatSessionId],
   );
   // Cross-workspace unread summary backs the workspace-switcher dot. One
   // shared cache entry across workspaces; gated on an active workspace since
