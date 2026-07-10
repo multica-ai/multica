@@ -125,7 +125,7 @@ VALUES (
     $8,
     $9
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids
 `
 
 type CreateChatTaskParams struct {
@@ -190,6 +190,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.OriginatorUserID,
 		&i.RuntimeConnectedApps,
 		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
 	)
 	return i, err
 }
@@ -806,9 +807,8 @@ FOR UPDATE
 // their FK check after we commit the delete.
 func (q *Queries) LockChatSessionForDelete(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockChatSessionForDelete, id)
-	var id_2 pgtype.UUID
-	err := row.Scan(&id_2)
-	return id_2, err
+	err := row.Scan(&id)
+	return id, err
 }
 
 const markChatSessionRead = `-- name: MarkChatSessionRead :exec

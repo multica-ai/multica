@@ -332,10 +332,11 @@ LIMIT 1;
 -- name: ListReconcilableCommentsForIssueSince :many
 -- MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
 -- comment on an issue created strictly after @since (the completing run's
--- created_at anchor), oldest first. The reconcile pass replays each undelivered
--- one through the normal trigger pipeline so a single coalesced follow-up run
--- covers all of them, guaranteeing at-least-once processing for input that
--- landed after the completing run's claim response was built.
+-- created_at anchor), plus every id in its planned trigger/coalesced batch.
+-- Planned ids matter for retry children because their input comments predate
+-- the child's created_at; if one could not be embedded at claim time it still
+-- needs reconciliation. The handler excludes only delivered_comment_ids, then
+-- replays the remainder through the normal trigger pipeline oldest first.
 --
 -- Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
 -- That left a gap — an explicit agent→agent @mention (agent A comments
@@ -359,7 +360,10 @@ LIMIT 1;
 SELECT * FROM comment
 WHERE issue_id = @issue_id
   AND author_type IN ('member', 'agent')
-  AND created_at > @since
+  AND (
+      created_at > @since
+      OR id = ANY(@planned_comment_ids::uuid[])
+  )
 ORDER BY created_at ASC, id ASC;
 
 -- name: GetComment :one

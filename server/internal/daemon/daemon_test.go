@@ -99,6 +99,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CODEX_HOME", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
+		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
