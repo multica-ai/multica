@@ -1361,7 +1361,7 @@ function DraggableSwimLane({
             <ActorAvatar
               actorType={lane.actor.type}
               actorId={lane.actor.id}
-              size={18}
+              size="sm"
             />
           )}
           <span className="truncate text-sm font-semibold">{lane.title}</span>

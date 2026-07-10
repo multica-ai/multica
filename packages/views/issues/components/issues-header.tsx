@@ -268,7 +268,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                  <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                   <span className="truncate">{m.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">
@@ -297,7 +297,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                   <span className="truncate">{a.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">
@@ -326,7 +326,7 @@ function ActorSubContent({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={checked} />
-                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
                   <span className="truncate">{s.name}</span>
                   {count > 0 && (
                     <span className="ml-auto text-xs text-muted-foreground">

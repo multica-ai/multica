@@ -800,7 +800,7 @@ function AgentSection({
               <ActorAvatar
                 actorType={selectedType}
                 actorId={selectedId}
-                size={28}
+                size="md"
                 showStatusDot={selectedType === "agent"}
               />
             ) : (

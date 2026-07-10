@@ -597,12 +597,15 @@ WHERE chat_session_id = $1;
 -- name: CreateChannelBindingToken :one
 -- Mints a single-use binding token for an unbound platform user. TTL cap
 -- (15 min) enforced by the table CHECK in lockstep with
--- channel.BindingTokenTTL. The HASH is stored, never the raw token.
+-- channel.BindingTokenTTL. Clamp against the database clock so small clock
+-- skew between an app node and Postgres cannot reject an otherwise valid
+-- 15-minute token. The HASH is stored, never the raw token.
 INSERT INTO channel_binding_token (
     token_hash, workspace_id, installation_id, channel_type,
     channel_user_id, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5,
+    LEAST(sqlc.arg('expires_at')::timestamptz, now() + INTERVAL '15 minutes')
 )
 RETURNING *;
 

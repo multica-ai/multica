@@ -166,7 +166,10 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
-	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
+	req.Header.Set("X-Client-Capabilities", strings.Join([]string{
+		protocol.DaemonCapabilitySkillBundlesV1,
+		protocol.DaemonCapabilityCoalescedCommentsV1,
+	}, ","))
 }
 
 // SetToken sets the auth token for authenticated requests.

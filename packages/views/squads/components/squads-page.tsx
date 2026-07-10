@@ -148,18 +148,19 @@ function SquadAvatar({ squad }: { squad: Squad }) {
         name={squad.name}
         initials={initials}
         avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-        size={32}
-        className="shrink-0 rounded-md"
+        size="lg"
+        className="shrink-0"
       />
     );
   }
   return (
-    <div
-      className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-      title={squad.name}
-    >
-      <Users className="h-4 w-4" />
-    </div>
+    <ActorAvatarBase
+      name={squad.name}
+      initials={initials}
+      isSquad
+      size="lg"
+      className="shrink-0"
+    />
   );
 }
 
@@ -191,7 +192,7 @@ function LeaderCell({
 }) {
   return (
     <ListGridCell className="gap-1.5">
-      <ActorAvatar actorType="agent" actorId={leaderId} size={18} />
+      <ActorAvatar actorType="agent" actorId={leaderId} size="sm" />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {leader?.name ?? leaderId.slice(0, 8)}
       </span>
@@ -225,7 +226,7 @@ function MembersCell({ squad }: { squad: Squad }) {
             <ActorAvatar
               actorType={m.member_type}
               actorId={m.member_id}
-              size={22}
+              size="md"
               enableHoverCard={m.member_type === "agent"}
             />
           </span>
@@ -599,7 +600,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.leaders.includes(o.id)} />
-                  <ActorAvatar actorType="agent" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="agent" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -622,7 +623,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.creators.includes(o.id)} />
-                  <ActorAvatar actorType="member" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="member" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -986,7 +987,7 @@ export function SquadsPage() {
                         <ActorAvatar
                           actorType="member"
                           actorId={squad.creator_id}
-                          size={18}
+                          size="sm"
                         />
                         <span className="min-w-0 truncate text-xs text-muted-foreground">
                           {membersById.get(squad.creator_id)?.name ??
@@ -1047,7 +1048,7 @@ function LoadingSkeleton() {
         {Array.from({ length: 4 }).map((_, i) => (
           <ListGridRow key={i} className="h-16 hover:bg-transparent">
             <ListGridCell className="gap-3">
-              <Skeleton className="size-8 rounded-md" />
+              <Skeleton className="size-8 rounded-full" />
               <div className="min-w-0 flex-1 space-y-1.5">
                 <Skeleton className="h-3.5 w-32 max-w-full" />
                 <Skeleton className="h-3 w-48 max-w-full" />

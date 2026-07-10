@@ -347,6 +347,14 @@ export interface ChatDonePayload {
   content?: string;
   elapsed_ms?: number;
   created_at?: string;
+  /**
+   * "message" (default) or "no_response" — a completed direct-chat turn with
+   * no text reply (MUL-4351). Optional/additive: older servers omit it, so the
+   * consumer defaults to "message". Because direct-chat completion now always
+   * persists exactly one assistant row, message_id/content/created_at are
+   * populated alongside this even for a no_response turn.
+   */
+  message_kind?: import("./chat").ChatMessageKind;
 }
 
 export interface ChatSessionReadPayload {

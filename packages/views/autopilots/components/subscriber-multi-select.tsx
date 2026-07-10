@@ -70,7 +70,7 @@ export function SubscriberMultiSelect({
           key={m.user_id}
           className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
         >
-          <ActorAvatar actorType="member" actorId={m.user_id} size={14} />
+          <ActorAvatar actorType="member" actorId={m.user_id} size="xs" />
           <span className="max-w-[10rem] truncate">{m.name}</span>
           <button
             type="button"
@@ -114,7 +114,7 @@ export function SubscriberMultiSelect({
               selected={selectedSet.has(m.user_id)}
               onClick={() => toggle(m.user_id)}
             >
-              <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+              <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
               <span className="truncate">{m.name}</span>
             </PickerItem>
           ))

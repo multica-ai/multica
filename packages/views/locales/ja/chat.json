@@ -25,6 +25,8 @@
     "show_details": "詳細を表示",
     "replied_in": "{{elapsed}}で返信",
     "failed_after": "{{elapsed}}後に失敗",
+    "finished_in": "{{elapsed}}で完了",
+    "no_response": "エージェントはテキストの返信なしでこのターンを終了しました。",
     "failure": {
       "agent_error": "エージェントでエラーが発生し、返信を完了できませんでした。もう一度お試しください。",
       "timeout": "処理に時間がかかりすぎたため、完了前に停止しました。もう一度お試しいただくか、リクエストを分けてみてください。",
@@ -141,6 +143,7 @@
     "failed": "送信失敗",
     "you_prefix": "あなた：",
     "no_messages": "メッセージはまだありません",
+    "no_response_preview": "テキスト返信なし",
     "quick_agents": "よく使う Agent",
     "add": "追加",
     "add_agent": "よく使う Agent を追加",

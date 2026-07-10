@@ -329,22 +329,40 @@ function AssistantRow({
   const { data: timeline = [] } = useQuery(
     taskMessagesOptions(message.task_id),
   );
+  // no_response (MUL-4351, mirrors packages/views AssistantMessage): the agent
+  // completed this turn without text. Keep the tool timeline and show a notice
+  // instead of an empty Markdown block; caption reads "Finished in" not
+  // "Replied in".
+  const isNoResponse = message.message_kind === "no_response";
   const body = (
     <View className="gap-1.5">
       {timeline.length > 0 ? (
         <ChatTimeline items={timeline} />
       ) : null}
-      <Markdown
-        content={message.content}
-        attachments={message.attachments}
-        selectable={isSelecting}
-      />
+      {isNoResponse ? (
+        <Text className="text-sm italic text-muted-foreground">
+          The agent finished this turn without a text reply.
+        </Text>
+      ) : (
+        <Markdown
+          content={message.content}
+          attachments={message.attachments}
+          selectable={isSelecting}
+        />
+      )}
+      {/* Standalone attachment cards for anything not referenced inline. An
+          image-only reply is a real ('message') outcome with empty content, so
+          it flows through the else-branch above (renders nothing) and the cards
+          here ARE the reply. */}
       <CommentAttachmentList
         attachments={message.attachments}
         content={message.content}
       />
       {message.elapsed_ms != null ? (
-        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+        <ElapsedCaption
+          variant={isNoResponse ? "finished" : "replied"}
+          elapsedMs={message.elapsed_ms}
+        />
       ) : null}
     </View>
   );
@@ -363,13 +381,15 @@ function ElapsedCaption({
   variant,
   elapsedMs,
 }: {
-  variant: "replied" | "failed";
+  variant: "replied" | "failed" | "finished";
   elapsedMs: number;
 }) {
   const label =
     variant === "replied"
       ? `Replied in ${formatElapsedMs(elapsedMs)}`
-      : `Failed after ${formatElapsedMs(elapsedMs)}`;
+      : variant === "finished"
+        ? `Finished in ${formatElapsedMs(elapsedMs)}`
+        : `Failed after ${formatElapsedMs(elapsedMs)}`;
   return (
     <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
   );

@@ -784,6 +784,7 @@ func TestResolveSessionID(t *testing.T) {
 		requested string
 		emitted   string
 		failed    bool
+		stderr    string
 		want      string
 	}{
 		{
@@ -791,6 +792,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "",
 			emitted:   "fresh-abc",
 			failed:    false,
+			stderr:    "",
 			want:      "fresh-abc",
 		},
 		{
@@ -798,6 +800,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    false,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -805,6 +808,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    true,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -812,6 +816,15 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    true,
+			stderr:    "",
+			want:      "",
+		},
+		{
+			name:      "resume not found stderr clears matching id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "sess-dead",
+			failed:    true,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "",
 		},
 		{
@@ -819,6 +832,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    false,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "fresh-new",
 		},
 		{
@@ -826,6 +840,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "",
 			failed:    true,
+			stderr:    "",
 			want:      "",
 		},
 	}
@@ -834,10 +849,10 @@ func TestResolveSessionID(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed, tc.stderr)
 			if got != tc.want {
-				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
-					tc.requested, tc.emitted, tc.failed, got, tc.want)
+				t.Fatalf("resolveSessionID(%q, %q, %v, %q) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, tc.stderr, got, tc.want)
 			}
 		})
 	}

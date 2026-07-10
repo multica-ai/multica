@@ -169,11 +169,12 @@ ORDER BY created_at DESC;
 -- key rides harmlessly alongside.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task, handoff_note,
+    coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
@@ -242,27 +243,45 @@ WHERE id = $1 AND issue_id IS NULL;
 -- retried as fresh sessions so the child does not inherit a stuck agent
 -- conversation. Keep the CASE WHEN predicates in sync with
 -- resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
--- incremented; max_attempts, trigger_comment_id, is_leader_task, and squad_id
--- are inherited so the retried task keeps the same squad-role provenance as its
--- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
--- continues to recognise it as a leader task. Inheriting squad_id also keeps
--- the squad-leader briefing injection working across retries.
+-- incremented; max_attempts, trigger_comment_id, coalesced_comment_ids,
+-- is_leader_task, and squad_id are inherited so the retried task receives the
+-- parent's complete planned comment batch and keeps the same squad-role
+-- provenance. delivered_comment_ids intentionally stays at its '{}' default:
+-- the child must earn its own delivery receipt at claim time.
 --
 -- originator_user_id is inherited so the Composio overlay decision sees the
 -- same top-of-chain human across the retry: the user behind the original
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+--
+-- chat_input_task_id is inherited straight from the parent so the whole retry
+-- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
+-- direct task set it to its own id, every descendant copies that value, and a
+-- claim always reads the same user messages. A plain copy (not
+-- COALESCE(parent.chat_input_task_id, parent.id)) is deliberate: legacy/channel
+-- parents carry NULL and must stay NULL so their retries keep the trailing
+-- selector — promoting a pre-migration NULL row to the task-owned path on retry
+-- would risk replaying untagged history during a rolling deploy.
+--
+-- Chat retries are queued at GREATEST(priority, 3) so a transiently-failed
+-- earlier turn is re-claimed ahead of any fresh chat task (priority 2) the user
+-- queued while the failing turn was still running — the retry continues the
+-- older turn first. Combined with creating the retry inside FailTask's
+-- transaction, this leaves no window for a newer input task to jump ahead.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
-    status, priority, trigger_comment_id, trigger_summary, context,
+    status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    chat_input_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
+    'queued',
+    CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
@@ -271,7 +290,8 @@ SELECT
     p.squad_id,
     p.originator_user_id,
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    p.chat_input_task_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -309,14 +329,14 @@ WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_l
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
--- Cancels active tasks whose trigger is the given comment. Called when a
--- comment is deleted so the agent does not run with the now-deleted content
--- already embedded in its prompt. Must run BEFORE the comment row is deleted
--- because the FK ON DELETE SET NULL would otherwise nullify trigger_comment_id
--- and we'd lose the ability to find the affected tasks.
+-- Cancels active tasks whose planned batch contains the edited/deleted comment.
+-- The body may already have been embedded as either the primary trigger or a
+-- coalesced input; cancellation prevents an agent from acting on a stale or
+-- deleted version. Must run before deletion clears trigger_comment_id.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByChatSession :many
@@ -384,6 +404,49 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
+RETURNING *;
+
+-- name: SetTaskDeliveredCommentIDs :one
+-- Replace (rather than append to) the delivery receipt for this claim. A stale
+-- dispatched task may be reclaimed by a daemon with different capabilities,
+-- so only the ids embedded in the newest response count as delivered. The CAS
+-- keeps a stale handler from writing after execution starts, and the subset
+-- guard prevents acknowledging an id outside the task's enqueue-time plan.
+UPDATE agent_task_queue
+SET delivered_comment_ids = @delivered_comment_ids::uuid[]
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at
+  AND trigger_comment_id IS NOT DISTINCT FROM sqlc.narg(expected_trigger_comment_id)::uuid
+  AND NOT EXISTS (
+      SELECT 1
+      FROM unnest(@delivered_comment_ids::uuid[]) AS delivered(id)
+      WHERE delivered.id IS NULL
+         OR (
+             delivered.id IS DISTINCT FROM trigger_comment_id
+             AND NOT (delivered.id = ANY(coalesced_comment_ids))
+         )
+  )
+RETURNING delivered_comment_ids;
+
+-- name: RequeueAgentTaskAfterClaimFailure :one
+-- Claim finalization (task token + optional comment receipt) failed before any
+-- response bytes were written. Return only that exact claim generation to the
+-- queue so another poll can retry immediately instead of waiting for stale
+-- dispatch recovery. The dispatched_at CAS prevents an old handler from
+-- rolling back a newer reclaim.
+UPDATE agent_task_queue
+SET status = 'queued',
+    dispatched_at = NULL,
+    prepare_lease_expires_at = NULL,
+    delivered_comment_ids = '{}'
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at
 RETURNING *;
 
 -- name: ReclaimStaleDispatchedTaskForRuntime :one
@@ -743,9 +806,9 @@ WHERE issue_id = @issue_id
 -- rounds 2–4). This merge is only reached when HasPendingTaskForIssueAndAgent
 -- matched a 'queued'/'dispatched' task, and 'dispatched' is deliberately NOT a
 -- target: a dispatched / waiting_local_directory / running task has already had
--- its claim response (with its coalesced_comment_ids) built and shipped, so
--- folding a comment in afterward would mark an undelivered comment as delivered;
--- those are handled by completion reconciliation instead. 'deferred' is also NOT
+-- its claim response built. Folding afterward would add a planned id that is
+-- absent from that response's delivered_comment_ids receipt; completion
+-- reconciliation handles it instead. 'deferred' is also NOT
 -- a target: a deferred row is an assignee-fallback escalation with its own
 -- fire_at/promotion lifecycle, and it never sets AlreadyPending
 -- (HasPendingTaskForIssueAndAgent only looks at queued/dispatched). If a newer
@@ -753,8 +816,8 @@ WHERE issue_id = @issue_id
 -- pick the deferred one by created_at and steal the coalescing target away from
 -- the queued run that is actually about to be claimed — so we match ONLY the
 -- queued row (the idx_one_pending_task_per_issue_agent unique index guarantees
--- at most one). Because merges only ever touch that pre-claim queued row,
--- coalesced_comment_ids == the set the run actually received.
+-- at most one). coalesced_comment_ids remains the pre-claim plan; the claim
+-- path records the actual embedded subset in delivered_comment_ids.
 --
 -- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
 -- runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW

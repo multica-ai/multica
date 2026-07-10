@@ -2969,6 +2969,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
+	// Children that transitioned into a terminal status this batch, collected so
+	// the parent/stage notification is evaluated once against the final state
+	// after the loop (MUL-4155) rather than per-child mid-batch.
+	var childDoneCompleted []db.Issue
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -3168,13 +3172,26 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538). Best-effort; failure does not abort the batch.
-		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage
+		// barrier here, per-child, would read a mid-batch sibling snapshot and
+		// fire a stale "advance Stage N+1" wake when one batch closes several
+		// stages at once (MUL-4155). Collect the terminal transitions and let
+		// notifyParentsOfBatchChildDone below evaluate each parent once against
+		// the batch's final committed state. Same transition guard as
+		// notifyParentOfChildDone: a non-terminal -> terminal move on a child.
+		if statusChanged && issue.ParentIssueID.Valid &&
+			!isTerminalChildStatus(prevIssue.Status) && isTerminalChildStatus(issue.Status) {
+			childDoneCompleted = append(childDoneCompleted, issue)
 		}
 
 		updated++
 	}
+
+	// Aggregate parent/stage notification over the whole batch's final state so
+	// each affected parent gets at most one accurate comment + wake, independent
+	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
+	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
+	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})

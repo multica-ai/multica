@@ -133,7 +133,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <ActorAvatar
         actorType={issue.assignee_type!}
         actorId={issue.assignee_id!}
-        size={20}
+        size="sm"
         enableHoverCard
         className="shrink-0"
       />
