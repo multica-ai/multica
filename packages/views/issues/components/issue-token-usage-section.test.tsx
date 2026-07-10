@@ -87,7 +87,7 @@ describe("IssueTokenUsageSection", () => {
     // cost without cache writes: (2000*3 + 100*15 + 30000*0.3) / 1e6 ≈ $0.017
     expect(screen.getByText("$0.02 · in 2.0k · out 100 · cache 30.0k")).toBeInTheDocument();
   });
-  
+
   it("expands a per-run breakdown labelled by trigger type", () => {
     render(wrap(<IssueTokenUsageSection usage={USAGE} />));
     fireEvent.click(screen.getByText("2 runs"));
