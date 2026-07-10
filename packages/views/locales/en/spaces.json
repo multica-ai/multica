@@ -77,7 +77,16 @@
   "surface": {
     "not_found": "Space not found"
   },
+  "overview": {
+    "work_title": "Work in this Space",
+    "manage_members": "Manage members",
+    "member_count_one": "{{count}} member",
+    "member_count_other": "{{count}} members",
+    "leave_confirm_title": "Leave this Space?",
+    "leave_confirm_description": "You will leave {{name}} and it will disappear from your Sidebar. A Space manager can add you again later."
+  },
   "settings": {
+    "title": "Settings",
     "stats_title": "At a glance",
     "stats_issues": "Issues",
     "stats_projects": "Projects",

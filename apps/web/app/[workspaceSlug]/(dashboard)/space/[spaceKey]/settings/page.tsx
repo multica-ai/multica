@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { SpaceOverviewPage } from "@multica/views/spaces";
+import { SpaceSettingsPage } from "@multica/views/spaces";
 
 export default function Page({
   params,
@@ -9,5 +9,5 @@ export default function Page({
   params: Promise<{ spaceKey: string }>;
 }) {
   const { spaceKey } = use(params);
-  return <SpaceOverviewPage spaceKey={spaceKey} />;
+  return <SpaceSettingsPage spaceKey={spaceKey} />;
 }

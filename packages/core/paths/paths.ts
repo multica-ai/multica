@@ -32,6 +32,7 @@ function workspaceScoped(slug: string) {
     spaceProjects: (key: string) => `${ws}/space/${encode(key)}/projects`,
     spaceAutopilots: (key: string) => `${ws}/space/${encode(key)}/autopilots`,
     spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
+    spaceSettings: (key: string) => `${ws}/space/${encode(key)}/settings`,
     // Static sibling of spaceDetail — "new" is a reserved space key
     // (RESERVED_SPACE_KEYS) precisely so it can never collide with this route.
     spaceNew: () => `${ws}/space/new`,
@@ -55,6 +56,8 @@ function workspaceScoped(slug: string) {
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
+    settingsSection: (scope: string, page: string) =>
+      `${ws}/settings/${encode(scope)}/${encode(page)}`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };
 }

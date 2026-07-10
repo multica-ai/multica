@@ -94,12 +94,13 @@
   "chat": {
     "floating_title": "フローティングウィンドウ",
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
+    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用のチャットページを使用します。"
   },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
     "workspace_fallback": "ワークスペース",
+    "this_device": "このデバイス",
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
@@ -114,7 +115,8 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
-      "properties": "プロパティ"
+      "properties": "プロパティ",
+      "spaces": "スペース"
     }
   },
   "properties": {
@@ -221,6 +223,17 @@
       "confirm": "ラベルを削除",
       "failed": "ラベルを削除できませんでした"
     }
+  },
+  "spaces": {
+    "title": "スペース",
+    "description": "ワークスペースのスペース、既定の保存先、アクセス状態を管理します。",
+    "joined": "参加済み",
+    "not_joined": "未参加",
+    "set_default": "既定に設定",
+    "setting_default": "設定中...",
+    "toast_default_updated": "既定のスペースを更新しました",
+    "toast_default_failed": "既定のスペースを更新できませんでした",
+    "archived_title_other": "アーカイブ済みスペース（{{count}}）"
   },
   "account": {
     "section_profile": "個人情報",

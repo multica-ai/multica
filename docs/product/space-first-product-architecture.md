@@ -331,7 +331,6 @@ Initiative 只聚合和呈现，不接管 Project 或 Issue 的归属。看到 I
 - Home / My Work；
 - Inbox；
 - Search；
-- All Projects（索引）；
 - Agents；
 - Skills；
 - Initiatives（未来）；
@@ -347,7 +346,7 @@ Initiative 只聚合和呈现，不接管 Project 或 Issue 的归属。看到 I
 - Members；
 - Space Settings。
 
-Sidebar 中只显示用户已加入或主动 Pin 的 Space。全局搜索和 All Projects 仍可以展示用户有权访问、但未加入的 Open Space 内容。
+Sidebar 中只显示用户已加入或主动 Pin 的 Space。项目只在所属 Space 下作为工作入口，不在 Workspace Sidebar 中重复出现。跨 Space 的项目索引可以通过搜索、报表或未来的聚合视图提供，但它只是展示层，不改变项目归属，也不成为 Workspace 根目录下的第二套项目入口。
 
 ## 生命周期规则
 

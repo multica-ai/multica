@@ -76,7 +76,15 @@
   "surface": {
     "not_found": "Space를 찾을 수 없습니다"
   },
+  "overview": {
+    "work_title": "이 스페이스의 작업",
+    "manage_members": "멤버 관리",
+    "member_count_other": "멤버 {{count}}명",
+    "leave_confirm_title": "이 스페이스에서 나갈까요?",
+    "leave_confirm_description": "{{name}}에서 나가면 사이드바에서 사라집니다. 나중에 스페이스 관리자가 다시 추가할 수 있습니다."
+  },
   "settings": {
+    "title": "설정",
     "stats_title": "현황",
     "stats_issues": "이슈",
     "stats_projects": "프로젝트",

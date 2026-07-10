@@ -3,7 +3,8 @@ import {
   SpaceIssuesPage,
   SpaceProjectsPage,
   SpaceAutopilotsPage,
-  SpaceDetailPage,
+  SpaceOverviewPage,
+  SpaceSettingsPage,
 } from "@multica/views/spaces";
 
 // Router wrappers: resolve the :spaceKey param and hand it to the shared
@@ -30,5 +31,11 @@ export function SpaceAutopilotsRoute() {
 export function SpaceDetailRoute() {
   const { spaceKey } = useParams<{ spaceKey: string }>();
   if (!spaceKey) return null;
-  return <SpaceDetailPage spaceKey={spaceKey} />;
+  return <SpaceOverviewPage spaceKey={spaceKey} />;
+}
+
+export function SpaceSettingsRoute() {
+  const { spaceKey } = useParams<{ spaceKey: string }>();
+  if (!spaceKey) return null;
+  return <SpaceSettingsPage spaceKey={spaceKey} />;
 }

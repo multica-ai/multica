@@ -97,12 +97,13 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, use the dedicated Chat page."
   },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
     "workspace_fallback": "Workspace",
+    "this_device": "This Device",
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
@@ -117,7 +118,8 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
-      "properties": "Properties"
+      "properties": "Properties",
+      "spaces": "Spaces"
     }
   },
   "properties": {
@@ -229,6 +231,18 @@
       "confirm": "Delete label",
       "failed": "Couldn't delete label"
     }
+  },
+  "spaces": {
+    "title": "Spaces",
+    "description": "Manage the workspace's Spaces, default destination, and access state.",
+    "joined": "Joined",
+    "not_joined": "Not joined",
+    "set_default": "Set as Default",
+    "setting_default": "Setting...",
+    "toast_default_updated": "Default Space updated",
+    "toast_default_failed": "Failed to update the Default Space",
+    "archived_title_one": "Archived Space ({{count}})",
+    "archived_title_other": "Archived Spaces ({{count}})"
   },
   "account": {
     "section_profile": "Personal information",

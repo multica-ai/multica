@@ -97,12 +97,13 @@
   "chat": {
     "floating_title": "悬浮窗",
     "floating_label": "悬浮聊天窗",
-    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，使用独立的聊天页面。"
   },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
     "workspace_fallback": "工作区",
+    "this_device": "此设备",
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
@@ -117,7 +118,8 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "properties": "属性"
+      "properties": "属性",
+      "spaces": "空间"
     }
   },
   "properties": {
@@ -228,6 +230,17 @@
       "confirm": "删除标签",
       "failed": "无法删除标签"
     }
+  },
+  "spaces": {
+    "title": "空间",
+    "description": "管理工作区中的空间、默认归属和访问状态。",
+    "joined": "已加入",
+    "not_joined": "未加入",
+    "set_default": "设为默认",
+    "setting_default": "设置中...",
+    "toast_default_updated": "默认空间已更新",
+    "toast_default_failed": "无法更新默认空间",
+    "archived_title_other": "已归档空间（{{count}}）"
   },
   "account": {
     "section_profile": "个人信息",

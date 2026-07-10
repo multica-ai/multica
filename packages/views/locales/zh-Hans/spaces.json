@@ -76,7 +76,15 @@
   "surface": {
     "not_found": "未找到空间"
   },
+  "overview": {
+    "work_title": "空间内工作",
+    "manage_members": "管理成员",
+    "member_count_other": "{{count}} 位成员",
+    "leave_confirm_title": "离开这个空间？",
+    "leave_confirm_description": "离开 {{name}} 后，它将从你的侧边栏中消失。空间管理员之后可以重新添加你。"
+  },
   "settings": {
+    "title": "设置",
     "stats_title": "概况",
     "stats_issues": "Issues",
     "stats_projects": "项目",

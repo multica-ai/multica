@@ -76,7 +76,15 @@
   "surface": {
     "not_found": "Space が見つかりません"
   },
+  "overview": {
+    "work_title": "このスペースの作業",
+    "manage_members": "メンバーを管理",
+    "member_count_other": "{{count}} 人のメンバー",
+    "leave_confirm_title": "このスペースから退出しますか？",
+    "leave_confirm_description": "{{name}} から退出し、サイドバーに表示されなくなります。後でスペース管理者が再度追加できます。"
+  },
   "settings": {
+    "title": "設定",
     "stats_title": "概況",
     "stats_issues": "Issue",
     "stats_projects": "プロジェクト",

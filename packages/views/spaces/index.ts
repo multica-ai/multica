@@ -5,6 +5,7 @@ export {
   SpaceIssuesPage,
   SpaceProjectsPage,
   SpaceAutopilotsPage,
-  SpaceDetailPage,
+  SpaceOverviewPage,
+  SpaceSettingsPage,
   CreateSpacePage,
 } from "./components";

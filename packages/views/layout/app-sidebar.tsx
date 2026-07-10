@@ -184,6 +184,7 @@ const spaceChildNav = [
   { pathKey: "spaceIssues", labelKey: "issues", icon: ListTodo },
   { pathKey: "spaceProjects", labelKey: "projects", icon: FolderKanban },
   { pathKey: "spaceAutopilots", labelKey: "autopilots", icon: Zap },
+  { pathKey: "spaceSettings", labelKey: "settings", icon: Settings },
 ] as const;
 
 function DraftDot() {
@@ -997,9 +998,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           >
                             <item.icon />
                             <span>{t(($) => $.nav[item.labelKey])}</span>
-                            {item.key === "runtimes" && hasRuntimeUpdates && (
-                              <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                            )}
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       );

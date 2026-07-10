@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, FolderKanban, ListTodo, Search, Zap } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,8 +9,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
 import {
   useArchiveSpace,
-  useJoinSpace,
-  useLeaveSpace,
   useReplaceSpaceMembers,
   useUpdateSpace,
   useUpdateSpaceMemberRole,
@@ -19,8 +17,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { sanitizeSpaceKeyInput, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
 import type { Space } from "@multica/core/types";
@@ -49,26 +45,21 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { SpaceIcon } from "./space-icon";
 import { useT } from "../../i18n";
 
 /**
- * Space detail — /space/:key, the sidebar space row's landing page. A single
- * narrow column: the identity rendered as page text (icon picker applies on
- * pick, name commits on blur — no save buttons), then members
- * (avatar stack → checkbox config; saving an empty set archives behind a
- * confirm), go-to links, and archive.
+ * Space settings — /space/:key/settings. Identity fields apply inline, then
+ * membership and lifecycle controls follow in the same narrow column.
  */
-export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
+export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
   // Full list (not active-only): an archived space's settings stay viewable.
   const { data: spaces = [], isSuccess } = useQuery(spaceListOptions(wsId));
   const space = spaces.find((tm) => tm.key.toLowerCase() === spaceKey.toLowerCase());
-  const joinSpace = useJoinSpace();
-  const leaveSpace = useLeaveSpace();
   // The server protects the configured Default Space separately. This count
   // keeps the older, complementary invariant visible too: a workspace must
   // never archive its final active Space.
@@ -87,49 +78,18 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
       <PageHeader className="gap-2">
         <SpaceIcon space={space} />
         <h1 className="text-sm font-medium">{space.name}</h1>
+        <span className="text-sm text-muted-foreground">/</span>
+        <span className="text-sm text-muted-foreground">
+          {t(($) => $.settings.title)}
+        </span>
         {space.is_default && <Badge variant="secondary">{t(($) => $.state.default)}</Badge>}
         {space.archived_at && <Badge variant="outline">{t(($) => $.state.archived)}</Badge>}
-        {!space.archived_at && !space.is_member && space.visibility === "open" && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={joinSpace.isPending}
-            onClick={async () => {
-              try {
-                await joinSpace.mutateAsync(space.id);
-                toast.success(t(($) => $.toast_joined));
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : t(($) => $.toast_save_failed));
-              }
-            }}
-          >
-            {t(($) => $.actions.join)}
-          </Button>
-        )}
-        {!space.archived_at && space.is_member && (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={leaveSpace.isPending}
-            onClick={async () => {
-              try {
-                await leaveSpace.mutateAsync(space.id);
-                toast.success(t(($) => $.toast_left));
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : t(($) => $.toast_save_failed));
-              }
-            }}
-          >
-            {t(($) => $.actions.leave)}
-          </Button>
-        )}
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
           <Identity space={space} />
           <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
-          <GotoSection space={space} />
           <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
         </div>
       </div>
@@ -555,10 +515,9 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lead">lead</SelectItem>
-                      <SelectItem value="admin">admin</SelectItem>
-                      <SelectItem value="member">member</SelectItem>
-                      <SelectItem value="guest">guest</SelectItem>
+                      {(["lead", "admin", "member", "guest"] as const).map((role) => (
+                        <SelectItem key={role} value={role}>{role}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 )}
@@ -602,53 +561,6 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function GotoSection({ space }: { space: Space }) {
-  const { t } = useT("spaces");
-  const wsId = useWorkspaceId();
-  const p = useWorkspacePaths();
-  // Counts come from the shared list caches — cheap, and clicking through
-  // lands on the matching space surface.
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: autopilots = [] } = useQuery(autopilotListOptions(wsId));
-  const projectCount = useMemo(
-    () => projects.filter((project) => project.space_id === space.id).length,
-    [projects, space.id],
-  );
-  const autopilotCount = useMemo(
-    () => autopilots.filter((autopilot) => autopilot.space_id === space.id).length,
-    [autopilots, space.id],
-  );
-
-  const links = [
-    { icon: ListTodo, label: t(($) => $.settings.stats_issues), value: space.issue_counter, href: p.spaceIssues(space.key) },
-    { icon: FolderKanban, label: t(($) => $.settings.stats_projects), value: projectCount, href: p.spaceProjects(space.key) },
-    { icon: Zap, label: t(($) => $.settings.stats_autopilots), value: autopilotCount, href: p.spaceAutopilots(space.key) },
-  ];
-
-  return (
-    <div className="flex flex-col gap-1">
-      <h3 className="mb-1 text-xs font-medium text-muted-foreground">
-        {t(($) => $.settings.goto)}
-      </h3>
-      {/* Equal-width cells, three across in the detail container; auto-fit
-          wraps them cleanly when the container narrows. */}
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2">
-        {links.map((link) => (
-          <AppLink
-            key={link.href}
-            href={link.href}
-            className="flex items-center gap-2 rounded-md border border-input/60 px-3 py-2 text-sm transition-colors hover:bg-accent/60"
-          >
-            <link.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate">{link.label}</span>
-            <span className="text-xs tabular-nums text-muted-foreground">{link.value}</span>
-          </AppLink>
-        ))}
-      </div>
     </div>
   );
 }

@@ -42,6 +42,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { creationDefaultSpaceId } from "@multica/core/spaces";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
@@ -240,15 +241,10 @@ export function MembersTab() {
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
 
-  // The default space (workspace's earliest-created active space) mirrors the
-  // server-side accept-time fallback, so pre-selecting it makes the picker's
-  // default match what an empty selection would do anyway.
-  const defaultSpaceId =
-    spaces.length > 0
-      ? spaces.reduce((earliest, s) =>
-          s.created_at < earliest.created_at ? s : earliest,
-        ).id
-      : null;
+  // Match the server's explicit workspace Default Space. The helper keeps the
+  // old-server compatibility fallback in one place without letting this form
+  // silently invent a different default from the rest of the product.
+  const defaultSpaceId = creationDefaultSpaceId(spaces) ?? null;
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");

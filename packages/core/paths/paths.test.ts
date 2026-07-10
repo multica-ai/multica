@@ -26,6 +26,10 @@ describe("paths.workspace(slug)", () => {
     expect(ws.squads()).toBe("/acme/squads");
     expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");
     expect(ws.settings()).toBe("/acme/settings");
+    expect(ws.settingsSection("workspace", "members")).toBe(
+      "/acme/settings/workspace/members",
+    );
+    expect(ws.spaceSettings("ENG")).toBe("/acme/space/ENG/settings");
     expect(ws.attachmentPreview("att_42")).toBe("/acme/attachments/att_42/preview");
   });
 

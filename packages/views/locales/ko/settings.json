@@ -94,12 +94,13 @@
   "chat": {
     "floating_title": "플로팅 창",
     "floating_label": "플로팅 채팅 창",
-    "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다."
+    "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 끄면 전용 채팅 페이지를 사용합니다."
   },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
     "workspace_fallback": "워크스페이스",
+    "this_device": "이 기기",
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
@@ -114,7 +115,8 @@
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
-      "properties": "속성"
+      "properties": "속성",
+      "spaces": "스페이스"
     }
   },
   "properties": {
@@ -221,6 +223,17 @@
       "confirm": "레이블 삭제",
       "failed": "레이블을 삭제하지 못했습니다"
     }
+  },
+  "spaces": {
+    "title": "스페이스",
+    "description": "워크스페이스의 스페이스, 기본 위치, 접근 상태를 관리합니다.",
+    "joined": "참여함",
+    "not_joined": "참여하지 않음",
+    "set_default": "기본값으로 설정",
+    "setting_default": "설정 중...",
+    "toast_default_updated": "기본 스페이스를 업데이트했습니다",
+    "toast_default_failed": "기본 스페이스를 업데이트하지 못했습니다",
+    "archived_title_other": "보관된 스페이스 ({{count}})"
   },
   "account": {
     "section_profile": "개인 정보",
