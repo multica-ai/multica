@@ -180,6 +180,9 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | ハートビート間隔 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | タスクのポーリング間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 最大同時タスク数 |
+| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | ローテーション前の `daemon.log` 現行ファイルの最大サイズ（MB） |
+| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 保持する圧縮済み `daemon.log` ローテーションバックアップ数 |
+| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | ローテーション済み `daemon.log` バックアップの最大保持日数 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 名に一致 | 各 AI コーディングツールの実行ファイルへのパス（例: `MULTICA_CLAUDE_PATH`） |
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI コーディングツールのデフォルトモデル |
 | `MULTICA_<PROVIDER>_ARGS` | 空 | バックエンドごとのデーモン全体のデフォルト CLI 引数。各タスクに対し、各エージェント自身の `custom_args` より前に適用される。`MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` をサポート |
