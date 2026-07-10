@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -17,15 +17,44 @@ import { useT } from "../../i18n";
 // detail scroll area, one tick per top-level comment thread (folded resolved
 // bars included — they are jump targets too). Ticks whose thread is currently
 // inside the scroll viewport render darker, so the rail doubles as a "you are
-// here" minimap. Hovering a tick grows it and opens a preview card (bold
-// first line + muted body excerpt); clicking jumps the timeline to that
-// thread.
+// here" minimap. Hovering magnifies ticks in a Dock-style wave around the
+// cursor (the hovered tick peaks, neighbours taper off) and opens a preview
+// card (bold first line + muted body excerpt); clicking jumps the timeline
+// to that thread.
 //
 // The rail deliberately skips activity groups: they are timeline noise, not
 // navigation destinations.
 
 /** Minimum number of threads before the rail is worth its pixels. */
 const MIN_THREADS = 2;
+
+// ---------------------------------------------------------------------------
+// Hover wave — Dock-style proximity magnification
+// ---------------------------------------------------------------------------
+//
+// While the pointer travels along the rail, every tick scales with a cosine
+// falloff of its distance to the cursor, so the hovered tick peaks and its
+// neighbours taper off like a wave. Driven per-pointermove with direct style
+// writes (no React re-render), batched read-then-write inside one rAF, on the
+// compositor-friendly native `scale` property; the 100ms ease-out transition
+// on the tick smooths between pointer samples and settles the collapse on
+// leave. Only the hovered tick darkens — neighbours grow but keep their color.
+
+/** Distance (px) at which a tick stops feeling the wave — ~4 tick pitches. */
+const WAVE_RADIUS_PX = 56;
+/** Peak horizontal scale of the hovered tick (12px base → ~20px). */
+const WAVE_MAX_SCALE = 1.7;
+
+/**
+ * Horizontal scale for a tick whose center is `distancePx` from the pointer.
+ * Cosine-squared bell: smooth at the peak and at the radius edge (no kinks).
+ */
+export function waveScale(distancePx: number): number {
+  const d = Math.abs(distancePx);
+  if (d >= WAVE_RADIUS_PX) return 1;
+  const t = Math.cos(((d / WAVE_RADIUS_PX) * Math.PI) / 2);
+  return 1 + (WAVE_MAX_SCALE - 1) * t * t;
+}
 
 /**
  * Caps applied by `commentPreview`. The preview card clamps visually
@@ -172,11 +201,19 @@ function MinimapTick({
       >
         <span
           className={cn(
-            "h-0.5 w-3 rounded-full transition-all duration-150",
+            // Enlargement is a left-anchored `scale` (compositor-friendly, and
+            // what the JS wave writes inline). The 100ms ease-out doubles as
+            // smoothing between pointer samples and as the settle on leave.
+            "h-0.5 w-3 origin-left rounded-full transition-[scale,background-color] duration-100 ease-out",
             inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
-            "group-hover/tick:w-[18px] group-hover/tick:bg-foreground",
-            "group-data-[popup-open]/tick:w-[18px] group-data-[popup-open]/tick:bg-foreground",
-            "group-focus-visible/tick:w-[18px] group-focus-visible/tick:bg-foreground",
+            "group-hover/tick:bg-foreground",
+            // CSS floor states for when no inline wave value is present:
+            // an open preview card keeps its tick grown while the pointer is
+            // on the card, keyboard focus grows without a pointer, and
+            // reduced-motion swaps the wave for a plain hover grow.
+            "group-data-[popup-open]/tick:scale-x-[1.7] group-data-[popup-open]/tick:bg-foreground",
+            "group-focus-visible/tick:scale-x-[1.7] group-focus-visible/tick:bg-foreground",
+            "motion-reduce:group-hover/tick:scale-x-[1.7]",
           )}
         />
       </HoverCardTrigger>
@@ -194,6 +231,63 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
   const { t } = useT("issues");
   const visibleIds = useVisibleThreadIds(threads, scrollContainerEl);
 
+  // Hover wave. Pointer position lives in refs and ticks are scaled with
+  // direct style writes so pointermove never re-renders the component; the
+  // rAF guard coalesces bursts to one batched read-then-write per frame.
+  const navRef = useRef<HTMLElement | null>(null);
+  const waveRafRef = useRef(0);
+  const pointerYRef = useRef<number | null>(null);
+  const reducedMotionRef = useRef(false);
+  useEffect(() => {
+    reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return () => {
+      if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current);
+    };
+  }, []);
+
+  const runWave = useCallback(() => {
+    waveRafRef.current = 0;
+    const nav = navRef.current;
+    if (!nav) return;
+    const y = pointerYRef.current;
+    const buttons = nav.querySelectorAll<HTMLButtonElement>("button");
+    // Read pass, then write pass — never interleaved, one reflow at most.
+    const scales: string[] = [];
+    buttons.forEach((b) => {
+      if (y === null) {
+        scales.push("");
+        return;
+      }
+      const r = b.getBoundingClientRect();
+      const s = waveScale(y - (r.top + r.height / 2));
+      scales.push(s > 1.001 ? `${s.toFixed(3)} 1` : "");
+    });
+    buttons.forEach((b, i) => {
+      const tick = b.firstElementChild as HTMLElement | null;
+      if (!tick) return;
+      const s = scales[i]!;
+      // Clearing the inline value hands control back to the CSS floor states
+      // (popup-open / focus-visible / reduced-motion hover).
+      if (s) tick.style.setProperty("scale", s);
+      else tick.style.removeProperty("scale");
+    });
+  }, []);
+  const scheduleWave = useCallback(() => {
+    if (!waveRafRef.current) waveRafRef.current = requestAnimationFrame(runWave);
+  }, [runWave]);
+  const handleWaveMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (reducedMotionRef.current) return;
+      pointerYRef.current = e.clientY;
+      scheduleWave();
+    },
+    [scheduleWave],
+  );
+  const handleWaveLeave = useCallback(() => {
+    pointerYRef.current = null;
+    scheduleWave();
+  }, [scheduleWave]);
+
   if (threads.length < MIN_THREADS) return null;
 
   return (
@@ -201,7 +295,10 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
     // strip never blocks content clicks.
     <div className={cn("pointer-events-none z-10 flex flex-col justify-center py-6", className)}>
       <nav
+        ref={navRef}
         aria-label={t(($) => $.detail.thread_nav_label)}
+        onPointerMove={handleWaveMove}
+        onPointerLeave={handleWaveLeave}
         // Bounded height + shrinkable ticks: when threads outgrow the rail,
         // flex compresses the spacing (down to min-h) instead of overflowing.
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"

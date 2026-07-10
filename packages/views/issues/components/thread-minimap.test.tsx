@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { ThreadMinimap, commentPreview } from "./thread-minimap";
+import { ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -53,6 +53,22 @@ describe("commentPreview", () => {
     const { title, body } = commentPreview(`${"t".repeat(500)}\n${"b".repeat(900)}`);
     expect(title).toHaveLength(200);
     expect(body).toHaveLength(300);
+  });
+});
+
+describe("waveScale", () => {
+  it("peaks under the cursor and settles to 1 at the radius", () => {
+    expect(waveScale(0)).toBeCloseTo(1.7, 5);
+    expect(waveScale(56)).toBe(1);
+    expect(waveScale(200)).toBe(1);
+  });
+
+  it("tapers monotonically and symmetrically", () => {
+    const profile = [0, 14, 28, 42, 56].map(waveScale);
+    for (let i = 1; i < profile.length; i++) {
+      expect(profile[i]!).toBeLessThan(profile[i - 1]!);
+    }
+    expect(waveScale(-14)).toBeCloseTo(waveScale(14), 10);
   });
 });
 
