@@ -16,6 +16,7 @@ import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
+import { TreeView } from "../components/tree-view";
 import { useT } from "../../i18n";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
@@ -138,7 +139,7 @@ function IssueSurfaceContent({
     (showClientEmpty ? showClientEmpty(renderContext) : true);
   const shouldShowBatchToolbar =
     batchToolbar !== "never" &&
-    (batchToolbar === "always" || controller.viewMode === "list");
+    (batchToolbar === "always" || controller.viewMode === "list" || controller.viewMode === "tree");
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
@@ -215,6 +216,20 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
               />
             )}
+            {controller.viewMode === "tree" && (
+              <TreeView
+                issues={issues}
+                visibleStatuses={controller.visibleStatuses}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+                myIssuesScope={controller.loadMoreScope}
+                myIssuesFilter={controller.loadMoreFilter}
+                sort={controller.sort}
+                projectId={controller.projectId}
+                onMoveIssue={controller.moveIssue}
+                onCreateIssue={openCreateIssue}
+              />
+            )}
             {controller.viewMode === "gantt" && (
               <GanttView issues={controller.filteredGanttIssues} />
             )}
@@ -245,7 +260,7 @@ function IssueSurfaceContent({
 }
 
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
-  if (mode === "list") {
+  if (mode === "list" || mode === "tree") {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
         {Array.from({ length: 4 }).map((_, i) => (

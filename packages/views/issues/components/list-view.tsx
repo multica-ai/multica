@@ -25,6 +25,7 @@ import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { buildIssueTreeRows, type IssueTreeRow } from "../utils/issue-hierarchy";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -64,6 +65,7 @@ export function ListView({
   onMoveIssue,
   onCreateIssue,
   sort,
+  tree = false,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -75,6 +77,8 @@ export function ListView({
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sort?: IssueSortParam;
+  /** Render parent/child hierarchy inside each status section. */
+  tree?: boolean;
 }) {
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
@@ -318,6 +322,7 @@ export function ListView({
             status={status}
             issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
+            allIssues={issues}
             childProgressMap={childProgressMap}
             projectMap={projectMap}
             myIssuesOpts={myIssuesOpts}
@@ -327,6 +332,7 @@ export function ListView({
             isExpanded={isExpanded}
             sortLabel={sortLabel}
             sort={sort}
+            tree={tree}
           />
         );
       })}
@@ -369,6 +375,7 @@ function StatusAccordionItem({
   status,
   issueIds,
   issueMap,
+  allIssues,
   childProgressMap,
   projectMap,
   myIssuesOpts,
@@ -378,10 +385,12 @@ function StatusAccordionItem({
   isExpanded,
   sortLabel,
   sort,
+  tree,
 }: {
   status: IssueStatus;
   issueIds: string[];
   issueMap: Map<string, Issue>;
+  allIssues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
@@ -391,6 +400,7 @@ function StatusAccordionItem({
   isExpanded: boolean;
   sortLabel: string | null;
   sort?: IssueSortParam;
+  tree: boolean;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
@@ -409,6 +419,13 @@ function StatusAccordionItem({
       return issue ? [issue] : [];
     }),
     [issueIds, issueMap],
+  );
+  const rows = useMemo<IssueTreeRow[]>(
+    () =>
+      tree
+        ? buildIssueTreeRows(issues, allIssues)
+        : issues.map((issue) => ({ issue, depth: 0 })),
+    [allIssues, issues, tree],
   );
 
   const selectedCount = issueIds.filter((id) => selectedIds.has(id)).length;
@@ -482,10 +499,12 @@ function StatusAccordionItem({
         {issues.length > 0 ? (
           dragEnabled ? (
             <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {issues.map((issue) => (
+              {rows.map(({ issue, depth, parentIssue }) => (
                 <DraggableListRow
                   key={issue.id}
                   issue={issue}
+                  depth={depth}
+                  parentIssue={parentIssue}
                   childProgress={childProgressMap.get(issue.id)}
                   project={
                     issue.project_id ? projectMap?.get(issue.project_id) : undefined
@@ -499,10 +518,12 @@ function StatusAccordionItem({
             </SortableContext>
           ) : (
             <>
-              {issues.map((issue) => (
+              {rows.map(({ issue, depth, parentIssue }) => (
                 <ListRow
                   key={issue.id}
                   issue={issue}
+                  depth={depth}
+                  parentIssue={parentIssue}
                   childProgress={childProgressMap.get(issue.id)}
                   project={
                     issue.project_id ? projectMap?.get(issue.project_id) : undefined

@@ -4,6 +4,7 @@ import { memo, type Ref } from "react";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { CornerDownRight } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue, Project } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
@@ -31,6 +32,8 @@ function ListRowContent({
   issue,
   childProgress,
   project,
+  depth = 0,
+  parentIssue,
   isDragging,
   containerRef,
   containerStyle,
@@ -40,6 +43,8 @@ function ListRowContent({
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
+  depth?: number;
+  parentIssue?: Issue;
   isDragging?: boolean;
   containerRef?: Ref<HTMLDivElement>;
   containerStyle?: React.CSSProperties;
@@ -59,14 +64,15 @@ function ListRowContent({
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const clampedDepth = Math.min(depth, 3);
 
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
         ref={containerRef}
-        style={containerStyle}
+        style={{ ...containerStyle, paddingLeft: 16 + clampedDepth * 18 }}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
+        className={`group/row flex h-9 items-center gap-2 pr-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
         } ${isDragging ? "opacity-30" : ""}`}
       >
@@ -87,6 +93,9 @@ function ListRowContent({
             }`}
           />
         </div>
+        {depth > 0 && (
+          <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/70" />
+        )}
         <AppLink
           href={p.issueDetail(issue.id)}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
@@ -95,6 +104,14 @@ function ListRowContent({
             {issue.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={issue.id} />
+          {depth > 0 && parentIssue && (
+            <span
+              title={`Parent: ${parentIssue.identifier} ${parentIssue.title}`}
+              className="hidden max-w-[120px] shrink-0 items-center rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground sm:inline-flex"
+            >
+              <span className="truncate">{parentIssue.identifier}</span>
+            </span>
+          )}
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
@@ -153,16 +170,22 @@ export const ListRow = memo(function ListRow({
   issue,
   childProgress,
   project,
+  depth = 0,
+  parentIssue,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
+  depth?: number;
+  parentIssue?: Issue;
 }) {
   return (
     <ListRowContent
       issue={issue}
       childProgress={childProgress}
       project={project}
+      depth={depth}
+      parentIssue={parentIssue}
     />
   );
 });
@@ -181,11 +204,15 @@ export const DraggableListRow = memo(function DraggableListRow({
   issue,
   childProgress,
   project,
+  depth = 0,
+  parentIssue,
   disableSorting,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
+  depth?: number;
+  parentIssue?: Issue;
   disableSorting?: boolean;
 }) {
   const {
@@ -212,6 +239,8 @@ export const DraggableListRow = memo(function DraggableListRow({
       issue={issue}
       childProgress={childProgress}
       project={project}
+      depth={depth}
+      parentIssue={parentIssue}
       isDragging={isDragging}
       containerRef={setNodeRef}
       containerStyle={style}

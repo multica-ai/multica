@@ -13,6 +13,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  ListTree,
   SignalHigh,
   SlidersHorizontal,
   X,
@@ -1293,6 +1294,8 @@ export function IssueDisplayControls({
                           <Columns3 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
+                        ) : viewMode === "tree" ? (
+                          <ListTree className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
                         ) : (
@@ -1303,6 +1306,8 @@ export function IssueDisplayControls({
                             ? t(($) => $.view.board)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
+                            : viewMode === "tree"
+                            ? t(($) => $.view.tree)
                             : viewMode === "gantt" && allowGantt
                             ? t(($) => $.view.gantt)
                             : t(($) => $.view.list)}
@@ -1317,6 +1322,8 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_board)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
+                  : viewMode === "tree"
+                  ? t(($) => $.view.tooltip_tree)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
                   : t(($) => $.view.tooltip_list)}
@@ -1334,6 +1341,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="list">
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="tree">
+                  <ListTree />
+                  {t(($) => $.view.tree)}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />
