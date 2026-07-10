@@ -32,8 +32,8 @@ function MentionHoverCard({
         </HoverCardTrigger>
         <HoverCardContent align="start" className="w-auto min-w-48 max-w-72">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-              <Users className="h-4 w-4 text-primary" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-warning/10">
+              <Users className="h-4 w-4 text-warning" />
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium">All members</p>
@@ -57,7 +57,8 @@ function MentionHoverCard({
             initials={initials}
             avatarUrl={avatarUrl}
             isAgent={type === "agent"}
-            size="lg"
+            isSquad={type === "squad"}
+            size={32}
           />
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{name}</p>
