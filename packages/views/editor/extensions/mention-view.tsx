@@ -25,10 +25,9 @@ import { IssueChip } from "../../issues/components/issue-chip";
 import { ProjectChip } from "../../projects/components/project-chip";
 import {
   ActorMentionChip,
-  ACTOR_MENTION_HOVER_CLASS,
+  isActorMentionType,
 } from "@multica/ui/components/common/actor-mention-chip";
 import { MentionHoverCard } from "@multica/ui/components/common/mention-hover-card";
-import type { ActorMentionType } from "@multica/ui/components/common/actor-mention-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -51,18 +50,22 @@ export function MentionView({ node }: NodeViewProps) {
 
   const name = (label ?? id) as string;
   const initials = name.charAt(0);
-  const actorType = type as ActorMentionType;
+
+  // Member/agent/squad/@all only — issue/project are handled above. Guard the
+  // untyped Tiptap attr rather than casting; an unknown type falls back to the
+  // legacy plain-text mention.
+  if (!isActorMentionType(type)) {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <span className="mention">@{name}</span>
+      </NodeViewWrapper>
+    );
+  }
 
   return (
     <NodeViewWrapper as="span" className="inline">
-      <MentionHoverCard type={actorType} id={id} name={name} initials={initials}>
-        <ActorMentionChip
-          type={actorType}
-          label={name}
-          initials={initials}
-          className={ACTOR_MENTION_HOVER_CLASS[actorType]}
-          focusable
-        />
+      <MentionHoverCard type={type} id={id} name={name} initials={initials}>
+        <ActorMentionChip type={type} label={name} initials={initials} focusable />
       </MentionHoverCard>
     </NodeViewWrapper>
   );

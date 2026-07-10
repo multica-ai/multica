@@ -41,10 +41,9 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
 import {
   ActorMentionChip,
-  ACTOR_MENTION_HOVER_CLASS,
+  isActorMentionType,
 } from "@multica/ui/components/common/actor-mention-chip";
 import { MentionHoverCard } from "@multica/ui/components/common/mention-hover-card";
-import type { ActorMentionType } from "@multica/ui/components/common/actor-mention-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
@@ -274,8 +273,7 @@ function ReadonlyLink({
     // Readonly chips are non-focusable (no tab stop per mention) — R14 — so
     // the chip's aria-label conveys identity to screen readers and mouse hover
     // still opens the MentionHoverCard.
-    if (match?.[1] && match[2]) {
-      const actorType = match[1] as ActorMentionType;
+    if (match?.[1] && match[2] && isActorMentionType(match[1])) {
       const rawLabel =
         typeof children === "string"
           ? children
@@ -288,13 +286,8 @@ function ReadonlyLink({
       const label = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
       const initials = label.charAt(0);
       return (
-        <MentionHoverCard type={actorType} id={match[2]} name={label} initials={initials}>
-          <ActorMentionChip
-            type={actorType}
-            label={label}
-            initials={initials}
-            className={ACTOR_MENTION_HOVER_CLASS[actorType]}
-          />
+        <MentionHoverCard type={match[1]} id={match[2]} name={label} initials={initials}>
+          <ActorMentionChip type={match[1]} label={label} initials={initials} />
         </MentionHoverCard>
       );
     }
