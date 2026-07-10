@@ -715,6 +715,127 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 	close(ch)
 }
 
+func TestOpencodeProcessEventsStreamEndsMidStep(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Regression for production run B: the provider stream died right after a
+	// mid-step planning message. opencode reaches a clean EOF and exits 0 with
+	// the step still open (no step_finish, no error event), which previously
+	// reported "completed" — a false-green with all work lost.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_midstep","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_midstep","part":{"type":"text","text":"Let me plan the work..."}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "failed" {
+		t.Errorf("status: got %q, want %q", result.status, "failed")
+	}
+	if !strings.Contains(result.errMsg, "terminal signal") {
+		t.Errorf("errMsg: got %q, want it to mention the missing terminal signal", result.errMsg)
+	}
+	// Text emitted before the stream died must still be captured.
+	if result.output != "Let me plan the work..." {
+		t.Errorf("output: got %q", result.output)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsStreamEndsAfterToolBeforeStepFinish(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Regression for production run A: the stream died after a tool ran but
+	// before the step closed. opencode emits tool_use only on terminal states
+	// (here completed), so unfinished work manifests as an unclosed step, not a
+	// pending tool — the open step at EOF is what fails the run.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_tool","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_tool","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"go test ./..."},"output":"ok\n"}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "failed" {
+		t.Errorf("status: got %q, want %q", result.status, "failed")
+	}
+	if !strings.Contains(result.errMsg, "terminal signal") {
+		t.Errorf("errMsg: got %q, want it to mention the missing terminal signal", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsMultiStepHappyPath(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Two fully bracketed steps (step_start … step_finish ×2) must stay
+	// "completed" — the terminal-signal guard only fires on an unclosed step.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_multi","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_multi","part":{"type":"text","text":"step one"}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_multi","part":{"type":"step-finish"}}`,
+		`{"type":"step_start","timestamp":1003,"sessionID":"ses_multi","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1004,"sessionID":"ses_multi","part":{"type":"text","text":" step two"}}`,
+		`{"type":"step_finish","timestamp":1005,"sessionID":"ses_multi","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q", result.status, "completed")
+	}
+	if result.output != "step one step two" {
+		t.Errorf("output: got %q", result.output)
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsToolErrorThenCleanFinish(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// A recovered tool error is normal in a healthy run: opencode emits tool_use
+	// only on terminal states, and a failed tool arrives with state.status=="error"
+	// (real wire shape from `opencode run --format json`). The run continues and
+	// closes every step with step_finish, so status must stay "completed". The
+	// earlier pending-tool heuristic recorded the error tool's callID, never
+	// drained it, and wrongly reported this healthy run as failed.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_toolerr","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_toolerr","part":{"type":"tool","tool":"read","callID":"functions.read:1","state":{"status":"error","input":{"filePath":"/nonexistent-path-xyz/also-missing.md"},"error":"File not found: /nonexistent-path-xyz/also-missing.md"}}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_toolerr","part":{"type":"tool","tool":"bash","callID":"functions.bash:0","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi\n"}}}`,
+		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_toolerr","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q (recovered tool error must not fail a healthy run)", result.status, "completed")
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
 // ── Windows native-binary resolution tests ──
 
 // fakeStat returns a statFn that reports any path in `present` as existing
@@ -1178,6 +1299,118 @@ func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
 		if a == bogusDir {
 			t.Errorf("custom --dir value %q leaked into argv: %q", bogusDir, args)
 		}
+	}
+}
+
+// fakeOpencodeMidToolScript impersonates an `opencode run` whose provider
+// stream dies mid-step: it prints a step_start and a terminal-error tool_use,
+// then exits 0 on a clean EOF with no step_finish and no error event. This is
+// the false-green shape from production — the recovered tool error does not
+// rescue the run; the unclosed step is what fails it.
+func fakeOpencodeMidToolScript() string {
+	return `#!/bin/sh
+printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
+printf '{"type":"tool_use","timestamp":2,"sessionID":"ses_fake","part":{"type":"tool","tool":"read","callID":"functions.read:1","state":{"status":"error","input":{"filePath":"/nope.md"},"error":"File not found"}}}\n'
+exit 0
+`
+}
+
+// TestOpencodeBackendFailsOnStreamEndingMidTool proves the terminal-signal
+// guard over the full clean-EOF/exit-0 path, not just the scanner loop: a run
+// whose stream ends with an open step must surface as Result.Status == "failed"
+// even though opencode exited 0 with no error event and its last tool merely
+// reported a recovered error.
+func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeMidToolScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+
+	if result.Status != "failed" {
+		t.Fatalf("result status = %q, error = %q; want failed", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "terminal signal") {
+		t.Errorf("result error = %q, want it to mention the missing terminal signal", result.Error)
+	}
+}
+
+// fakeOpencodeStepThenExit1Script impersonates an `opencode run` that crashes
+// mid-step: it opens a step, then the process itself dies nonzero with no
+// step_finish and no error event.
+func fakeOpencodeStepThenExit1Script() string {
+	return `#!/bin/sh
+printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
+exit 1
+`
+}
+
+// TestOpencodeBackendAppendsExitDetailOnMidStepCrash pins the second fix: when
+// the terminal-signal guard has already failed the run AND the process exited
+// nonzero, the exit detail is appended so the crash signal / exit code is not
+// lost — the errMsg carries both the missing-terminal-signal reason and the
+// process exit status.
+func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeStepThenExit1Script()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+
+	if result.Status != "failed" {
+		t.Fatalf("result status = %q, error = %q; want failed", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "terminal signal") {
+		t.Errorf("result error = %q, want it to mention the missing terminal signal", result.Error)
+	}
+	if !strings.Contains(result.Error, "exit status 1") {
+		t.Errorf("result error = %q, want it to include the process exit status", result.Error)
 	}
 }
 

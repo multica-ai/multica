@@ -227,6 +227,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
+		} else if exitErr != nil && scanResult.noTerminalSignal {
+			// Status is already "failed" from the terminal-signal guard; append
+			// the process exit detail so a mid-step crash still surfaces the
+			// signal / exit code that killed it.
+			scanResult.errMsg = fmt.Sprintf("%s; opencode exited with error: %v", scanResult.errMsg, exitErr)
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
@@ -260,11 +265,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 // eventResult holds the accumulated state from processing the event stream.
 type eventResult struct {
-	status    string
-	errMsg    string
-	output    string
-	sessionID string
-	usage     TokenUsage // accumulated token usage across all steps
+	status           string
+	errMsg           string
+	output           string
+	sessionID        string
+	usage            TokenUsage // accumulated token usage across all steps
+	noTerminalSignal bool       // guard fired: stream reached EOF with a step still open
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -275,6 +281,15 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
+
+	// Track step bracketing so a stream that ends mid-step is not mistaken for a
+	// clean completion. OpenCode's JSON stream has no terminal result event
+	// (unlike Claude's type:"result"), so "no error seen" is not proof the run
+	// finished. opencode emits tool_use only on terminal states (completed or
+	// error), so a dangling tool call implies an unclosed step — step bracketing
+	// is the positive terminal signal. Recovered tool errors (state.status ==
+	// "error") are normal in healthy runs and must not affect status.
+	openStep := false // between a step_start and its step_finish
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -302,8 +317,10 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		case "error":
 			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
 		case "step_start":
+			openStep = true
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
+			openStep = false
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
@@ -325,12 +342,24 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	// Require a positive terminal signal. A clean EOF while a step is still open
+	// means the run did not finish — its provider stream died and `opencode run`
+	// exited without emitting an error event. Fail closed on that structural
+	// evidence rather than reporting a false-green completion.
+	noTerminalSignal := false
+	if finalStatus == "completed" && openStep {
+		finalStatus = "failed"
+		finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
+		noTerminalSignal = true
+	}
+
 	return eventResult{
-		status:    finalStatus,
-		errMsg:    finalError,
-		output:    output.String(),
-		sessionID: sessionID,
-		usage:     usage,
+		status:           finalStatus,
+		errMsg:           finalError,
+		output:           output.String(),
+		sessionID:        sessionID,
+		usage:            usage,
+		noTerminalSignal: noTerminalSignal,
 	}
 }
 
