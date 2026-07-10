@@ -42,8 +42,18 @@ const (
 	// agent/system-authored comment; the human is resolved through
 	// comment.source_task_id (a special case of delegation, MUL-4302 §3.3).
 	SourceCommentSource Source = "comment_source"
-	// SourceRuleOwner — an autopilot trigger enqueued the run; the accountable
-	// human is the publisher of the rule's active version (MUL-4302 §3.4).
+	// SourceTriggerOwner — an autopilot schedule/webhook trigger enqueued the run;
+	// the accountable human is the member who CREATED that specific trigger (set up
+	// the schedule / registered the webhook). Preferred over rule_owner: a run is
+	// accountable to whoever armed the trigger that fired it, not to whoever last
+	// published the rule (MUL-4302; Bohan's refinement). originator stays NULL — an
+	// autonomous fire carries no human authorization — so this is the same authz-safe
+	// audit-only divergence as rule_owner.
+	SourceTriggerOwner Source = "trigger_owner"
+	// SourceRuleOwner — an autopilot trigger enqueued the run but its creator is not
+	// recoverable (a trigger created before per-trigger creators were recorded); the
+	// accountable human degrades to the publisher of the rule's active version
+	// (MUL-4302 §3.4). Precise, but coarser than trigger_owner.
 	SourceRuleOwner Source = "rule_owner"
 	// SourceOwnerFallback — nothing above resolved a human, so attribution
 	// degrades to the agent owner. This is DEGRADED, not compliance-grade, and
@@ -63,7 +73,7 @@ const (
 // attribution-coverage health metric (MUL-4302 §9).
 func (src Source) Precise() bool {
 	switch src {
-	case SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceRuleOwner:
+	case SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceTriggerOwner, SourceRuleOwner:
 		return true
 	default:
 		return false
@@ -329,6 +339,27 @@ func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind Evidence
 	if publisherUserID.Valid {
 		r.Source = SourceRuleOwner
 		r.AccountableUserID = publisherUserID
+	} else {
+		r.Source = SourceUnattributed
+	}
+	return finalizeAttribution(r)
+}
+
+// TriggerOwner builds attribution for an autopilot schedule/webhook run keyed to
+// the human who created the firing trigger (MUL-4302; Bohan's refinement). Like
+// RuleOwner, no human authorized the run, so UserID (originator) stays NULL and
+// only the audit-accountable side is set — to creatorUserID, the trigger's member
+// creator. Evidence is caller-supplied (autopilot_run for run_only, the issue for
+// create_issue). An invalid creator degrades to unattributed so callers that lost
+// the creator fall back to rule_owner rather than fabricating a human.
+func TriggerOwner(creatorUserID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
+	r := Result{
+		EvidenceKind:  evidenceKind,
+		EvidenceRefID: evidenceRefID,
+	}
+	if creatorUserID.Valid {
+		r.Source = SourceTriggerOwner
+		r.AccountableUserID = creatorUserID
 	} else {
 		r.Source = SourceUnattributed
 	}

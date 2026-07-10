@@ -395,6 +395,7 @@
       "source_direct_human": "Direct member action",
       "source_delegation": "Delegated from another run",
       "source_comment_source": "From a comment thread",
+      "source_trigger_owner": "Autopilot trigger creator",
       "source_rule_owner": "Autopilot rule publisher",
       "source_owner_fallback": "No precise owner — attributed to the agent owner",
       "source_backfill": "Backfilled attribution",

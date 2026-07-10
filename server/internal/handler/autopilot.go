@@ -1314,6 +1314,10 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
+		// Record the creating member so runs this trigger fires attribute to them
+		// (source=trigger_owner, MUL-4302).
+		CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		CreatedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1376,6 +1380,10 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
+			// Record the creating member so runs this webhook fires attribute to
+			// them (source=trigger_owner, MUL-4302).
+			CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			CreatedByID:   publisherID,
 		})
 		if err != nil {
 			tx.Rollback(ctx)

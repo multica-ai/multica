@@ -379,6 +379,7 @@
       "source_direct_human": "メンバーの直接操作",
       "source_delegation": "別の実行から委任",
       "source_comment_source": "コメントスレッドから",
+      "source_trigger_owner": "オートパイロットのトリガー作成者",
       "source_rule_owner": "オートパイロットのルール公開者",
       "source_owner_fallback": "正確な責任者なし — エージェント所有者に帰属",
       "source_backfill": "バックフィルされた帰属",

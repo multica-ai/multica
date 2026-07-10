@@ -379,6 +379,7 @@
       "source_direct_human": "멤버 직접 작업",
       "source_delegation": "다른 실행에서 위임됨",
       "source_comment_source": "댓글 스레드에서",
+      "source_trigger_owner": "오토파일럿 트리거 작성자",
       "source_rule_owner": "오토파일럿 규칙 게시자",
       "source_owner_fallback": "정확한 담당자 없음 — 에이전트 소유자에게 귀속",
       "source_backfill": "백필된 귀속",

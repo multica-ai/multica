@@ -238,6 +238,10 @@ type AutopilotTrigger struct {
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
 	EventFilters   []byte             `json:"event_filters"`
+	// Actor type that created this trigger: member | agent. Paired with created_by_id. Consumed only for attribution (source=trigger_owner) — never authorization. NULL on pre-migration triggers (MUL-4302).
+	CreatedByType pgtype.Text `json:"created_by_type"`
+	// The member/agent that created this trigger. For a member creator this is the accountable human of runs this trigger fires (source=trigger_owner). No FK, app-layer integrity. NULL on pre-migration triggers, which degrade to rule_owner (MUL-4302).
+	CreatedByID pgtype.UUID `json:"created_by_id"`
 }
 
 type ChannelBindingToken struct {

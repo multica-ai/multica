@@ -176,6 +176,93 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 	}
 }
 
+// TestTriggerOwnerAttribution_ScheduleTriggerCreator is the acceptance test for
+// trigger_owner (MUL-4302; Bohan): an autopilot schedule/webhook run is accountable
+// to the member who CREATED the firing trigger, with originator NULL (no human
+// authorized the autonomous fire).
+func TestTriggerOwnerAttribution_ScheduleTriggerCreator(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, creatorID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var autopilotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'trigger-owner-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, creatorID).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	// Schedule trigger created by the member.
+	var triggerID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, created_by_type, created_by_id)
+		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2) RETURNING id`,
+		autopilotID, creatorID).Scan(&triggerID); err != nil {
+		t.Fatalf("seed trigger: %v", err)
+	}
+
+	got := triggerOwnerAttribution(ctx, q,
+		util.MustParseUUID(triggerID), util.MustParseUUID(workspaceID), util.MustParseUUID(autopilotID),
+		attribution.EvidenceAutopilotRun, util.MustParseUUID(autopilotID))
+	if got.Source != attribution.SourceTriggerOwner {
+		t.Fatalf("source = %q, want trigger_owner", got.Source)
+	}
+	if got.UserID.Valid {
+		t.Errorf("trigger_owner is audit-only; originator must stay NULL, got %s", util.UUIDToString(got.UserID))
+	}
+	if !got.AccountableUserID.Valid || got.AccountableUserID.Bytes != util.MustParseUUID(creatorID).Bytes {
+		t.Errorf("accountable = %s, want trigger creator %s", util.UUIDToString(got.AccountableUserID), creatorID)
+	}
+}
+
+// TestTriggerOwnerAttribution_LegacyTriggerFallsBackToRuleOwner verifies the
+// backward-compat path Bohan signed off on: a trigger with no recorded creator
+// (created before this migration) degrades to the rule publisher (rule_owner),
+// never fabricating a human.
+func TestTriggerOwnerAttribution_LegacyTriggerFallsBackToRuleOwner(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, publisherID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var autopilotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'legacy-trigger-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, publisherID).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	// Trigger with NO creator recorded (pre-migration style).
+	var triggerID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression)
+		VALUES ($1, 'schedule', true, '0 * * * *') RETURNING id`,
+		autopilotID).Scan(&triggerID); err != nil {
+		t.Fatalf("seed trigger: %v", err)
+	}
+	// Active rule version so the fallback resolves to rule_owner (the publisher).
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO autopilot_rule_version (autopilot_id, workspace_id, published_by_type, published_by_id)
+		VALUES ($1, $2, 'member', $3)`, autopilotID, workspaceID, publisherID); err != nil {
+		t.Fatalf("seed rule version: %v", err)
+	}
+
+	got := triggerOwnerAttribution(ctx, q,
+		util.MustParseUUID(triggerID), util.MustParseUUID(workspaceID), util.MustParseUUID(autopilotID),
+		attribution.EvidenceAutopilotRun, util.MustParseUUID(autopilotID))
+	if got.Source != attribution.SourceRuleOwner {
+		t.Fatalf("source = %q, want rule_owner (legacy trigger falls back)", got.Source)
+	}
+	if !got.AccountableUserID.Valid || got.AccountableUserID.Bytes != util.MustParseUUID(publisherID).Bytes {
+		t.Errorf("accountable = %s, want rule publisher %s", util.UUIDToString(got.AccountableUserID), publisherID)
+	}
+}
+
 // TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner is the acceptance test for
 // rule_owner (MUL-4302 §3.4): an autopilot-origin issue's run has NO authorizing
 // human (originator_user_id stays NULL) but IS accountable to the publisher of the

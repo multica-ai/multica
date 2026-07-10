@@ -122,12 +122,14 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider, event_filters
+    next_run_at, webhook_token, label, provider, event_filters,
+    created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
-    sqlc.narg('event_filters')
+    sqlc.narg('event_filters'),
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one

@@ -287,8 +287,9 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		// Authorization must never be forged from the audit side: a non-NULL
 		// accountable with a NULL originator is allowed (divergence), but the
 		// reverse — originator set from accountable — must never happen implicitly.
-		if r.AccountableUserID.Valid && !r.UserID.Valid && r.Source != SourceRuleOwner && r.Source != SourceOwnerFallback {
-			t.Errorf("result[%d]: accountable set with NULL originator only allowed for rule_owner/owner_fallback, got source=%q", i, r.Source)
+		if r.AccountableUserID.Valid && !r.UserID.Valid &&
+			r.Source != SourceRuleOwner && r.Source != SourceTriggerOwner && r.Source != SourceOwnerFallback {
+			t.Errorf("result[%d]: accountable set with NULL originator only allowed for trigger_owner/rule_owner/owner_fallback, got source=%q", i, r.Source)
 		}
 	}
 }
@@ -341,6 +342,38 @@ func TestRuleOwner(t *testing.T) {
 	}
 }
 
+func TestTriggerOwner(t *testing.T) {
+	// The divergence case (MUL-4302; Bohan): an autopilot schedule/webhook run has
+	// NO authorizing human (originator NULL) but IS accountable to the member who
+	// created the firing trigger.
+	got := TriggerOwner(human, EvidenceAutopilotRun, issue)
+	if got.Source != SourceTriggerOwner {
+		t.Fatalf("source = %q, want trigger_owner", got.Source)
+	}
+	if !got.Source.Precise() {
+		t.Errorf("trigger_owner must be a precise source")
+	}
+	if got.UserID.Valid {
+		t.Errorf("trigger_owner must NOT set originator (authorization stays NULL), got %v", got.UserID)
+	}
+	if got.AccountableUserID != human {
+		t.Errorf("accountable should be the trigger creator, got %v", got.AccountableUserID)
+	}
+	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != issue {
+		t.Errorf("evidence should be carried through")
+	}
+
+	// No creator (unrecoverable) must not fabricate a human — degrades to
+	// unattributed so the caller can fall back to rule_owner.
+	none := TriggerOwner(pgtype.UUID{}, EvidenceAutopilotRun, issue)
+	if none.Source != SourceUnattributed {
+		t.Errorf("missing creator must degrade to unattributed, got %q", none.Source)
+	}
+	if none.UserID.Valid || none.AccountableUserID.Valid {
+		t.Errorf("missing creator must carry no human on either side")
+	}
+}
+
 func TestOwnerFallback(t *testing.T) {
 	// Unattributed → owner_fallback: accountable = owner, originator stays NULL,
 	// source is degraded (not precise).
@@ -386,7 +419,7 @@ func TestUnattributed(t *testing.T) {
 }
 
 func TestSourcePrecise(t *testing.T) {
-	precise := []Source{SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceRuleOwner}
+	precise := []Source{SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceTriggerOwner, SourceRuleOwner}
 	degraded := []Source{SourceOwnerFallback, SourceBackfill, SourceUnattributed, Source("")}
 	for _, s := range precise {
 		if !s.Precise() {

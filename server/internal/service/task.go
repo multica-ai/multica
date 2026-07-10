@@ -380,13 +380,19 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
 	// webhook trigger: no human authorized the run, so originator stays NULL, but it
-	// is accountable to the publisher of the autopilot's active rule version —
-	// rule_owner (MUL-4302 §3.4). Resolved the same way run_only dispatch resolves
+	// is accountable to the human who CREATED the firing trigger — trigger_owner
+	// (MUL-4302; Bohan's refinement), degrading to the rule publisher when that
+	// creator is not recoverable. Resolved the same way run_only dispatch resolves
 	// it, so both autopilot execution modes attribute identically. (A manual trigger
-	// carries an actor and is already handled above.)
+	// carries an actor and is already handled above.) The issue only stores the
+	// autopilot id, so bridge issue → active run → trigger_id to find the trigger.
 	if s != nil && s.Queries != nil && issue.OriginType.Valid &&
 		issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
-		return ruleOwnerAttribution(ctx, s.Queries, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)
+		var triggerID pgtype.UUID
+		if run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID); err == nil {
+			triggerID = run.TriggerID
+		}
+		return triggerOwnerAttribution(ctx, s.Queries, triggerID, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)
 	}
 	facts := attribution.DirectFacts{
 		IssueID:     issue.ID,
@@ -436,6 +442,24 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 		publisher = ver.PublishedByID
 	}
 	return attribution.RuleOwner(publisher, ver.ID, evidenceKind, evidenceRefID)
+}
+
+// triggerOwnerAttribution resolves an autopilot schedule/webhook run to the human
+// who CREATED the firing trigger (MUL-4302; Bohan's refinement). triggerID is the
+// autopilot_run's trigger_id. When it resolves to a member-created trigger, the run
+// is trigger_owner-accountable to that member. A trigger with no recorded creator
+// (created before per-trigger creators were captured) or an agent-created trigger
+// degrades to ruleOwnerAttribution (rule publisher, then owner_fallback) — the same
+// coarser behavior autopilots had before this change, so nothing regresses. Never
+// errors: attribution must not fail an enqueue.
+func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
+	if q != nil && triggerID.Valid {
+		if trig, err := q.GetAutopilotTrigger(ctx, triggerID); err == nil &&
+			trig.CreatedByType.Valid && trig.CreatedByType.String == "member" && trig.CreatedByID.Valid {
+			return attribution.TriggerOwner(trig.CreatedByID, evidenceKind, evidenceRefID)
+		}
+	}
+	return ruleOwnerAttribution(ctx, q, workspaceID, autopilotID, evidenceKind, evidenceRefID)
 }
 
 // ErrAttributionFailClosed signals that a run resolved to no precise accountable

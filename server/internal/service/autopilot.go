@@ -650,16 +650,16 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// the triggering member is direct_human and becomes BOTH originator (so the run
 	// carries their authorization context) and accountable (MUL-4302 §4). A
 	// schedule / webhook trigger has no human — originator_user_id stays NULL and
-	// the audit-accountable human is the rule_owner, the publisher of the active
-	// rule version, with rule_version_id recording the snapshot (MUL-4302 §3.4); a
-	// missing version/publisher degrades to unattributed (see ruleOwnerAttribution).
-	// Either way evidence points at the autopilot run and the row is never a
-	// NULL-source bypass.
+	// the audit-accountable human is the member who CREATED the firing trigger —
+	// trigger_owner, resolved from run.TriggerID (MUL-4302; Bohan's refinement) —
+	// degrading to the rule version publisher (rule_owner) when that creator is not
+	// recoverable, then to unattributed. Either way evidence points at the autopilot
+	// run and the row is never a NULL-source bypass.
 	var autopilotAttr attribution.Result
 	if actorUserID.Valid {
 		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
 	} else {
-		autopilotAttr = ruleOwnerAttribution(ctx, s.Queries, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
+		autopilotAttr = triggerOwnerAttribution(ctx, s.Queries, run.TriggerID, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
 	}
 	// If no precise human resolved (a version-less autopilot), degrade to
 	// owner_fallback (accountable = agent owner), or skip the dispatch when the
