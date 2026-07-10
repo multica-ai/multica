@@ -69,9 +69,18 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID                 string
-	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
-	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	IssueID          string
+	TriggerCommentID string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	// CommentReplyTargets is set for a comment run that coalesced comments
+	// spanning MORE THAN ONE root thread (MUL-4348). When it has >=2 entries the
+	// workflow's reply step fans out — one reply per thread — instead of the
+	// single --parent=trigger cookbook, keeping this persistent brief in sync
+	// with the per-turn prompt so a cross-thread run cannot get one source
+	// telling it "one comment" and the other "one per thread". Same-thread
+	// follow-ups collapse to a single group upstream, so this stays empty and
+	// the single-parent path is used (no duplicate replies).
+	CommentReplyTargets     []ThreadReplyTarget
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task

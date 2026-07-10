@@ -114,6 +114,10 @@ export function applyChatDoneToCache(
       task_id: payload.task_id,
       created_at: payload.created_at,
       elapsed_ms: payload.elapsed_ms ?? null,
+      // Mirror web's applyChatDoneToCache: carry the kind so a no_response turn
+      // renders its notice inline; missing → "message" for older servers
+      // (MUL-4351).
+      message_kind: payload.message_kind ?? "message",
     };
     qc.setQueryData<ChatMessage[]>(
       chatKeys.messages(payload.chat_session_id),

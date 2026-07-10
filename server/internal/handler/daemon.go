@@ -1899,43 +1899,83 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// Build the chat prompt from EVERY user message that has arrived
-			// since the agent's last reply — not just the most recent one. A
-			// short-window debounce (MUL-2968) can land several user messages
-			// before a single run fires; the agent resumes its prior session
-			// and only learns of new input through resp.ChatMessage, so
-			// delivering just the latest message would silently drop the
-			// earlier ones (e.g. "看上海天气" then "还有青岛" → only Qingdao
-			// answered). The unanswered set is the trailing run of user
-			// messages after the last assistant message (every completed or
-			// failed run writes an assistant row, so that anchor advances each
-			// turn). Attachments are collected from each included message so
-			// the agent can `multica attachment download <id>` — the markdown
-			// URL alone is signed and 30-min expiring on the private CDN.
-			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				unanswered := trailingUserMessages(msgs)
-				parts := make([]string, 0, len(unanswered))
-				for _, m := range unanswered {
-					if strings.TrimSpace(m.Content) != "" {
-						parts = append(parts, m.Content)
-					}
-					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-						ChatMessageID: m.ID,
-						WorkspaceID:   parseUUID(resp.WorkspaceID),
-					}); attErr == nil && len(atts) > 0 {
-						for _, a := range atts {
-							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
-								ID:          uuidToString(a.ID),
-								Filename:    a.Filename,
-								ContentType: a.ContentType,
-							})
-						}
+			// Resolve the user-message input batch for this run. A task-owned
+			// direct-chat task (chat_input_task_id set, MUL-4351) reads exactly
+			// the user messages tagged with its own input owner, so a message
+			// that arrived after this turn was sealed can never be absorbed here.
+			// Legacy and channel (Slack/Lark) tasks carry a NULL owner and keep
+			// the trailing-message selector — the run of user messages after the
+			// last assistant row, which also covers a debounced burst (MUL-2968:
+			// "看上海天气" then "还有青岛" must both be delivered) — so a rolling
+			// deploy never replays their history. Attachments are collected per
+			// included message so the agent can `multica attachment download <id>`
+			// (the inline markdown URL is signed + 30-min expiring on the CDN).
+			var unanswered []db.ChatMessage
+			var inputLoadErr error
+			if task.ChatInputTaskID.Valid {
+				unanswered, inputLoadErr = h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID)
+			} else if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil {
+				unanswered = trailingUserMessages(msgs)
+			} else {
+				inputLoadErr = err
+			}
+			// A read failure must NOT masquerade as "zero input". Preserve the
+			// just-dispatched task (the stale-dispatched reclaim redelivers it)
+			// and reject the claim with 5xx, rather than cancelling a valid direct
+			// task on a transient DB error (MUL-4351 review).
+			if inputLoadErr != nil {
+				outcome = "error_chat_input_load"
+				slog.Error("chat claim: load chat input messages failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", inputLoadErr)
+				writeError(w, http.StatusInternalServerError, "failed to load chat input")
+				return
+			}
+
+			parts := make([]string, 0, len(unanswered))
+			for _, m := range unanswered {
+				if strings.TrimSpace(m.Content) != "" {
+					parts = append(parts, m.Content)
+				}
+				if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+					ChatMessageID: m.ID,
+					WorkspaceID:   parseUUID(resp.WorkspaceID),
+				}); attErr == nil && len(atts) > 0 {
+					for _, a := range atts {
+						resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+							ID:          uuidToString(a.ID),
+							Filename:    a.Filename,
+							ContentType: a.ContentType,
+						})
 					}
 				}
-				resp.ChatMessage = strings.Join(parts, "\n\n")
-				if strings.TrimSpace(resp.ThreadName) == "" {
-					resp.ThreadName = resp.ChatMessage
+			}
+			resp.ChatMessage = strings.Join(parts, "\n\n")
+
+			// Fail closed: a task-owned direct task that resolves to no user text
+			// (and is not the agent's proactive intro) must never dispatch an
+			// empty prompt. The send path creates the owning user message in the
+			// same transaction as the task, so this only fires on genuinely
+			// corrupt state — cancel the just-dispatched task and reject the claim
+			// rather than run the agent with nothing to answer (MUL-4351).
+			if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
+				outcome = "error_empty_chat_input"
+				slog.Error("chat claim: task-owned direct task has no user input; cancelling",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"chat_input_task_id", uuidToString(task.ChatInputTaskID),
+				)
+				if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+					slog.Error("chat claim: cancel after empty input failed",
+						"task_id", uuidToString(task.ID), "error", cerr)
 				}
+				writeError(w, http.StatusInternalServerError, "chat task has no user input")
+				return
+			}
+
+			if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
+				resp.ThreadName = resp.ChatMessage
 			}
 		}
 	}
@@ -2491,8 +2531,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	result, _ := json.Marshal(req)
 	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir)
 	if err != nil {
+		// A CompleteTask error is an infrastructure failure (transaction /
+		// assistant-outcome write), not a bad request: an already-finalized
+		// callback is treated as idempotent success and returns no error. Return
+		// 5xx so the daemon retries the terminal callback and the completion —
+		// including the single chat outcome row — lands exactly once (MUL-4351).
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

@@ -122,7 +122,7 @@ function MainTopBar() {
         transition={toolbarMotion}
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       />
-      <div className="relative z-10 flex h-full items-center">
+      <div className="relative z-10 flex h-full min-w-0 max-w-full items-center">
         <TabBar />
       </div>
     </motion.header>

@@ -41,7 +41,8 @@ export function ChatFab() {
     toggle();
   };
 
-  // Tooltip text communicates the state that isn't carried by the icon/badge.
+  // Tooltip text carries the running/unread state on hover; the FAB itself no
+  // longer shows an unread-count badge (it duplicated the chat tab's, MUL-4374).
   const tooltip = isRunning
     ? t(($) => $.fab.running)
     : unreadSessionCount > 0
@@ -60,11 +61,6 @@ export function ChatFab() {
         )}
       >
         <MessageCircle className="size-5" />
-        {unreadSessionCount > 0 && (
-          <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex min-w-4 h-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold leading-none text-background">
-            {unreadSessionCount > 9 ? "9+" : unreadSessionCount}
-          </span>
-        )}
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={10}>{tooltip}</TooltipContent>
     </Tooltip>

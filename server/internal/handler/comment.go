@@ -1155,6 +1155,33 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// taskCoversReplyParent reports whether parentID is a comment this task is
+// authorized to reply under. A comment-triggered task may reply to its trigger
+// comment OR to any earlier comment that was folded into the same run while it
+// was still queued (coalesced_comment_ids). A coalesced run answers each root
+// thread it covered inside that thread, so its replies legitimately target
+// those threads' comments — not just the trigger (MUL-4348 per-thread fan-out).
+//
+// Every other parent on the task's own issue is still rejected: this is the
+// defense against resumed-session --parent drift and cross-thread misplacement.
+// The allow-list is exactly the set the run was given to answer, so it cannot
+// reach arbitrary comments.
+func taskCoversReplyParent(task db.AgentTaskQueue, parentID pgtype.UUID) bool {
+	if !parentID.Valid {
+		return false
+	}
+	target := uuidToString(parentID)
+	if task.TriggerCommentID.Valid && uuidToString(task.TriggerCommentID) == target {
+		return true
+	}
+	for _, id := range task.CoalescedCommentIds {
+		if id.Valid && uuidToString(id) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -1237,9 +1264,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
-						if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+						if !taskCoversReplyParent(task, parentID) {
 							writeError(w, http.StatusConflict,
-								"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+								"parent_id must be this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+") or one of the earlier comments it coalesced")
 							return
 						}
 					}

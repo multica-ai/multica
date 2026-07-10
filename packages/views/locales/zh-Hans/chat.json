@@ -25,6 +25,8 @@
     "show_details": "查看详情",
     "replied_in": "{{elapsed}} 内回复",
     "failed_after": "{{elapsed}} 后失败",
+    "finished_in": "{{elapsed}} 内结束",
+    "no_response": "本轮已结束，Agent 没有返回文字回复。",
     "failure": {
       "agent_error": "智能体运行时出错，没能完成回复。请重试。",
       "timeout": "智能体处理超时，未能完成。可以重试，或把需求拆得更小一些。",
@@ -141,6 +143,7 @@
     "failed": "发送失败",
     "you_prefix": "你：",
     "no_messages": "还没有消息",
+    "no_response_preview": "无文字回复",
     "quick_agents": "常用 Agent",
     "add": "添加",
     "add_agent": "添加常用 Agent",
