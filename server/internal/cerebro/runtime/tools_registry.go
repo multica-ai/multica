@@ -419,6 +419,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "add_project_group", Description: "Grant a group access to a project.", Status: ToolStatusExcluded},
 	{Name: "agent_context_change_requests", Description: "List agent-context change requests (proposals). CLI-runtime MCP tool over GET /api/agents/{id}/context/change-requests.", Status: ToolStatusExcluded},
 	{Name: "agent_context_diff", Description: "Show a unified diff between two versions of an agent's context. CLI-runtime MCP tool over GET /api/agents/{id}/context/diff.", Status: ToolStatusExcluded},
+	{Name: "agent_context_lint", Description: "Drift-lint agent context (dead skill refs, duplicated rules, governance gaps, stale repo links) or a repo CLAUDE.md/AGENTS.md. CLI-runtime MCP tool over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file.", Status: ToolStatusExcluded},
 	{Name: "agent_context_propose", Description: "Propose a versioned change to an agent's context as a change request. CLI-runtime MCP tool over POST /api/agents/{id}/context/change-requests.", Status: ToolStatusExcluded},
 	{Name: "agent_context_review", Description: "Approve or reject a pending agent-context change request. CLI-runtime MCP tool over POST /api/agents/context/change-requests/{crId}/review.", Status: ToolStatusExcluded},
 	{Name: "agent_context_rollback", Description: "Roll an agent's context back to a historical version. CLI-runtime MCP tool over POST /api/agents/{id}/context/rollback.", Status: ToolStatusExcluded},

@@ -1,6 +1,7 @@
 # Agent Office — versioning + governance for agent context
 
-**Issue:** FIR-1775. **Status:** building (Phase 1). **Owner:** Mia.
+**Issue:** FIR-1775. **Status:** Phases 1–2 shipped; Phase 3 building (context
+lint + repo-file drift lint shipped; skill MCP gaps open). **Owner:** Mia.
 
 The real solution (not an MVP): bring *all* agent context under the same
 versioning + governance machinery that skills already have, exposed via **REST
@@ -83,8 +84,11 @@ REST (proposed):
 - `GET  /api/agents/{id}/context/change-requests`
 - `POST /api/agents/context/change-requests/{crId}/review`
 - `PUT  /api/agents/{id}/context/ownership`
-- `GET  /api/agents/{id}/context/lint`  (drift/dup lint — requirement D)
-- `GET  /api/agents/context/lint`       (workspace-wide drift sweep)
+- `GET  /api/agents/{id}/context/lint`  (drift/dup lint — requirement D; live)
+- `GET  /api/agents/context/lint`       (workspace-wide drift sweep; live)
+- `POST /api/agents/context/lint/repo-file` (repo CLAUDE.md/AGENTS.md drift
+  lint, §9 move 2; the CLI/agent posts the file content because the server has
+  no repo checkout; live)
 
 MCP tools (new): `agent_context_list_versions`, `agent_context_diff`,
 `agent_context_propose_change`, `agent_context_list_change_requests`,

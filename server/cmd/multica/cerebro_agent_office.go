@@ -80,6 +80,26 @@ var agentContextRollbackCmd = &cobra.Command{
 	RunE:  runAgentContextRollback,
 }
 
+var agentContextLintCmd = &cobra.Command{
+	Use:   "lint [agent-id]",
+	Short: "Drift-lint an agent's context (or the whole workspace), and repo CLAUDE.md/AGENTS.md files",
+	Long: `Context lint (FIR-1775 Phase 3). Three modes:
+
+  multica agent context lint <agent-id>        one agent: dead/unbound skill
+                                               refs, duplicated rules across
+                                               layers, empty governance fields,
+                                               stale repo links
+  multica agent context lint                   workspace-wide sweep over every
+                                               non-archived agent
+  multica agent context lint --repo-file <p>   drift-lint a repo CLAUDE.md /
+                                               AGENTS.md: flags agent-behavior
+                                               language and lines duplicated
+                                               from the versioned harness
+                                               (repeatable)`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runAgentContextLint,
+}
+
 func init() {
 	agentCmd.AddCommand(agentContextCmd)
 	agentContextCmd.AddCommand(agentContextVersionsCmd)
@@ -89,6 +109,7 @@ func init() {
 	agentContextCmd.AddCommand(agentContextDiffCmd)
 	agentContextCmd.AddCommand(agentContextOwnershipCmd)
 	agentContextCmd.AddCommand(agentContextRollbackCmd)
+	agentContextCmd.AddCommand(agentContextLintCmd)
 
 	agentContextVersionsCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -126,6 +147,9 @@ func init() {
 	agentContextRollbackCmd.Flags().String("version", "", "Historical version to roll back to, e.g. 1.0.0 (required)")
 	agentContextRollbackCmd.Flags().String("comment", "", "Optional note describing why (becomes the change request description)")
 	agentContextRollbackCmd.Flags().String("output", "json", "Output format: json")
+
+	agentContextLintCmd.Flags().StringArray("repo-file", nil, "Path to a repo CLAUDE.md/AGENTS.md to drift-lint (repeatable)")
+	agentContextLintCmd.Flags().String("output", "json", "Output format: json")
 }
 
 func runAgentContextVersions(cmd *cobra.Command, args []string) error {
@@ -340,6 +364,49 @@ func runAgentContextOwnership(cmd *cobra.Command, args []string) error {
 	var out any
 	if err := client.PutJSON(ctx, "/api/agents/"+url.PathEscape(args[0])+"/context/ownership", body, &out); err != nil {
 		return fmt.Errorf("update ownership: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, out)
+}
+
+func runAgentContextLint(cmd *cobra.Command, args []string) error {
+	repoFiles, _ := cmd.Flags().GetStringArray("repo-file")
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if len(repoFiles) > 0 {
+		// Repo-file drift lint: the server has no checkout of the repo, so the
+		// CLI reads each file and posts its content to be checked against the
+		// workspace harness (agent instructions + skills).
+		results := make([]any, 0, len(repoFiles))
+		for _, path := range repoFiles {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read repo-file: %w", err)
+			}
+			body := map[string]any{"filename": path, "content": string(data)}
+			var out any
+			if err := client.PostJSON(ctx, "/api/agents/context/lint/repo-file", body, &out); err != nil {
+				return fmt.Errorf("lint repo-file %s: %w", path, err)
+			}
+			results = append(results, out)
+		}
+		if len(results) == 1 {
+			return cli.PrintJSON(os.Stdout, results[0])
+		}
+		return cli.PrintJSON(os.Stdout, results)
+	}
+
+	path := "/api/agents/context/lint"
+	if len(args) == 1 {
+		path = "/api/agents/" + url.PathEscape(args[0]) + "/context/lint"
+	}
+	var out any
+	if err := client.GetJSON(ctx, path, &out); err != nil {
+		return fmt.Errorf("lint: %w", err)
 	}
 	return cli.PrintJSON(os.Stdout, out)
 }

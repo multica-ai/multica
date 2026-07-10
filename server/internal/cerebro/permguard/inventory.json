@@ -25,6 +25,10 @@
       "gate": "agent_context_manage"
     },
     {
+      "id": "POST /api/agents/context/lint/repo-file",
+      "exempt": "read-only analysis — the POST only submits repo-file content to be linted against the harness; nothing is written"
+    },
+    {
       "id": "PUT /api/agents/{id}/context/ownership",
       "gate": "agent_context_manage"
     },
@@ -1751,6 +1755,10 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff, no mutation"
     },
     {
+      "id": "agent_context_lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent_context_propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
     },
@@ -2083,6 +2091,10 @@
     {
       "id": "agent context diff",
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff"
+    },
+    {
+      "id": "agent context lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/[{id}/]context/lint and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
     },
     {
       "id": "agent context ownership",
