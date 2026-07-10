@@ -150,6 +150,14 @@ Run every verification step in order. Do not stop at the first pass.
 # Backend: Go compiles cleanly
 cd server && go build ./... && cd ..
 
+# Database: apply any migrations the merge brought in. cmd/migrate reads
+# DATABASE_URL (it defaults to localhost:5432/multica:multica — wrong for a
+# self-hosted instance on :5433, so pass the value from .env). Confirm the
+# run reaches "Done." with no unapplied migrations left; an upstream
+# migration-number reshuffle can abort the run midway. See
+# docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md
+cd server && DATABASE_URL="<DATABASE_URL from .env>" go run ./cmd/migrate up && cd ..
+
 # TypeScript: no type errors introduced by the merge
 pnpm typecheck
 
@@ -160,7 +168,7 @@ pnpm test
 pnpm build
 ```
 
-If any step fails, fix the issue before proceeding. The typecheck step will catch cases where local features still reference removed upstream APIs.
+If any step fails, fix the issue before proceeding. The typecheck step will catch cases where local features still reference removed upstream APIs. The migrate step catches schema drift that would otherwise surface as 500s on endpoints whose queries reference new columns.
 
 ### Step 8: Restart services and verify
 
@@ -249,9 +257,10 @@ git checkout origin/main -- packages/ui/actor-avatar.tsx && git add packages/ui/
 # Update AvatarChip size={14} -> size="xs"
 # Update Avatar shape="rounded-square" -> shape="circle"
 
-# 7. Install + verify
+# 7. Install + verify (apply migrations between build and tests)
 pnpm install
 cd server && go build ./... && cd ..
+cd server && DATABASE_URL="<from .env>" go run ./cmd/migrate up && cd ..
 pnpm typecheck
 pnpm test
 pnpm build
@@ -287,3 +296,4 @@ git cherry-pick <commit1> <commit2> ...
 - `docs/solutions/workflow-issues/git-staging-timing-checkout-edit.md` — A git staging pitfall encountered during this upgrade where `git checkout --` stages a snapshot rather than the working tree, causing unexpected behavior when editing files mid-merge.
 - `docs/solutions/workflow-issues/upstream-api-divergence-cherry-pick-port.md` — Documents how upstream API divergence turns a simple cherry-pick into a porting exercise requiring feature adaptation, directly relevant to Step 5.
 - `docs/solutions/workflow-issues/pnpm-install-after-upstream-merge.md` — The missing `pnpm install` step that causes confusing build failures after merging upstream package.json changes, addressed in Step 6.
+- `docs/solutions/workflow-issues/unapplied-migrations-after-upstream-upgrade.md` — A sibling "post-merge step the workflow forgot": after the v0.3.42 merge `migrate up` had not been run, silently breaking the issue execution-log list (usage endpoint 200 while task-runs 500). This SOP's Step 7 now runs it.
