@@ -239,6 +239,13 @@
       "default": false
     },
     {
+      "key": "cerebro_inbox_rounds",
+      "label": "Inbox rounds",
+      "description": "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
+      "group": "inbox",
+      "default": false
+    },
+    {
       "key": "cerebro_note_inbox_pane",
       "label": "Open notes in inbox pane",
       "description": "Clicking a note in the inbox Notes box opens it in the same detail pane that messages use — read and edit it without leaving the inbox — with an \"Åbn fuldt\" button to jump to the full Notes surface. Off reverts to opening notes on the full Notes page. Requires Notes.",

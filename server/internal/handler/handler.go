@@ -152,6 +152,8 @@ type Handler struct {
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
 	CommentTargetGuard CommentTargetGuardInvoker
+	// CEREBRO-PATCH(cerebro-rounds): hold member replies until a round starts.
+	RoundCommentGate RoundCommentGate
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).
@@ -421,7 +423,7 @@ type PrivateAgentRunRequesterInvoker interface {
 type ChannelListenInvoker interface {
 	EnqueueChannelListenerTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string)
 	FilterArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow, includeArchived bool) []db.ListChannelsForUserRow
-	OnlyArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow) []db.ListChannelsForUserRow // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2791 archived-only channel list
+	OnlyArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow) []db.ListChannelsForUserRow         // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2791 archived-only channel list
 	MaybeUnarchiveForUser(ctx context.Context, channelID, userID pgtype.UUID, workspaceID, actorType, actorID, triggerNotifType string) // CEREBRO-PATCH(handler-channel-listen-iface): FIR-2321 diagnostics param
 	// CEREBRO-PATCH(handler-dm-promote-iface): JEH-1131 — seam for the
 	// DM-to-channel promotion that runs after mention dispatch.

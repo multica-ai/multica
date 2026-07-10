@@ -105,6 +105,30 @@
       "gate": "self_only"
     },
     {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/members/{issueId}",
+      "gate": "self_only"
+    },
+    {
+      "id": "PATCH /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/members",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/start",
+      "gate": "self_only"
+    },
+    {
       "id": "DELETE /api/cerebro/saved-filters/{id}",
       "gate": "workspace_member"
     },
@@ -2975,6 +2999,30 @@
     {
       "id": "squad update",
       "gate": "via:PUT /api/squads/{id}/"
+    },
+    {
+      "id": "round add",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/members"
+    },
+    {
+      "id": "round create",
+      "gate": "via:POST /api/cerebro/rounds/"
+    },
+    {
+      "id": "round list",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds"
+    },
+    {
+      "id": "round remove",
+      "gate": "via:DELETE /api/cerebro/rounds/{roundId}/members/{issueId}"
+    },
+    {
+      "id": "round start",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/start"
+    },
+    {
+      "id": "round status",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds/{roundId}/status"
     },
     {
       "id": "tool-policy explain",

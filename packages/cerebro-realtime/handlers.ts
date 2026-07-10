@@ -187,6 +187,18 @@ export function registerCerebroHandlers(
     invalidateChatUsage((p as TaskFailedPayload).chat_session_id);
   });
 
+  // FIR-2736 — round counters and held-response state are derived server-side
+  // from issue comments and task lifecycle. Refresh the single workspace
+  // query on those existing realtime events so the inbox advances immediately
+  // without polling.
+  const invalidateRounds = () => {
+    const wsId = getCurrentWsId();
+    if (wsId) qc.invalidateQueries({ queryKey: ["cerebro-rounds", wsId] });
+  };
+  const unsubRoundComment = ws.on("comment:created", invalidateRounds);
+  const unsubRoundTaskCompleted = ws.on("task:completed", invalidateRounds);
+  const unsubRoundTaskFailed = ws.on("task:failed", invalidateRounds);
+
   // JEH-1006 — workspace groups settings list/members invalidation.
   const unsubGroups = registerCerebroGroupHandlers(ws, qc);
 
@@ -208,6 +220,9 @@ export function registerCerebroHandlers(
     unsubChatDoneUsage();
     unsubTaskCompletedUsage();
     unsubTaskFailedUsage();
+    unsubRoundComment();
+    unsubRoundTaskCompleted();
+    unsubRoundTaskFailed();
     unsubGroups();
   };
 }

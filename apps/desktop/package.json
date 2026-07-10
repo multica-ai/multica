@@ -64,6 +64,7 @@
     "@multica/cerebro-realtime": "workspace:*",
     "@multica/cerebro-references": "workspace:*",
     "@multica/cerebro-reminders": "workspace:*",
+    "@multica/cerebro-rounds": "workspace:*",
     "@multica/cerebro-runtime": "workspace:*",
     "@multica/cerebro-skill-ownership": "workspace:*",
     "@multica/cerebro-tasks": "workspace:*",

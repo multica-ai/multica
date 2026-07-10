@@ -22,6 +22,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useQueries } from "@tanstack/react-query";
+import { issueDetailOptions } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
@@ -102,6 +104,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
+import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -180,6 +183,15 @@ export function DynamicInbox() {
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
   const secretaryEnabled = useFeatureFlag("cerebro_inbox_secretary");
   const favoritesEnabled = useFeatureFlag("cerebro_inbox_favorites");
+  const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
+  const { data: roundStatuses = [] } = useRoundStatuses(wsId);
+  const startRound = useStartRound(wsId);
+  const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
+  const roundIssueQueries = useQueries({ queries: roundIssueIds.map((issueId) => issueDetailOptions(wsId, issueId)) });
+  const roundIssueTitles = useMemo(() => Object.fromEntries(roundIssueQueries.flatMap((query, index) => {
+    const issue = query.data;
+    return issue ? [[roundIssueIds[index]!, `${issue.identifier} · ${issue.title}`]] : [];
+  })), [roundIssueIds, roundIssueQueries]);
   // TECH-3541 #2 — same flags the classic inbox uses to gate its view options.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
@@ -455,18 +467,20 @@ export function DynamicInbox() {
   // just-marked-read state. Matched on stable identity; falls through cleanly
   // if the row was archived/removed.
   const displayEntries = useMemo(() => {
-    if (!selectedSnapshot) return entries;
+    const excluded = roundsEnabled ? roundIssueIdsToExclude(roundStatuses) : new Set<string>();
+    const availableEntries = entries.filter((e) => e.kind !== "notif" || !e.item.issue_id || !excluded.has(e.item.issue_id));
+    if (!selectedSnapshot) return availableEntries;
     const target = entryIdentity(selectedSnapshot);
     let swapped = false;
-    const next = entries.map((e) => {
+    const next = availableEntries.map((e) => {
       if (!swapped && entryIdentity(e) === target) {
         swapped = true;
         return selectedSnapshot;
       }
       return e;
     });
-    return swapped ? next : entries;
-  }, [entries, selectedSnapshot]);
+    return swapped ? next : availableEntries;
+  }, [entries, selectedSnapshot, roundsEnabled, roundStatuses]);
 
   // TECH-3413 #1 — drag-to-reorder sections (5px threshold so clicks inside a
   // section still register).
@@ -832,6 +846,7 @@ export function DynamicInbox() {
             // TECH-3598 #1 — scroll to + highlight the comment that triggered
             // the notification instead of landing at the top, classic parity.
             highlightCommentId={selected.item.details?.comment_id ?? undefined}
+            extensions={roundsEnabled ? <AddToRoundAction issueId={selected.item.issue_id} /> : undefined}
             linkSelfInBreadcrumb
             onDelete={clearSelection}
             // TECH-3549 — reuse the classic inbox's mark-done/archive toolbar
@@ -1143,6 +1158,15 @@ export function DynamicInbox() {
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
+          {roundsEnabled && (
+            <div className="space-y-2">
+              <div className="flex justify-end"><ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} /></div>
+              <RoundsBlock statuses={roundStatuses} issueTitles={roundIssueTitles} onStart={(roundId) => startRound.mutate(roundId)} onSelectIssue={(issueId) => {
+                const entry = entries.find((e) => e.kind === "notif" && e.item.issue_id === issueId);
+                if (entry) onSelect(entry);
+              }} />
+            </div>
+          )}
           {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
               Empty tab — add a section from the ⋯ menu.

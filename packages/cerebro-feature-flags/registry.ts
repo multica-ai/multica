@@ -36,6 +36,7 @@ export type CerebroFlagKey =
   // instead of auto-advancing to the next message. Per-user preference.
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
+  | "cerebro_inbox_rounds"
   // FIR-1854: split a channel/DM thread with unread replies into its own
   // inbox row so replies buried in a thread are not missed.
   | "cerebro_inbox_thread_split"
@@ -430,6 +431,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
   cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
+  cerebro_inbox_rounds: false,
   // FIR-1854 (Jesper): ON — a thread reply that would otherwise hide inside
   // the channel row gets its own inbox row so it is not missed.
   cerebro_inbox_thread_split: true,
@@ -1060,6 +1062,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+  },
+  {
+    key: "cerebro_inbox_rounds",
+    label: "Inbox rounds",
+    group: "inbox",
+    description:
+      "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
   },
   {
     key: "cerebro_note_inbox_pane",
