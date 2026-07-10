@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -58,6 +59,70 @@ func TestMigrationFilesHaveMatchingDirections(t *testing.T) {
 			t.Errorf("migration %s must have both .up.sql and .down.sql files", stem)
 		}
 	}
+}
+
+func TestMigrationNumericPrefixesStayUniqueAfterLegacySet(t *testing.T) {
+	stemsByPrefix := migrationStemsByPrefix(t)
+
+	for prefix, stems := range stemsByPrefix {
+		sort.Strings(stems)
+
+		legacyStems, isLegacyDuplicate := legacyDuplicateMigrationStems[prefix]
+		if isLegacyDuplicate {
+			expected := append([]string(nil), legacyStems...)
+			sort.Strings(expected)
+			if !reflect.DeepEqual(stems, expected) {
+				t.Errorf("legacy duplicate migration prefix %s changed: got %v, want %v; do not add to or rename historical duplicate-prefix migrations", prefix, stems, expected)
+			}
+			continue
+		}
+
+		if len(stems) > 1 {
+			t.Errorf("migration prefix %s is reused by %v; use the next unique prefix instead", prefix, stems)
+		}
+	}
+}
+
+func TestNewMigrationPrefixesStartAfterLegacyRange(t *testing.T) {
+	stemsByPrefix := migrationStemsByPrefix(t)
+
+	for prefix, stems := range stemsByPrefix {
+		n, err := strconv.Atoi(prefix)
+		if err != nil {
+			t.Fatalf("parse migration prefix %q: %v", prefix, err)
+		}
+		if n <= maxLegacyMigrationPrefix && !isKnownLegacyPrefix(prefix) {
+			t.Errorf("migration prefix %s is in the frozen legacy range 001-%03d: %v; new migrations must start at %03d", prefix, maxLegacyMigrationPrefix, stems, maxLegacyMigrationPrefix+1)
+		}
+	}
+}
+
+func TestMigrationsAvoidUnsupportedIsFiniteOnDoublePrecision(t *testing.T) {
+	for _, file := range migrationFilesForLint(t, "*.sql") {
+		contents, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", file, err)
+		}
+		if strings.Contains(string(contents), "isfinite(") {
+			t.Errorf("migration %s uses isfinite(...), which is not portable for double precision in our Postgres environments", filepath.Base(file))
+		}
+	}
+}
+
+func migrationStemsByPrefix(t *testing.T) map[string][]string {
+	t.Helper()
+
+	files := migrationFilesForLint(t, "*.up.sql")
+	stemsByPrefix := make(map[string][]string)
+	for _, file := range files {
+		stem := strings.TrimSuffix(filepath.Base(file), ".up.sql")
+		match := migrationPrefixPattern.FindStringSubmatch(stem)
+		if match == nil {
+			t.Fatalf("migration %s does not start with a numeric prefix followed by underscore", stem)
+		}
+		stemsByPrefix[match[1]] = append(stemsByPrefix[match[1]], stem)
+	}
+	return stemsByPrefix
 }
 
 func migrationFilesForLint(t *testing.T, pattern string) []string {

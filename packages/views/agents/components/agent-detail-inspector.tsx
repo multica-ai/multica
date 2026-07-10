@@ -36,9 +36,7 @@ import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
 import { useExecutionControls } from "./inspector/use-execution-controls";
-
-interface InspectorProps {
-  agent: Agent;
+import { WaitTimeoutPicker } from "./inspector/wait-timeout-picker";
   runtime: AgentRuntime | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
@@ -355,7 +353,25 @@ export function AgentDetailInspector({
                   onSave={(next) => update({ max_concurrent_tasks: next })}
                 />
               </SettingsRow>
-            </SettingsCard>
+              <SettingsRow
+                label={t((1000 7 27 100 106 108 111 986 989 1000 => 1inspector.prop_wait_timeout)}
+                size="select-wide"
+              >
+                <WaitTimeoutPicker
+              <SettingsRow
+                label={t(($) => $.inspector.prop_wait_timeout)}
+                size="select-wide"
+              >
+                <WaitTimeoutPicker
+                  valueSeconds={agent.queued_ttl_seconds}
+                  canEdit={canEdit}
+                  onChange={(seconds) => update({ queued_ttl_seconds: seconds })}
+                />
+              </SettingsRow>
+                  valueSeconds={agent.queued_ttl_seconds}
+                  canEdit={canEdit}
+                  onChange={(seconds) => update({ queued_ttl_seconds: seconds })}
+                
           </SettingsSection>
         </div>
 
@@ -367,33 +383,8 @@ export function AgentDetailInspector({
             name={name.trim() || agent.name}
             description={description}
             avatarUrl={agent.avatar_url ?? null}
-            starters={showStarters ? starters : []}
-          />
         </SettingsSection>
       </div>
-    </div>
-  );
-}
-
-function ConcurrencyField({
-  value,
-  canEdit,
-  onSave,
-}: {
-  value: number;
-  canEdit: boolean;
-  onSave: (next: number) => Promise<void>;
-}) {
-  const { t } = useT("agents");
-  const [draft, setDraft] = useState(String(value));
-
-  useEffect(() => setDraft(String(value)), [value]);
-
-  const commit = () => {
-    const next = Number(draft);
-    if (
-      !Number.isInteger(next) ||
-      next < AGENT_MAX_CONCURRENT_TASKS_MIN ||
       next > AGENT_MAX_CONCURRENT_TASKS_MAX
     ) {
       setDraft(String(value));
