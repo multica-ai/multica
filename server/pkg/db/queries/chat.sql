@@ -23,10 +23,11 @@ SELECT cs.*,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
-       lm.failure_reason AS last_message_failure_reason
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
 FROM chat_session cs
 LEFT JOIN LATERAL (
-  SELECT content, role, created_at, failure_reason
+  SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
    ORDER BY m.created_at DESC
@@ -44,10 +45,11 @@ SELECT cs.*,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
-       lm.failure_reason AS last_message_failure_reason
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
 FROM chat_session cs
 LEFT JOIN LATERAL (
-  SELECT content, role, created_at, failure_reason
+  SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
    ORDER BY m.created_at DESC
@@ -137,8 +139,11 @@ UPDATE chat_session SET updated_at = now()
 WHERE id = $1;
 
 -- name: CreateChatMessage :one
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
-VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
+-- message_kind defaults to 'message' via COALESCE so every existing caller
+-- (which omits it) keeps writing ordinary messages; the empty-reply path passes
+-- 'no_response' to mark a visible turn with no text output (MUL-4351).
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind)
+VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms), COALESCE(sqlc.narg(message_kind)::text, 'message'))
 RETURNING *;
 
 -- name: LinkChatMessageToTask :exec
@@ -155,6 +160,18 @@ RETURNING *;
 SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
+
+-- name: ListChatInputMessages :many
+-- Loads the immutable user-message input batch owned by a direct-chat task.
+-- The caller passes the task's chat_input_task_id (itself for an original send,
+-- the root task for an auto-retry child), so a claim reads exactly the messages
+-- the user sent for this turn — and never absorbs a message that arrived after
+-- the batch was sealed, no matter what the assistant wrote or when. Only used
+-- for new task-owned direct-chat tasks; legacy/channel (chat_input_task_id
+-- NULL) tasks keep using ListChatMessages + trailingUserMessages.
+SELECT * FROM chat_message
+WHERE task_id = $1 AND role = 'user'
+ORDER BY created_at ASC, id ASC;
 
 -- name: ListChatMessagesPage :many
 SELECT * FROM chat_message
@@ -183,6 +200,18 @@ VALUES (
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps)
 )
+RETURNING *;
+
+-- name: SetChatTaskInputOwnerSelf :one
+-- Stamps a freshly-created direct-chat task as the owner of its own input batch
+-- (chat_input_task_id = id), so a later claim loads exactly the user messages
+-- tagged with this task id (ListChatInputMessages) rather than scanning trailing
+-- history. Runs in the same transaction as CreateChatTask + the user message
+-- insert on the direct-send path. Channel and legacy tasks skip this call and
+-- keep chat_input_task_id NULL, so a rolling deploy never replays their history.
+UPDATE agent_task_queue
+SET chat_input_task_id = id
+WHERE id = $1
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one

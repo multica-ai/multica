@@ -146,7 +146,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -175,7 +175,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Status:      s.Status,
 				HasUnread:   s.UnreadCount > 0,
 				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -598,70 +598,32 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		hadUserMessage = existed
 	}
 
-	// Create the user message first so the daemon can always find it.
-	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
-		ChatSessionID: session.ID,
-		Role:          "user",
-		Content:       req.Content,
-	})
+	// Persist the whole turn atomically (MUL-4351): the owning task, the user
+	// message bound to that task (so it belongs to the task's immutable input
+	// batch the instant it exists), attachment bindings, and the session touch
+	// all commit together, and the daemon is only notified after the commit. For
+	// web chat the sender is the authenticated request user (sessions are
+	// creator-only), so they are the task initiator — surfaced to the agent
+	// under `## Task Initiator`.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create chat message")
+		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
 		return
 	}
+	msg := sent.Message
+	task := sent.Task
 
-	// Back-fill chat_message_id on attachments the sender uploaded while
-	// composing. New clients upload workspace-scoped unattached rows and bind
-	// them here; older clients may still upload against the chat_session_id.
-	// The query accepts both shapes, but only for this workspace, this actor,
-	// and rows that are not already linked to an issue/comment/message.
+	// AttachmentIDs actually bound by the server. Requested-but-unbound ids are
+	// surfaced to the client so it can warn the user (see SendChatMessageResponse).
 	var boundAttachmentIDs []string
 	if len(attachmentIDs) > 0 {
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		bound, err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
-			ChatMessageID: msg.ID,
-			ChatSessionID: session.ID,
-			WorkspaceID:   session.WorkspaceID,
-			UploaderType:  actorType,
-			UploaderID:    parseUUID(actorID),
-			AttachmentIds: attachmentIDs,
-		})
-		if err != nil {
-			// Don't fail the send — the message content is already saved and
-			// the attachments remain on the session (still downloadable).
-			slog.Warn("link chat attachments failed", "error", err, "message_id", uuidToString(msg.ID))
-		}
-		boundAttachmentIDs = make([]string, 0, len(bound))
-		for _, id := range bound {
+		boundAttachmentIDs = make([]string, 0, len(sent.BoundAttachmentIDs))
+		for _, id := range sent.BoundAttachmentIDs {
 			boundAttachmentIDs = append(boundAttachmentIDs, uuidToString(id))
 		}
 	}
 
-	// Enqueue a chat task after the message exists. For web chat the sender is
-	// the authenticated request user (sessions are creator-only), so they are
-	// the task initiator — surfaced to the agent under `## Task Initiator`.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID), false)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
-		return
-	}
-	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
-		ID:     msg.ID,
-		TaskID: task.ID,
-	}); err != nil {
-		// Don't fail the send: the task already exists and the user message
-		// is persisted. The link is only needed for precise empty-cancel
-		// cleanup; older/unlinked rows simply keep the historical behavior.
-		slog.Warn("link user chat message to task failed",
-			"message_id", uuidToString(msg.ID),
-			"task_id", uuidToString(task.ID),
-			"error", err,
-		)
-	}
-
-	// Touch session updated_at.
-	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
-		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
-	}
 	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
 	platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.ChatMessageSent(
@@ -1195,11 +1157,15 @@ type ChatLastMessage struct {
 	Role          string  `json:"role"`
 	CreatedAt     string  `json:"created_at"`
 	FailureReason *string `json:"failure_reason"`
+	// MessageKind is 'message' (default) or 'no_response'. Lets the session
+	// list render a localized preview for a no-text-reply turn instead of the
+	// English fallback content the server stores (MUL-4351).
+	MessageKind string `json:"message_kind"`
 }
 
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
-func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text) *ChatLastMessage {
+func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
 	if !at.Valid {
 		return nil
 	}
@@ -1208,6 +1174,7 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 		Role:          role,
 		CreatedAt:     timestampToString(at),
 		FailureReason: textToPtr(failure),
+		MessageKind:   normalizeMessageKind(kind),
 	}
 }
 
@@ -1224,6 +1191,10 @@ type ChatMessageResponse struct {
 	// ElapsedMs is the wall-clock duration from task creation to terminal
 	// state. Drives "Replied in 38s" / "Failed after 12s" captions.
 	ElapsedMs *int64 `json:"elapsed_ms"`
+	// MessageKind is 'message' (default) or 'no_response' — a completed
+	// direct-chat turn that produced no text reply (MUL-4351). Additive:
+	// clients that don't understand it fall back to the non-empty content.
+	MessageKind string `json:"message_kind"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the
@@ -1256,6 +1227,19 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		CreatedAt:     timestampToString(m.CreatedAt),
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),
+		MessageKind:   normalizeMessageKind(m.MessageKind),
 		Attachments:   attachments,
+	}
+}
+
+// normalizeMessageKind maps a stored chat_message.message_kind to the value the
+// API exposes. Unknown / empty kinds degrade to 'message' so a future kind
+// never surprises an older client into a broken render (MUL-4351).
+func normalizeMessageKind(kind string) string {
+	switch kind {
+	case protocol.ChatMessageKindNoResponse:
+		return protocol.ChatMessageKindNoResponse
+	default:
+		return protocol.ChatMessageKindMessage
 	}
 }

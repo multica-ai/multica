@@ -222,6 +222,15 @@ export function ChatThreadList({
       );
     } else if (last?.failure_reason) {
       previewNode = <span className="block truncate text-destructive">{t(($) => $.list.failed)}</span>;
+    } else if (last?.message_kind === "no_response") {
+      // A no_response turn stores a non-empty English fallback as its content,
+      // so the preview is never blank even on older clients; new clients show a
+      // localized, italic hint instead of that fallback text (MUL-4351).
+      previewNode = (
+        <span className="block truncate italic text-muted-foreground">
+          {t(($) => $.list.no_response_preview)}
+        </span>
+      );
     } else if (last) {
       previewNode = (
         <span className={cn("block truncate", unread > 0 ? "text-foreground/80" : "text-muted-foreground")}>

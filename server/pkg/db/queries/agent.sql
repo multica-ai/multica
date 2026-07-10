@@ -253,16 +253,34 @@ WHERE id = $1 AND issue_id IS NULL;
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+--
+-- chat_input_task_id is inherited straight from the parent so the whole retry
+-- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
+-- direct task set it to its own id, every descendant copies that value, and a
+-- claim always reads the same user messages. A plain copy (not
+-- COALESCE(parent.chat_input_task_id, parent.id)) is deliberate: legacy/channel
+-- parents carry NULL and must stay NULL so their retries keep the trailing
+-- selector — promoting a pre-migration NULL row to the task-owned path on retry
+-- would risk replaying untagged history during a rolling deploy.
+--
+-- Chat retries are queued at GREATEST(priority, 3) so a transiently-failed
+-- earlier turn is re-claimed ahead of any fresh chat task (priority 2) the user
+-- queued while the failing turn was still running — the retry continues the
+-- older turn first. Combined with creating the retry inside FailTask's
+-- transaction, this leaves no window for a newer input task to jump ahead.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    chat_input_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
+    'queued',
+    CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
+    p.trigger_comment_id, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
@@ -271,7 +289,8 @@ SELECT
     p.squad_id,
     p.originator_user_id,
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    p.chat_input_task_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

@@ -1787,30 +1787,70 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// turn). Attachments are collected from each included message so
 			// the agent can `multica attachment download <id>` — the markdown
 			// URL alone is signed and 30-min expiring on the private CDN.
-			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				unanswered := trailingUserMessages(msgs)
-				parts := make([]string, 0, len(unanswered))
-				for _, m := range unanswered {
-					if strings.TrimSpace(m.Content) != "" {
-						parts = append(parts, m.Content)
-					}
-					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-						ChatMessageID: m.ID,
-						WorkspaceID:   parseUUID(resp.WorkspaceID),
-					}); attErr == nil && len(atts) > 0 {
-						for _, a := range atts {
-							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
-								ID:          uuidToString(a.ID),
-								Filename:    a.Filename,
-								ContentType: a.ContentType,
-							})
-						}
+			// Resolve the user-message input batch for this run. A task-owned
+			// direct-chat task (chat_input_task_id set, MUL-4351) reads exactly
+			// the user messages tagged with its own input owner, so a message
+			// that arrived after this turn was sealed can never be absorbed here.
+			// Legacy and channel (Slack/Lark) tasks carry a NULL owner and keep
+			// the trailing-message selector, so a rolling deploy never replays
+			// their history.
+			var unanswered []db.ChatMessage
+			if task.ChatInputTaskID.Valid {
+				if owned, err := h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID); err == nil {
+					unanswered = owned
+				} else {
+					slog.Warn("chat claim: load owned input messages failed",
+						"task_id", uuidToString(task.ID),
+						"chat_input_task_id", uuidToString(task.ChatInputTaskID),
+						"error", err)
+				}
+			} else if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
+				unanswered = trailingUserMessages(msgs)
+			}
+
+			parts := make([]string, 0, len(unanswered))
+			for _, m := range unanswered {
+				if strings.TrimSpace(m.Content) != "" {
+					parts = append(parts, m.Content)
+				}
+				if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+					ChatMessageID: m.ID,
+					WorkspaceID:   parseUUID(resp.WorkspaceID),
+				}); attErr == nil && len(atts) > 0 {
+					for _, a := range atts {
+						resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+							ID:          uuidToString(a.ID),
+							Filename:    a.Filename,
+							ContentType: a.ContentType,
+						})
 					}
 				}
-				resp.ChatMessage = strings.Join(parts, "\n\n")
-				if strings.TrimSpace(resp.ThreadName) == "" {
-					resp.ThreadName = resp.ChatMessage
+			}
+			resp.ChatMessage = strings.Join(parts, "\n\n")
+
+			// Fail closed: a task-owned direct task that resolves to no user text
+			// (and is not the agent's proactive intro) must never dispatch an
+			// empty prompt. The send path creates the owning user message in the
+			// same transaction as the task, so this only fires on genuinely
+			// corrupt state — cancel the just-dispatched task and reject the claim
+			// rather than run the agent with nothing to answer (MUL-4351).
+			if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
+				outcome = "error_empty_chat_input"
+				slog.Error("chat claim: task-owned direct task has no user input; cancelling",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"chat_input_task_id", uuidToString(task.ChatInputTaskID),
+				)
+				if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+					slog.Error("chat claim: cancel after empty input failed",
+						"task_id", uuidToString(task.ID), "error", cerr)
 				}
+				writeError(w, http.StatusInternalServerError, "chat task has no user input")
+				return
+			}
+
+			if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
+				resp.ThreadName = resp.ChatMessage
 			}
 		}
 	}
@@ -2357,8 +2397,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	result, _ := json.Marshal(req)
 	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir)
 	if err != nil {
+		// A CompleteTask error is an infrastructure failure (transaction /
+		// assistant-outcome write), not a bad request: an already-finalized
+		// callback is treated as idempotent success and returns no error. Return
+		// 5xx so the daemon retries the terminal callback and the completion —
+		// including the single chat outcome row — lands exactly once (MUL-4351).
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
