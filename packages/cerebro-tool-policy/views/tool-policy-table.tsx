@@ -21,9 +21,10 @@
 // ../core fail CLOSED (unknown verdict → deny), so a drifted response can never
 // render a tool as Allow by accident.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ChevronDown,
   ChevronRight,
@@ -41,6 +42,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   SlidersHorizontal,
+  UsersRound,
   X,
 } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -100,9 +102,15 @@ import {
   type ScopeConfig,
   type ScopeOption,
 } from "./data-source-scope";
+import { GROUP_ARG, useGroupScopeOptions } from "./group-scope";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
-import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
+import { ConnectionToolList } from "./connection-config-sheet";
+import {
+  FirtalRegistryDataSourceConfigure,
+  DataSourceList,
+} from "./firtal-registry-data-source-sheet";
+import { CapabilityCatalog } from "./capability-catalog";
 
 /**
  * The actor surfaces. Each page renders the same catalog but authors a different
@@ -123,14 +131,18 @@ export type ToolPolicyView =
   | "member"
   | "system";
 
-// FIR-2281: the permission flade is split into TWO tabs instead of five.
+// FIR-2281 split the permission flade into two tabs; FIR-2706 splits the
+// former "resources" tab in two again, so the three resource kinds each get
+// their own dedicated surface instead of being lumped together and told
+// apart only by the Type column/filter:
 //   "permissions" — every flat capability the subject can use (Multica + the
 //                   runtime-reported tools). The simple on/off rights.
-//   "resources"   — the things an agent is granted scoped access TO: workspace
-//                   connections, repositories, and credential boxes. These are
-//                   the per-resource rows (a connection, a repo URL, a vault
-//                   box), shown with a Type column + Type filter.
-export type ToolPolicyTabFilter = "permissions" | "resources";
+//   "repos"       — the repositories an agent is scoped to, one collapsible
+//                   group per repo URL.
+//   "connections" — workspace connections (flat rows) plus credential boxes
+//                   (collapsible groups), since both are "access to an
+//                   external resource" the same way a connection is.
+export type ToolPolicyTabFilter = "permissions" | "repos" | "connections";
 
 export interface ToolPolicyTableProps {
   wsId: string;
@@ -147,11 +159,12 @@ export interface ToolPolicyTableProps {
   userId?: string | null;
   groupIds?: string[];
   /**
-   * Which half of the flade this instance renders (FIR-2281):
+   * Which slice of the flade this instance renders (FIR-2281, split further by FIR-2706):
    *   "permissions" — flat capability rows that are not a connection (Multica +
    *                   runtime-reported tools).
-   *   "resources"   — connection rows (flat) plus the repo and credential
-   *                   collapsible sections.
+   *   "repos"       — the repo collapsible groups only.
+   *   "connections" — connection rows (flat) plus the credential collapsible
+   *                   groups.
    * When omitted, all rows are shown (the single-table fallback).
    */
   tabFilter?: ToolPolicyTabFilter;
@@ -192,13 +205,28 @@ const CREDENTIAL_CAP_ORDER = [
 ];
 
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
+// "disable" (FIR-2351 follow-up, product decision 2026-07-06) only ever makes
+// sense authored at the workspace layer — it turns a workspace Deny into a
+// hard, unopenable floor for one permission, the opposite of what Group/User/
+// Agent rows do. Only the workspace-layer decision control offers it; every
+// other layer keeps SETTING_CHOICES unchanged. See settingChoicesFor below.
+const WORKSPACE_SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "disable", "inherit"];
+function settingChoicesFor(editLayer: ToolLayer): ToolSetting[] {
+  return editLayer === "workspace" ? WORKSPACE_SETTING_CHOICES : SETTING_CHOICES;
+}
 const SETTING_LABEL: Record<ToolSetting, string> = {
   allow: "Allow",
   ask: "Ask",
   deny: "Deny",
   inherit: "Inherit",
+  disable: "Disable",
 };
 const DECISION_FILTERS: ToolEffectiveSetting[] = ["allow", "ask", "deny"];
+
+// Restrictiveness rank — a sub-row choice can only TIGHTEN a group-wide floor,
+// never loosen it (TECH-3287 hul 7). Mirrors the connection sheet's rank so the
+// inline catalog lists and the sheet gate futile choices identically.
+const SETTING_RANK: Record<ToolEffectiveSetting, number> = { allow: 0, ask: 1, deny: 2 };
 
 // Decision palette — emerald / amber / destructive, matching the cerebro fork's
 // other permission surfaces (simple table, cerebro-access).
@@ -225,10 +253,11 @@ const LAYER_LABEL: Record<string, string> = {
 };
 
 // FIR-2281: the permission "Type" — the single dimension that used to be the
-// five top-level tabs, now a column + filter. The "permissions" tab covers
-// Multica + Runtime; the "resources" tab covers the three resource kinds an
-// agent is scoped to. ONE classifier drives the Type column AND the
-// tab/filter partition, so a row can never land under the wrong type.
+// five top-level tabs, now a column + filter. FIR-2706 maps it onto three
+// tabs instead of two: "permissions" covers Multica + Runtime, "repos" covers
+// Repos, and "connections" covers Connections + Credentials. ONE classifier
+// drives the Type column AND the tab/filter partition, so a row can never
+// land under the wrong type.
 export type PermissionType =
   | "Multica"
   | "Runtime"
@@ -238,7 +267,8 @@ export type PermissionType =
 
 const PERMISSION_TYPES_BY_TAB: Record<ToolPolicyTabFilter, PermissionType[]> = {
   permissions: ["Multica", "Runtime"],
-  resources: ["Connections", "Repos", "Credentials"],
+  repos: ["Repos"],
+  connections: ["Connections", "Credentials"],
 };
 
 // A runtime-reported tool is one a runtime actually advertised — built-ins and
@@ -313,6 +343,16 @@ export function ToolPolicyTable({
   // on; gate them on the same flag the backend gates the rows with so the
   // Credentials type is a consistent surface the moment an admin enables it.
   const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
+  // FIR-2706: the redesigned "Tools & permissions" look — the flat catalog
+  // rendered as grouped capability cards with inline-expanding connections and a
+  // single Decision-toggle-that-holds-When per row. Presentation only; every
+  // verdict, filter, and write path below is unchanged. Gated on the permissions
+  // flag itself (`cerebro_tool_policy`, default ON) rather than the agent-page
+  // preview — Jesper's call, so the catalog IS the default permissions surface on
+  // production, and every surface that renders this shared component (agent Tools
+  // tab, runtime, group, member, autopilot, connections, collections, settings)
+  // shows it. The classic table below only serves installs with tool-policy off.
+  const showCatalog = useFeatureFlag("cerebro_tool_policy");
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
@@ -379,25 +419,27 @@ export function ToolPolicyTable({
     return map;
   }, [rows]);
 
-  // tabFilter splits the flade in two (FIR-2281). TanStack Query deduplicates the
-  // underlying fetch, so the two ToolPolicyTable instances behind the tabs share a
-  // single network request.
+  // tabFilter splits the flade in three (FIR-2281, then FIR-2706). TanStack
+  // Query deduplicates the underlying fetch, so the ToolPolicyTable instances
+  // behind the tabs share a single network request.
   const capRows = useMemo(() => {
-    // Resources tab: the only FLAT capability rows are the connection rows — repos
-    // and credentials render as collapsible sections (repoGroups / credentialGroups
-    // below), so the flat table excludes them on this tab.
-    if (tabFilter === "resources")
+    // Connections tab: the only FLAT capability rows are the connection rows —
+    // credentials render as collapsible sections (credentialGroups below), so
+    // the flat table excludes them on this tab.
+    if (tabFilter === "connections")
       return allCapRows.filter((r) => r.source === "connection");
     if (tabFilter === "permissions")
       // Everything that is not a connection — Multica + the runtime-reported tools.
       return allCapRows.filter((r) => r.source !== "connection");
+    // Repos tab has no flat rows — repos render as collapsible sections only.
+    if (tabFilter === "repos") return [];
     // No tabFilter: the single-table fallback shows every flat capability row.
     return allCapRows;
   }, [tabFilter, allCapRows]);
 
   const repoRows = useMemo(() => {
-    // Repos belong to the Resources tab (and the no-filter fallback).
-    if (!tabFilter || tabFilter === "resources") return allRepoRows;
+    // Repos belong to their own tab (and the no-filter fallback).
+    if (!tabFilter || tabFilter === "repos") return allRepoRows;
     return [];
   }, [tabFilter, allRepoRows]);
 
@@ -409,12 +451,19 @@ export function ToolPolicyTable({
       for (const r of capRows) present.add(permissionType(r));
       const order = tabFilter
         ? PERMISSION_TYPES_BY_TAB.permissions
-        : [...PERMISSION_TYPES_BY_TAB.permissions, ...PERMISSION_TYPES_BY_TAB.resources];
+        : [
+            ...PERMISSION_TYPES_BY_TAB.permissions,
+            ...PERMISSION_TYPES_BY_TAB.repos,
+            ...PERMISSION_TYPES_BY_TAB.connections,
+          ];
       return order.filter((t) => present.has(t));
     }
+    if (tabFilter === "repos") {
+      return allRepoRows.length ? ["Repos"] : [];
+    }
+    // connections tab
     const present: PermissionType[] = [];
     if (capRows.length) present.push("Connections");
-    if (allRepoRows.length) present.push("Repos");
     if (showCredentials && allCredentialRows.length) present.push("Credentials");
     return present;
   }, [tabFilter, capRows, allRepoRows, allCredentialRows, showCredentials]);
@@ -431,11 +480,11 @@ export function ToolPolicyTable({
     [types, repoRows, search],
   );
   // Credential groups: one collapsible group per Agent Vault box, shown on the
-  // Resources tab when the feature is on. Keyed by resource_pattern and narrowed by
-  // the free-text search (on the box name) and the "Credentials" type filter.
+  // Connections tab when the feature is on. Keyed by resource_pattern and narrowed
+  // by the free-text search (on the box name) and the "Credentials" type filter.
   const credentialGroups = useMemo(() => {
-    const onResources = !tabFilter || tabFilter === "resources";
-    if (!onResources || !showCredentials) return [];
+    const onConnections = !tabFilter || tabFilter === "connections";
+    if (!onConnections || !showCredentials) return [];
     if (types.size && !types.has("Credentials")) return [];
     return groupCredentialRows(allCredentialRows, search);
   }, [tabFilter, showCredentials, types, allCredentialRows, search]);
@@ -448,7 +497,25 @@ export function ToolPolicyTable({
       clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
       return;
     }
-    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+    setPolicy.mutate(
+      { tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope },
+      {
+        // FIR-2706 follow-up: the server ACCEPTS a write a higher layer then
+        // overrides, so the pill snapped back with no message — a silent
+        // failure to the user. Rejected writes already toast via the hook's
+        // onError; this covers the accepted-but-overridden case by naming the
+        // blocking layer out loud the moment the write lands.
+        onSuccess: () => {
+          const row = rows.find(
+            (r) =>
+              r.tool_key === toolKey && (r.resource_pattern || "") === (resourcePattern || ""),
+          );
+          if (!row) return;
+          const warning = futileWriteWarning(row, editLayer, setting);
+          if (warning) toast.warning(warning, { duration: 8000 });
+        },
+      },
+    );
   }
 
   // Write (or clear) the Condition — the WHEN layer (FIR-1609) — on this page's
@@ -488,19 +555,103 @@ export function ToolPolicyTable({
   }
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
+    let skipped = 0;
     for (const row of filtered) {
       // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
       // skip those instead of firing a silent dead write that reverts on refetch.
-      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) continue;
+      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) {
+        skipped += 1;
+        continue;
+      }
       setPolicy.mutate({ tool_key: row.tool_key, layer: editLayer, subject_id: subjectId, setting });
     }
+    // Skipping silently looked like the bulk action half-failed (FIR-2706
+    // follow-up) — say how many rows a higher layer holds locked.
+    if (skipped > 0) {
+      toast.info(
+        skipped === 1
+          ? "1 permission was left unchanged — a higher layer locks it. The lock icon on the row names the blocker."
+          : `${skipped} permissions were left unchanged — higher layers lock them. The lock icon on each row names the blocker.`,
+        { duration: 8000 },
+      );
+    }
   }
+
+  // FIR-2706 — a catalog row is itself a GROUP when it carries underlying rows:
+  // a connection with per-tool rows, or a tool (firtal_registry) with data
+  // sources. Group rows expand inline instead of opening a Sheet, so the wide
+  // "Configure (N)" / "Data sources (N)" buttons no longer crowd the row on mobile.
+  const connToolsFor = (row: ToolPolicyRow) =>
+    row.source === "connection" ? (connectionToolsByKey.get(row.tool_key) ?? []) : [];
+  const dataSourcesFor = (row: ToolPolicyRow) =>
+    registryDataSourcesByKey.get(row.tool_key) ?? [];
+
+  // The per-row control in the redesigned catalog: ONE Decision toggle that also
+  // holds the When editor inside its popover (FIR-2706 — Jesper's "When lives in
+  // the toggle, not a second button on the bar"). Same single control for leaf and
+  // group rows, so the row bar is always one control wide and the tool name never
+  // gets crowded off on mobile. Group rows additionally expand (chevron) to reveal
+  // their sub-tool list; that lives in renderCatalogDetail below.
+  const renderDecision = (row: ToolPolicyRow) => (
+    <CatalogDecisionControl
+      row={row}
+      editLayer={editLayer}
+      disabled={busy}
+      onDecision={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
+      onCondition={(c) => applyCondition(row, c)}
+      wsId={wsId}
+      argScopeConfig={argScopeConfig}
+    />
+  );
+
+  // The inline detail for a group row: the per-tool list (connections) and data
+  // sources as their own labelled sub-group — "expand and show the group"
+  // (FIR-2706). The group-wide When now lives inside the row's Decision toggle
+  // (see renderDecision), so it no longer sits at the top of the detail. Returns
+  // null for a leaf row, which keeps its chevron hidden in the catalog.
+  const renderCatalogDetail = (row: ToolPolicyRow): ReactNode | null => {
+    const connTools = connToolsFor(row);
+    const dataSources = dataSourcesFor(row);
+    if (connTools.length === 0 && dataSources.length === 0) return null;
+    return (
+      <div className="flex flex-col gap-3">
+        {connTools.length > 0 ? (
+          <ConnectionToolList
+            connectionKey={row.tool_key}
+            connectionRow={row}
+            toolRows={connTools}
+            editLayer={editLayer}
+            subjectId={subjectId}
+          />
+        ) : null}
+        {dataSources.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">
+              Data sources
+            </span>
+            <DataSourceList
+              toolKey={row.tool_key}
+              sourceRows={dataSources}
+              editLayer={editLayer}
+              subjectId={subjectId}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
         shown={filtered.length}
-        total={capRows.length + repoRows.length + (showCredentials ? allCredentialRows.length : 0)}
+        total={
+          capRows.length +
+          repoRows.length +
+          (showCredentials && (!tabFilter || tabFilter === "connections")
+            ? allCredentialRows.length
+            : 0)
+        }
         busy={busy}
         onBulk={bulkSet}
       />
@@ -536,6 +687,8 @@ export function ToolPolicyTable({
               onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
               onSetGroup={applyRepoGroup}
               onSetCondition={applyCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
             />
           )}
 
@@ -547,10 +700,20 @@ export function ToolPolicyTable({
               onSetCapability={(resource, toolKey, s) => applySetting(toolKey, s, resource)}
               onSetGroup={applyCredentialGroup}
               onSetCondition={applyCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
             />
           )}
 
-          {filtered.length > 0 && (
+          {filtered.length > 0 && showCatalog && (
+            <CapabilityCatalog
+              rows={filtered}
+              renderDecision={renderDecision}
+              renderDetail={renderCatalogDetail}
+            />
+          )}
+
+          {filtered.length > 0 && !showCatalog && (
           <>
           {/* Desktop: the full sortable catalog table. */}
           <div className="hidden overflow-hidden rounded-lg border md:block">
@@ -659,7 +822,12 @@ export function ToolPolicyTable({
                       {row.tool_key}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  {/* flex-col-reverse stacks the controls vertically on mobile
+                      with the Decision pill (last child) on TOP and the
+                      Configure / Data sources buttons UNDER it, so the wide
+                      buttons no longer steal the row's width and the capability
+                      name stays readable (FIR-2640 review). */}
+                  <div className="flex shrink-0 flex-col-reverse items-end gap-1.5">
                     {view === "agent" && subjectId ? (
                       <FirtalRegistryRowConfigure
                         toolKey={row.tool_key}
@@ -717,11 +885,13 @@ export function ToolPolicyTable({
 }
 
 export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
-  // FIR-2281: two tabs instead of five. "Permissions" holds the flat capabilities
-  // (Multica + Runtime); "Resources" holds the things an agent is scoped to —
-  // connections, repos and credential boxes — distinguished by the Type column and
-  // filter inside the table. The credentials feature flag is read inside the table
-  // itself, so it never has to gate a whole tab here.
+  // FIR-2281 introduced two tabs instead of five. FIR-2706 splits the former
+  // "Resources" tab in two again: "Repos" and "Connections" now each get their
+  // own dedicated tab instead of being told apart only by the Type column and
+  // filter inside a shared table. "Permissions" is unchanged — the flat
+  // capabilities (Multica + Runtime). Credential boxes live under
+  // "Connections" (see PERMISSION_TYPES_BY_TAB); the credentials feature flag
+  // is read inside the table itself, so it never has to gate a whole tab here.
   return (
     // TECH-3156 Mangel 3: force the tab row horizontal. The shared Tabs primitive
     // renders its list vertically by default, so — like cost-optimization-tabs —
@@ -734,15 +904,21 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
         <TabsTrigger className="!w-auto !flex-none !justify-center" value="permissions">
           Permissions
         </TabsTrigger>
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="resources">
-          Resources
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="repos">
+          Repos
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="connections">
+          Connections
         </TabsTrigger>
       </TabsList>
       <TabsContent value="permissions" className="mt-4">
         <ToolPolicyTable {...props} tabFilter="permissions" />
       </TabsContent>
-      <TabsContent value="resources" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="resources" />
+      <TabsContent value="repos" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="repos" />
+      </TabsContent>
+      <TabsContent value="connections" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="connections" />
       </TabsContent>
     </Tabs>
   );
@@ -1039,6 +1215,25 @@ function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
   return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
 }
 
+// futileWriteWarning — the message to toast when a write the server ACCEPTED
+// is nonetheless overridden by a layer this page cannot loosen (FIR-2706
+// follow-up: an accepted-but-capped write used to revert with no explanation
+// beyond a hover tooltip). Returns null when the write actually takes effect:
+// tightening (deny/disable) always bites, and so does any choice at or above
+// the effective verdict's restrictiveness. Exported for unit tests.
+export function futileWriteWarning(
+  row: ToolPolicyRow,
+  editLayer: ToolLayer,
+  setting: ToolSetting,
+): string | null {
+  if (setting !== "allow" && setting !== "ask") return null;
+  if (!isLockedFromElsewhere(row, editLayer)) return null;
+  const effective = row.effective.setting;
+  if (SETTING_RANK[setting] >= SETTING_RANK[effective]) return null;
+  const { phrase, hint } = blockerText(row);
+  return `"${SETTING_LABEL[setting]}" was saved on the ${LAYER_LABEL[editLayer]} layer, but it has no effect: the decision stays "${SETTING_LABEL[effective]}" because ${phrase} blocks it. ${hint}`.trim();
+}
+
 // rowAttribution is the single source of truth for what the Origin badge says.
 //
 // TECH-3287 hul 2/4/5 reframes two things WITHOUT touching the established
@@ -1142,7 +1337,16 @@ export function DecisionControl({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
-        {SETTING_CHOICES.map((choice) => (
+        {/* FIR-2706 follow-up: the lock explanation lived only in a hover
+            tooltip, so a capped row read as silently broken. Show the reason
+            in the menu itself, right where the user is about to choose. */}
+        {locked && lockTooltip ? (
+          <div className="flex max-w-64 items-start gap-1.5 border-b px-2 py-1.5 text-xs text-muted-foreground">
+            <Lock className="mt-0.5 size-3 shrink-0" />
+            <span>{lockTooltip}</span>
+          </div>
+        ) : null}
+        {settingChoicesFor(editLayer).map((choice) => (
           <DropdownMenuItem
             key={choice}
             onClick={() => onChange(choice)}
@@ -1160,6 +1364,166 @@ export function DecisionControl({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// CatalogDecisionControl is the SINGLE per-row control for the redesigned catalog
+// (FIR-2706): one pill on the row that opens a popover holding BOTH the decision
+// choices (Allow/Ask/Deny/Inherit) AND the When editor. This is Jesper's ask —
+// "the When lives inside the Allow toggle, not as a second button on the bar" — so
+// the row bar stays one control wide and the tool name never gets crowded off on
+// mobile. It composes the same DecisionControl verdict styling and the extracted
+// ConditionEditorBody, so the underlying write semantics are unchanged.
+//
+// Exported for the inline group lists (ConnectionToolList, DataSourceList) so
+// every expanded sub-row in the catalog renders the exact same control
+// (FIR-2706 follow-up — Jesper: "100% identical everywhere"). The optional
+// floorRank/floorLabel pair carries the connection sheet's tighten-only rule:
+// choices looser than the group-wide floor are disabled as futile
+// (TECH-3287 hul 7).
+export function CatalogDecisionControl({
+  row,
+  editLayer,
+  disabled,
+  onDecision,
+  onCondition,
+  wsId,
+  argScopeConfig,
+  floorRank,
+  floorLabel,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  disabled?: boolean;
+  onDecision: (setting: ToolSetting) => void;
+  onCondition: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+  /** Restrictiveness rank of the group-wide floor; looser choices are futile. */
+  floorRank?: number;
+  /** Display label of the group-wide floor, for the futile-choice tooltip. */
+  floorLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const verdict = row.effective.setting;
+  const locked = isLockedFromElsewhere(row, editLayer);
+  const Icon = locked ? Lock : VERDICT_ICON[verdict];
+  const overridden = !!row.layers[editLayer];
+  const lockTooltip = locked ? rowAttribution(row, editLayer).tooltip : undefined;
+
+  // Does this row have a meaningful When condition to edit? Mirrors
+  // ConditionControl's gate so the When section shows exactly where it would as a
+  // standalone control — but now inside the same popover as the decision.
+  const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
+  const hasConcreteRule =
+    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
+  const current = conditionForLayer(row, editLayer);
+  const active = !conditionIsEmpty(current);
+  const facets = conditionFacets(row);
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
+  const meaningful =
+    facets.host || facets.actions.length > 0 || facets.cel || showArg || showGroupArg;
+  const showWhen = editLayer !== "group" && (meaningful || active);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        aria-label={`Decision: ${SETTING_LABEL[verdict]}`}
+        title={lockTooltip}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          VERDICT_PILL[verdict],
+          overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {SETTING_LABEL[verdict]}
+        {active ? (
+          <SlidersHorizontal className="size-3 opacity-70" aria-label="Has a When condition" />
+        ) : null}
+        <ChevronDown className="size-3 opacity-60" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-0">
+        <div className="flex flex-col">
+          {/* FIR-2706 follow-up: same visible lock explanation as
+              DecisionControl — a hover-only tooltip read as a silent failure. */}
+          {locked && lockTooltip ? (
+            <div className="flex items-start gap-1.5 border-b px-3 py-2 text-xs text-muted-foreground">
+              <Lock className="mt-0.5 size-3 shrink-0" />
+              <span>{lockTooltip}</span>
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-0.5 p-1.5">
+            <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Decision
+            </span>
+            {settingChoicesFor(editLayer).map((choice) => {
+              // "disable" (FIR-2351 follow-up) is never futile: it is always at
+              // least as restrictive as the tightest connection floor (Deny), so
+              // the below-floor-rank futile check only applies to allow/ask/deny.
+              const futile =
+                floorRank !== undefined &&
+                choice !== "inherit" &&
+                choice !== "disable" &&
+                SETTING_RANK[choice] < floorRank;
+              return (
+                <button
+                  key={choice}
+                  type="button"
+                  data-testid={`catalog-decision-${row.tool_key}-${choice}`}
+                  disabled={futile}
+                  title={
+                    futile
+                      ? `The connection is set to “${floorLabel}” — “${SETTING_LABEL[choice]}” here is more open and has no effect.`
+                      : undefined
+                  }
+                  onClick={() => {
+                    onDecision(choice);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                    choice === "inherit" && "text-muted-foreground",
+                    row.layers[editLayer] === choice && "font-semibold",
+                    futile && "cursor-not-allowed opacity-50 hover:bg-transparent",
+                  )}
+                >
+                  {SETTING_LABEL[choice]}
+                  {choice === "inherit" && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      clears {LAYER_LABEL[editLayer]}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {showWhen ? (
+            <div className="border-t p-3">
+              {hasConcreteRule ? (
+                <ConditionEditorBody
+                  row={row}
+                  editLayer={editLayer}
+                  onChange={onCondition}
+                  wsId={wsId}
+                  argScopeConfig={argScopeConfig}
+                  enabled={open}
+                  onClose={() => setOpen(false)}
+                />
+              ) : (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <SlidersHorizontal className="size-3.5 shrink-0" />
+                  Set a decision above to add a When condition.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1195,6 +1559,7 @@ function argSummary(list: ToolCondition["arg_allowlist"]): string | null {
   const entry = (list ?? []).find((a) => a.values.length > 0);
   if (!entry) return null;
   const n = entry.values.length;
+  if (entry.arg === GROUP_ARG) return n === 1 ? "1 group" : `${n} groups`;
   if (entry.arg === FOLDER_ARG) return n === 1 ? "1 folder" : `${n} folders`;
   return n === 1 ? "1 source" : `${n} sources`;
 }
@@ -1293,6 +1658,105 @@ export function ConditionControl({
   argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
+
+  const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
+  const hasConcreteRule =
+    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
+  const current = conditionForLayer(row, editLayer);
+  const active = !conditionIsEmpty(current);
+  // The contextual facets: which structured sections are worth showing for this
+  // tool. `meaningful` is the gate for whether the control appears at all.
+  const facets = conditionFacets(row);
+  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const meaningful =
+    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+
+  // Group has no single condition — show nothing there.
+  if (editLayer === "group") return null;
+  // Hide entirely on a tool where a condition makes no sense AND none is set — no
+  // stray "When" affordance on a notification tool. A row that already carries a
+  // condition keeps its control so the value stays editable.
+  if (!meaningful && !active) return null;
+
+  // No concrete rule on this layer → nothing to refine. Disabled hint that names
+  // the prerequisite, rather than silently creating an override.
+  if (!hasConcreteRule) {
+    return (
+      <button
+        type="button"
+        disabled
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label="Condition unavailable"
+        title="Set a decision (Allow/Ask/Deny) on this level first to add a condition."
+        className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs font-medium text-muted-foreground opacity-50"
+      >
+        <SlidersHorizontal className="size-3.5" />
+        When
+      </button>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label={active ? `Condition: ${summarizeCondition(current!)}` : "Add condition"}
+        title={
+          active
+            ? `Applies only when: ${summarizeCondition(current!)}`
+            : "Add a condition — narrow when this rule applies"
+        }
+        className={cn(
+          "inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+          active
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-dashed border-border bg-background text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <SlidersHorizontal className="size-3.5 shrink-0" />
+        <span className="truncate">{active ? summarizeCondition(current!) : "When…"}</span>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80">
+        <ConditionEditorBody
+          row={row}
+          editLayer={editLayer}
+          onChange={onChange}
+          wsId={wsId}
+          argScopeConfig={argScopeConfig}
+          enabled={open}
+          onClose={() => setOpen(false)}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ConditionEditorBody is the WHEN editor form (FIR-2706), extracted from
+// ConditionControl so it renders both in that standalone popover AND inside the
+// catalog Decision toggle's popover — so "When" no longer needs a second button on
+// the row bar (the mobile-crowding fix). It owns its draft state, seeded from the
+// persisted condition each time `enabled` rises. Callers MUST gate that a concrete
+// rule exists (hasConcreteRule) before showing it.
+export function ConditionEditorBody({
+  row,
+  editLayer,
+  onChange,
+  wsId,
+  argScopeConfig,
+  enabled,
+  onClose,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  onChange: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+  /** True while the editor is visible; gates seeding + the lazy scope fetch. */
+  enabled: boolean;
+  /** Close the surrounding popover after Save / Cancel / Clear. */
+  onClose: () => void;
+}) {
   const [hosts, setHosts] = useState<string[]>([]);
   const [actions, setActions] = useState<string[]>([]);
   const [expr, setExpr] = useState("");
@@ -1306,70 +1770,67 @@ export function ConditionControl({
   const [argMode, setArgMode] = useState<"folder" | "source">("source");
   const [argValues, setArgValues] = useState<string[]>([]);
   const [argSearch, setArgSearch] = useState("");
+  const [groupValues, setGroupValues] = useState<string[]>([]);
+  const [groupSearch, setGroupSearch] = useState("");
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
-  const hasConcreteRule =
-    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
   const current = conditionForLayer(row, editLayer);
   const active = !conditionIsEmpty(current);
-
-  // The contextual facets: which structured sections are worth showing for this
-  // tool. `meaningful` is the gate for whether the control appears at all.
   const facets = conditionFacets(row);
   // The arg picker shows only when the row is arg-scoped AND a scope binding
   // (connection + options source) was resolved for the workspace.
-  const showArg = facets.arg && !!wsId && !!argScopeConfig;
-  const meaningful =
-    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
 
-  // Lazily fetch the scope options only while the popover is open (one cached
+  // Lazily fetch the scope options only while the editor is open (one cached
   // registry round-trip per edit session, not on every table render).
   const { options: scopeOptions, loading: scopeLoading } = useScopeOptions(
     wsId ?? "",
     showArg ? argScopeConfig ?? null : null,
-    open && showArg,
+    enabled && showArg,
+  );
+  const { options: groupOptions, loading: groupLoading } = useGroupScopeOptions(
+    wsId ?? "",
+    enabled && showGroupArg,
   );
 
-  // Group has no single condition — show nothing there.
-  if (editLayer === "group") return null;
-
-  // Hide the control entirely on a tool where a condition makes no sense AND none
-  // is already set — no stray "When" affordance on a notification tool. A row
-  // that already carries a condition keeps its control so the value stays
-  // editable even if the heuristic would otherwise hide it.
-  if (!meaningful && !active) return null;
-
-  // Seed the form from the persisted condition each time the popover opens, so an
+  // Seed the form from the persisted condition each time the editor opens, so an
   // abandoned edit never leaks into the next open.
-  function handleOpenChange(next: boolean) {
-    if (next) {
-      setHosts(current?.host_allowlist ?? []);
-      setActions(current?.actions ?? []);
-      setExpr(current?.expr ?? "");
-      setHostDraft("");
-      setHostError(null);
-      setArgSearch("");
-      // Seed the arg picker from the stored allowlist: a folder_id entry → folder
-      // mode, otherwise the data_source_id entry → source mode.
-      const folderEntry = current?.arg_allowlist?.find(
-        (a) => a.arg === FOLDER_ARG && a.values.length > 0,
-      );
-      const sourceEntry = current?.arg_allowlist?.find(
-        (a) => a.arg === DATA_SOURCE_ARG && a.values.length > 0,
-      );
-      if (folderEntry) {
-        setArgMode("folder");
-        setArgValues(folderEntry.values);
-      } else {
-        setArgMode("source");
-        setArgValues(sourceEntry?.values ?? []);
-      }
-      // Open the Advanced disclosure pre-expanded only when a CEL expression is
-      // already set, so an existing expression is never hidden behind a click.
-      setAdvancedOpen(!!current?.expr.trim());
+  useEffect(() => {
+    if (!enabled) return;
+    setHosts(current?.host_allowlist ?? []);
+    setActions(current?.actions ?? []);
+    setExpr(current?.expr ?? "");
+    setHostDraft("");
+    setHostError(null);
+    setArgSearch("");
+    setGroupSearch("");
+    setGroupValues(
+      current?.arg_allowlist?.find((a) => a.arg === GROUP_ARG)?.values ?? [],
+    );
+    // Seed the arg picker from the stored allowlist: a folder_id entry → folder
+    // mode, otherwise the data_source_id entry → source mode.
+    const folderEntry = current?.arg_allowlist?.find(
+      (a) => a.arg === FOLDER_ARG && a.values.length > 0,
+    );
+    const sourceEntry = current?.arg_allowlist?.find(
+      (a) => a.arg === DATA_SOURCE_ARG && a.values.length > 0,
+    );
+    if (folderEntry) {
+      setArgMode("folder");
+      setArgValues(folderEntry.values);
+    } else {
+      setArgMode("source");
+      setArgValues(sourceEntry?.values ?? []);
     }
-    setOpen(next);
-  }
+    // Open the Advanced disclosure pre-expanded only when a CEL expression is
+    // already set, so an existing expression is never hidden behind a click.
+    setAdvancedOpen(!!current?.expr.trim());
+    // Seed once per open (the rising edge of `enabled`); an in-progress edit must
+    // not be reset by re-renders while the editor stays open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
   // Switching the scope axis resets the selection — folder ids and source ids are
   // different value spaces, so a selection never carries across modes.
@@ -1380,6 +1841,12 @@ export function ConditionControl({
 
   function toggleArgValue(id: string) {
     setArgValues((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function toggleGroupValue(id: string) {
+    setGroupValues((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
@@ -1407,9 +1874,11 @@ export function ConditionControl({
     // One arg-allowlist entry per condition: the gate ANDs entries, so a folder
     // OR source rule is expressed as a single entry on the chosen axis.
     const arg_allowlist =
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [];
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [];
     const next: ToolCondition = {
       host_allowlist: hosts,
       actions,
@@ -1417,65 +1886,27 @@ export function ConditionControl({
       expr: expr.trim(),
     };
     onChange(conditionIsEmpty(next) ? null : next);
-    setOpen(false);
+    onClose();
   }
 
   function clear() {
     onChange(null);
-    setOpen(false);
-  }
-
-  // No concrete rule on this layer → nothing to refine. Disabled hint that names
-  // the prerequisite, rather than silently creating an override. Only shown when
-  // a facet IS meaningful — on a non-meaningful row we hid the control above.
-  if (!hasConcreteRule) {
-    return (
-      <button
-        type="button"
-        disabled
-        data-testid={`condition-control-${row.tool_key}`}
-        aria-label="Condition unavailable"
-        title="Set a decision (Allow/Ask/Deny) on this level first to add a condition."
-        className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs font-medium text-muted-foreground opacity-50"
-      >
-        <SlidersHorizontal className="size-3.5" />
-        When
-      </button>
-    );
+    onClose();
   }
 
   const draftEmpty = conditionIsEmpty({
     host_allowlist: hosts,
     actions,
     arg_allowlist:
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [],
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [],
     expr,
   });
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        disabled={disabled}
-        data-testid={`condition-control-${row.tool_key}`}
-        aria-label={active ? `Condition: ${summarizeCondition(current!)}` : "Add condition"}
-        title={
-          active
-            ? `Applies only when: ${summarizeCondition(current!)}`
-            : "Add a condition — narrow when this rule applies"
-        }
-        className={cn(
-          "inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
-          active
-            ? "border-primary/40 bg-primary/10 text-primary"
-            : "border-dashed border-border bg-background text-muted-foreground hover:bg-muted",
-        )}
-      >
-        <SlidersHorizontal className="size-3.5 shrink-0" />
-        <span className="truncate">{active ? summarizeCondition(current!) : "When…"}</span>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
         <div className="flex flex-col gap-4" data-testid={`condition-editor-${row.tool_key}`}>
           <div className="flex flex-col gap-1">
             <PopoverTitle className="text-sm font-semibold">When this rule applies</PopoverTitle>
@@ -1562,6 +1993,17 @@ export function ConditionControl({
             />
           )}
 
+          {showGroupArg && (
+            <GroupScopePicker
+              values={groupValues}
+              onToggle={toggleGroupValue}
+              options={groupOptions}
+              loading={groupLoading}
+              search={groupSearch}
+              onSearch={setGroupSearch}
+            />
+          )}
+
           {facets.cel && (
             <div className="flex flex-col gap-1">
               <button
@@ -1608,7 +2050,7 @@ export function ConditionControl({
               Clear
             </Button>
             <div className="flex gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+              <Button type="button" size="sm" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
               <Button type="button" size="sm" onClick={save}>
@@ -1617,8 +2059,83 @@ export function ConditionControl({
             </div>
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+  );
+}
+
+function GroupScopePicker({
+  values,
+  onToggle,
+  options,
+  loading,
+  search,
+  onSearch,
+}: {
+  values: string[];
+  onToggle: (id: string) => void;
+  options: ScopeOption[];
+  loading: boolean;
+  search: string;
+  onSearch: (s: string) => void;
+}) {
+  const q = search.trim().toLowerCase();
+  const rows = options.filter((o) => !q || o.name.toLowerCase().includes(q));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="flex items-center gap-1.5 text-xs">
+        <UsersRound className="size-3.5" /> Groups
+      </Label>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search groups…"
+          className="h-8 pl-7"
+          aria-label="Search groups"
+        />
+      </div>
+
+      <div className="max-h-52 overflow-y-auto rounded-md border">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Loading…
+          </div>
+        ) : options.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups available.
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups match.
+          </p>
+        ) : (
+          <ul className="divide-y">
+            {rows.map((o) => {
+              const selected = values.includes(o.id);
+              return (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => onToggle(o.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <Checkbox checked={selected} className="pointer-events-none" />
+                    <span className="flex-1 truncate">{o.name}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Allows only the selected groups. None selected means every group.
+      </p>
+    </div>
   );
 }
 
@@ -1796,6 +2313,58 @@ function ArgScopePicker({
 
 // --- repo groups (FIR-2505 slice 3) -----------------------------------------
 
+// GroupCapabilityRow is the redesigned full-width sub-row inside a collapsible
+// group (a repo's read/checkout/push, a credential box's actions). It matches the
+// catalog leaf-row layout exactly: the capability name takes the full width and a
+// single CatalogDecisionControl pill holds BOTH the decision and the When editor
+// (FIR-2706 follow-up — Jesper: "Repos and groups get the same design"). This
+// replaces the old two-control bar (DecisionControl + a separate When button) that
+// crowded the name on mobile and made groups read differently from the catalog.
+function GroupCapabilityRow({
+  row,
+  editLayer,
+  busy,
+  testid,
+  onDecision,
+  onCondition,
+  wsId,
+  argScopeConfig,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  busy: boolean;
+  testid: string;
+  onDecision: (setting: ToolSetting) => void;
+  onCondition: (condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+}) {
+  return (
+    <div
+      data-testid={testid}
+      className="flex items-center justify-between gap-4 border-t px-4 py-3 first:border-t-0"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{row.title || row.tool_key}</div>
+        <div className="truncate font-mono text-xs text-muted-foreground">
+          {row.tool_key}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <CatalogDecisionControl
+          row={row}
+          editLayer={editLayer}
+          disabled={busy}
+          onDecision={onDecision}
+          onCondition={onCondition}
+          wsId={wsId}
+          argScopeConfig={argScopeConfig}
+        />
+      </div>
+    </div>
+  );
+}
+
 // RepoGroupData is one repo's collapsible group: the repo URL plus its (up to
 // three) capability rows in read → checkout → push order.
 interface RepoGroupData {
@@ -1847,6 +2416,8 @@ function RepoSection({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   groups: RepoGroupData[];
   editLayer: ToolLayer;
@@ -1855,6 +2426,8 @@ function RepoSection({
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
   /** Write/clear the When condition on one repo capability row. */
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="repo-policy-section">
@@ -1879,6 +2452,8 @@ function RepoSection({
             onSetCapability={onSetCapability}
             onSetGroup={onSetGroup}
             onSetCondition={onSetCondition}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         ))}
       </div>
@@ -1893,6 +2468,8 @@ function RepoGroup({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   group: RepoGroupData;
   editLayer: ToolLayer;
@@ -1900,13 +2477,18 @@ function RepoGroup({
   onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = repoGroupVerdict(group, editLayer);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div className="rounded-lg border" data-testid={`repo-group-${group.url}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`repo-group-${group.url}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -1925,31 +2507,17 @@ function RepoGroup({
       {open && (
         <div className="border-t">
           {group.rows.map((row) => (
-            <div
+            <GroupCapabilityRow
               key={`${row.tool_key}:${row.resource_pattern}`}
-              data-testid={`repo-cap-${row.tool_key}-${row.resource_pattern}`}
-              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm">{row.title || row.tool_key}</span>
-                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <OriginTag row={row} editLayer={editLayer} />
-                <DecisionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(s) => onSetCapability(group.url, row.tool_key, s)}
-                />
-                <ConditionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(c) => onSetCondition(row, c)}
-                />
-              </div>
-            </div>
+              testid={`repo-cap-${row.tool_key}-${row.resource_pattern}`}
+              row={row}
+              editLayer={editLayer}
+              busy={busy}
+              onDecision={(s) => onSetCapability(group.url, row.tool_key, s)}
+              onCondition={(c) => onSetCondition(row, c)}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
+            />
           ))}
         </div>
       )}
@@ -2045,6 +2613,98 @@ export function groupCredentialRows(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// FIR-2441: credential boxes follow the vault-naming convention
+// "<track>-<owner>-<credential>" (e.g. agents-mia-agent-vault,
+// members-jesper-bigquery), so the flat box list nests into a tree
+// track › owner › credential. Setting a decision on a track or owner node
+// cascades to every credential box beneath it — the naming IS the permission
+// structure. Boxes whose name does not fit the convention (e.g. "default", or a
+// registry credential UUID) stay at the top level as ungrouped leaves.
+const CREDENTIAL_TRACKS = ["agents", "members", "shared"];
+
+// A node in the credential permission tree. A branch (track/owner) carries
+// `children` and no `group`; a leaf carries `group` (one Agent Vault box) and no
+// children. `key` is stable across renders; `label` is the segment shown.
+export interface CredentialTreeNode {
+  key: string;
+  label: string;
+  children: CredentialTreeNode[];
+  group?: CredentialGroupData;
+}
+
+// buildCredentialTree nests the flat credential groups by parsing each box name
+// on "-": first segment = track (agents/members/shared), second = owner, the
+// rest = the credential label. Every level is sorted alphabetically so the tree
+// is stable. Names without a known track prefix are top-level leaves.
+export function buildCredentialTree(
+  groups: CredentialGroupData[],
+): CredentialTreeNode[] {
+  const roots: CredentialTreeNode[] = [];
+  const findOrAdd = (
+    siblings: CredentialTreeNode[],
+    key: string,
+    label: string,
+  ): CredentialTreeNode => {
+    let node = siblings.find((s) => s.key === key);
+    if (!node) {
+      node = { key, label, children: [] };
+      siblings.push(node);
+    }
+    return node;
+  };
+  for (const group of groups) {
+    const name = group.label;
+    const firstDash = name.indexOf("-");
+    const track = firstDash === -1 ? "" : name.slice(0, firstDash);
+    if (firstDash === -1 || !CREDENTIAL_TRACKS.includes(track)) {
+      roots.push({ key: group.resource, label: name, children: [], group });
+      continue;
+    }
+    const rest = name.slice(firstDash + 1); // e.g. "mia-agent-vault"
+    const secondDash = rest.indexOf("-");
+    const owner = secondDash === -1 ? rest : rest.slice(0, secondDash);
+    const leafLabel = secondDash === -1 ? rest : rest.slice(secondDash + 1);
+    const trackNode = findOrAdd(roots, `track:${track}`, track);
+    const ownerNode = findOrAdd(
+      trackNode.children,
+      `track:${track}/owner:${owner}`,
+      owner,
+    );
+    ownerNode.children.push({
+      key: group.resource,
+      label: leafLabel || name,
+      children: [],
+      group,
+    });
+  }
+  const sortRec = (nodes: CredentialTreeNode[]) => {
+    nodes.sort((a, b) => a.label.localeCompare(b.label));
+    for (const n of nodes) sortRec(n.children);
+  };
+  sortRec(roots);
+  return roots;
+}
+
+// subtreeGroups collects every leaf credential box under a node (the node itself
+// when it is a leaf) — the exact set a branch-level cascade writes to.
+export function subtreeGroups(node: CredentialTreeNode): CredentialGroupData[] {
+  return node.group ? [node.group] : node.children.flatMap(subtreeGroups);
+}
+
+// credentialNodeVerdict folds every capability row beneath a branch into one
+// header value: the shared Effective when all agree, else "mixed". `overridden`
+// is true when any row beneath carries an explicit setting at the page's layer.
+function credentialNodeVerdict(
+  node: CredentialTreeNode,
+  editLayer: ToolLayer,
+): { setting: ToolEffectiveSetting | "mixed"; overridden: boolean } {
+  const rows = subtreeGroups(node).flatMap((g) => g.rows);
+  const settings = new Set(rows.map((r) => r.effective.setting));
+  const overridden = rows.some((r) => !!r.layers[editLayer]);
+  const only = settings.size === 1 ? [...settings][0] : undefined;
+  return { setting: only ?? "mixed", overridden };
+}
+
 // credentialGroupVerdict folds a box's rows into one header value: the shared
 // Effective when all agree, else "mixed". `overridden` is true when any
 // capability carries an explicit setting at the page's own layer.
@@ -2065,6 +2725,8 @@ function CredentialSection({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   groups: CredentialGroupData[];
   editLayer: ToolLayer;
@@ -2073,6 +2735,8 @@ function CredentialSection({
   onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
   /** Write/clear the When condition on one credential capability row. */
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="credential-policy-section">
@@ -2084,22 +2748,116 @@ function CredentialSection({
         </span>
       </div>
       <p className="max-w-xl text-sm text-muted-foreground">
-        Set a whole credential, or expand it to decide each action separately.
-        Setting the credential cascades to every action.
+        Grouped by name (track › owner › credential). Set a whole track, a whole
+        owner, or one credential — the choice cascades to everything beneath it.
+        Expand a credential to decide each action separately.
       </p>
       <div className="flex flex-col gap-2">
-        {groups.map((group) => (
-          <CredentialGroup
-            key={group.resource}
-            group={group}
+        {buildCredentialTree(groups).map((node) => (
+          <CredentialTreeNodeView
+            key={node.key}
+            node={node}
+            depth={0}
             editLayer={editLayer}
             busy={busy}
             onSetCapability={onSetCapability}
             onSetGroup={onSetGroup}
             onSetCondition={onSetCondition}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// CredentialTreeNodeView renders one node of the credential permission tree: a
+// leaf delegates to CredentialGroup (the box's per-action fold-out); a branch
+// (track/owner) renders a collapsible header whose Decision control cascades to
+// every credential box beneath it, then its children recursively. `depth` only
+// drives the left indent so the nesting reads visually.
+function CredentialTreeNodeView({
+  node,
+  depth,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+  onSetCondition,
+  wsId,
+  argScopeConfig,
+}: {
+  node: CredentialTreeNode;
+  depth: number;
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
+}) {
+  const [open, setOpen] = useState(true);
+  if (node.group) {
+    return (
+      <CredentialGroup
+        group={node.group}
+        editLayer={editLayer}
+        busy={busy}
+        onSetCapability={onSetCapability}
+        onSetGroup={onSetGroup}
+        onSetCondition={onSetCondition}
+        wsId={wsId}
+        argScopeConfig={argScopeConfig}
+      />
+    );
+  }
+  const verdict = credentialNodeVerdict(node, editLayer);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  const leaves = subtreeGroups(node);
+  return (
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`credential-branch-${node.key}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <Chevron className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-semibold">{node.label}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {leaves.length === 1 ? "1 credential" : `${leaves.length} credentials`}
+          </span>
+        </button>
+        <CredentialGroupControl
+          verdict={verdict}
+          disabled={busy}
+          onChange={(s) => leaves.forEach((g) => onSetGroup(g, s))}
+        />
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2 border-t p-2 pl-4">
+          {node.children.map((child) => (
+            <CredentialTreeNodeView
+              key={child.key}
+              node={child}
+              depth={depth + 1}
+              editLayer={editLayer}
+              busy={busy}
+              onSetCapability={onSetCapability}
+              onSetGroup={onSetGroup}
+              onSetCondition={onSetCondition}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2111,6 +2869,8 @@ function CredentialGroup({
   onSetCapability,
   onSetGroup,
   onSetCondition,
+  wsId,
+  argScopeConfig,
 }: {
   group: CredentialGroupData;
   editLayer: ToolLayer;
@@ -2118,6 +2878,8 @@ function CredentialGroup({
   onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
   onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+  wsId?: string;
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = credentialGroupVerdict(group, editLayer);
@@ -2129,23 +2891,19 @@ function CredentialGroup({
     const row = group.rows[0]!;
     return (
       <div
-        className="flex items-center justify-between gap-3 rounded-lg border p-3"
+        className="flex items-center justify-between gap-4 rounded-xl border bg-background px-4 py-3 shadow-sm"
         data-testid={`credential-group-${group.resource}`}
       >
-        <span className="truncate text-sm font-medium">{group.label}</span>
-        <div className="flex items-center gap-2">
-          <OriginTag row={row} editLayer={editLayer} />
-          <DecisionControl
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <CatalogDecisionControl
             row={row}
             editLayer={editLayer}
             disabled={busy}
-            onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
-          />
-          <ConditionControl
-            row={row}
-            editLayer={editLayer}
-            disabled={busy}
-            onChange={(c) => onSetCondition(row, c)}
+            onDecision={(s) => onSetCapability(group.resource, row.tool_key, s)}
+            onCondition={(c) => onSetCondition(row, c)}
+            wsId={wsId}
+            argScopeConfig={argScopeConfig}
           />
         </div>
       </div>
@@ -2153,8 +2911,11 @@ function CredentialGroup({
   }
 
   return (
-    <div className="rounded-lg border" data-testid={`credential-group-${group.resource}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
+    <div
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
+      data-testid={`credential-group-${group.resource}`}
+    >
+      <div className="flex items-center justify-between gap-3 bg-muted/40 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -2173,31 +2934,17 @@ function CredentialGroup({
       {open && (
         <div className="border-t">
           {group.rows.map((row) => (
-            <div
+            <GroupCapabilityRow
               key={`${row.tool_key}:${row.resource_pattern}`}
-              data-testid={`credential-cap-${row.tool_key}-${row.resource_pattern}`}
-              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm">{row.title || row.tool_key}</span>
-                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <OriginTag row={row} editLayer={editLayer} />
-                <DecisionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
-                />
-                <ConditionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(c) => onSetCondition(row, c)}
-                />
-              </div>
-            </div>
+              testid={`credential-cap-${row.tool_key}-${row.resource_pattern}`}
+              row={row}
+              editLayer={editLayer}
+              busy={busy}
+              onDecision={(s) => onSetCapability(group.resource, row.tool_key, s)}
+              onCondition={(c) => onSetCondition(row, c)}
+              wsId={wsId}
+              argScopeConfig={argScopeConfig}
+            />
           ))}
         </div>
       )}

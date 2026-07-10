@@ -1,18 +1,34 @@
 "use client";
 
+// CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — versioned MCP config editing.
+// Agent Office (FIR-1775) — the MCP config tab edits an agent's mcp_config
+// through the SAME versioned change-request flow as Instructions, instead of
+// writing the agent row directly. You edit a draft, then Propose change; the
+// owner/approvers review the diff and approve, which applies it and snapshots a
+// new version. Pending proposals and version history (scoped to mcp_config)
+// render below so propose → approve → diff → restore all live on this tab.
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eraser, Loader2, Lock, Save } from "lucide-react";
+import { Eraser, Lock, Send } from "lucide-react";
 import type { Agent } from "@multica/core/types";
+import { useAuthStore } from "@multica/core/auth";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { memberListOptions } from "@multica/core/workspace/queries";
+import { useQuery } from "@tanstack/react-query";
+import {
+  AgentContextChangeRequestQueue,
+  AgentContextFieldProposeDialog,
+  AgentContextVersionsPanel,
+} from "@multica/cerebro-agent-context/views";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import { toast } from "sonner";
 import { useT } from "../../../i18n";
 
-// `null` and the empty string are the two ways the user can mean "no
-// config" — the server stores either as a NULL column and the daemon
-// falls back to the runtime CLI default at launch. We normalise to
-// the empty string in the editor so the dirty check has one canonical
-// form to compare against.
+// Only the mcp_config field is in scope for this tab's diffs and proposal queue.
+const MCP_KEYS = ["mcp_config"];
+
+// `null` and the empty string both mean "no config" — normalise to the empty
+// string in the editor so the dirty check has one canonical form to compare.
 function configToText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return JSON.stringify(value, null, 2);
@@ -20,29 +36,29 @@ function configToText(value: unknown): string {
 
 export function McpConfigTab({
   agent,
-  onSave,
+  canEdit = true,
   onDirtyChange,
 }: {
   agent: Agent;
-  onSave: (updates: { mcp_config: unknown | null }) => Promise<void>;
+  canEdit?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  const isOwner = !!(userId && agent.owner_id && agent.owner_id === userId);
+  const canManage = canEdit || isOwner;
 
   const redacted = agent.mcp_config_redacted === true;
   const original = useMemo(() => configToText(agent.mcp_config), [agent.mcp_config]);
   const [text, setText] = useState(original);
-  const [saving, setSaving] = useState(false);
+  const [showPropose, setShowPropose] = useState(false);
 
-  // Sync local draft when the agent prop changes (e.g. after a successful
-  // save invalidates the cache and a fresh agent arrives). We only sync
-  // when the user has no in-flight edits — comparing the current draft
-  // against the *previous* original (not the new one) is what tells us
-  // "they haven't touched this since the last sync". Comparing against
-  // the new original would skip the sync whenever the server-side value
-  // changes underneath an untouched draft, leaving the editor showing a
-  // stale value that a later Save would write back, clobbering another
-  // admin's edit.
+  // Sync the draft when the agent prop changes (e.g. a proposal merged) only
+  // when the user has no in-flight edits — comparing against the *previous*
+  // original is what tells us "untouched since the last sync".
   const previousOriginalRef = useRef(original);
   useEffect(() => {
     setText((current) =>
@@ -59,14 +75,10 @@ export function McpConfigTab({
     if (trimmed === "") return { ok: true, value: null };
     try {
       const value = JSON.parse(trimmed);
-      // The MCP CLI accepts an object (`{"mcpServers": …}`); a top-level
-      // array or primitive is almost certainly a user mistake, so reject
-      // here rather than surprise them with a server-side error later.
+      // The MCP CLI accepts an object (`{"mcpServers": …}`); a top-level array
+      // or primitive is almost certainly a mistake, so reject it here.
       if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return {
-          ok: false,
-          error: "mcp_config_not_object",
-        };
+        return { ok: false, error: "mcp_config_not_object" };
       }
       return { ok: true, value };
     } catch (err) {
@@ -97,45 +109,28 @@ export function McpConfigTab({
     );
   }
 
-  const handleSave = async () => {
-    if (!parseResult.ok) return;
-    setSaving(true);
-    try {
-      await onSave({ mcp_config: parseResult.value });
-      // Normalise the editor to the pretty-printed canonical form so the
-      // dirty check stops firing after a successful save (the user's
-      // raw input may differ from what configToText would emit).
-      setText(configToText(parseResult.value));
-      toast.success(t(($) => $.tab_body.mcp_config.saved_toast));
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.tab_body.mcp_config.save_failed_toast),
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleClear = () => {
-    setText("");
-  };
+  const handleClear = () => setText("");
 
   const showInvalid = trimmed !== "" && !parseResult.ok;
-  const invalidMessage = !parseResult.ok && parseResult.error === "mcp_config_not_object"
-    ? t(($) => $.tab_body.mcp_config.invalid_not_object)
-    : !parseResult.ok
-      ? t(($) => $.tab_body.mcp_config.invalid_json, { error: parseResult.error })
-      : "";
+  const invalidMessage =
+    !parseResult.ok && parseResult.error === "mcp_config_not_object"
+      ? t(($) => $.tab_body.mcp_config.invalid_not_object)
+      : !parseResult.ok
+        ? t(($) => $.tab_body.mcp_config.invalid_json, { error: parseResult.error })
+        : "";
 
   return (
-    <div className="flex h-full flex-col space-y-3">
+    <div className="flex h-full flex-col space-y-5">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          {t(($) => $.tab_body.mcp_config.intro)}
-        </p>
-        {trimmed !== "" && (
+        <div className="max-w-prose space-y-1">
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.tab_body.mcp_config.intro)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.tab_body.mcp_config.versioned_note)}
+          </p>
+        </div>
+        {trimmed !== "" && canManage && (
           <Button
             type="button"
             variant="outline"
@@ -156,32 +151,60 @@ export function McpConfigTab({
         aria-invalid={showInvalid || undefined}
         aria-label={t(($) => $.tab_body.mcp_config.editor_aria)}
         spellCheck={false}
-        className="min-h-[240px] flex-1 font-mono text-xs"
+        readOnly={!canManage}
+        className="min-h-[220px] font-mono text-xs"
       />
 
-      {showInvalid && (
-        <p className="text-xs text-destructive">{invalidMessage}</p>
+      {showInvalid && <p className="text-xs text-destructive">{invalidMessage}</p>}
+
+      {canManage && (
+        <div className="flex items-center justify-end gap-3">
+          {dirty && (
+            <span className="text-xs text-muted-foreground">
+              {t(($) => $.tab_body.common.unsaved_changes)}
+            </span>
+          )}
+          <Button
+            onClick={() => setShowPropose(true)}
+            disabled={!dirty || !parseResult.ok}
+            size="sm"
+            className="bg-blue-600 text-white hover:bg-blue-700"
+          >
+            <Send className="h-3.5 w-3.5" />
+            {t(($) => $.tab_body.common.propose_change)}
+          </Button>
+        </div>
       )}
 
-      <div className="flex items-center justify-end gap-3">
-        {dirty && (
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.tab_body.common.unsaved_changes)}
-          </span>
-        )}
-        <Button
-          onClick={handleSave}
-          disabled={!dirty || !parseResult.ok || saving}
-          size="sm"
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )}
-          {t(($) => $.tab_body.common.save)}
-        </Button>
+      <div className="my-1 h-px bg-border" />
+
+      <div className="space-y-5">
+        <AgentContextChangeRequestQueue
+          agent={agent}
+          wsId={wsId}
+          members={members}
+          canReview={canManage}
+          onlyKeys={MCP_KEYS}
+          title="MCP config change requests"
+        />
+        <AgentContextVersionsPanel
+          agent={agent}
+          wsId={wsId}
+          members={members}
+          canManage={canManage}
+          onlyKeys={MCP_KEYS}
+          title="MCP config version history"
+        />
       </div>
+
+      <AgentContextFieldProposeDialog
+        agent={agent}
+        open={showPropose}
+        onOpenChange={setShowPropose}
+        override={{ mcp_config: parseResult.ok ? parseResult.value : undefined }}
+        fieldLabel="MCP config"
+        defaultTitle="Update MCP config"
+      />
     </div>
   );
 }

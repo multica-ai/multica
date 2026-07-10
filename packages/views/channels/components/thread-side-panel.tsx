@@ -66,6 +66,8 @@ interface ThreadSidePanelProps {
   backLabel?: string;
   onClose: () => void;
   onSubmit: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate a reply send when it @mentions a non-participant (dialog rendered by the main channel composer).
+  confirmBeforeSend?: (content: string) => Promise<boolean>;
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -82,6 +84,7 @@ export function ThreadSidePanel({
   backLabel,
   onClose,
   onSubmit,
+  confirmBeforeSend, // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — forwarded to the reply composer.
   onEdit,
   onDelete,
   onToggleReaction,
@@ -195,6 +198,7 @@ export function ThreadSidePanel({
           draftKey={`reply:${channelId}:${parentEntry.id}`}
           avatar={currentUserId ? { type: "member", id: currentUserId } : null}
           onSubmit={(content, ids) => onSubmit(parentEntry.id, content, ids)}
+          confirmBeforeSend={confirmBeforeSend} // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate reply @mentions of non-participants.
         />
       </div>
     </aside>

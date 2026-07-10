@@ -1,7 +1,7 @@
 import type { WorkflowWriteInput } from "./types";
 
 /**
- * Default-trigger startpakke fra [JEH-1047](https://multica.io). Phase 1 shipped
+ * Default-trigger starter pack from [JEH-1047](https://multica.io). Phase 1 shipped
  * the first two active templates (status-change, due-date-time); phase 2
  * ([JEH-1103]) added run-skill and comment-on-issue. Phase 3 ([JEH-1108])
  * activates the four "coming" placeholders (all-children-done,
@@ -9,9 +9,9 @@ import type { WorkflowWriteInput } from "./types";
  * (cron-daily-standup, webhook-github-pr) — for a total of 10 active
  * templates with no remaining "coming" placeholders.
  *
- * Templates er kun *defaults* — formularen pre-udfylder felter ud fra
- * `defaults`, og brugeren skal trykke Gem for at oprette en aktiv regel.
- * Ingen workflow_row oprettes automatisk ved workspace-oprettelse.
+ * Templates are only *defaults* — the form pre-fills fields from
+ * `defaults`, and the user must click Save to create an active rule.
+ * No workflow_row is created automatically on workspace creation.
  */
 export interface WorkflowTemplate {
   /** Stable kebab-case key (used for the "use template" button + tests). */
@@ -114,10 +114,10 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
-    // Phase-2 ext (JEH-1114, PR 1). Composes med phase-1 conditions:
-    // workflows der filtrerer på `issue.labels` kan nu reagere automatisk
-    // når et issue er klassificeret. Workspacet skal have et label per
-    // domæne (fx `domain:code`) før templaten er funktionsdygtig.
+    // Phase-2 ext (JEH-1114, PR 1). Composes with phase-1 conditions:
+    // workflows that filter on `issue.labels` can now react automatically
+    // once an issue is classified. The workspace needs a label per
+    // domain (e.g. `domain:code`) before the template is functional.
     key: "route-by-domain",
     label: "Status changed → Route by domain",
     description:
@@ -169,10 +169,10 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
-    // Phase-2 ext (JEH-1114, PR 3). Walker parent-kæden op og poster på
-    // første ancestor med assignee. Bruges typisk sammen med en
-    // due_date_reached-trigger så stallede sub-issues får fingers
-    // peget på dem efter X timer uden status-skift.
+    // Phase-2 ext (JEH-1114, PR 3). Walks the parent chain up and posts on the
+    // first ancestor with an assignee. Typically used together with a
+    // due_date_reached trigger so stalled sub-issues get pointed
+    // out after X hours without a status change.
     key: "escalate-stalled-to-owner",
     label: "Due date reached → Escalate to owner",
     description:
@@ -245,9 +245,9 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
       enabled: true,
       trigger_type: "cron",
       trigger_config: {
-        // Hver dag kl. 09:00 Europe/Copenhagen — server-side sweeper bruger
-        // robfig/cron/v3 til at parse udtrykket. cron-daily-standup nedenfor
-        // har en mere snæver "kun hverdage" variant.
+        // Every day at 09:00 Europe/Copenhagen — the server-side sweeper uses
+        // robfig/cron/v3 to parse the expression. cron-daily-standup below
+        // has a narrower "weekdays only" variant.
         schedule_expr: "0 9 * * *",
         timezone: "Europe/Copenhagen",
       },
@@ -293,15 +293,15 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
       enabled: true,
       trigger_type: "cron",
       trigger_config: {
-        // Mandag–fredag kl. 09:00 Europe/Copenhagen.
+        // Monday-Friday at 09:00 Europe/Copenhagen.
         schedule_expr: "0 9 * * 1-5",
         timezone: "Europe/Copenhagen",
       },
       conditions: [],
       action_type: "run_skill",
       action_config: {
-        // skill_name pre-fyldt med spec'ens navne-suggestion; agent_id blank
-        // så brugeren vælger den agent der ejer skillen før gem.
+        // skill_name pre-filled with the spec's name suggestion; agent_id blank
+        // so the user picks the agent that owns the skill before saving.
         skill_name: "daily-standup-summary",
         agent_id: "",
         skill_input: {},

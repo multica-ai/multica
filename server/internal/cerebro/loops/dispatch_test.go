@@ -17,9 +17,15 @@ import (
 
 // fakeDispatchQueries stubs the upstream issue queries the TaskDispatcher needs.
 type fakeDispatchQueries struct {
-	agent   db.Agent
-	getErr  error
-	created []db.CreateQuickCreateTaskParams
+	agent             db.Agent
+	getErr            error
+	issue             db.Issue
+	getIssueErr       error
+	created           []db.CreateQuickCreateTaskParams
+	comments          []db.CreateCommentParams
+	issueTasks        []db.CreateAgentTaskParams
+	modelOverrides    []db.SetAgentTaskModelOverrideParams
+	thinkingOverrides []db.SetAgentTaskThinkingOverrideParams
 }
 
 func (f *fakeDispatchQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
@@ -28,7 +34,47 @@ func (f *fakeDispatchQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.
 
 func (f *fakeDispatchQueries) CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error) {
 	f.created = append(f.created, arg)
-	return db.AgentTaskQueue{}, nil
+	return db.AgentTaskQueue{ID: mustDispatchUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")}, nil
+}
+
+func (f *fakeDispatchQueries) SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error {
+	f.modelOverrides = append(f.modelOverrides, arg)
+	return nil
+}
+
+func (f *fakeDispatchQueries) SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error {
+	f.thinkingOverrides = append(f.thinkingOverrides, arg)
+	return nil
+}
+
+func (f *fakeDispatchQueries) GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error) {
+	if f.getIssueErr != nil {
+		return db.Issue{}, f.getIssueErr
+	}
+	if f.issue.ID.Valid {
+		return f.issue, nil
+	}
+	return db.Issue{ID: id}, nil
+}
+
+func (f *fakeDispatchQueries) CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error) {
+	f.comments = append(f.comments, arg)
+	var id pgtype.UUID
+	_ = id.Scan("99999999-9999-9999-9999-999999999999")
+	return db.Comment{ID: id, IssueID: arg.IssueID, AuthorType: arg.AuthorType, AuthorID: arg.AuthorID, Content: arg.Content}, nil
+}
+
+func (f *fakeDispatchQueries) CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	f.issueTasks = append(f.issueTasks, arg)
+	return db.AgentTaskQueue{ID: mustDispatchUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")}, nil
+}
+
+func mustDispatchUUID(s string) pgtype.UUID {
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		panic(err)
+	}
+	return u
 }
 
 func mustScanUUID(t *testing.T, s string) pgtype.UUID {
@@ -173,6 +219,39 @@ func TestTaskDispatcher_EnqueuesJudgeTask(t *testing.T) {
 	prompt, _ := ctxMap["prompt"].(string)
 	if prompt == "" {
 		t.Fatal("judge prompt should not be empty")
+	}
+}
+
+func TestTaskDispatcher_AppliesJudgeTaskOverrides(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	runtimeID := mustScanUUID(t, "22222222-2222-2222-2222-222222222222")
+	wsID := mustScanUUID(t, "33333333-3333-3333-3333-333333333333")
+	q := &fakeDispatchQueries{agent: db.Agent{
+		ID:          mustScanUUID(t, agentID),
+		WorkspaceID: wsID,
+		RuntimeID:   runtimeID,
+	}}
+	d := NewTaskDispatcher(q)
+
+	err := d.DispatchJudge(context.Background(), JudgeDispatch{
+		AgentID:       agentID,
+		IssueID:       "44444444-4444-4444-4444-444444444444",
+		Gate:          "gate-1",
+		Round:         1,
+		CheckID:       "ux-quality",
+		Rubric:        "the UI must not regress",
+		SkillName:     "judge-skill",
+		Model:         "judge-model",
+		ThinkingLevel: "high",
+	})
+	if err != nil {
+		t.Fatalf("dispatch judge: %v", err)
+	}
+	if len(q.modelOverrides) != 1 || q.modelOverrides[0].ModelOverride != "judge-model" {
+		t.Fatalf("model override not applied: %+v", q.modelOverrides)
+	}
+	if len(q.thinkingOverrides) != 1 || q.thinkingOverrides[0].ThinkingOverride != "high" {
+		t.Fatalf("thinking override not applied: %+v", q.thinkingOverrides)
 	}
 }
 

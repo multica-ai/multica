@@ -84,6 +84,8 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   manually_added: "Added to inbox", // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
   // Mirrors agent_capability_drift label in packages/views/inbox/components/inbox-detail-label.tsx (TECH-3738).
   agent_capability_drift: "Capability drift",
+  // FIR-1775: agent-context (Instructions) change proposed. Mirrors the skill change-request row.
+  agent_context_change_request: "Agent change requested",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).

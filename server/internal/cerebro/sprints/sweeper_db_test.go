@@ -270,6 +270,62 @@ func TestSweeperTick_RunsWhenFlagOn(t *testing.T) {
 	}
 }
 
+func TestSweeperTick_IgnoresLaterCancelledSprint(t *testing.T) {
+	if sweeperTestPool == nil {
+		t.Skip("no test database")
+	}
+	ctx := context.Background()
+	resetSweeperState(t, ctx)
+
+	q := cerebrodb.New(sweeperTestPool)
+	if err := q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: sweeperTestWorkspaceID,
+		FlagKey:     "cerebro_sprints",
+		Enabled:     true,
+		Locked:      false,
+	}); err != nil {
+		t.Fatalf("enable flag: %v", err)
+	}
+
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	seedSettingsWithLeadDays(t, ctx, 2)
+	seedActiveSprintEndingOn(t, ctx, now)
+	if _, err := q.CreateCerebroSprint(ctx, cerebrodb.CreateCerebroSprintParams{
+		WorkspaceID: sweeperTestWorkspaceID,
+		ProjectID:   sweeperTestProjectID,
+		Name:        "Cancelled future sprint",
+		SequenceNo:  2,
+		Status:      StatusCancelled,
+		StartDate:   pgtype.Date{Time: now.AddDate(0, 0, 1), Valid: true},
+		EndDate:     pgtype.Date{Time: now.AddDate(0, 0, 14), Valid: true},
+	}); err != nil {
+		t.Fatalf("create cancelled sprint: %v", err)
+	}
+
+	sw := newSweeperForTest(t, now)
+	if err := sw.Tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	sprints, err := q.ListCerebroSprintsByProject(ctx, sweeperTestProjectID)
+	if err != nil {
+		t.Fatalf("list sprints: %v", err)
+	}
+	var created *cerebrodb.CerebroSprint
+	for i := range sprints {
+		if sprints[i].Status == StatusPlanned {
+			created = &sprints[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatalf("expected planned sprint after cancelled future sprint, got %+v", sprints)
+	}
+	if created.SequenceNo != 3 {
+		t.Fatalf("planned sprint sequence_no = %d, want 3", created.SequenceNo)
+	}
+}
+
 // TestSweeperSweepProject_ReportsCountersAndHonorsFlag covers the manual
 // sweep trigger added for FIR-2699 QA. It proves:
 //  1. The endpoint reports flag_enabled=false and does nothing when the

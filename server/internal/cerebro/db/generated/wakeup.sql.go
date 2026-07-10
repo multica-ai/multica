@@ -22,7 +22,7 @@ WHERE id = $1
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones, origin_comment_id
+          consecutive_postpones, origin_comment_id, model_override
 `
 
 type CancelCerebroAgentWakeupParams struct {
@@ -53,6 +53,7 @@ func (q *Queries) CancelCerebroAgentWakeup(ctx context.Context, arg CancelCerebr
 		&i.UpdatedAt,
 		&i.ConsecutivePostpones,
 		&i.OriginCommentID,
+		&i.ModelOverride,
 	)
 	return i, err
 }
@@ -89,7 +90,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones, origin_comment_id
+          consecutive_postpones, origin_comment_id, model_override
 `
 
 func (q *Queries) ClaimDueTimeWakeups(ctx context.Context, rowLimit int32) ([]CerebroAgentWakeup, error) {
@@ -121,6 +122,7 @@ func (q *Queries) ClaimDueTimeWakeups(ctx context.Context, rowLimit int32) ([]Ce
 			&i.UpdatedAt,
 			&i.ConsecutivePostpones,
 			&i.OriginCommentID,
+			&i.ModelOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -150,7 +152,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones, origin_comment_id
+          consecutive_postpones, origin_comment_id, model_override
 `
 
 type ClaimPendingGithubCIWakeupsParams struct {
@@ -187,6 +189,7 @@ func (q *Queries) ClaimPendingGithubCIWakeups(ctx context.Context, arg ClaimPend
 			&i.UpdatedAt,
 			&i.ConsecutivePostpones,
 			&i.OriginCommentID,
+			&i.ModelOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -217,7 +220,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones, origin_comment_id
+          consecutive_postpones, origin_comment_id, model_override
 `
 
 type ClaimPendingIssueStatusWakeupsParams struct {
@@ -255,6 +258,7 @@ func (q *Queries) ClaimPendingIssueStatusWakeups(ctx context.Context, arg ClaimP
 			&i.UpdatedAt,
 			&i.ConsecutivePostpones,
 			&i.OriginCommentID,
+			&i.ModelOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -293,16 +297,51 @@ func (q *Queries) CountActiveWakeupsForAgentIssue(ctx context.Context, arg Count
 	return count, err
 }
 
+const countConsecutiveSelfWakeupsForAgentIssue = `-- name: CountConsecutiveSelfWakeupsForAgentIssue :one
+SELECT count(*)
+FROM cerebro_agent_wakeup w
+WHERE w.workspace_id = $1
+  AND w.agent_id = $2
+  AND w.issue_id = $3
+  AND w.state <> 'cancelled'
+  AND w.created_at > COALESCE(
+        (SELECT max(c.created_at)
+         FROM comment c
+         WHERE c.issue_id = $3
+           AND c.author_type = 'member'),
+        '-infinity'::timestamptz
+      )
+`
+
+type CountConsecutiveSelfWakeupsForAgentIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// FIR-2679 Spor 1a: how many self-wakeups this agent has stacked on this issue
+// since the last time a human (member) commented on it. A member comment is what
+// breaks a self-wakeup loop, so only wakeups created after the latest member
+// comment count toward the consecutive-loop cap. Cancelled wakeups don't count.
+// When the issue has no member comment, every non-cancelled wakeup counts.
+func (q *Queries) CountConsecutiveSelfWakeupsForAgentIssue(ctx context.Context, arg CountConsecutiveSelfWakeupsForAgentIssueParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countConsecutiveSelfWakeupsForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCerebroAgentWakeup = `-- name: CreateCerebroAgentWakeup :one
 INSERT INTO cerebro_agent_wakeup (
     workspace_id, agent_id, issue_id, prompt, trigger_type,
-    fire_at, watch_issue_id, watch_status, created_by_id, origin_comment_id
+    fire_at, watch_issue_id, watch_status, created_by_id, origin_comment_id,
+    model_override
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones, origin_comment_id
+          consecutive_postpones, origin_comment_id, model_override
 `
 
 type CreateCerebroAgentWakeupParams struct {
@@ -316,6 +355,7 @@ type CreateCerebroAgentWakeupParams struct {
 	WatchStatus     pgtype.Text        `json:"watch_status"`
 	CreatedByID     pgtype.UUID        `json:"created_by_id"`
 	OriginCommentID pgtype.UUID        `json:"origin_comment_id"`
+	ModelOverride   string             `json:"model_override"`
 }
 
 func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebroAgentWakeupParams) (CerebroAgentWakeup, error) {
@@ -330,6 +370,7 @@ func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebr
 		arg.WatchStatus,
 		arg.CreatedByID,
 		arg.OriginCommentID,
+		arg.ModelOverride,
 	)
 	var i CerebroAgentWakeup
 	err := row.Scan(
@@ -352,6 +393,7 @@ func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebr
 		&i.UpdatedAt,
 		&i.ConsecutivePostpones,
 		&i.OriginCommentID,
+		&i.ModelOverride,
 	)
 	return i, err
 }
@@ -360,7 +402,7 @@ const getCerebroAgentWakeup = `-- name: GetCerebroAgentWakeup :one
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
        dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-       consecutive_postpones, origin_comment_id
+       consecutive_postpones, origin_comment_id, model_override
 FROM cerebro_agent_wakeup
 WHERE id = $1
 `
@@ -388,6 +430,7 @@ func (q *Queries) GetCerebroAgentWakeup(ctx context.Context, id pgtype.UUID) (Ce
 		&i.UpdatedAt,
 		&i.ConsecutivePostpones,
 		&i.OriginCommentID,
+		&i.ModelOverride,
 	)
 	return i, err
 }
@@ -450,7 +493,7 @@ const listCerebroAgentWakeups = `-- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
        dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-       consecutive_postpones, origin_comment_id
+       consecutive_postpones, origin_comment_id, model_override
 FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND ($3::uuid IS NULL OR agent_id = $3::uuid)
@@ -503,6 +546,7 @@ func (q *Queries) ListCerebroAgentWakeups(ctx context.Context, arg ListCerebroAg
 			&i.UpdatedAt,
 			&i.ConsecutivePostpones,
 			&i.OriginCommentID,
+			&i.ModelOverride,
 		); err != nil {
 			return nil, err
 		}

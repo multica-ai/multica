@@ -170,12 +170,19 @@ func (h *Handler) Call(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "tool requires human approval and cannot be dispatched on a local runtime")
 			return
 		}
-		result, err := v.Tool.Call(r.Context(), req.Arguments)
+		// FIR-2668: carry the server-resolved agent identity to dispatch so
+		// on_behalf_of-enabled connections stamp the agent's delegated identity.
+		callCtx := runtime.WithConnectionAgent(r.Context(), util.UUIDToString(ident.agentID))
+		result, err := v.Tool.Call(callCtx, req.Arguments)
 		if err != nil {
 			// The endpoint call itself failed (upstream HTTP error, bad params,
-			// timeout). Surface as a 502 with the redacted message Call already
-			// produced — never a 200 with a hidden error.
-			writeError(w, http.StatusBadGateway, err.Error())
+			// timeout). Surface the redacted message Call already produced —
+			// never a 200 with a hidden error. NOT 502: Cloudflare replaces an
+			// origin's 502 body with its generic "error code: 502" page, so the
+			// agent never sees the upstream message (FIR-2441). 424 states it
+			// precisely — this request was fine, the upstream it depends on
+			// failed — and passes through Cloudflare with the body intact.
+			writeError(w, http.StatusFailedDependency, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, callResponse{Result: result})

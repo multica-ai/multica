@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/autopilotmodel"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -36,6 +37,11 @@ const (
 	// values agreed on TECH-3298.
 	defaultMaxSelfWakeupsPerIssue = 8
 	defaultMinWakeupIntervalMin   = 5
+
+	// defaultMaxConsecutiveWakeupLoops caps how many self-wakeups an agent may
+	// chain on one issue since the last human (member) comment (FIR-2679 Spor
+	// 1a). Applied when the workspace has no settings row. 0 = guard disabled.
+	defaultMaxConsecutiveWakeupLoops = 5
 
 	// postponeDelay is how long to wait before retrying a wakeup that couldn't
 	// fire because the issue had an active task or the agent runtime was offline.
@@ -82,6 +88,11 @@ type CreateRequest struct {
 	// agent's eventual reply lands back in the original conversation instead of
 	// a new orphaned root note (TECH-3487). Zero value = no thread context.
 	OriginCommentID pgtype.UUID
+	// ModelOverride optionally pins the dispatched run to a cheaper model
+	// (FIR-2679 Spor 1b) so a pure verification wakeup like "is CI green?" never
+	// fires Opus. Empty = no override = the agent's own model. Validated against
+	// autopilotmodel.Allowed() in Create.
+	ModelOverride string
 }
 
 func New(cerebro *cerebrodb.Queries, queries *db.Queries, tasks *service.TaskService, bus *events.Bus) *Service {
@@ -91,8 +102,15 @@ func New(cerebro *cerebrodb.Queries, queries *db.Queries, tasks *service.TaskSer
 func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) (cerebrodb.CerebroAgentWakeup, error) {
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	req.TriggerType = strings.TrimSpace(req.TriggerType)
+	req.ModelOverride = strings.TrimSpace(req.ModelOverride)
 	if req.Prompt == "" {
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("prompt is required")
+	}
+	// FIR-2679 Spor 1b: reject an unknown model up front so the agent gets a
+	// clear 400 instead of a wakeup that later dispatches on a bad --model. Empty
+	// passes (no override).
+	if err := autopilotmodel.Validate(req.ModelOverride); err != nil {
+		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 	if !req.AgentID.Valid {
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("agent_id is required")
@@ -169,6 +187,14 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 
+	// FIR-2679 Spor 1a: loop-guard. Stop an agent from chaining self-wakeups on
+	// the same issue without a human replying in between (worst observed: 18
+	// re-arms in 22h). The streak resets on the next member comment. Gated by the
+	// cerebro_wakeup_loop_guard flag (default ON); a cap of 0 disables it.
+	if err := s.enforceLoopGuard(ctx, workspaceID, req); err != nil {
+		return cerebrodb.CerebroAgentWakeup{}, err
+	}
+
 	row, err := s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
 		WorkspaceID:     workspaceID,
 		AgentID:         req.AgentID,
@@ -180,6 +206,7 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		WatchStatus:     req.WatchStatus,
 		CreatedByID:     req.CreatedByID,
 		OriginCommentID: req.OriginCommentID,
+		ModelOverride:   req.ModelOverride,
 	})
 	if err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
@@ -335,8 +362,23 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	// creator → latest human comment); if no human can be found, the task still
 	// runs but cannot fan out to other agents.
 	delegation := s.resolveWakeupOrigin(ctx, row, issue)
-	if _, err := s.Tasks.EnqueueWakeupTask(ctx, issue, row.AgentID, originCommentID, util.UUIDToString(row.ID), row.TriggerType, row.Prompt, delegation); err != nil {
+	task, err := s.Tasks.EnqueueWakeupTask(ctx, issue, row.AgentID, originCommentID, util.UUIDToString(row.ID), row.TriggerType, row.Prompt, delegation)
+	if err != nil {
 		return fmt.Errorf("enqueue agent task: %w", err)
+	}
+	// FIR-2679 Spor 1b: pin the woken run to the wakeup's cheaper model when set,
+	// mirroring how the autopilot dispatcher stamps its own override after the
+	// upstream CreateAgentTask. The daemon's resolveTaskModel then runs it. Empty
+	// override is a no-op (SetOnTask returns early), so the agent's own model wins.
+	if row.ModelOverride != "" {
+		if err := autopilotmodel.SetOnTask(ctx, s.Queries, task.ID, row.ModelOverride); err != nil {
+			slog.Warn("cerebro wakeup: could not set model override on task",
+				"wakeup_id", util.UUIDToString(row.ID),
+				"task_id", util.UUIDToString(task.ID),
+				"model", row.ModelOverride,
+				"error", err,
+			)
+		}
 	}
 	if err := s.Cerebro.MarkWakeupDispatched(ctx, row.ID); err != nil {
 		return fmt.Errorf("mark dispatched: %w", err)
@@ -467,6 +509,51 @@ func (s *Service) selfWakeupLimits(ctx context.Context, workspaceID pgtype.UUID)
 		minInterval = time.Duration(settings.WakeupMinIntervalMinutes) * time.Minute
 	}
 	return
+}
+
+// maxConsecutiveWakeupLoops resolves the per-workspace consecutive-loop cap,
+// falling back to the default when no settings row exists or the lookup fails.
+// A stored value of 0 means the guard is disabled for the workspace.
+func (s *Service) maxConsecutiveWakeupLoops(ctx context.Context, workspaceID pgtype.UUID) int {
+	if s.Cerebro == nil {
+		return defaultMaxConsecutiveWakeupLoops
+	}
+	settings, err := s.Cerebro.GetCerebroWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return defaultMaxConsecutiveWakeupLoops
+	}
+	return int(settings.WakeupMaxConsecutiveLoops)
+}
+
+// enforceLoopGuard blocks a new wakeup once an agent has already chained the
+// configured number of self-wakeups on this issue since the last human (member)
+// comment. The error is actionable — it tells the agent to escalate to the human
+// instead of looping — and surfaces to the create handler as a 400. Off when the
+// cerebro_wakeup_loop_guard flag is disabled or the cap is 0.
+func (s *Service) enforceLoopGuard(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) error {
+	if !s.loopGuardEnabled(ctx, workspaceID) {
+		return nil
+	}
+	loopCap := s.maxConsecutiveWakeupLoops(ctx, workspaceID)
+	if loopCap <= 0 {
+		return nil
+	}
+	count, err := s.Cerebro.CountConsecutiveSelfWakeupsForAgentIssue(ctx, cerebrodb.CountConsecutiveSelfWakeupsForAgentIssueParams{
+		WorkspaceID: workspaceID,
+		AgentID:     req.AgentID,
+		IssueID:     req.IssueID,
+	})
+	if err != nil {
+		// Never block a wakeup on a transient count failure.
+		return nil
+	}
+	if int(count) >= loopCap {
+		return fmt.Errorf(
+			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue since the last human reply (max %d in a row). Post a status or question to the human instead of scheduling another wakeup — a human comment resets the limit.",
+			count, loopCap,
+		)
+	}
+	return nil
 }
 
 // enforceSelfWakeupLimits caps how many wakeups an agent may stack on one issue

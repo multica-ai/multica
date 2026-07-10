@@ -56,6 +56,15 @@ jobs:
           pnpm generate:reserved-slugs
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
+      # CEREBRO-PATCH(cerebro-feature-cli): FIR-3009 — the CLI embeds a JSON
+      # catalog generated from packages/cerebro-feature-flags/registry.ts.
+      # Re-run the generator and fail on drift so `multica feature list`
+      # always describes the same flags as the settings UI.
+      - name: Verify cerebro feature catalog is up to date
+        run: |
+          pnpm generate:feature-catalog
+          git diff --exit-code -- server/cmd/multica/cerebro_feature_catalog.json
+
       - name: Build, type check, and test
         # CEREBRO-PATCH(ci-no-lint-no-mobile): cerebro fork drops lint enforcement
         # (codebase has ~73 i18next/no-literal-string violations on main) and the
@@ -182,3 +191,6 @@ jobs:
 
       - name: Validate system-activity docs consistency # CEREBRO-PATCH(system-activity-ci): TECH-3038 Phase 1
         run: bash scripts/validate-system-activity-docs.sh
+
+      - name: Validate Agent Office managed region # CEREBRO-PATCH(agent-office-region-ci): FIR-1775 §10 write-gate
+        run: bash scripts/validate-agent-office-region.sh

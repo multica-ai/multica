@@ -13,19 +13,21 @@ import (
 
 const getCerebroWorkspaceSettings = `-- name: GetCerebroWorkspaceSettings :one
 SELECT workspace_id, display_currency, wakeup_max_self_per_issue,
-       wakeup_min_interval_minutes, default_agent_start_kind, updated_at, updated_by
+       wakeup_min_interval_minutes, wakeup_max_consecutive_loops,
+       default_agent_start_kind, updated_at, updated_by
 FROM cerebro_workspace_settings
 WHERE workspace_id = $1
 `
 
 type GetCerebroWorkspaceSettingsRow struct {
-	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
-	DisplayCurrency          string             `json:"display_currency"`
-	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
-	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
-	DefaultAgentStartKind    string             `json:"default_agent_start_kind"`
-	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
-	UpdatedBy                pgtype.UUID        `json:"updated_by"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency           string             `json:"display_currency"`
+	WakeupMaxSelfPerIssue     int32              `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes  int32              `json:"wakeup_min_interval_minutes"`
+	WakeupMaxConsecutiveLoops int32              `json:"wakeup_max_consecutive_loops"`
+	DefaultAgentStartKind     string             `json:"default_agent_start_kind"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                 pgtype.UUID        `json:"updated_by"`
 }
 
 // The per-workspace settings row. Missing row -> the handler applies the
@@ -39,6 +41,7 @@ func (q *Queries) GetCerebroWorkspaceSettings(ctx context.Context, workspaceID p
 		&i.DisplayCurrency,
 		&i.WakeupMaxSelfPerIssue,
 		&i.WakeupMinIntervalMinutes,
+		&i.WakeupMaxConsecutiveLoops,
 		&i.DefaultAgentStartKind,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
@@ -95,31 +98,34 @@ func (q *Queries) UpsertCerebroWorkspaceDisplayCurrency(ctx context.Context, arg
 const upsertCerebroWorkspaceWakeupLimits = `-- name: UpsertCerebroWorkspaceWakeupLimits :exec
 INSERT INTO cerebro_workspace_settings (
     workspace_id, wakeup_max_self_per_issue, wakeup_min_interval_minutes,
-    updated_at, updated_by
+    wakeup_max_consecutive_loops, updated_at, updated_by
 )
-VALUES ($1, $2, $3, now(), $4)
+VALUES ($1, $2, $3, $4, now(), $5)
 ON CONFLICT (workspace_id) DO UPDATE
 SET wakeup_max_self_per_issue = EXCLUDED.wakeup_max_self_per_issue,
     wakeup_min_interval_minutes = EXCLUDED.wakeup_min_interval_minutes,
+    wakeup_max_consecutive_loops = EXCLUDED.wakeup_max_consecutive_loops,
     updated_at = now(),
     updated_by = EXCLUDED.updated_by
 `
 
 type UpsertCerebroWorkspaceWakeupLimitsParams struct {
-	WorkspaceID              pgtype.UUID `json:"workspace_id"`
-	WakeupMaxSelfPerIssue    int32       `json:"wakeup_max_self_per_issue"`
-	WakeupMinIntervalMinutes int32       `json:"wakeup_min_interval_minutes"`
-	UpdatedBy                pgtype.UUID `json:"updated_by"`
+	WorkspaceID               pgtype.UUID `json:"workspace_id"`
+	WakeupMaxSelfPerIssue     int32       `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes  int32       `json:"wakeup_min_interval_minutes"`
+	WakeupMaxConsecutiveLoops int32       `json:"wakeup_max_consecutive_loops"`
+	UpdatedBy                 pgtype.UUID `json:"updated_by"`
 }
 
-// TECH-3298: set (or change) the per-workspace self-wakeup limits. Only the two
-// wakeup columns are touched on conflict so an existing display_currency choice
-// is preserved.
+// TECH-3298 / FIR-2679: set (or change) the per-workspace self-wakeup limits.
+// Only the wakeup columns are touched on conflict so an existing display_currency
+// choice is preserved.
 func (q *Queries) UpsertCerebroWorkspaceWakeupLimits(ctx context.Context, arg UpsertCerebroWorkspaceWakeupLimitsParams) error {
 	_, err := q.db.Exec(ctx, upsertCerebroWorkspaceWakeupLimits,
 		arg.WorkspaceID,
 		arg.WakeupMaxSelfPerIssue,
 		arg.WakeupMinIntervalMinutes,
+		arg.WakeupMaxConsecutiveLoops,
 		arg.UpdatedBy,
 	)
 	return err

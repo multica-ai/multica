@@ -474,19 +474,6 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
-	hasGroupScope, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
-		WorkspaceID: wsUUID,
-		ToolKey:     toolpolicy.CapabilityManageGroupOverrides,
-		UserID:      viewer.UserID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "permission check failed")
-		return false
-	}
-	if !hasWorkspaceScope && !hasGroupScope {
-		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin")
-		return false
-	}
 
 	// FIR-2351 fix (Tine, adversarial review, finding 2): workspace-scope must
 	// resolve to a REAL member of THIS workspace, not any syntactically valid
@@ -502,8 +489,16 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 		}
 	}
 
+	// Group scope ("Manage group permissions") resolves PER SHARED GROUP so a
+	// WHEN condition on the capability row can pin the grant to specific
+	// group(s) (FIR-2351, product decision 2026-07-06): the capability's Allow
+	// row may carry an arg_allowlist condition on `group_id`, and the row then
+	// only applies when one of the groups the actor and target SHARE is listed.
+	// An unconditioned Allow row matches every context, so existing grants keep
+	// today's any-shared-group reach unchanged.
 	var actorGroups, targetGroups []pgtype.UUID
-	if h.GroupPermissions != nil && hasGroupScope {
+	hasGroupScope := false
+	if h.GroupPermissions != nil {
 		if actorGroups, err = h.GroupPermissions.ResolveGroupIDs(r.Context(), wsUUID, viewer.UserID); err != nil {
 			writeError(w, http.StatusInternalServerError, "permission check failed")
 			return false
@@ -512,10 +507,88 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 			writeError(w, http.StatusInternalServerError, "permission check failed")
 			return false
 		}
+		shared := map[pgtype.UUID]bool{}
+		for _, a := range actorGroups {
+			if a.Valid {
+				shared[a] = true
+			}
+		}
+		for _, t := range targetGroups {
+			if !t.Valid || !shared[t] {
+				continue
+			}
+			granted, gerr := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+				WorkspaceID: wsUUID,
+				ToolKey:     toolpolicy.CapabilityManageGroupOverrides,
+				UserID:      viewer.UserID,
+				RequestContext: toolpolicy.RequestContext{
+					ArgValues: map[string]string{"group_id": util.UUIDToString(t)},
+				},
+			})
+			if gerr != nil {
+				writeError(w, http.StatusInternalServerError, "permission check failed")
+				return false
+			}
+			if granted {
+				hasGroupScope = true
+				break
+			}
+		}
+	}
+
+	if !hasWorkspaceScope && !hasGroupScope {
+		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin")
+		return false
 	}
 
 	if !toolpolicy.CanAuthorDelegatedOverride(viewer.UserID, targetUserID, hasWorkspaceScope, hasGroupScope, actorGroups, targetGroups) {
 		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin (and note: this permission can never be used on your own access)")
+		return false
+	}
+	return true
+}
+
+// cerebroRequireManagePermissionsPolicy gates a Group- or Agent-layer
+// /tool-policy write on the manage_workspace_overrides capability ("Manage
+// permissions" in the app) — the FIR-2351 follow-up (product decision
+// 2026-07-06) that lets its holder grant a group or a single agent access,
+// including an Allow that opens a workspace-level default Deny. The
+// group-scoped capability (manage_group_overrides, "Manage group permissions")
+// deliberately does NOT reach these layers: it delegates authoring one
+// person's own row, not team- or agent-wide rules. Owner/admin bypasses like
+// every other capability gate in this file, and nil-queries fails open for
+// upstream-only test fixtures, both exactly as
+// cerebroRequireDelegatedOverridePolicy.
+//
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 Group/Agent-layer write gate for Manage permissions.
+func (h *Handler) cerebroRequireManagePermissionsPolicy(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	granted, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+	if !granted {
+		writeError(w, http.StatusForbidden, "changing group or agent permission rows requires the Manage permissions capability — ask a workspace admin")
 		return false
 	}
 	return true
@@ -553,6 +626,19 @@ func (h *Handler) RequireToolPolicyWritePolicy(param string) func(http.Handler) 
 					next.ServeHTTP(w, r)
 					return
 				}
+			}
+
+			// Group- and Agent-layer rows are how a "Manage permissions" holder
+			// grants a group or a single agent access — including opening a
+			// workspace-level default Deny (FIR-2351, product decision
+			// 2026-07-06). Workspace/runtime/system rows stay owner/admin-only
+			// below: the workspace DEFAULT itself is not delegated.
+			if probeOK && (toolpolicy.Layer(layer) == toolpolicy.LayerGroup || toolpolicy.Layer(layer) == toolpolicy.LayerAgent) {
+				if !h.cerebroRequireManagePermissionsPolicy(w, r, workspaceID) {
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
 			}
 
 			if !h.requireWorkspaceOwnerAdmin(w, r, workspaceID) {

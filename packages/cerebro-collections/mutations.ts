@@ -25,6 +25,29 @@ import type {
   UpsertProjectGrantInput,
 } from "./types";
 
+// FIR-2688: creating/moving a folder from the Collections tab must also refresh
+// the real surface (Documents/Notes/Skills/Autopilots), which read folders
+// through their own caches. This package is a leaf and must NOT import
+// cerebro-artifacts / cerebro-entity-folders (they import our FolderAccessColumn
+// — a cycle otherwise), so we invalidate their keys by literal prefix here. The
+// shapes are: artifact folder lists `["artifacts", wsId, "folders", kind]` and
+// entity folder lists `["entity-folders", wsId, kind]`; a prefix match hits
+// every kind under them.
+function invalidateSurfaceFolders(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  surface: "artifact" | "entity",
+  entityKind?: "skill" | "autopilot",
+) {
+  if (surface === "artifact") {
+    void qc.invalidateQueries({ queryKey: ["artifacts", wsId, "folders"] });
+  } else if (entityKind) {
+    void qc.invalidateQueries({
+      queryKey: ["entity-folders", wsId, entityKind],
+    });
+  }
+}
+
 export function useCreateCollectionFolder() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -41,6 +64,14 @@ export function useCreateCollectionFolder() {
           queryKey: collectionFolderKeys.entity(wsId, input.kind as "skill" | "autopilot"),
         });
       }
+      invalidateSurfaceFolders(
+        qc,
+        wsId,
+        input.surface,
+        input.surface === "entity"
+          ? (input.kind as "skill" | "autopilot")
+          : undefined,
+      );
     },
   });
 }
@@ -126,6 +157,7 @@ export function useMoveCollectionFolder() {
       void qc.invalidateQueries({
         queryKey: folderGrantKeys.folder(wsId, input.surface, input.folderId),
       });
+      invalidateSurfaceFolders(qc, wsId, input.surface, input.entityKind);
     },
   });
 }

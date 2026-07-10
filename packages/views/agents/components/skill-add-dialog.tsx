@@ -37,10 +37,24 @@ export function SkillAddDialog({
   agent,
   open,
   onOpenChange,
+  attachedIds: attachedIdsOverride,
+  onAdd,
 }: {
   agent: Agent;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  // CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — draft add mode for the versioned Skills tab.
+  /**
+   * Treat these ids (not just agent.skills) as already attached, so the picker
+   * hides draft additions too. Used by the versioned Skills tab.
+   */
+  attachedIds?: string[];
+  /**
+   * Draft mode: when provided, Confirm calls this with the newly selected ids
+   * instead of saving to the agent — the caller proposes the change through
+   * Agent Office. When absent, the dialog saves directly (legacy callers).
+   */
+  onAdd?: (ids: string[]) => void;
 }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -50,8 +64,9 @@ export function SkillAddDialog({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const attachedIds = useMemo(
-    () => new Set(agent.skills.map((s) => s.id)),
-    [agent.skills],
+    () =>
+      new Set(attachedIdsOverride ?? agent.skills.map((s) => s.id)),
+    [attachedIdsOverride, agent.skills],
   );
   // Hide attached skills outright — the dialog is for adding new ones.
   // If a user wants to see what's already on the agent, the SkillsTab
@@ -77,6 +92,13 @@ export function SkillAddDialog({
 
   const handleConfirm = async () => {
     if (selectedIds.size === 0) return;
+    // Draft mode: hand the selection back to the caller (versioned propose
+    // flow) and close — no direct write to the agent.
+    if (onAdd) {
+      onAdd([...selectedIds]);
+      handleOpenChange(false);
+      return;
+    }
     setSaving(true);
     try {
       const newIds = [

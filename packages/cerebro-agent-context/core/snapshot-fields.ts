@@ -57,6 +57,24 @@ function skillsToText(
   return ids.map((id) => resolveSkill(id)).join("\n");
 }
 
+// snapshotFieldsChanged reports whether any of the given snapshot keys differ
+// between two snapshots, using the same normalisation the diff view uses. The
+// Skills / MCP tabs use it to show only the change requests and versions that
+// actually touch their field, instead of every context change.
+export function snapshotFieldsChanged(
+  base: AgentContextSnapshot,
+  proposed: AgentContextSnapshot,
+  keys: string[],
+): boolean {
+  const baseFields = snapshotToFields(base);
+  const proposedFields = snapshotToFields(proposed);
+  return keys.some((key) => {
+    const b = baseFields.find((f) => f.key === key)?.value ?? "";
+    const p = proposedFields.find((f) => f.key === key)?.value ?? "";
+    return b !== p;
+  });
+}
+
 export interface SnapshotToFieldsOptions {
   /** Maps a skill id to its human-readable name; id passed through if unknown. */
   resolveSkill?: (id: string) => string;

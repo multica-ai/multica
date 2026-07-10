@@ -16,10 +16,20 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector?: (s: { user: { id: string } | null }) => unknown) => {
+    const state = { user: null };
+    return selector ? selector(state) : state;
+  },
+}));
+
 vi.mock("@multica/core/api", () => ({
   api: {
     listSkills: (...args: unknown[]) => mockListSkills(...args),
     setAgentSkills: vi.fn(),
+    listMembers: vi.fn().mockResolvedValue([]),
+    listAgentContextVersions: vi.fn().mockResolvedValue([]),
+    listAgentContextChangeRequests: vi.fn().mockResolvedValue([]),
   },
 }));
 

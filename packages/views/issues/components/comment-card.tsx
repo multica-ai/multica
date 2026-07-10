@@ -44,6 +44,8 @@ import { CommentComposer } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(comment-edit-attachment-binding): FIR-2394 — pure binding helpers extracted for robustness + unit coverage.
 import { attachmentReferencedInContent, collectActiveAttachmentIds } from "./comment-attachment-binding";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(comment-image-gallery): FIR-2710 — one image gallery per comment (body + attachments).
+import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 // CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — "Remind me" on a comment lives in cerebro-inbox.
 import { useCommentReminder } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(issue-comment-cost-badge-import): FIR-39 per-comment cost badge.
@@ -568,12 +570,15 @@ function CommentRow({
         </div>
       ) : (
         <>
+          {/* CEREBRO-PATCH(comment-image-gallery): FIR-2710 — body + attachment images page as one gallery. */}
+          <ImageGalleryProvider>
           <div className="mt-1.5 pl-2 sm:pl-8 text-sm leading-relaxed text-foreground/85">
             <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{entry.content ?? ""}</p>}>
               <LazyReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
             </Suspense>
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-8" />
+          </ImageGalleryProvider>
           {!isTemp && (
             <ReactionBar
               reactions={reactions}
@@ -952,12 +957,15 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
+                {/* CEREBRO-PATCH(comment-image-gallery): FIR-2710 — body + attachment images page as one gallery. */}
+                <ImageGalleryProvider>
                 <div className="pl-2 sm:pl-10 text-sm leading-relaxed text-foreground/85">
                   <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{entry.content ?? ""}</p>}>
                     <LazyReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                   </Suspense>
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-2 sm:pl-10" />
+                </ImageGalleryProvider>
                 {!isTemp && (
                   <ReactionBar
                     reactions={reactions}

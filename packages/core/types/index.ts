@@ -50,6 +50,20 @@ export type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+} from "./agent";
+// CEREBRO-PATCH(model-registry-types-export): FIR-2698 single-source model registry governance types.
+export type {
+  ModelRegistryEntry,
+  ModelRegistrySnapshot,
+  ModelRegistry,
+  ModelRegistryVersion,
+  ModelRegistryChangeRequestStatus,
+  ModelRegistryChangeRequest,
+  CreateModelRegistryChangeRequestRequest,
+  ReviewModelRegistryChangeRequestRequest,
+  RollbackModelRegistryRequest,
+} from "./model-registry";
+export type {
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
@@ -105,6 +119,8 @@ export type {
   ArtifactScope,
   ArtifactFolder,
   ArtifactFolderKind, // CEREBRO-PATCH(artifact-folder-kind): TECH-3637
+  ArtifactFolderSuggestion, // CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2
+  ArtifactFolderSuggestionStatus, // CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2
   FolderVisibility, // CEREBRO-PATCH(folder-access): FIR-1590
   ArtifactUploadResponse,
   CreateArtifactRequest,

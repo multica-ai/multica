@@ -50,10 +50,33 @@ func decodeSkillMetadata(raw []byte) *SkillMetadataView {
 }
 
 // SkillSummaryWithMetadata extends SkillSummaryResponse with metadata and version.
+//
+// FIR-2748: owner_id + approver_ids are carried on the list payload so the
+// Skills-page personal review alert can tell which pending change requests
+// belong to skills the current user owns or approves. Without them the client
+// enrichment (enrichSkillChanges) always resolved "mine" to 0 and the alert
+// never rendered. The upstream SkillSummaryResponse deliberately omits these to
+// stay narrow; this cerebro list already selects them (ListSkillsByMetadata), so
+// we surface them here rather than widening the shared upstream shape.
 type SkillSummaryWithMetadata struct {
 	SkillSummaryResponse
 	Metadata       *SkillMetadataView `json:"metadata,omitempty"`
 	CurrentVersion string             `json:"current_version,omitempty"`
+	OwnerID        *string            `json:"owner_id"`
+	ApproverIDs    []string           `json:"approver_ids"`
+}
+
+// uuidSliceToStrings converts a slice of pgtype.UUID (as returned by the skill
+// approver_ids array column) into JSON-friendly strings, dropping invalid
+// entries. Always returns a non-nil slice so the field serialises as [].
+func uuidSliceToStrings(ids []pgtype.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, u := range ids {
+		if u.Valid {
+			out = append(out, uuidToString(u))
+		}
+	}
+	return out
 }
 
 // listSkillsByMetadata handles GET /skills when category/domain/tag/status/data_domain
@@ -88,6 +111,9 @@ func (h *Handler) listSkillsByMetadata(w http.ResponseWriter, r *http.Request, w
 			),
 			Metadata:       decodeSkillMetadata(s.Metadata),
 			CurrentVersion: s.CurrentVersion,
+			// FIR-2748: surface ownership so the personal review alert works.
+			OwnerID:     uuidToPtr(s.OwnerID),
+			ApproverIDs: uuidSliceToStrings(s.ApproverIds),
 		}
 	}
 

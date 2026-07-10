@@ -32,7 +32,15 @@ import (
 const (
 	firtalGatewayServerDaemonID  = "server:firtal-gateway"
 	firtalGatewayIssueCommentCap = 200
-	firtalGatewayMaxToolDefs     = 50
+	// firtalGatewayMaxToolDefs is a backstop against a pathological tool list,
+	// not a working budget. A single API connection legitimately exposes ~90
+	// endpoint tools (FIR-2640: "Firtal data sources" has 88), and connection
+	// tools are appended after the platform tools — at the old cap of 50 every
+	// execute tool was silently truncated away on gateway runtimes (FIR-2685).
+	// The compat tool loop already falls back to core tools if a provider
+	// rejects the full list, so the cap only needs to guard against runaway
+	// growth, and any truncation is logged in limitFirtalGatewayTools.
+	firtalGatewayMaxToolDefs = 200
 )
 
 type FirtalGatewayExecutor struct {
@@ -207,7 +215,7 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 	metadata, _ := json.Marshal(map[string]any{
 		"managed_by":   "multica-server",
 		"runtime_kind": "cloud",
-		"supports":     []string{"chat", "issue", "autopilot_run_only"},
+		"supports":     []string{"chat", "issue", "autopilot_run_only", "tool_less_batch"},
 	})
 	for _, workspace := range workspaces {
 		workspaceID := workspace.ID
@@ -388,6 +396,18 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		return
 	}
 
+	// FIR-1794 layer 3 — automatic memory recall at run start. When the
+	// cerebro_memory flag is on for this workspace, recall memories relevant
+	// to the task server-side and fold them into the system prompt, so memory
+	// use does not depend on the model remembering to call memory_recall.
+	// Fail open: an empty block (flag off, nothing recalled, service down)
+	// leaves the messages untouched.
+	if e.cerebro != nil && plan.recallQuery != "" && len(messages) > 0 && messages[0].Role == "system" {
+		if block := CerebroMemoryAutoRecallBlock(parent, e.cerebro, plan.workspaceID, task.AgentID, task.OriginalUserID, plan.recallQuery); block != "" {
+			messages[0].Content += "\n\n" + strings.TrimSpace(block)
+		}
+	}
+
 	// FIR-2325: resolve the workspace's cost-saving modes once and apply the
 	// model_routing saving when it is "on". Default (no override) is off, so the
 	// requested model is unchanged for every workspace that hasn't opted in.
@@ -409,8 +429,19 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	pruneOn := costModes[savingPruneToolResults] == savingModeOn
 	pruneHeldOut := pruneOn && costSavingHeldOut(task.ID, savingPruneToolResults, e.resolveHoldoutPct(parent, plan.workspaceID, savingPruneToolResults))
 
-	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
-	defer cancel()
+	// FIR-2803: no whole-run wall-clock cap by default — a healthy run on a
+	// slow model must not be killed merely for running long (the daemon
+	// runtime follows the same principle via MULTICA_AGENT_TIMEOUT=0). Each
+	// model call is bounded by cfg.CallTimeout and each tool dispatch by
+	// cfg.ToolCallTimeout, and the tool loop is bounded by max rounds, so an
+	// uncapped run still cannot hang forever. TaskTimeout > 0 restores an
+	// operator-set hard ceiling.
+	runCtx := parent
+	if cfg.TaskTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(parent, cfg.TaskTimeout)
+		defer cancel()
+	}
 	meta := GatewayRequestMeta{
 		TaskID:         taskID,
 		AgentID:        util.UUIDToString(task.AgentID),
@@ -433,7 +464,8 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		}
 	}
 	var completion GatewayCompletion
-	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID) {
+	hasCallableTools := e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID)
+	if hasCallableTools {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
 		// The no-tools compat path serializes over the OpenAI wire, which
@@ -444,7 +476,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		if cfg.EntryMode != FirtalGatewayEntryModeNative {
 			noToolMessages = e.foldGatewayCompatAttachmentBlocks(messages, meta)
 		}
-		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, noToolMessages, meta)
+		completion, err = e.completeGatewayToolless(runCtx, cfg, task, agent.Model.String, noToolMessages, meta)
 	}
 	if err != nil {
 		e.failTask(parent, task, err.Error(), "agent_error")
@@ -479,6 +511,34 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 }
 
+// completeGatewayToolless uses Anthropic's asynchronous batch transport only
+// for tasks carrying the explicit Round tool-less contract. Capability,
+// authentication, transport, timeout and result failures all return to the
+// existing synchronous path. Once a job was accepted, CompleteBatch attempts
+// cancellation before returning, avoiding an unobserved duplicate request.
+func (e *FirtalGatewayExecutor) completeGatewayToolless(ctx context.Context, cfg FirtalGatewayRuntimeConfig, task db.AgentTaskQueue, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if !gatewayBatchTaskEligible(task, false) {
+		return e.completeGateway(ctx, cfg, model, messages, meta)
+	}
+	batchCtx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
+	client := e.gateway
+	if client == nil {
+		client = NewGatewayClient(cfg, nil)
+	}
+	completion, accepted, batchErr := client.CompleteBatch(batchCtx, model, messages, meta, defaultGatewayBatchPollInterval)
+	if batchErr == nil {
+		completion.PromptInputChars = messagesChars(messages)
+		e.logger.Info("firtal gateway batch completed", "task_id", meta.TaskID, "model", completion.Model)
+		return completion, nil
+	}
+	if ctx.Err() != nil {
+		return GatewayCompletion{}, ctx.Err()
+	}
+	e.logger.Warn("firtal gateway batch fell back to synchronous execution", "task_id", meta.TaskID, "accepted", accepted, "error", batchErr)
+	return e.completeGateway(ctx, cfg, model, messages, meta)
+}
+
 // taskPlan captures everything the gateway needs to fulfil a task: the
 // workspace it belongs to (for config + budget + usage rollup), a function
 // that produces the message list given the history limit, and the error
@@ -495,6 +555,9 @@ type taskPlan struct {
 	// context is the human-readable run context (surface, issue, project)
 	// forwarded to the registry AI-gateway so each logged call is attributable.
 	context gatewayContext
+	// recallQuery is the task-derived query for automatic memory recall at run
+	// start (FIR-1794 layer 3). Empty disables auto-recall for the run.
+	recallQuery string
 }
 
 // gatewayContext is the best-effort, human-readable context for a gateway run.
@@ -549,6 +612,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			// Chat history is inlined; a daemon agent would list it itself.
 			inlinedContextReads: 1,
 			context:             gatewayContext{surface: "chat"},
+			recallQuery:         CerebroMemoryAutoRecallQuery(lastUserChatMessage(history)),
 		}, nil
 
 	case task.IssueID.Valid:
@@ -606,6 +670,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
 			context:             issueCtx,
+			recallQuery: CerebroMemoryAutoRecallQuery(issue.Title, func() string {
+				if triggerComment != nil {
+					return triggerComment.Content
+				}
+				return ""
+			}()),
 		}, nil
 
 	case task.AutopilotRunID.Valid:
@@ -637,11 +707,24 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			},
 			emptyMessageError: "autopilot run has no prompt to answer",
 			context:           apCtx,
+			recallQuery:       CerebroMemoryAutoRecallQuery(ap.Title, ap.Description.String),
 		}, nil
 
 	default:
 		return taskPlan{}, fmt.Errorf("firtal gateway runtime cannot fulfil this task kind (no chat, issue, or autopilot link)")
 	}
+}
+
+// lastUserChatMessage returns the newest user-authored message in a
+// chronologically-ordered chat history — the text the run is answering, used
+// as the automatic memory-recall query for chat tasks.
+func lastUserChatMessage(history []db.ChatMessage) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			return history[i].Content
+		}
+	}
+	return ""
 }
 
 func (e *FirtalGatewayExecutor) effectiveWorkspaceConfig(ctx context.Context, workspaceID pgtype.UUID) (FirtalGatewayRuntimeConfig, bool, error) {
@@ -725,7 +808,19 @@ func anthropicContentChars(content any) int64 {
 	}
 }
 
+// gatewayCallContext bounds one model call against the gateway. With no
+// whole-run cap by default (FIR-2803), the per-call deadline is what stops a
+// hung upstream from stalling a run forever.
+func gatewayCallContext(ctx context.Context, cfg FirtalGatewayRuntimeConfig) (context.Context, context.CancelFunc) {
+	if cfg.CallTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, cfg.CallTimeout)
+}
+
 func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -742,6 +837,8 @@ func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalG
 }
 
 func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -762,6 +859,8 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // so the transcript stays valid for Anthropic while the model is constrained to
 // produce text instead of another tool call. See FIR-2421.
 func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	ctx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
 	var (
 		c   GatewayCompletion
 		err error
@@ -879,13 +978,22 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 	taskRegistry.db = e.registry.db
 	if tools, handled := e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID); handled {
-		return len(tools) > 0
+		if len(tools) > 0 {
+			return true
+		}
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools are additive
+		// (offered by the memory gates, not the policy/cascade), so an agent whose
+		// only tools are memory tools must still enter the tool loop.
+		return len(CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)) > 0
 	}
 	cascadeUserID := originalUserID
 	if !cascadeUserID.Valid {
 		cascadeUserID = ownerID
 	}
-	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)) > 0
+	if len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)) > 0 {
+		return true
+	}
+	return len(CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)) > 0 // CEREBRO-PATCH(memory-tools-offer): FIR-1794
 }
 
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
@@ -899,6 +1007,9 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
 	// exchange-enabled connections run on that person's own session key.
 	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
+	// FIR-2668: carry the calling agent to API-connection dispatch so
+	// on_behalf_of-enabled connections stamp the agent's delegated identity.
+	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
 	// Pin the default file-attachment target (create_file) to the surface this
 	// task runs on, so an agent never has to know the chat-message UUID.
@@ -999,6 +1110,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			})
 			connTools := make([]Tool, 0, len(resolved.APITools))
 			for _, v := range resolved.APITools {
+				// FIR-2243 B2: stamp the run identity + the admitting verdict onto
+				// the tool so its dispatch emits the gateway-trace line. The registry
+				// holds the same pointer, so the call path sees it.
+				v.Tool.attachTrace(e.logger, meta, string(v.Verdict))
 				connTools = append(connTools, v.Tool)
 			}
 			// FIR-2441 fix-list #4: reach the mcp_http half too. On a local runtime
@@ -1013,6 +1128,24 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			connTools = append(connTools, buildGatewayMCPTools(ctx, resolved.MCPServers, nil, e.logger)...)
 			if len(connTools) > 0 {
 				for _, t := range connTools {
+					taskRegistry.Register(t)
+					enabledTools = append(enabledTools, t)
+				}
+				enabledTools = limitFirtalGatewayTools(enabledTools)
+				anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+				activeRegistry = taskRegistry
+				useRegistry = true
+			}
+		}
+		// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — additive, like the
+		// API-connection tools above: when the three memory gates pass for this
+		// (workspace, agent, originating user), the Cognee memory tools are
+		// appended and registered. The gates re-run inside every Call, so this
+		// list is a UX courtesy — no other grant path can bypass the switches.
+		if e.cerebro != nil {
+			memTools := CerebroMemoryToolsForTask(ctx, e.cerebro, tctx, originalUserID)
+			if len(memTools) > 0 {
+				for _, t := range memTools {
 					taskRegistry.Register(t)
 					enabledTools = append(enabledTools, t)
 				}
@@ -1233,14 +1366,26 @@ func limitFirtalGatewayTools(tools []Tool) []Tool {
 	}
 
 	out := make([]Tool, 0, firtalGatewayMaxToolDefs)
+	var truncated []string
 	for i, tool := range tools {
 		if _, shouldDrop := drop[i]; shouldDrop {
 			continue
 		}
-		out = append(out, tool)
 		if len(out) == firtalGatewayMaxToolDefs {
-			break
+			truncated = append(truncated, tool.Name())
+			continue
 		}
+		out = append(out, tool)
+	}
+	if len(truncated) > 0 {
+		// A dropped tool is invisible to the agent — it cannot report what it
+		// never saw (FIR-2685) — so the truncation must at least be visible here.
+		slog.Warn("firtal gateway: tool list exceeds cap, truncating",
+			"cap", firtalGatewayMaxToolDefs,
+			"total", len(tools),
+			"dropped_count", len(truncated),
+			"dropped", strings.Join(truncated, ","),
+		)
 	}
 	return out
 }
@@ -1281,6 +1426,9 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
 	// exchange-enabled connections run on that person's own session key.
 	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
+	// FIR-2668: carry the calling agent to API-connection dispatch so
+	// on_behalf_of-enabled connections stamp the agent's delegated identity.
+	ctx = WithConnectionAgent(ctx, meta.AgentID)
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
@@ -1347,7 +1495,7 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 				})
 				continue
 			}
-			result, dur := e.dispatchTool(ctx, toolSrv, call)
+			result, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
 			e.logger.Info("firtal gateway tool call",
 				"task_id", meta.TaskID,
 				"agent_id", meta.AgentID,
@@ -1502,7 +1650,9 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			}
 			if !isError {
 				var err error
-				resultText, err = registry.Call(ctx, call.Function.Name, args)
+				toolCtx, cancelTool := toolCallContext(ctx, cfg)
+				resultText, err = registry.Call(toolCtx, call.Function.Name, args)
+				cancelTool()
 				if err != nil {
 					resultText = fmt.Sprintf("tool error: %v", err)
 					isError = true
@@ -1691,11 +1841,13 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 					}
 				}
 				if !isError {
-					resultText, err = registry.Call(ctx, call.Function.Name, args)
+					toolCtx, cancelTool := toolCallContext(ctx, cfg)
+					resultText, err = registry.Call(toolCtx, call.Function.Name, args)
+					cancelTool()
 					if err != nil {
 						// Fall through to MCP server if registry doesn't know this tool.
 						if toolSrv != nil {
-							mcpResult, dur := e.dispatchTool(ctx, toolSrv, call)
+							mcpResult, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
 							e.logger.Info("firtal gateway anthropic tool call (mcp fallback)",
 								"task_id", meta.TaskID,
 								"agent_id", meta.AgentID,
@@ -1713,7 +1865,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 					}
 				}
 			} else if toolSrv != nil {
-				mcpResult, _ := e.dispatchTool(ctx, toolSrv, call)
+				mcpResult, _ := e.dispatchTool(ctx, cfg, toolSrv, call)
 				resultText = toolResultText(mcpResult)
 				isError = mcpResult.IsError
 			} else {
@@ -1806,13 +1958,25 @@ func buildAnthropicAssistantContent(c GatewayCompletion) []AnthropicContentBlock
 	return blocks
 }
 
-func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
+// toolCallContext bounds one server-side tool dispatch. With no whole-run cap
+// by default (FIR-2803), the per-dispatch deadline is what stops a tool that
+// never returns from hanging a run forever.
+func toolCallContext(ctx context.Context, cfg FirtalGatewayRuntimeConfig) (context.Context, context.CancelFunc) {
+	if cfg.ToolCallTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, cfg.ToolCallTimeout)
+}
+
+func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, cfg FirtalGatewayRuntimeConfig, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
 	args := map[string]any{}
 	if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &args); err != nil {
 			return mcp.ErrorResult(fmt.Sprintf("invalid tool arguments JSON: %v", err)), 0
 		}
 	}
+	ctx, cancel := toolCallContext(ctx, cfg)
+	defer cancel()
 	start := time.Now()
 	result, err := srv.Call(ctx, call.Function.Name, args)
 	dur := time.Since(start)

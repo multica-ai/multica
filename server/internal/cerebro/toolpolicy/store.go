@@ -79,10 +79,12 @@ func validLayer(l Layer) bool {
 	}
 }
 
-// validSetting reports whether s is one of the four stored settings.
+// validSetting reports whether s is one of the five stored settings. Whether
+// SettingDisable may be stored at the layer the caller is targeting is a
+// separate check — see Set, which rejects it outside LayerWorkspace.
 func validSetting(s Setting) bool {
 	switch s {
-	case SettingInherit, SettingAllow, SettingAsk, SettingDeny:
+	case SettingInherit, SettingAllow, SettingAsk, SettingDeny, SettingDisable:
 		return true
 	default:
 		return false
@@ -189,6 +191,28 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 		mode = ModeOpenable
 	}
 	return ResolveWithMode(mode, input), nil
+}
+
+// MemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// flag is on for the workspace — read from the workspace-level row (the all-zero
+// sentinel user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
+// local-runtime (daemonMemberOverrideEnabled) gates, so a display surface that
+// consults it can never disagree with enforcement. A lookup miss or DB error
+// resolves to OFF (the flag's default): a path that can LOOSEN access must never
+// switch itself on by accident.
+func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if s == nil || s.q == nil {
+		return false
+	}
+	enabled, err := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     FlagMemberOverride,
+	})
+	if err != nil || !enabled {
+		return false
+	}
+	return true
 }
 
 // ResolveOptIn loads the explicit settings for the query's (workspace, user,
@@ -311,6 +335,16 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 	}
 	if !validSetting(p.Setting) {
 		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: %q", ErrUnknownSetting, p.Setting)
+	}
+	// SettingDisable is a workspace-only state (product decision 2026-07-06,
+	// FIR-2351 follow-up): it makes a workspace Deny an unopenable floor for one
+	// permission. Authoring it at any other layer would be meaningless (Disable
+	// is normalized away by resolveOpenable/resolveHardFloor unless it sits at
+	// LayerWorkspace) and would silently behave like an ordinary Deny instead —
+	// reject it outright so the write path fails loudly rather than the row
+	// quietly doing nothing.
+	if p.Setting == SettingDisable && p.Layer != LayerWorkspace {
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: disable is only valid at the workspace layer, got %q", ErrUnknownSetting, p.Layer)
 	}
 	conditions, err := encodeCondition(p.Conditions)
 	if err != nil {

@@ -29,6 +29,14 @@ interface Props {
   wsId: string;
   members: MemberWithUser[];
   canManage: boolean;
+  /**
+   * When set, each version diff is scoped to these snapshot keys. Restore still
+   * restores the whole composite snapshot (history is append-only) — only the
+   * diff readout is narrowed, so the Skills / MCP tabs stay readable.
+   */
+  onlyKeys?: string[];
+  /** Header label; defaults to "Version history". */
+  title?: string;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -46,6 +54,8 @@ export function AgentContextVersionsPanel({
   wsId,
   members,
   canManage,
+  onlyKeys,
+  title = "Version history",
 }: Props) {
   const [open, setOpen] = useState(true);
   const [diffTarget, setDiffTarget] = useState<AgentContextVersion | null>(null);
@@ -82,7 +92,7 @@ export function AgentContextVersionsPanel({
       >
         <span className="flex items-center gap-1.5">
           <GitCommit className="h-3 w-3" />
-          Version history
+          {title}
           {versions.length > 0 && (
             <Badge variant="secondary" className="h-4 text-xs">
               {versions.length}
@@ -177,6 +187,7 @@ export function AgentContextVersionsPanel({
                 proposed={versions[0].snapshot}
                 baseLabel={diffTarget.version}
                 proposedLabel={`current (${versions[0].version})`}
+                onlyKeys={onlyKeys}
               />
             </div>
           )}

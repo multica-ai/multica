@@ -36,6 +36,7 @@ export type CerebroFlagKey =
   // instead of auto-advancing to the next message. Per-user preference.
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
+  | "cerebro_inbox_rounds"
   // FIR-1854: split a channel/DM thread with unread replies into its own
   // inbox row so replies buried in a thread are not missed.
   | "cerebro_inbox_thread_split"
@@ -74,6 +75,31 @@ export type CerebroFlagKey =
   | "cerebro_note_comments"
   //   - version history (see who changed what, restore an earlier version),
   | "cerebro_note_versions"
+  // FIR-2697: extend that same version-history engine to agent-created
+  // DOCUMENTS (any artifact, not just personal notes). When on, updating a
+  // document snapshots a new version of the same file instead of leaving no
+  // trail, and the Documents editor shows a "Version history" action to view /
+  // restore earlier versions. Off by default until QA'd on staging.
+  | "cerebro_document_versions"
+  // FIR-2697 part 2: folder suggestions with accept. When on, an agent can
+  // PROPOSE an existing folder for a document/note instead of moving it
+  // outright; the artifact only moves once a human accepts the proposal, shown
+  // as a banner in the editor. Notes and Documents keep separate folder trees.
+  // Off by default until QA'd on staging.
+  | "cerebro_folder_suggestions"
+  // FIR-2697 part 3: automatic Agent Runs folder structure at Collections level.
+  // When on, the first time an agent saves a document/note in a run the server
+  // silently creates (get-or-create) the folder path
+  // Agent Runs > member > agent > run and files the artifact there, stamping a
+  // Collections sharing grant on every folder it creates. No notifications.
+  // Off by default until QA'd on staging.
+  | "cerebro_agent_runs_folders"
+  // FIR-2697 part 4: an agent-authored document/note attached to a chat message
+  // or issue comment (via a `mention://artifact/<id>` token) must always have a
+  // folder — the server files a folder-less one into the same Agent Runs
+  // structure part 3 builds — and the artifact card links to that folder.
+  // Off by default until QA'd on staging.
+  | "cerebro_attachment_folder"
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
@@ -92,6 +118,10 @@ export type CerebroFlagKey =
   // note is shared with (and their agents), instead of the full workspace
   // directory. Prevents even offering a colleague who cannot open the note.
   | "cerebro_note_scoped_mentions"
+  // FIR-2680: an @mention of a non-participant in a channel/group no longer
+  // silently notifies them. The author is prompted to add them first, mirroring
+  // the note give-access model. DMs are unchanged.
+  | "cerebro_channel_mention_members_only"
   // FIR-1800: reference an artifact (document/note) inside a comment / chat /
   // DM / channel body via a `mention://artifact/<id>` token, rendered as a
   // compact white card that opens the full-page note editor.
@@ -102,11 +132,22 @@ export type CerebroFlagKey =
   // across issue comments/bodies, chat, DM, and channels. Off = the legacy grey
   // single-icon row.
   | "cerebro_attachment_chips"
+  // FIR-2710: clicking an image attachment under a comment opens a paginated
+  // gallery lightbox above the thread (prev/next through the message's images,
+  // counter, thumbnail strip, per-image zoom) instead of routing to a single
+  // full-page image in a new tab. Off = the legacy per-image new-tab viewer.
+  | "cerebro_image_gallery"
   // FIR-2034: move an issue's standalone attachments off the top of the page
   // into a dedicated "Attachments" tab, rendered as a tidy list of rows
   // (preview + name + size + uploader/time). The top shows only a one-line
   // hint. Off = attachments stay inline at the top (the chip grid).
   | "cerebro_attachments_tab"
+  // FIR-2693: images added to a composer (drag-drop, paste, or the attach
+  // button) collect as numbered thumbnails above the input instead of landing
+  // inline in the text. Each has a number (so you can tell the agent "image 2"),
+  // opens a preview on click, can be embedded inline, or removed. Same in every
+  // composer (chat, comments, channels, DMs). Off = images insert inline.
+  | "cerebro_composer_image_tray"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -125,6 +166,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
+  | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
   // FIR-1496: surface the group/person → tool grant editor alongside the unified
@@ -195,6 +237,8 @@ export type CerebroFlagKey =
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
+  // FIR-2810: per-line note attribution (see who wrote/edited every line) + the per-note "stamp my member code on each line" toggle.
+  | "cerebro_note_line_authors"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-1673: recover a stalled/half-loaded image on the document page — loading
@@ -275,6 +319,10 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_time"
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
+  // FIR-2679: loop-guard — cap how many self-wakeups an agent may chain on one
+  // issue without a human replying. The cap itself is a per-workspace number
+  // setting; this flag turns the guard on/off.
+  | "cerebro_wakeup_loop_guard"
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
   // mirroring the running banner (live countdown / waited-for status / CI).
   | "cerebro_wakeup_bar"
@@ -341,7 +389,20 @@ export type CerebroFlagKey =
   | "cerebro_browser"
   // FIR-2042: mobile-web "Install Multica" top banner with per-platform
   // guidance (Android native install prompt; iOS Share → Add to Home Screen).
-  | "cerebro_pwa_install_banner";
+  | "cerebro_pwa_install_banner"
+  // FIR-2669: configurable columns + full-field search on the Runtime and Agent
+  // list pages. Adds a column picker (persisted per workspace/device) and an
+  // Account column to the runtimes table, and a search box + Account/Thinking
+  // level columns to the agents table. Default ON.
+  | "cerebro_interface_columns"
+  // FIR-2670: opt-in preview of the redesigned agent detail page (new card
+  // chrome, identity rail, flat tab strip). Default OFF — the live agent page
+  // is untouched until this is flipped on per workspace/user.
+  | "cerebro_agent_page_redesign"
+  // FIR-2698: Settings tab for the single-source model registry (prices,
+  // context windows, display labels) with propose → review → approve
+  // versioning. Default OFF until the tab has been QA'd on staging.
+  | "cerebro_model_registry";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -373,6 +434,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
   cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
+  cerebro_inbox_rounds: false,
   // FIR-1854 (Jesper): ON — a thread reply that would otherwise hide inside
   // the channel row gets its own inbox row so it is not missed.
   cerebro_inbox_thread_split: true,
@@ -405,6 +467,14 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
   cerebro_note_versions: false,
+  // FIR-2697: document version history — off until QA'd on staging.
+  cerebro_document_versions: false,
+  // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.
+  cerebro_folder_suggestions: false,
+  // FIR-2697 part 3: automatic Agent Runs folder structure — off until QA'd.
+  cerebro_agent_runs_folders: false,
+  // FIR-2697 part 4: attach ⇒ always has a folder + card links to it — off until QA'd.
+  cerebro_attachment_folder: false,
   cerebro_note_lock: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
@@ -412,6 +482,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_agent_collab: true,
   // FIR-2595 point 3: OFF until the scoped note @mention picker is QA'd on staging.
   cerebro_note_scoped_mentions: false,
+  // FIR-2680: ON — a channels setting (under the Channels feature) that makes
+  // channel/group @mentions respect membership. Only takes effect where
+  // cerebro_channels is on; a workspace can switch it off via the setting.
+  cerebro_channel_mention_members_only: true,
   // FIR-2022: OFF until the Notes search scope is QA'd on staging. Gates only
   // the in-app global-search "Notes" scope; the CLI/MCP search tools always work.
   cerebro_note_search: false,
@@ -422,8 +496,16 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2034: ON — unified attachment chips (image thumbnails + colour-coded
   // document cards) everywhere. Opt-out via this flag (kill-switch, no redeploy).
   cerebro_attachment_chips: true,
+  // FIR-2710: OFF until QA signs off on staging — paginated image gallery
+  // lightbox for comment image attachments (desktop + mobile).
+  cerebro_image_gallery: false,
   // FIR-2034: OFF until QA signs off — opt-in moves issue attachments into a tab.
   cerebro_attachments_tab: false,
+  // FIR-2693: the numbered-thumbnail tray is the standard way to insert images
+  // (drag-drop / paste / attach) across chat, comments, channels, DMs, and the
+  // field editors (issue description, notes, documents, create-issue). FIR-2714:
+  // ON — Jesper signed off making the tray the standard everywhere.
+  cerebro_composer_image_tray: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -437,6 +519,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
   // FIR-1496: grant editor (group/person → tool) on the runtime page. Default OFF
@@ -546,6 +629,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
+  // FIR-2810: ON by default. Line authors is opt-in per note (a toggle in the
+  // note's ⋯ menu), so the flag only controls whether the toggles exist.
+  cerebro_note_line_authors: true,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -647,6 +733,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_wakeup_time: true,
   cerebro_wakeup_issue_status: true,
   cerebro_wakeup_github_ci: true,
+  // FIR-2679: ON by default — cap consecutive self-wakeups per issue. Off lets an
+  // agent chain self-wakeups without the loop guard.
+  cerebro_wakeup_loop_guard: true,
   // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
   // sidebar-only wakeup list with no banner.
   cerebro_wakeup_bar: true,
@@ -696,6 +785,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2042: default ON — the install banner only appears on mobile web when
   // the app is not already installed, and is dismissible.
   cerebro_pwa_install_banner: true,
+  cerebro_interface_columns: true,
+  // FIR-2670: default OFF — opt-in preview of the redesigned agent page.
+  cerebro_agent_page_redesign: false,
+  // FIR-2698: default OFF until QA'd on staging.
+  cerebro_model_registry: false,
 };
 
 /**
@@ -781,6 +875,20 @@ export interface CerebroFlagDefinition {
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
+    key: "cerebro_agent_page_redesign",
+    label: "Agent page redesign (preview)",
+    group: "agents",
+    description:
+      "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+  },
+  {
+    key: "cerebro_model_registry",
+    label: "Model registry",
+    group: "agents",
+    description:
+      "Add a Model registry tab under Settings: view and propose changes to model prices, context windows, and display labels. Changes go through the same propose → review → approve flow as Agent Context, so a bad edit never lands without a second pair of eyes.",
+  },
+  {
     key: "cerebro_credentials_per_actor",
     label: "Credentials per actor",
     group: "permissions",
@@ -837,6 +945,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
   },
   {
+    key: "cerebro_attachment_folder",
+    label: "Attached documents show their folder",
+    group: "issues",
+    description:
+      "FIR-2697 part 4. When an agent-authored document/note is attached to a chat message or issue comment (via a `mention://artifact/<id>` token), guarantee it has a folder: a folder-less one is filed into the same automatic Agent Runs structure (part 3). The white artifact card then shows and links to that folder. Only agent documents are affected — raw file uploads have no document behind them. Needs `Artifact references in comments` on to render the card; pairs with `Automatic Agent Runs folders`. Off leaves attaching unchanged.",
+  },
+  {
     key: "cerebro_attachment_chips",
     label: "Unified attachment cards",
     group: "issues",
@@ -844,11 +959,25 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Show attachments in one consistent format everywhere: images render as a real thumbnail (not a file box), and documents render as fixed-size colour-coded cards by type (PDF red, Excel green, Word blue, PowerPoint orange, archive amber, code violet). Same card in the composer while you type and in the posted thread, and identical across issue comments & descriptions, chat, DM, and channels. Every card is clickable (preview or download) and keyboard-focusable. Off falls back to the legacy grey single-icon row.",
   },
   {
+    key: "cerebro_image_gallery",
+    label: "Image gallery lightbox",
+    group: "issues",
+    description:
+      "Clicking an image attachment under a comment opens a full-screen gallery above the thread instead of routing to a single image on its own page in a new tab. The gallery pages through all the images in that message with prev/next arrows, keyboard arrows, a tap-able thumbnail strip, and a \"3 / 5\" counter, and each image zooms (wheel on desktop, pinch on mobile). Works on desktop and mobile. Off restores the legacy per-image new-tab viewer.",
+  },
+  {
     key: "cerebro_attachments_tab",
     label: "Attachments tab",
     group: "issues",
     description:
       "Move an issue's standalone attachments off the top of the page into a dedicated \"Attachments\" tab next to Comments / Agent Runs / CLI runs. Inside the tab each file is a row: a small preview (image thumbnail or type-coloured icon), the filename and type, its size, and who uploaded it when, with open/download actions on hover. The top of the issue shows only a one-line hint with the file count. Off keeps attachments inline at the top of the issue (the unified chip grid).",
+  },
+  {
+    key: "cerebro_composer_image_tray",
+    label: "Numbered image tray in composers and fields",
+    group: "issues",
+    description:
+      "Images you add (drag-and-drop, paste, or the attach button) collect as numbered thumbnails above the field instead of being inserted inline in the text. Each thumbnail shows its number (so you can tell the agent \"look at image 2\"), opens a full preview on click, and can be removed. Works in chat, issue comments, channels, and DMs (embed inline + appended on send), and in issue descriptions, notes, and documents (the numbered row is saved with the text and shown again on reopen). Off = images insert inline where the cursor is.",
   },
   {
     key: "cerebro_web_push",
@@ -940,6 +1069,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+  },
+  {
+    key: "cerebro_inbox_rounds",
+    label: "Inbox rounds",
+    group: "inbox",
+    description:
+      "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
   },
   {
     key: "cerebro_note_inbox_pane",
@@ -1037,6 +1173,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
   },
   {
+    key: "cerebro_interface_columns",
+    label: "Configurable list columns",
+    group: "agents",
+    description:
+      "Choose which columns show on the Runtimes and Agents pages via a column picker (remembered per workspace on this device). Adds an Account column to Runtimes and Account + Thinking level columns to Agents, plus a search box on Agents and full-field search on Runtimes.",
+  },
+  {
     key: "cerebro_tasks",
     label: "Tasks page",
     group: "workspace",
@@ -1063,6 +1206,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+  },
+  {
+    key: "cerebro_workflow_step_model_override",
+    label: "Workflow step model override",
+    group: "workspace",
+    description:
+      "Let Issue workflow steps choose a model and thinking level per Plan, Build, build phase, and AI review condition. Empty values use the selected agent's default.",
   },
   {
     key: "cerebro_skill_mention",
@@ -1339,11 +1489,25 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Inside a note, the @mention picker only offers people the note is shared with (and their agents), instead of the whole workspace. Prevents tagging a colleague who cannot open the note. FIR-2595.",
   },
   {
+    key: "cerebro_channel_mention_members_only",
+    label: "Mentions respect membership",
+    group: "dm_channel",
+    description:
+      "A Channels setting: in a channel or group, @mentioning someone who is not a participant no longer silently notifies them. The author is prompted to add them to the channel first (Cancel / Send without / Add & send), mirroring the note give-access prompt. Only takes effect where Channels is on; direct messages are unchanged. FIR-2680.",
+  },
+  {
     key: "cerebro_note_types",
     label: "Note types",
     group: "workspace",
     description:
       "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+  },
+  {
+    key: "cerebro_note_line_authors",
+    label: "Note line authors",
+    group: "workspace",
+    description:
+      "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
   },
   {
     key: "cerebro_skill_folders",
@@ -1566,6 +1730,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
   },
   {
+    key: "cerebro_wakeup_loop_guard",
+    label: "Wakeup: loop guard",
+    group: "agents",
+    description:
+      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without a human replying, the next wakeup is rejected and the agent is told to post a status or question instead. A human comment resets the count. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-2679.",
+  },
+  {
     key: "cerebro_wakeup_bar",
     label: "Scheduled wakeup banner",
     group: "issues",
@@ -1644,6 +1815,14 @@ export interface CerebroFlagSubgroup {
 export const CEREBRO_FLAG_SUBGROUPS: Partial<
   Record<CerebroFlagGroupKey, CerebroFlagSubgroup[]>
 > = {
+  dm_channel: [
+    {
+      key: "channels",
+      label: "Channels",
+      description:
+        "Channel-style conversations and the settings that govern how they behave.",
+    },
+  ],
   permissions: [
     {
       key: "tool_permissions",
@@ -1685,6 +1864,10 @@ export const CEREBRO_FLAG_SUBGROUPS: Partial<
  * sub-groups defined in {@link CEREBRO_FLAG_SUBGROUPS}.
  */
 export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> = {
+  // Channels — the channels feature and its settings (e.g. membership-aware
+  // mentions), so the setting reads as living under Channels. FIR-2680.
+  cerebro_channels: "channels",
+  cerebro_channel_mention_members_only: "channels",
   // Tool permissions — the tool-policy chain and everything that feeds it.
   cerebro_tool_policy: "tool_permissions",
   cerebro_simple_tool_policy: "tool_permissions",

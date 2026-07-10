@@ -30,16 +30,20 @@ const (
 	maxMaxSelfPerIssue = 100
 	minMinIntervalMin  = 0
 	maxMinIntervalMin  = 1440 // 24h
+	minMaxConsecutive  = 0    // 0 disables the loop guard
+	maxMaxConsecutive  = 100
 )
 
 type wakeupSettingsResponse struct {
-	MaxSelfPerIssue    int `json:"max_self_per_issue"`
-	MinIntervalMinutes int `json:"min_interval_minutes"`
+	MaxSelfPerIssue     int `json:"max_self_per_issue"`
+	MinIntervalMinutes  int `json:"min_interval_minutes"`
+	MaxConsecutiveLoops int `json:"max_consecutive_loops"`
 }
 
 type wakeupSettingsRequest struct {
-	MaxSelfPerIssue    int `json:"max_self_per_issue"`
-	MinIntervalMinutes int `json:"min_interval_minutes"`
+	MaxSelfPerIssue     int `json:"max_self_per_issue"`
+	MinIntervalMinutes  int `json:"min_interval_minutes"`
+	MaxConsecutiveLoops int `json:"max_consecutive_loops"`
 }
 
 // GetSettings returns the workspace's self-wakeup limits. A missing settings row
@@ -52,8 +56,9 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := wakeupSettingsResponse{
-		MaxSelfPerIssue:    defaultMaxSelfWakeupsPerIssue,
-		MinIntervalMinutes: defaultMinWakeupIntervalMin,
+		MaxSelfPerIssue:     defaultMaxSelfWakeupsPerIssue,
+		MinIntervalMinutes:  defaultMinWakeupIntervalMin,
+		MaxConsecutiveLoops: defaultMaxConsecutiveWakeupLoops,
 	}
 	settings, err := h.Service.Cerebro.GetCerebroWorkspaceSettings(r.Context(), wsUUID)
 	switch {
@@ -63,6 +68,9 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if settings.WakeupMinIntervalMinutes >= 0 {
 			resp.MinIntervalMinutes = int(settings.WakeupMinIntervalMinutes)
+		}
+		if settings.WakeupMaxConsecutiveLoops >= 0 {
+			resp.MaxConsecutiveLoops = int(settings.WakeupMaxConsecutiveLoops)
 		}
 	case errors.Is(err, pgx.ErrNoRows):
 		// No row yet -> defaults.
@@ -96,6 +104,10 @@ func (h *Handler) SetSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "min_interval_minutes must be between 0 and 1440")
 		return
 	}
+	if req.MaxConsecutiveLoops < minMaxConsecutive || req.MaxConsecutiveLoops > maxMaxConsecutive {
+		writeError(w, http.StatusBadRequest, "max_consecutive_loops must be between 0 and 100")
+		return
+	}
 
 	var updatedBy pgtype.UUID
 	if uid, err := util.ParseUUID(r.Header.Get("X-User-ID")); err == nil {
@@ -103,10 +115,11 @@ func (h *Handler) SetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Service.Cerebro.UpsertCerebroWorkspaceWakeupLimits(r.Context(), cerebrodb.UpsertCerebroWorkspaceWakeupLimitsParams{
-		WorkspaceID:              wsUUID,
-		WakeupMaxSelfPerIssue:    int32(req.MaxSelfPerIssue),
-		WakeupMinIntervalMinutes: int32(req.MinIntervalMinutes),
-		UpdatedBy:                updatedBy,
+		WorkspaceID:               wsUUID,
+		WakeupMaxSelfPerIssue:     int32(req.MaxSelfPerIssue),
+		WakeupMinIntervalMinutes:  int32(req.MinIntervalMinutes),
+		WakeupMaxConsecutiveLoops: int32(req.MaxConsecutiveLoops),
+		UpdatedBy:                 updatedBy,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update wakeup settings")
 		return
@@ -119,14 +132,16 @@ func (h *Handler) SetSettings(w http.ResponseWriter, r *http.Request) {
 			ActorType:   "member",
 			ActorID:     r.Header.Get("X-User-ID"),
 			Payload: wakeupSettingsResponse{
-				MaxSelfPerIssue:    req.MaxSelfPerIssue,
-				MinIntervalMinutes: req.MinIntervalMinutes,
+				MaxSelfPerIssue:     req.MaxSelfPerIssue,
+				MinIntervalMinutes:  req.MinIntervalMinutes,
+				MaxConsecutiveLoops: req.MaxConsecutiveLoops,
 			},
 		})
 	}
 
 	writeJSON(w, http.StatusOK, wakeupSettingsResponse{
-		MaxSelfPerIssue:    req.MaxSelfPerIssue,
-		MinIntervalMinutes: req.MinIntervalMinutes,
+		MaxSelfPerIssue:     req.MaxSelfPerIssue,
+		MinIntervalMinutes:  req.MinIntervalMinutes,
+		MaxConsecutiveLoops: req.MaxConsecutiveLoops,
 	})
 }

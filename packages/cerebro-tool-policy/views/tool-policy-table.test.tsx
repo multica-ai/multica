@@ -6,7 +6,18 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockListAutopilots = vi.hoisted(() => vi.fn());
+const mockListCerebroGroups = vi.hoisted(() => vi.fn());
 const mockUseFeatureFlag = vi.hoisted(() => vi.fn((_key: string) => false));
+const mockToast = vi.hoisted(() => ({
+  warning: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  success: vi.fn(),
+}));
+
+// FIR-2706 follow-up: writes a higher layer overrides must toast an explanation
+// instead of failing silently — the mock lets tests assert the message.
+vi.mock("sonner", () => ({ toast: mockToast }));
 
 vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/cerebro-feature-flags")>();
@@ -19,7 +30,11 @@ vi.mock("@multica/core/api", async () => {
   );
   return {
     ...actual,
-    api: { cerebroRequest: mockCerebroRequest, listAutopilots: mockListAutopilots },
+    api: {
+      cerebroRequest: mockCerebroRequest,
+      listAutopilots: mockListAutopilots,
+      listCerebroGroups: mockListCerebroGroups,
+    },
   };
 });
 
@@ -111,7 +126,8 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
   };
 });
 
-import { ToolPolicyTable, ToolPolicyTabs } from "./tool-policy-table";
+import { ToolPolicyTable, ToolPolicyTabs, futileWriteWarning } from "./tool-policy-table";
+import type { ToolPolicyRow } from "../core";
 
 const TABLE = {
   tools: [
@@ -164,6 +180,8 @@ beforeEach(() => {
   // picker); the mock stays defined so the api shape is complete.
   mockListAutopilots.mockReset();
   mockListAutopilots.mockResolvedValue({ autopilots: [] });
+  mockListCerebroGroups.mockReset();
+  mockListCerebroGroups.mockResolvedValue([]);
   // Credentials feature is OFF by default; the credential-specific tests opt in.
   mockUseFeatureFlag.mockReset();
   mockUseFeatureFlag.mockReturnValue(false);
@@ -470,6 +488,18 @@ describe("ToolPolicyTable (repo groups)", () => {
     expect(screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`)).toBeInTheDocument();
   });
 
+  it("renders each repo capability with ONE Decision pill and no separate When button (FIR-2706 same-design)", async () => {
+    const user = userEvent.setup();
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const checkout = screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`);
+    // Exactly one control on the bar: the Decision pill. The old standalone When
+    // button (condition-control-*) is gone — When now lives inside the pill.
+    expect(within(checkout).getByLabelText(/^Decision:/)).toBeInTheDocument();
+    expect(within(checkout).queryByTestId("condition-control-repo.checkout")).not.toBeInTheDocument();
+  });
+
   it("setting the repo group cascades the choice to all three capabilities with the repo as resource", async () => {
     const user = userEvent.setup();
     renderRepoTable();
@@ -495,7 +525,7 @@ describe("ToolPolicyTable (repo groups)", () => {
     await user.click(within(group).getByRole("button", { expanded: false }));
     const checkout = screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`);
     await user.click(within(checkout).getByLabelText(/^Decision:/));
-    await user.click(within(checkout).getByRole("menuitem", { name: "Ask" }));
+    await user.click(within(checkout).getByTestId("catalog-decision-repo.checkout-ask"));
     await waitFor(() => {
       const put = findPutCalls().at(-1);
       expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({
@@ -522,7 +552,9 @@ describe("ToolPolicyTable (repo groups)", () => {
     const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
     await user.click(within(group).getByRole("button", { expanded: false }));
     const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
-    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    // The When editor now lives inside the row's single Decision pill popover
+    // (FIR-2706 — one control per row), so open the pill to reach it.
+    await user.click(within(push).getByLabelText(/^Decision:/));
     const editor = within(await screen.findByTestId("condition-editor-repo.push"));
     // Preset action chips for the repo verb model.
     expect(editor.getByLabelText("Action read")).toBeInTheDocument();
@@ -541,7 +573,9 @@ describe("ToolPolicyTable (repo groups)", () => {
     const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
     await user.click(within(group).getByRole("button", { expanded: false }));
     const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
-    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    // The When editor now lives inside the row's single Decision pill popover
+    // (FIR-2706 — one control per row), so open the pill to reach it.
+    await user.click(within(push).getByLabelText(/^Decision:/));
     const editor = within(await screen.findByTestId("condition-editor-repo.push"));
     await user.click(editor.getByLabelText("Action push"));
     await user.click(editor.getByRole("button", { name: "Save" }));
@@ -759,6 +793,69 @@ describe("ToolPolicyTable (Condition editor)", () => {
       expect(body.condition).toBeNull();
     });
   });
+
+  it("uses a group picker for Manage group permissions and writes group_id", async () => {
+    const user = userEvent.setup();
+    mockListCerebroGroups.mockResolvedValue([
+      {
+        id: "group-finance",
+        workspace_id: "ws-1",
+        name: "Finance",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+      {
+        id: "group-support",
+        workspace_id: "ws-1",
+        name: "Customer service",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+    ]);
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "manage_group_overrides",
+          title: "Manage group permissions",
+          category: "Permissions",
+          source: "platform",
+          enforced_conditions: ["arg", "cel"],
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          conditions: { workspace: null, runtime: null, agent: null, user: null },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-manage_group_overrides");
+    await user.click(within(row).getByTestId("condition-control-manage_group_overrides"));
+    const editor = within(await screen.findByTestId("condition-editor-manage_group_overrides"));
+
+    expect(await editor.findByLabelText("Search groups")).toBeInTheDocument();
+    expect(editor.getByText("Groups")).toBeInTheDocument();
+    await user.click(await editor.findByRole("button", { name: /Finance/ }));
+    await user.click(editor.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        tool_key: "manage_group_overrides",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "allow",
+      });
+      expect(body.condition.arg_allowlist).toEqual([
+        { arg: "group_id", values: ["group-finance"] },
+      ]);
+    });
+  });
 });
 
 describe("ToolPolicyTable (firtal_registry data sources — FIR-1609 Phase 5)", () => {
@@ -910,7 +1007,7 @@ describe("ToolPolicyTable (System actor — FIR-1692)", () => {
   });
 });
 
-describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
+describe("ToolPolicyTable Permissions/Connections tab split (FIR-2281, FIR-2706)", () => {
   const SPLIT = {
     tools: [
       {
@@ -945,10 +1042,19 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
         layers: { runtime: null, agent: null, group: null, user: null },
         effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
       },
+      {
+        tool_key: "repo.read",
+        resource_pattern: "github.com/firtal-group/repo-a",
+        title: "Read code",
+        category: "repo",
+        source: "repo",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
     ],
   };
 
-  function renderTab(tabFilter: "permissions" | "resources") {
+  function renderTab(tabFilter: "permissions" | "repos" | "connections") {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={qc}>
@@ -978,24 +1084,56 @@ describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
     expect(table.getAllByText("Multica").length).toBeGreaterThan(0);
     // A connection is a resource, not a flat permission — never on this tab.
     expect(table.queryByText("Slack workspace")).not.toBeInTheDocument();
+    // Neither is a repo.
+    expect(screen.queryByTestId("repo-policy-section")).not.toBeInTheDocument();
   });
 
-  it("Resources tab shows connections and excludes the flat permissions", async () => {
+  it("Connections tab shows connections and excludes the flat permissions and repos", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
-    renderTab("resources");
+    renderTab("connections");
     const table = await tableBody();
     expect(table.getByText("Slack workspace")).toBeInTheDocument();
     expect(table.getAllByText("Connections").length).toBeGreaterThan(0);
     expect(table.queryByText("Bash")).not.toBeInTheDocument();
     expect(table.queryByText("Add comment")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("repo-policy-section")).not.toBeInTheDocument();
+  });
+
+  it("Repos tab shows the repo group and excludes connections and flat permissions", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("repos");
+    expect(
+      await screen.findByTestId("repo-group-github.com/firtal-group/repo-a"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Slack workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add comment")).not.toBeInTheDocument();
+  });
+
+  // FIR-2640 review — on mobile the connection row's controls (the Configure
+  // button + the Decision pill) must stack vertically, Decision on top and
+  // Configure UNDER it (flex-col-reverse), so the wide "Configure" button stops
+  // stealing the row's width and the capability name stays readable.
+  it("stacks the mobile card controls so Configure sits under Allow", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("connections");
+    await tableBody();
+    const card = document.querySelector(
+      '[data-testid="tool-card-connection:slack"]',
+    );
+    expect(card).not.toBeNull();
+    // The right-hand control column stacks (reverse so the Decision pill — the
+    // last child — renders on top and the Configure button below it).
+    expect(card?.querySelector(".flex-col-reverse")).not.toBeNull();
   });
 });
 
 // FIR-1479 + FIR-2281: credentials are a resource type, rendered as per-box rows
-// inside the Resources tab. Each row carries a resource_pattern
+// inside the Connections tab (FIR-2706 split repos out into their own tab, but
+// credentials stayed alongside connections). Each row carries a resource_pattern
 // ("cerebro-credential:<id>"), so a decision MUST be written scoped to that box —
 // the prior inline rendering dropped the scope and the toggle silently no-op'd.
-describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () => {
+describe("ToolPolicyTable — Credentials in the Connections tab (FIR-1479)", () => {
   // A single-action box (Agent Vault boxes expose only "Use secret") renders as a
   // plain permission row — resource agentvault-vault:<name>, one reveal capability.
   const vaultRow = (
@@ -1060,7 +1198,7 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
           subjectId="agent-1"
           runtimeId="rt-1"
           userId="user-1"
-          tabFilter="resources"
+          tabFilter="connections"
         />
       </QueryClientProvider>,
     );
@@ -1083,7 +1221,7 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
     // A vault box (only "Use secret") is a plain row — no fold, one decision.
     const box = await screen.findByTestId("credential-group-agentvault-vault:bigquery");
     await user.click(within(box).getByLabelText(/^Decision:/));
-    await user.click(within(box).getByRole("menuitem", { name: "Allow" }));
+    await user.click(within(box).getByTestId("catalog-decision-credential.reveal-allow"));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
@@ -1107,7 +1245,7 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
       "credential-cap-credential.rotate-cerebro-credential:box-1",
     );
     await user.click(within(cap).getByLabelText(/^Decision:/));
-    await user.click(within(cap).getByRole("menuitem", { name: "Allow" }));
+    await user.click(within(cap).getByTestId("catalog-decision-credential.rotate-allow"));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
@@ -1137,16 +1275,16 @@ describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () =
     });
   });
 
-  it("shows nothing on the Resources tab when only flat permissions exist", async () => {
+  it("shows nothing on the Connections tab when only flat permissions exist", async () => {
     mockCerebroRequest.mockResolvedValue({ tools: [BUILTIN_ROW] });
     renderCredentials();
-    // A builtin tool is a permission, not a resource → the Resources tab is empty.
+    // A builtin tool is a permission, not a resource → the Connections tab is empty.
     expect(await screen.findByText(/No tools match these filters/)).toBeInTheDocument();
     expect(screen.queryByText("List issues")).not.toBeInTheDocument();
   });
 });
 
-describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
+describe("ToolPolicyTabs — three tabs (FIR-2281, FIR-2706)", () => {
   function renderTabs() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
@@ -1156,12 +1294,210 @@ describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
     );
   }
 
-  it("renders exactly the Permissions and Resources tabs", async () => {
+  it("renders exactly the Permissions, Repos and Connections tabs", async () => {
     renderTabs();
     expect(await screen.findByRole("tab", { name: "Permissions" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Resources" })).toBeInTheDocument();
-    // The old five tabs are gone — Resources holds connections/repos/credentials.
+    expect(screen.getByRole("tab", { name: "Repos" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
+    // The old five tabs (and the FIR-2281 combined "Resources" tab) are gone.
     expect(screen.queryByRole("tab", { name: "Multica" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Credentials" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Resources" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8, FIR-2706)", () => {
+  function renderRedesigned(view: "agent" | "runtime" = "agent") {
+    // The capability catalog is now gated on the permissions flag itself
+    // (cerebro_tool_policy) rather than the agent-page preview (FIR-2706). Only
+    // that flag is on; every other flag stays off.
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view={view} subjectId="agent-1" runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders grouped capability cards instead of the flat table when the flag is on", async () => {
+    renderRedesigned("agent");
+    // The capability-card container replaces the <table>.
+    expect(await screen.findByTestId("capability-catalog")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    // Every tool still shows, just grouped into cards.
+    expect(screen.getByText("Post Slack message")).toBeInTheDocument();
+    expect(screen.getByText("Restart deploy")).toBeInTheDocument();
+    expect(screen.getByText("List issues")).toBeInTheDocument();
+  });
+
+  it("keeps the write path: picking a decision still writes the agent layer", async () => {
+    const user = userEvent.setup();
+    renderRedesigned("agent");
+    const slackRow = await screen.findByTestId("tool-card-slack.post_message");
+    // FIR-2706 — the row now carries a SINGLE combined control: the Decision pill
+    // opens a popover whose choices are buttons (and which also holds When), not a
+    // dropdown menu + a separate When button on the bar.
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByTestId("catalog-decision-slack.post_message-ask"));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({
+        tool_key: "slack.post_message",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "ask",
+      });
+    });
+  });
+
+  it("gives the row a single combined control — no separate When button on the bar", async () => {
+    const user = userEvent.setup();
+    renderRedesigned("agent");
+    const slackRow = await screen.findByTestId("tool-card-slack.post_message");
+    // The row bar carries the single Decision toggle and NOT a standalone When
+    // button — that was the mobile-crowding source (FIR-2706).
+    expect(within(slackRow).getByLabelText(/^Decision:/)).toBeInTheDocument();
+    expect(
+      within(slackRow).queryByTestId("condition-control-slack.post_message"),
+    ).not.toBeInTheDocument();
+    // Opening the toggle reveals the decision choices as buttons inside one popover
+    // (the same popover that also holds the When editor).
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    expect(
+      within(slackRow).getByTestId("catalog-decision-slack.post_message-deny"),
+    ).toBeInTheDocument();
+  });
+});
+
+// FIR-2706 follow-up — a write the server accepts but a higher layer overrides
+// used to fail silently: the pill snapped back with only a hover tooltip.
+describe("silent-failure feedback (FIR-2706 follow-up)", () => {
+  const NO_LAYERS = { workspace: null, runtime: null, agent: null, group: null, user: null, system: null };
+  const NO_CONDITIONS = { workspace: null, runtime: null, agent: null, user: null, system: null };
+  function cappedRow(
+    effective: Partial<ToolPolicyRow["effective"]> = {},
+    extra: Partial<ToolPolicyRow> = {},
+  ): ToolPolicyRow {
+    return {
+      tool_key: "slack.post_message",
+      resource_pattern: "",
+      title: "Post Slack message",
+      category: "MCP · Slack",
+      source: "scan",
+      managed_externally: false,
+      layers: { ...NO_LAYERS },
+      conditions: { ...NO_CONDITIONS },
+      effective: {
+        setting: "deny",
+        decided_by: "user",
+        capped_by: "user",
+        reason: "Capped by user",
+        ...effective,
+      },
+      capped_by_groups: [],
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    mockToast.warning.mockReset();
+    mockToast.info.mockReset();
+  });
+
+  describe("futileWriteWarning", () => {
+    it("names the blocking layer and where to change it when a looser write cannot take effect", () => {
+      const msg = futileWriteWarning(cappedRow(), "agent", "allow");
+      expect(msg).toContain('"Allow" was saved on the Agent layer');
+      expect(msg).toContain('the decision stays "Deny"');
+      expect(msg).toContain("User blocks it");
+      expect(msg).toContain("ceiling");
+    });
+
+    it("names the blocking group and its owner", () => {
+      const msg = futileWriteWarning(
+        cappedRow(
+          { decided_by: "group", capped_by: "group" },
+          { capped_by_groups: [{ name: "Support", owner: "Jesper Hvejsel" }] },
+        ),
+        "agent",
+        "ask",
+      );
+      expect(msg).toContain("group Support (owner: Jesper Hvejsel) blocks it");
+      expect(msg).toContain("Settings → Groups");
+    });
+
+    it("is silent when the write tightens — deny always bites", () => {
+      expect(futileWriteWarning(cappedRow({ setting: "ask" }), "agent", "deny")).toBeNull();
+    });
+
+    it("is silent when nothing locks the row", () => {
+      expect(
+        futileWriteWarning(
+          cappedRow({ setting: "allow", decided_by: "", capped_by: "", reason: "" }),
+          "agent",
+          "allow",
+        ),
+      ).toBeNull();
+    });
+
+    it("is silent when the choice matches the effective verdict's restrictiveness", () => {
+      // Workspace decided Ask; writing Ask on the agent layer is consistent, not futile.
+      expect(
+        futileWriteWarning(
+          cappedRow({ setting: "ask", decided_by: "workspace", capped_by: "" }),
+          "agent",
+          "ask",
+        ),
+      ).toBeNull();
+    });
+  });
+
+  it("shows the lock explanation inside the decision menu, not only as a hover tooltip", async () => {
+    renderTable("agent");
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    // The dropdown mock renders content inline, so the visible in-menu banner
+    // (Case 1 attribution: futile local override beneath the user cap) is
+    // queryable directly.
+    expect(
+      within(slackRow).getByText(/Your Agent setting has no effect — blocked by User/),
+    ).toBeInTheDocument();
+  });
+
+  it("toasts an explanation when an accepted write is overridden by a higher layer", async () => {
+    const user = userEvent.setup();
+    renderTable("agent");
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Allow" }));
+
+    await waitFor(() => {
+      expect(mockToast.warning).toHaveBeenCalledWith(
+        expect.stringContaining("has no effect"),
+        expect.anything(),
+      );
+    });
+    expect(mockToast.warning).toHaveBeenCalledWith(
+      expect.stringContaining("because User blocks it"),
+      expect.anything(),
+    );
+  });
+
+  it("does not toast when the write takes effect", async () => {
+    const user = userEvent.setup();
+    renderTable("agent");
+    // list_issues is unlocked (effective allow, nothing decides it) — writing
+    // Deny tightens and must produce no warning.
+    const row = await screen.findByTestId("tool-row-list_issues");
+    await user.click(within(row).getByLabelText(/^Decision:/));
+    await user.click(within(row).getByRole("menuitem", { name: "Deny" }));
+
+    await waitFor(() => {
+      expect(findPutCalls().length).toBeGreaterThan(0);
+    });
+    expect(mockToast.warning).not.toHaveBeenCalled();
   });
 });

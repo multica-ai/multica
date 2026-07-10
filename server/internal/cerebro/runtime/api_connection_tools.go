@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -127,6 +128,44 @@ type APIConnectionTool struct {
 	exchanger   *ConnectionSessionExchanger
 
 	client *http.Client
+
+	// trace + logger are attached per task (attachTrace) so a dispatched call can
+	// emit a structured gateway-trace line tying the outgoing request to the run
+	// that made it. Both are optional: a tool built without them (e.g. in unit
+	// tests) simply logs nothing — Call's behaviour is unchanged. (FIR-2243 B2.)
+	logger *slog.Logger
+	trace  apiToolTrace
+}
+
+// apiToolTrace is the per-run identity stamped onto an API-connection tool so the
+// gateway-trace line can answer "which agent, on which task/issue, with which
+// permission decision, made this outgoing call". It never holds a credential
+// VALUE — only the connection's id/name identify the credential. (FIR-2243 B2.)
+type apiToolTrace struct {
+	agentID   string
+	agentName string
+	taskID    string
+	issueID   string
+	surface   string
+	decision  string // resolved permission verdict (allow/ask) this call ran under
+}
+
+// attachTrace stamps the run identity + resolved permission decision + logger onto
+// the tool so a later Call can emit the gateway-trace line. Called once per task
+// after the call-time policy verdict is known; safe on a nil tool. (FIR-2243 B2.)
+func (t *APIConnectionTool) attachTrace(logger *slog.Logger, meta GatewayRequestMeta, decision string) {
+	if t == nil {
+		return
+	}
+	t.logger = logger
+	t.trace = apiToolTrace{
+		agentID:   meta.AgentID,
+		agentName: meta.AgentName,
+		taskID:    meta.TaskID,
+		issueID:   meta.IssueID,
+		surface:   meta.Surface,
+		decision:  decision,
+	}
 }
 
 func (t *APIConnectionTool) Name() string                { return t.toolName }
@@ -369,6 +408,19 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	if client == nil {
 		client = &http.Client{Timeout: apiConnectionToolTimeout}
 	}
+	// Per-agent delegation (FIR-2668): when enabled and the call has an
+	// authenticated agent caller, stamp the agent onto the request so the
+	// remote API authorizes it as that agent's own grants (Firtal Data
+	// Registry x-on-behalf-of contract). Takes precedence over
+	// session_exchange — a delegated agent call must not ride the triggering
+	// human's (broader) session key.
+	delegatedAgent := ""
+	if ob := t.auth.OnBehalfOf; ob != nil && ob.Enabled {
+		delegatedAgent = ConnectionAgent(ctx)
+		if delegatedAgent != "" {
+			req.Header.Set(onBehalfOfHeader, "agent:"+delegatedAgent)
+		}
+	}
 
 	// Per-person session exchange (FIR-2564 fase 2): when enabled and the run
 	// has a triggering human, the call runs on that person's own short-lived
@@ -376,7 +428,7 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	// error, never fall back to the (broader) shared key. System runs with no
 	// triggering human keep the shared key.
 	effectiveAuth := t.auth
-	if se := t.auth.SessionExchange; se != nil && se.Enabled {
+	if se := t.auth.SessionExchange; se != nil && se.Enabled && delegatedAgent == "" {
 		if member := ConnectionTriggerMember(ctx); member != "" {
 			if t.exchanger == nil {
 				return "", fmt.Errorf("api connection %q: session exchange is enabled but not available on this surface", t.connName)
@@ -389,11 +441,17 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		}
 	}
 	applyConnectionAuth(req, effectiveAuth)
+	start := time.Now()
 	resp, err := client.Do(req)
+	dur := time.Since(start)
 	if err != nil {
+		// Transport-level failure: no HTTP status. Trace it as a failed call so the
+		// gateway log records that the agent reached out and got nothing back.
+		t.logGatewayCall(req.URL.Host, filledPath, 0, false, dur, err)
 		return "", fmt.Errorf("api connection %q: call %s %s: %w", t.connName, t.method, filledPath, err)
 	}
 	defer resp.Body.Close()
+	t.logGatewayCall(req.URL.Host, filledPath, resp.StatusCode, resp.StatusCode >= 200 && resp.StatusCode < 300, dur, nil)
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, apiConnectionResponseLimit))
 	if err != nil {
@@ -414,6 +472,73 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		return fmt.Sprintf("HTTP %d (empty body)", resp.StatusCode), nil
 	}
 	return text, nil
+}
+
+// logGatewayCall emits one structured gateway-trace line per outgoing API-
+// connection call: which connection+tool, the target host/method/path, the
+// credential identity (id+name+scheme — never the value), the permission verdict
+// the call ran under, the HTTP outcome (status + ok/fail + duration), and the run
+// identity (agent/task/issue). This is the "outgoing call" half of the FIR-2243
+// audit trail; B1 covers the runtime tool+permission decision and B3 the
+// credential read. A non-2xx or transport error logs at Warn, a 2xx at Info.
+//
+// The credential VALUE never appears here — only the connection's id/name and the
+// auth scheme (bearer/api_key/cf_access). A tool without a logger attached (unit
+// tests, a tool that bypassed attachTrace) is a no-op, so Call's behaviour is
+// unchanged when tracing is not wired.
+func (t *APIConnectionTool) logGatewayCall(host, path string, status int, ok bool, dur time.Duration, callErr error) {
+	if t == nil || t.logger == nil {
+		return
+	}
+	attrs := []any{
+		"event", "api_connection_call",
+		"connection", t.connName,
+		"tool", t.toolName,
+		"target_host", host,
+		"method", t.method,
+		"path", path,
+		"credential_id", t.connID,
+		"credential_name", t.connName,
+		"credential_scheme", authScheme(t.auth),
+		"permission_decision", t.trace.decision,
+		"http_status", status,
+		"ok", ok,
+		"duration_ms", dur.Milliseconds(),
+		"agent_id", t.trace.agentID,
+		"agent_name", t.trace.agentName,
+		"task_id", t.trace.taskID,
+		"issue_id", t.trace.issueID,
+		"surface", t.trace.surface,
+	}
+	switch {
+	case callErr != nil:
+		t.logger.Warn("api connection gateway call failed (FIR-2243 B2)", append(attrs, "error", callErr.Error())...)
+	case !ok:
+		t.logger.Warn("api connection gateway call non-2xx (FIR-2243 B2)", attrs...)
+	default:
+		t.logger.Info("api connection gateway call (FIR-2243 B2)", attrs...)
+	}
+}
+
+// authScheme names which credential scheme(s) the connection's auth_config carries,
+// for the gateway-trace line. It NEVER returns a secret value — only the scheme
+// label(s): "bearer", "api_key", "cf_access", joined with "+" when several are set,
+// or "none" when the connection is unauthenticated.
+func authScheme(auth connections.AuthConfig) string {
+	var schemes []string
+	if auth.BearerToken != "" {
+		schemes = append(schemes, "bearer")
+	}
+	if auth.APIKey != "" {
+		schemes = append(schemes, "api_key")
+	}
+	if auth.CFAccessID != "" || auth.CFAccessSecret != "" {
+		schemes = append(schemes, "cf_access")
+	}
+	if len(schemes) == 0 {
+		return "none"
+	}
+	return strings.Join(schemes, "+")
 }
 
 // fillPathParams substitutes every `{param}` in path from args; a missing or
@@ -474,6 +599,7 @@ func buildQueryValues(args map[string]any) url.Values {
 // bearer token, a custom API-key header (default X-API-Key), and a Cloudflare
 // Access service-token pair. All are optional.
 func applyConnectionAuth(req *http.Request, auth connections.AuthConfig) {
+	auth = connections.TrimCredentials(auth)
 	if auth.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+auth.BearerToken)
 	}

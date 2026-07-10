@@ -7,7 +7,7 @@ export { ChannelTypingIndicator } from "./channel-typing-indicator";
 export type { ChannelTypingIndicatorProps } from "./channel-typing-indicator";
 export { useChannelFavoritesStore, actorKey, channelKey } from "./favorites-store";
 export type { ActorKey, ChannelKey, FavoriteKey } from "./favorites-store";
-export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
+export { useArchiveChannel, useUnarchiveChannel, archivedChannelsOptions } from "./archive-mutations";
 // TECH-3758 — leave a channel (remove own subscription) / delete it for all.
 export { useLeaveChannel, useDeleteChannel } from "./leave-delete-mutations";
 // TECH-3352 — open-time auto-mark-read for channels/DMs (replaces the inline
@@ -38,3 +38,8 @@ export type {
   ChannelMessageSearchButtonProps,
   ChannelMessageSearchBarProps,
 } from "./channel-message-search";
+// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate a channel send
+// with an "add them to this channel?" prompt when a non-participant is
+// @mentioned, mirroring the notes give-access prompt.
+export { useChannelMentionGate } from "./channel-mention-gate";
+export type { ChannelMentionGate } from "./channel-mention-gate";

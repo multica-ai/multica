@@ -191,9 +191,11 @@ type ActionConfigSendReminder struct {
 // of skill versioning is intentionally absent — workflows always run the
 // latest version of the skill bundled on the agent.
 type ActionConfigRunSkill struct {
-	SkillName  string         `json:"skill_name"`
-	AgentID    string         `json:"agent_id"`
-	SkillInput map[string]any `json:"skill_input,omitempty"`
+	SkillName     string         `json:"skill_name"`
+	AgentID       string         `json:"agent_id"`
+	Model         string         `json:"model,omitempty"`
+	ThinkingLevel string         `json:"thinking_level,omitempty"`
+	SkillInput    map[string]any `json:"skill_input,omitempty"`
 	// LoopPlanning signals that this run_skill action is the build step of a
 	// loop that requires an explicit planning phase. When true, the loop engine
 	// (FIR-2283) prepends a planning-dispatch rule so the agent must produce a
@@ -201,6 +203,23 @@ type ActionConfigRunSkill struct {
 	// opaque action_config JSON and has no effect on the base run_skill action
 	// runner — it is consumed only by the loop compiler.
 	LoopPlanning bool `json:"loop_planning,omitempty"`
+	// PlanMode marks THIS run_skill dispatch as the planning phase itself
+	// (FIR-2283 followup point 3). Unlike LoopPlanning (a compiler-only hint on
+	// the build step), PlanMode IS consumed by the action runner: it makes the
+	// dispatched run carry an explicit plan-mode instruction — "only produce a
+	// plan in Multica, do not write code" — and stamps loop_phase=plan on the
+	// task so the run genuinely knows it is planning, instead of being expected
+	// to infer it from the issue status. Set by the loop compiler on the
+	// planning-dispatch rule.
+	PlanMode bool `json:"plan_mode,omitempty"`
+	// LoopPhase names the Issue-workflow phase this run_skill dispatch belongs
+	// to ("plan" / "build"). Set by the loop compiler on the phase dispatch
+	// rules. When set AND the trigger has an issue, the action runner starts
+	// the run ON that issue — a visible kickoff comment opens a session thread
+	// (badged with the phase) and the agent task is issue-bound — instead of a
+	// detached quick_create task nobody can see on the issue (Tine's live-test
+	// finding: 0 comments / 0 sessions on the workflow's target issue).
+	LoopPhase string `json:"loop_phase,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

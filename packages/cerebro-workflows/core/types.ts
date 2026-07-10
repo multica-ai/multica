@@ -142,6 +142,8 @@ export interface LoopVerification {
   // both agents and people in one list.
   assignee_type?: LoopAssigneeType;
   assignee_id?: string;
+  model?: string;
+  thinking_level?: string;
 }
 
 export interface LoopCaps {
@@ -150,21 +152,56 @@ export interface LoopCaps {
   no_progress_stalls: number;
 }
 
+// One ordered build phase in a multi-phase loop (FIR-2283 followup point 6).
+// Each phase runs its own build skill and is gated by its own delivery review
+// (verification) that must pass before the next phase's build starts.
+export interface LoopBuildPhase {
+  /** Display name, e.g. "Backend". Names the phase's build/review sessions. */
+  name?: string;
+  build_skill: string;
+  build_agent_id?: string;
+  model?: string;
+  thinking_level?: string;
+  goal?: string;
+  verification: LoopVerification[];
+}
+
 export interface LoopSpec {
   version: 1;
-  goal: string;
-  definition_of_done: string;
+  // FIR-2283 v2 point 4 — one free-text prompt (skill-taggable) replaces the
+  // old fixed Goal / Definition-of-done pair. Both stay optional on the wire
+  // (the backend spec already treats them as human-notes, not required); the
+  // editor now writes only `goal` and leaves `definition_of_done` unset.
+  goal?: string;
+  definition_of_done?: string;
   verification: LoopVerification[];
   caps: LoopCaps;
   planning?: boolean;
+  // Gates on the Plan step (FIR-2283 v2 point 6) — only meaningful when
+  // planning is true. Unlike verification, a plan gate does NOT require a
+  // programmatic entry: there is no code yet to run a command against
+  // during planning, so a judge-only criterion (e.g. an adversarial AI
+  // review of the plan) is valid on its own.
+  plan_gate?: LoopVerification[];
 
-  // Build bindings.
+  // Build bindings. Used for a single-phase loop. When `phases` is set (a
+  // multi-phase loop), these are ignored — each phase carries its own build
+  // skill/agent and its own delivery gate.
   build_agent_id: string;
   build_skill: string;
+  build_model?: string;
+  build_thinking?: string;
+
+  // Multi-phase build chain (FIR-2283 followup point 6). When non-empty, the
+  // build is split into ordered phases, each gated by its own review that must
+  // pass before the next phase's build begins. Empty/omitted = single-phase.
+  phases?: LoopBuildPhase[];
 
   // Planning bindings — only meaningful when planning is true.
   plan_agent_id?: string;
   plan_skill?: string;
+  plan_model?: string;
+  plan_thinking?: string;
 
   // Status names — optional, server defaults apply (todo / in_progress /
   // in_review / done) when omitted.
@@ -177,6 +214,8 @@ export interface LoopSpec {
   // assignee_id.
   judge_agent_id?: string;
   judge_skill?: string;
+  judge_model?: string;
+  judge_thinking?: string;
 }
 
 export const DEFAULT_LOOP_CAPS: LoopCaps = {
@@ -199,6 +238,21 @@ export interface PendingHumanCheck {
   prompt: string;
   assignee_type: LoopAssigneeType;
   assignee_id: string;
+}
+
+// FIR-2283 v2 point 8 — "per-issue workflow activation".
+// POST /{id}/activate response.
+export interface ActivateWorkflowResponse {
+  activated: boolean;
+  workflow_id: string;
+  issue_id: string;
+}
+
+// GET /for-issue/{issueId} response — which recipe (if any) an issue is
+// currently running. workflow_id is only present when active is true.
+export interface ActiveWorkflowForIssueResponse {
+  active: boolean;
+  workflow_id?: string;
 }
 
 export interface CerebroWorkflowRun {
@@ -224,6 +278,22 @@ export interface WorkflowRunsListResponse {
   runs: CerebroWorkflowRun[];
   limit: number;
   offset: number;
+}
+
+// FIR-2283 v2 point 7 — one issue that has run through a recipe's loop, for
+// the run-history page's issue log. Derived server-side from the generated
+// child rows; no separate run table.
+export interface IssueLoopRun {
+  issue_id: string;
+  issue_number: number;
+  issue_title: string;
+  issue_status: string;
+  first_activated_at: string;
+  last_activated_at: string;
+}
+
+export interface IssueLoopRunsResponse {
+  issue_runs: IssueLoopRun[];
 }
 
 // Phase-3 regenerate-endpoint responses (JEH-1108). The plaintext secret /

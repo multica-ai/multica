@@ -32,7 +32,11 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+// CEREBRO-PATCH(create-issue-image-tray): FIR-2714 — description swaps ContentEditor
+// for EditorImageTray so dropped/pasted/attached images collect in the numbered tray
+// at the top (flag-gated inside EditorImageTray; identical to ContentEditor when off).
+import { type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(create-issue-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
 import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
@@ -57,6 +61,10 @@ import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
 import { useAssignIssueToSprint } from "@multica/cerebro-sprints/core";
 // CEREBRO-PATCH(create-issue-sprint-field-import): TECH-3684 sprint selector in the create modal.
 import { SprintSelectField } from "@multica/cerebro-sprints/views";
+// CEREBRO-PATCH(create-issue-workflow-field-import): FIR-2283 v2 point 8 — Issue workflow selector in the create modal.
+import { WorkflowSelectField } from "@multica/cerebro-workflows/views";
+// CEREBRO-PATCH(create-issue-workflow-activate-import): FIR-2283 v2 point 8 — activate the picked recipe on the new issue.
+import { useActivateWorkflowForCreate } from "@multica/cerebro-workflows/core";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -130,6 +138,8 @@ export function ManualCreatePanel({
   const [sprintId, setSprintId] = useState<string>(
     typeof data?.sprint_id === "string" ? data.sprint_id : "",
   );
+  // CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — Issue workflow to activate on the new task.
+  const [workflowId, setWorkflowId] = useState<string>("");
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -194,6 +204,8 @@ export function ManualCreatePanel({
   const updateIssueMutation = useUpdateIssue();
   // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620 link the new issue to data.sprint_id (set by the sprint board).
   const assignIssueToSprintMutation = useAssignIssueToSprint(wsId);
+  // CEREBRO-PATCH(create-issue-workflow-activate): FIR-2283 v2 point 8 — activate the picked recipe on the new issue.
+  const activateWorkflowMutation = useActivateWorkflowForCreate(wsId);
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -242,6 +254,15 @@ export function ManualCreatePanel({
           await assignIssueToSprintMutation.mutateAsync({ issueId: issue.id, sprintId });
         } catch {
           toast.error("Issue created, but sprint assignment failed");
+        }
+      }
+
+      // CEREBRO-PATCH(create-issue-workflow-activate): FIR-2283 v2 point 8 — turn on the picked Issue workflow.
+      if (workflowId) {
+        try {
+          await activateWorkflowMutation.mutateAsync({ issueId: issue.id, workflowId });
+        } catch {
+          toast.error("Issue created, but workflow activation failed");
         }
       }
 
@@ -451,7 +472,8 @@ export function ManualCreatePanel({
 
             {/* Description — takes remaining space */}
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
-              <ContentEditor
+              {/* CEREBRO-PATCH(create-issue-image-tray): FIR-2714 — EditorImageTray in place of ContentEditor for the numbered image tray. */}
+              <EditorImageTray
                 ref={descEditorRef}
                 defaultValue={draft.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
@@ -523,6 +545,9 @@ export function ManualCreatePanel({
 
               {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint; PillButton trigger matches the sibling chips. */}
               <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" triggerRender={<PillButton />} />
+
+              {/* CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — pick an Issue workflow at creation; renders nothing when none exist or the flag is off. */}
+              <WorkflowSelectField workspaceId={wsId} value={workflowId} onChange={setWorkflowId} className="max-w-48" triggerRender={<PillButton />} />
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field

@@ -31,6 +31,7 @@ import {
   agentContextChangeRequestsOptions,
   agentContextVersionsOptions,
 } from "../../core/queries";
+import { snapshotFieldsChanged } from "../../core/snapshot-fields";
 import { useReviewAgentContextChangeRequest } from "../../core/mutations";
 import { AgentContextFieldDiff } from "./agent-context-field-diff";
 
@@ -39,6 +40,14 @@ interface Props {
   wsId: string;
   members: MemberWithUser[];
   canReview: boolean;
+  /**
+   * When set, only change requests that actually touch one of these snapshot
+   * keys are listed, and each diff is scoped to them. Used by the Skills / MCP
+   * tabs so they show only the proposals relevant to that field.
+   */
+  onlyKeys?: string[];
+  /** Header label; defaults to "Change requests". */
+  title?: string;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -70,6 +79,8 @@ export function AgentContextChangeRequestQueue({
   wsId,
   members,
   canReview,
+  onlyKeys,
+  title = "Change requests",
 }: Props) {
   const [open, setOpen] = useState(true);
   const [reviewTarget, setReviewTarget] =
@@ -79,7 +90,7 @@ export function AgentContextChangeRequestQueue({
     null,
   );
 
-  const { data: requests = [], isLoading } = useQuery(
+  const { data: allRequests = [], isLoading } = useQuery(
     agentContextChangeRequestsOptions(agent.id),
   );
   const { data: versions = [] } = useQuery(
@@ -91,6 +102,17 @@ export function AgentContextChangeRequestQueue({
   const baseSnapshotFor = (req: AgentContextChangeRequest) =>
     versions.find((v) => v.version === req.base_version)?.snapshot ??
     versions[0]?.snapshot;
+
+  // When scoped (Skills / MCP tab), hide proposals that don't touch the field
+  // so each tab only surfaces its own pending work.
+  const requests = onlyKeys
+    ? allRequests.filter((req) => {
+        const base = baseSnapshotFor(req);
+        return base
+          ? snapshotFieldsChanged(base, req.proposed_snapshot, onlyKeys)
+          : true;
+      })
+    : allRequests;
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const mutation = useReviewAgentContextChangeRequest(agent.id, wsId);
@@ -134,7 +156,7 @@ export function AgentContextChangeRequestQueue({
       >
         <span className="flex items-center gap-1.5">
           <GitPullRequest className="h-3 w-3" />
-          Change requests
+          {title}
           {pendingCount > 0 && (
             <Badge
               variant="secondary"
@@ -199,6 +221,7 @@ export function AgentContextChangeRequestQueue({
                     proposed={req.proposed_snapshot}
                     baseLabel={`base (${req.base_version})`}
                     proposedLabel={req.proposed_version}
+                    onlyKeys={onlyKeys}
                   />
                 ) : (
                   <div className="rounded-md border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">

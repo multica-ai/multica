@@ -182,6 +182,19 @@ const ROW_GROUPS: RowGroup[] = [
     ],
   },
   {
+    // FIR-1775: agent-context (Instructions) change requests. The owner and
+    // named approvers are notified when someone proposes a versioned edit to
+    // an agent's instructions — inbox by default, phone/browser push opt-in.
+    title: "Agents you own",
+    rows: [
+      {
+        routingKey: "agent_context_change_request",
+        label: "Change request",
+        hint: "Someone proposed a change to the instructions of an agent you own or approve for.",
+      },
+    ],
+  },
+  {
     title: "System",
     rows: [
       {
@@ -502,6 +515,14 @@ export function NotificationsTab() {
         </div>
       </section>
 
+      <CommentsSection
+        user={user}
+        saving={savingChannelKey === "inbox:new_comment"}
+        onChange={(next) =>
+          handleChannelToggle("inbox", "new_comment", next ? "on" : "off")
+        }
+      />
+
       <AutoSubscribeSection
         rows={autoSubscribeRows}
         user={user}
@@ -562,6 +583,56 @@ interface DirectMessageSectionProps {
   user: ReturnType<typeof useAuthStore.getState>["user"];
   saving: boolean;
   onChange: (next: boolean) => void | Promise<void>;
+}
+
+interface CommentsSectionProps {
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  saving: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}
+
+function CommentsSection({
+  user,
+  saving,
+  onChange,
+}: CommentsSectionProps) {
+  const checked =
+    getChannelChoice(
+      user?.preferences as Record<string, unknown> | undefined,
+      "inbox",
+      "new_comment",
+    ) === "on";
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">Comments</h3>
+        <span className="text-xs text-muted-foreground">
+          — New comments on issues you follow
+        </span>
+      </div>
+      <Card>
+        <CardContent className="px-4 py-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <Label className="text-sm font-medium">
+                Send comments to Inbox
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                New comments on issues you follow.
+              </p>
+            </div>
+            <Switch
+              aria-label="Send comments to Inbox"
+              checked={checked}
+              disabled={saving || !user}
+              onCheckedChange={(next) => void onChange(next)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
 }
 
 // FIR-308: Direct-message notification preferences. The on/off-per-channel for

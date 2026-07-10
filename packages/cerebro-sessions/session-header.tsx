@@ -7,6 +7,21 @@ import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
 import { useUpdateSession } from "./use-sessions";
 
+// FIR-2283 followup: workflow phase badge shown next to Open/Resolved.
+const PHASE_LABELS: Record<string, string> = {
+  plan: "Plan",
+  build: "Build",
+  review: "Review",
+};
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase] ?? phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+const PHASE_CLASSES: Record<string, string> = {
+  plan: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  build: "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  review: "border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400",
+};
+
 // FIR-1787 (review of FIR-1769) — the session headline is the top of the thread
 // box, not a separate floating card: a slim header row that sits at the top of
 // the session's box with a divider underneath, so a session reads exactly like
@@ -132,6 +147,17 @@ export function SessionHeader({
               <ScrollText className="h-3.5 w-3.5" />
               Handoff
             </button>
+          ) : null}
+          {session.phase ? (
+            <span
+              data-testid="session-phase-badge"
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-xs font-medium",
+                PHASE_CLASSES[session.phase] ?? "border-muted-foreground/30 text-muted-foreground",
+              )}
+            >
+              {phaseLabel(session.phase)}
+            </span>
           ) : null}
           <span
             className={cn(

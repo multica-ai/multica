@@ -106,6 +106,8 @@ vi.mock("sonner", () => ({
 }));
 
 import { useIssueTimeline } from "./use-issue-timeline";
+import { ApiError } from "@multica/core/api";
+import { toast } from "sonner";
 
 describe("useIssueTimeline", () => {
   beforeEach(() => {
@@ -113,6 +115,16 @@ describe("useIssueTimeline", () => {
     queryState.data = [];
     queryState.isLoading = false;
     cacheUpdates.last = null;
+    stableHandles.createMutateAsync.mockReset();
+    stableHandles.createMutateAsync.mockResolvedValue({});
+    stableHandles.updateMutateAsync.mockReset();
+    stableHandles.updateMutateAsync.mockResolvedValue({});
+    stableHandles.deleteMutateAsync.mockReset();
+    stableHandles.deleteMutateAsync.mockResolvedValue({});
+    stableHandles.resolveMutateAsync.mockReset();
+    stableHandles.resolveMutateAsync.mockResolvedValue({});
+    stableHandles.toggleMutate.mockReset();
+    vi.mocked(toast.error).mockClear();
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
@@ -150,6 +162,28 @@ describe("useIssueTimeline", () => {
     ];
     const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
     expect(result.current.timeline.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("keeps submitComment rejected when sending fails so the composer keeps the draft", async () => {
+    stableHandles.createMutateAsync.mockRejectedValueOnce(new Error("network down"));
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await expect(result.current.submitComment("half-written")).rejects.toThrow("network down");
+
+    expect(toast.error).toHaveBeenCalledWith("network down");
+  });
+
+  it("shows a clear session-expired message and keeps submitReply rejected", async () => {
+    stableHandles.createMutateAsync.mockRejectedValueOnce(
+      new ApiError("not authenticated", 401, "Unauthorized"),
+    );
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await expect(result.current.submitReply("parent-1", "half-written")).rejects.toThrow("not authenticated");
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Your session expired. Your draft is still saved locally. Sign in again, then press Submit.",
+    );
   });
 
   it("comment:created appends the new entry to the cache", () => {

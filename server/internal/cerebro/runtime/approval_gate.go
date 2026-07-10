@@ -203,10 +203,18 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	args map[string]any,
 	reg *Registry,
 	meta GatewayRequestMeta,
-) (bool, string) {
+) (allowed bool, reason string) {
 	if e == nil {
 		return true, ""
 	}
+	// FIR-2243 B1: emit one structured runtime decision line per tool call, tying
+	// the tool to the permission verdict it ran under — for EVERY call, including
+	// the default-off common path that previously logged nothing. decision is set
+	// at each return below; the defer reads the final named (allowed, reason).
+	var decision, connNameLog string
+	defer func() {
+		e.logToolDecision(meta, toolName, connNameLog, decision, allowed, reason)
+	}()
 	// Workspace-connection per-tool policy (TECH-3174 Deny, TECH-3498 Ask). Resolve
 	// the verdict once. Deny is always-on — it runs even when the approval gate is
 	// off (e.gate == nil), because connection tools (e.g. the customer-service MCP
@@ -231,9 +239,11 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		}
 		connSetting = toolpolicy.MoreRestrictive(connSetting, epSetting)
 	}
+	connNameLog = connName
 	if connSetting == toolpolicy.SettingDeny {
 		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
+		decision = "deny_connection"
 		return false, fmt.Sprintf("tool %q is denied for this agent by a connection permission", toolName)
 	}
 	// FIR-2388: an API-connection ENDPOINT set to Ask fronts the secrets box and is
@@ -249,13 +259,16 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	if epSetting == toolpolicy.SettingAsk && !e.approvalInboxActive(ctx, agentID, workspaceID) {
 		e.logger.Info("api endpoint Ask blocked — approval inbox inactive (FIR-2388)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName, "connection", connName)
+		decision = "deny_ask_inbox_inactive"
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
 	}
 	if e.gate == nil {
+		decision = "allow_gate_off"
 		return true, ""
 	}
 	if len(e.gateAgents) > 0 {
 		if _, ok := e.gateAgents[agentID.Bytes]; !ok || !agentID.Valid {
+			decision = "allow_out_of_scope"
 			return true, ""
 		}
 	}
@@ -263,6 +276,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// A workspace admin can turn it off from Settings → Features without a
 	// server restart. Any DB error → fail-open (keep gate on, don't block work).
 	if !e.workspaceApprovalGateEnabled(ctx, workspaceID) {
+		decision = "allow_flag_off"
 		return true, ""
 	}
 
@@ -272,6 +286,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// (the generic resolver below keys on the bare tool name and never sees the
 	// connection:<name> rows, so it would resolve such a tool to Allow).
 	if connSetting == toolpolicy.SettingAsk {
+		decision = "ask_connection"
 		return e.guardConnectionAsk(ctx, agentID, workspaceID, toolName, connName, args, meta)
 	}
 
@@ -279,6 +294,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// call before the legacy capability resolver. That lets explicit per-tool
 	// rows gate every platform tool, including older tools with no capability key.
 	if e.toolPolicy != nil {
+		decision = "tool_policy"
 		return e.guardToolCallViaPolicy(ctx, agentID, workspaceID, toolName, args, meta)
 	}
 
@@ -286,6 +302,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// flag so the zero-value test executor can still exercise the old resolver.
 	capKey := toolCapabilityKey(toolName)
 	if capKey == "" {
+		decision = "allow_ungated"
 		return true, ""
 	}
 
@@ -316,6 +333,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			"capability", capKey,
 			"error", err,
 		)
+		decision = "capability_error"
 		return false, fmt.Sprintf("permission gate error: %v", err)
 	}
 	e.logger.Info("approval gate decision",
@@ -326,14 +344,46 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		"outcome", string(res.Outcome),
 		"reason", res.Reason,
 	)
+	decision = "capability_" + string(res.Outcome)
 	if res.Outcome.Stops() {
-		reason := res.Reason
-		if reason == "" {
-			reason = string(res.Outcome)
+		r := res.Reason
+		if r == "" {
+			r = string(res.Outcome)
 		}
-		return false, reason
+		return false, r
 	}
 	return true, ""
+}
+
+// logToolDecision emits the FIR-2243 B1 runtime audit line: one structured record
+// per tool call tying the tool to the permission decision it ran under and the run
+// that made it (agent/task/issue/surface), plus the deciding connection when the
+// verdict came from a connection rule. It fires for EVERY call — including the
+// default-off allow path that previously logged nothing — so the audit trail can
+// answer "which agent ran which tool, on which issue, and was it allowed". A
+// blocked call logs at Warn, an allowed call at Info. Field names match the B2
+// gateway-trace line so the registry can consume both consistently.
+func (e *FirtalGatewayExecutor) logToolDecision(meta GatewayRequestMeta, toolName, connName, decision string, allowed bool, reason string) {
+	if e == nil || e.logger == nil {
+		return
+	}
+	attrs := []any{
+		"event", "tool_call_decision",
+		"tool", toolName,
+		"connection", connName,
+		"decision", decision,
+		"allowed", allowed,
+		"agent_id", meta.AgentID,
+		"agent_name", meta.AgentName,
+		"task_id", meta.TaskID,
+		"issue_id", meta.IssueID,
+		"surface", meta.Surface,
+	}
+	if allowed {
+		e.logger.Info("runtime tool decision (FIR-2243 B1)", attrs...)
+		return
+	}
+	e.logger.Warn("runtime tool decision (FIR-2243 B1)", append(attrs, "reason", reason)...)
 }
 
 // guardToolCallViaPolicy enforces the FIR-2230 per-tool permission chain for one

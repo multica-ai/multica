@@ -1,6 +1,26 @@
 import type { Attachment } from "@multica/core/types";
 
 /**
+ * Every attachment belonging to an issue — the issue body's own uploads plus
+ * every comment's — deduped by id.
+ *
+ * Used by the FIR-2034 Attachments tab (FIR-2710 point 3). Unlike
+ * {@link standaloneAttachments} this deliberately does NOT drop attachments
+ * referenced inline in the description/comment markdown: the tab is the issue's
+ * complete file index, so an image pasted straight into the description or a
+ * comment (an "inline tray" image) still shows up here instead of being hidden.
+ */
+export function allIssueAttachments(
+  issueAttachments: Attachment[] | undefined,
+  commentAttachments: Attachment[] | undefined,
+): Attachment[] {
+  const byId = new Map<string, Attachment>();
+  for (const a of issueAttachments ?? []) byId.set(a.id, a);
+  for (const a of commentAttachments ?? []) byId.set(a.id, a);
+  return [...byId.values()];
+}
+
+/**
  * The attachments that should render as standalone cards/rows — i.e. those
  * NOT already referenced inline in the given markdown `content`.
  *

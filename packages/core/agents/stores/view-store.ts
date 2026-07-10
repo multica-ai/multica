@@ -62,6 +62,8 @@ export const EMPTY_AGENT_FILTERS: AgentListFilters = {
 
 // User-hideable columns. Name and the structural columns (checkbox, kebab)
 // are always visible.
+// CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account (the
+// runtime's cerebro_account) and Thinking level (agent.thinking_level).
 export type AgentColumnKey =
   | "status"
   | "owner"
@@ -69,12 +71,18 @@ export type AgentColumnKey =
   | "lastActive"
   | "runs"
   | "model"
+  | "account"
+  | "thinking"
   | "created";
 
-/** Model and created are opt-in: hidden until the user enables them. Owner
- *  is shown by default (the user wants to see who owns each agent). */
+/** Model, account, thinking and created are opt-in: hidden until the user
+ *  enables them. Owner is shown by default (the user wants to see who owns
+ *  each agent). */
+// CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — new opt-in columns.
 export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
   "model",
+  "account",
+  "thinking",
   "created",
 ];
 

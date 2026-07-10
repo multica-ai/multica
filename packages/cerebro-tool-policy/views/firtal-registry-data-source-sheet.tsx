@@ -34,7 +34,11 @@ import {
   type ToolPolicyRow,
   type ToolSetting,
 } from "../core/tool-policy";
-import { DecisionControl, ConditionControl } from "./tool-policy-table";
+import {
+  CatalogDecisionControl,
+  ConditionControl,
+  DecisionControl,
+} from "./tool-policy-table";
 
 export interface FirtalRegistryDataSourceSheetProps {
   open: boolean;
@@ -128,7 +132,11 @@ export function FirtalRegistryDataSourceSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full max-w-xl flex-col gap-0 p-0 sm:max-w-xl"
+        // Width classes carry the data-[side=right] prefix so they beat the base
+        // SheetContent's data-[side=right]:w-3/4 / sm:max-w-sm on specificity —
+        // a plain w-full loses and the sheet stays at 75% on mobile (FIR-2640
+        // review). Full width on mobile, xl (36rem) on desktop.
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:max-w-full data-[side=right]:sm:w-[36rem] data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="border-b">
           <SheetTitle>{toolLabel} — data sources</SheetTitle>
@@ -162,7 +170,11 @@ export function FirtalRegistryDataSourceSheet({
           </Button>
         </div>
 
-        <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+        {/* overflow-auto + inner min-w-max column: long data-source names/ids
+            scroll horizontally on a narrow (mobile) sheet instead of truncating
+            (FIR-2640 review). */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="flex min-w-max flex-col gap-1">
           {sourceRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No data sources configured for this workspace yet.
@@ -176,17 +188,17 @@ export function FirtalRegistryDataSourceSheet({
               <div
                 key={r.resource_pattern}
                 data-testid={`registry-data-source-${r.resource_pattern}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+                className="flex w-full items-center justify-between gap-4 rounded-md border px-3 py-2"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
+                <div className="min-w-0">
+                  <div className="whitespace-nowrap text-sm font-medium">
                     {r.title || r.resource_pattern}
                   </div>
-                  <div className="truncate font-mono text-xs text-muted-foreground">
+                  <div className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                     {r.resource_pattern}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <DecisionControl
                     row={r}
                     editLayer={editLayer}
@@ -203,6 +215,7 @@ export function FirtalRegistryDataSourceSheet({
               </div>
             ))
           )}
+          </div>
         </div>
 
         <SheetFooter className="border-t">
@@ -270,5 +283,101 @@ export function FirtalRegistryDataSourceConfigure({
         subjectId={subjectId}
       />
     </>
+  );
+}
+
+// DataSourceList (FIR-2706) renders the firtal_registry data sources as an inline
+// list — the SAME per-source rows the sheet shows, mounted directly under an
+// expanded row in the capability catalog as a "Data sources" sub-group, instead
+// of behind the "Data sources (N)" button. Renders CatalogDecisionControl (the
+// catalog's single decision-with-When pill, same as repo and credential
+// sub-rows) with the identical write semantics so inline and sheet editing can
+// never drift.
+export function DataSourceList({
+  toolKey,
+  sourceRows,
+  editLayer,
+  subjectId,
+}: {
+  toolKey: string;
+  sourceRows: ToolPolicyRow[];
+  editLayer: ToolLayer;
+  subjectId: string;
+}) {
+  const setPolicy = useSetToolPolicy();
+  const clearPolicy = useClearToolPolicy();
+  const busy = setPolicy.isPending || clearPolicy.isPending;
+
+  const sorted = useMemo(
+    () =>
+      [...sourceRows].sort((a, b) =>
+        (a.title || a.resource_pattern).localeCompare(
+          b.title || b.resource_pattern,
+        ),
+      ),
+    [sourceRows],
+  );
+
+  function applySetting(resourcePattern: string, setting: ToolSetting) {
+    const scope = { resource_pattern: resourcePattern };
+    if (setting === "inherit") {
+      clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
+      return;
+    }
+    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+  }
+
+  function applyCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    const setting = editLayer === "group" ? null : row.layers[editLayer];
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    setPolicy.mutate({
+      tool_key: toolKey,
+      layer: editLayer,
+      subject_id: subjectId,
+      setting,
+      condition,
+      resource_pattern: row.resource_pattern,
+    });
+  }
+
+  if (sorted.length === 0) return null;
+
+  return (
+    // FIR-2706 — full-width divided list flush to the panel (see ConnectionToolList):
+    // width goes to the source name, not padding + a per-card margin, and controls
+    // wrap under the name on a narrow row instead of crushing it on mobile.
+    <div
+      className="flex flex-col divide-y overflow-hidden rounded-md border bg-background"
+      data-testid={`data-source-list-${toolKey}`}
+    >
+      {sorted.map((r) => (
+        <div
+          key={r.resource_pattern}
+          data-testid={`registry-data-source-${r.resource_pattern}`}
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-2.5 py-2"
+        >
+          <div className="min-w-0 flex-1 basis-40">
+            <div className="truncate text-sm font-medium">
+              {r.title || r.resource_pattern}
+            </div>
+            <div className="truncate font-mono text-xs text-muted-foreground">
+              {r.resource_pattern}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* The SAME single pill as every other catalog sub-row (repos,
+                credential groups, connection tools): decision + When inside
+                one control (FIR-2706 follow-up — "100% identical everywhere"). */}
+            <CatalogDecisionControl
+              row={r}
+              editLayer={editLayer}
+              disabled={busy}
+              onDecision={(s) => applySetting(r.resource_pattern, s)}
+              onCondition={(c) => applyCondition(r, c)}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

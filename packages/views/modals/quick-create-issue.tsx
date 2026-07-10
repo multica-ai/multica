@@ -30,6 +30,8 @@ import type { Agent, Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+// CEREBRO-PATCH(quick-create-workflow-field-import): FIR-2283 followup — the same Issue workflow picker the manual create modal uses, so agents can start a workflow from Create-with-agent too.
+import { WorkflowSelectField } from "@multica/cerebro-workflows/views";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -40,11 +42,14 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
-  ContentEditor,
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
 } from "../editor";
+// CEREBRO-PATCH(quick-create-image-tray): FIR-2714 — prompt uses EditorImageTray so
+// dropped/pasted/attached images collect in the numbered tray at the top (flag-gated
+// inside EditorImageTray; identical to ContentEditor when off).
+import { EditorImageTray } from "@multica/cerebro-composer";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 // CEREBRO-PATCH(quick-create-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
 import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
@@ -225,6 +230,12 @@ export function AgentCreatePanel({
   const parentIssueIdentifier =
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
+  // CEREBRO-PATCH(quick-create-workflow-state): FIR-2283 followup — optional
+  // Issue workflow to start the new issue on. "" = no workflow. The picker
+  // renders nothing when no Issue workflows exist or the flag is off, so this
+  // stays inert for workspaces that don't use them.
+  const [workflowId, setWorkflowId] = useState<string>("");
+
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
@@ -359,6 +370,8 @@ export function AgentCreatePanel({
         prompt: md,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
+        // CEREBRO-PATCH(quick-create-workflow-submit): FIR-2283 followup.
+        workflow_id: workflowId || undefined,
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
@@ -536,7 +549,8 @@ export function AgentCreatePanel({
           {...dropZoneProps}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
-          <ContentEditor
+          {/* CEREBRO-PATCH(quick-create-image-tray): FIR-2714 — EditorImageTray in place of ContentEditor for the numbered image tray. */}
+          <EditorImageTray
             ref={editorRef}
             defaultValue={initialPrompt}
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
@@ -578,6 +592,14 @@ export function AgentCreatePanel({
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
             triggerRender={<PillButton />}
             align="start"
+          />
+          {/* CEREBRO-PATCH(quick-create-workflow-field): FIR-2283 followup — pick an Issue workflow to start the new issue on; renders nothing when none exist or the flag is off. */}
+          <WorkflowSelectField
+            workspaceId={wsId}
+            value={workflowId}
+            onChange={setWorkflowId}
+            className="max-w-48"
+            triggerRender={<PillButton />}
           />
           {parentIssueId && (
             <span

@@ -174,7 +174,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: base})
+			row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: base})
 			out = append(out, row)
 		}
 	}
@@ -265,7 +265,7 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 		if len(a.groups) > 0 {
 			a.layers[LayerGroup] = CombineGroups(a.groups...)
 		}
-		out[key] = Resolve(Input{Settings: a.layers, Base: in.Base}).Setting
+		out[key] = ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: a.layers, Base: in.Base}).Setting
 	}
 	return out, nil
 }
@@ -464,6 +464,8 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // ever tightens below its Base and refuses to loosen, so a Deny base could never
 // be lifted by an Allow grant. The rule, over all of the above rows/layers:
 //
+//   - an explicit workspace Disable wins immediately (FIR-2351 follow-up,
+//     2026-07-06) — a hard, unopenable floor, unlike an ordinary workspace Deny;
 //   - an explicit Deny at any layer wins (revokes) — fail-safe;
 //   - else an explicit Allow at any layer grants the call;
 //   - else an explicit Ask at any layer gates the call (human approval);
@@ -498,7 +500,17 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	wantKey := connectionToolKeyPrefix + connName
 	wantPattern := method + " " + path
+	// Workspace-Deny-as-default (FIR-2351, product decision 2026-07-06): with the
+	// workspace member-override flag on, an explicit WORKSPACE-layer setting on a
+	// connection is a workspace-authored DEFAULT, not an instant global verdict —
+	// so "deny this connection for the workspace" can still be opened for one
+	// specific agent/member/group by an explicit Allow at those layers, exactly
+	// like the connection's own default_access=deny. Who may author those rows is
+	// the write path's job. With the flag off, behavior is unchanged: an explicit
+	// Deny at ANY layer (workspace included) wins immediately.
+	openableWS := s.MemberOverrideEnabled(ctx, workspaceID)
 	var hasAllow, hasAsk bool
+	var wsWide, wsEndpoint Setting
 	for _, r := range rows {
 		if r.ToolKey != wantKey {
 			continue
@@ -523,11 +535,32 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// opening the secrets box to whoever drives the agent, while still letting a
 		// member-level Deny hold across every agent that member delegates work to.
 		for layer, set := range r.Layers {
+			if layer == LayerWorkspace && set == SettingDisable {
+				// FIR-2351 follow-up (product decision 2026-07-06): a workspace row
+				// explicitly Disabled is a hard, unopenable floor for this connection —
+				// unlike an ordinary workspace Deny (which openableWS defers below so a
+				// per-actor Allow can open it), nothing overrides Disable. Return
+				// immediately regardless of any per-actor Allow already collected from
+				// an earlier row in this loop, and regardless of openableWS/flag state,
+				// so Disable works the same whether or not cerebro_member_override is on.
+				return SettingDeny, connName, nil
+			}
 			if layer == LayerOnBehalfOf {
 				// Deny-only: honour a revoke, ignore any Allow/Ask so the initiator can
 				// never grant or gate a call the owner's own layers did not.
 				if set == SettingDeny {
 					return SettingDeny, connName, nil
+				}
+				continue
+			}
+			if openableWS && layer == LayerWorkspace {
+				// Collect the workspace-authored default instead of treating it as a
+				// per-actor verdict; it applies below (endpoint row wins over the
+				// connection-wide row by specificity) only when no per-actor row spoke.
+				if isEndpoint {
+					wsEndpoint = set
+				} else {
+					wsWide = set
 				}
 				continue
 			}
@@ -548,6 +581,23 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	if hasAsk {
 		return SettingAsk, connName, nil
+	}
+	// No per-actor row spoke — the workspace-authored default (flag on) decides
+	// before the connection's configured default_access, endpoint-specific over
+	// connection-wide.
+	if openableWS {
+		wsDefault := wsWide
+		if rank(wsEndpoint) >= 0 {
+			wsDefault = wsEndpoint
+		}
+		switch wsDefault {
+		case SettingAllow:
+			return SettingAllow, "", nil
+		case SettingAsk:
+			return SettingAsk, connName, nil
+		case SettingDeny:
+			return SettingDeny, connName, nil
+		}
 	}
 	// No explicit per-actor row — fall back to the connection's configured default
 	// access (allow/ask/deny), chosen when the connection was created/edited. A

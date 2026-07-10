@@ -64,6 +64,8 @@ import {
 import { useArchiveChannel } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(inbox-chat-row-actions): TECH-3489 — 3-dot menu + unarchive for chat rows.
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(inbox-skill-change-request): FIR-2742 — in-place skill change-request detail.
+import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { useChatStore } from "@multica/core/chat";
@@ -510,18 +512,15 @@ export function InboxPage() {
   }, [selectedId, selectedRead, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
-    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 — skill change-request
-    // items have no issue_id; deep-link to the skill detail with the proposal
-    // focused (?cr=) so "click the inbox message → see the proposal in the UI".
+    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2742 — skill change-request
+    // items now open in-place in the inbox pane (SkillChangeInboxDetail) instead
+    // of pushing a full navigation that takes over the window; the detail offers
+    // an explicit "Open in new window". Fall through to the generic select.
     if (
-      (item.type === "skill_change_request_created" ||
-        item.type === "skill_change_request_reviewed") &&
-      item.details?.skill_id
+      item.type === "skill_change_request_created" ||
+      item.type === "skill_change_request_reviewed"
     ) {
-      const cr = item.details.change_request_id;
-      push(
-        `${wsPaths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`,
-      );
+      setSelectedKey("issue", item.id);
       return;
     }
     // CEREBRO-PATCH(inbox-skill-notify-settings): FIR-1587 — fork / agent-assignment items deep-link to the relevant skill detail.
@@ -531,6 +530,16 @@ export function InboxPage() {
     }
     if (item.type === "skill_agent_assigned" && item.details?.skill_id) {
       push(wsPaths.skillDetail(String(item.details.skill_id)));
+      return;
+    }
+    // CEREBRO-PATCH(inbox-agent-context-change-request): FIR-1775 — agent-context
+    // change requests have no issue_id; deep-link to the agent's Instructions tab
+    // (?tab=instructions) so clicking the inbox row lands on the proposal queue.
+    if (item.type === "agent_context_change_request" && item.details?.agent_id) {
+      const cr = item.details.change_request_id;
+      push(
+        `${wsPaths.agentDetail(item.details.agent_id)}?tab=instructions${cr ? `&cr=${cr}` : ""}`,
+      );
       return;
     }
     // CEREBRO-PATCH(inbox-note-mention-deeplink): TECH-3421 / FIR-2589 — note @-mentions have no issue_id; deep-link to the note, plus the comment id when the mention was in a comment so it opens the exact comment.
@@ -1395,6 +1404,14 @@ export function InboxPage() {
         onDone={isArchivedView ? undefined : () => handleArchive(selected.id)}
         onUnarchive={isArchivedView ? () => handleUnarchive(selected.id) : undefined}
       />
+    </ErrorBoundary>
+  ) : selected &&
+    (selected.type === "skill_change_request_created" ||
+      selected.type === "skill_change_request_reviewed") ? (
+    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2742 — render the change in
+    // the inbox pane with an "Open in new window" action instead of navigating away.
+    <ErrorBoundary resetKeys={[selected.id]}>
+      <SkillChangeInboxDetail item={selected} timeAgo={timeAgo(selected.created_at)} />
     </ErrorBoundary>
   ) : selected ? (
     <div className="p-3 sm:p-6">

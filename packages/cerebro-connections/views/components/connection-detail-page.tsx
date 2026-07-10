@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
+  FileUp,
   Loader2,
   Plus,
   Settings,
@@ -144,6 +145,9 @@ function ConnectionFormBody({
   const [endpoints, setEndpoints] = useState<EndpointPermission[]>(initialEndpoints ?? []);
   const [scopableArgs, setScopableArgs] = useState<ScopableArg[]>(initialScopableArgs ?? []);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  // Explicit OpenAPI spec URL (api type) — used by "Discover from URL".
+  const [specUrl, setSpecUrl] = useState("");
+  const specFileRef = useRef<HTMLInputElement | null>(null);
 
   // Tool names known for this connection — the discovered list (persisted or from
   // a fresh test) — used to populate the tool / options-source dropdowns so an
@@ -171,27 +175,57 @@ function ConnectionFormBody({
     if (v !== "apikey") setForm((f) => ({ ...f, api_key: "", api_key_header: "" }));
   }
 
-  async function handleTest() {
+  // runTest probes the connection. With a spec source (an explicit document
+  // URL or uploaded document text), the backend reads the endpoint catalogue
+  // from that spec instead of probing well-known spec locations.
+  async function runTest(spec?: { spec_url?: string; spec_content?: string }) {
     if (!form.url) {
       toast.error("Enter a URL first.");
       return;
     }
     setTestResult(null);
     const auth_config = buildAuthConfig(form, authType);
-    const result = await testConn.mutateAsync({
-      url: form.url,
-      type: form.type,
-      auth_config,
-      // Pass the connection ID when editing so the backend can fill in masked credentials.
-      ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
-    });
+    let result: TestResult;
+    try {
+      result = await testConn.mutateAsync({
+        url: form.url,
+        type: form.type,
+        auth_config,
+        // Pass the connection ID when editing so the backend can fill in masked credentials.
+        ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
+        ...(spec ?? {}),
+      });
+    } catch {
+      toast.error("Test failed. Please try again.");
+      return;
+    }
     setTestResult(result);
     // For API connections, discovery returns the endpoint catalogue from the
     // API's OpenAPI/Swagger spec — fold it into the editable list.
     if (form.type === "api" && result.endpoints && result.endpoints.length > 0) {
       setEndpoints((prev) => mergeEndpoints(prev, result.endpoints ?? []));
       toast.success(`Discovered ${result.endpoints.length} endpoint${result.endpoints.length !== 1 ? "s" : ""}.`);
+    } else if (spec && result.error) {
+      // Explicit spec input deserves an explicit failure signal.
+      toast.error(result.error);
     }
+  }
+
+  function handleTest() {
+    return runTest();
+  }
+
+  async function handleSpecFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset so picking the same file again re-triggers onChange.
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Spec file is too large (max 8 MB).");
+      return;
+    }
+    const content = await file.text();
+    await runTest({ spec_content: content });
   }
 
   function addEndpoint() {
@@ -309,7 +343,7 @@ function ConnectionFormBody({
         <form
           id="conn-form"
           onSubmit={(e) => void handleSubmit(e)}
-          className="mx-auto max-w-2xl px-6 py-8 space-y-6"
+          className="w-full px-6 py-8 space-y-6"
         >
           {/* Name (new only) */}
           {isCreate && (
@@ -388,10 +422,8 @@ function ConnectionFormBody({
               >
                 {testConn.isPending ? (
                   <Loader2 className="size-3.5 animate-spin" />
-                ) : form.type === "api" ? (
-                  "Test & discover"
                 ) : (
-                  "Test"
+                  "Test & discover"
                 )}
               </Button>
             </div>
@@ -446,12 +478,13 @@ function ConnectionFormBody({
               )}
 
               {testResult.reachable &&
+                !testResult.error &&
                 (!testResult.tools || testResult.tools.length === 0) &&
                 (!testResult.endpoints || testResult.endpoints.length === 0) && (
                   <p className="text-xs text-muted-foreground">
                     {form.type === "mcp_http"
-                      ? "Server reachable — no tools returned (server may require initialize handshake)."
-                      : "Server reachable — no OpenAPI/Swagger spec found. Add endpoints manually below."}
+                      ? "Server reachable — no tools returned. The server may require authentication, or it may expose no tools yet."
+                      : "Server reachable — no OpenAPI/Swagger spec found next to this URL. Paste the spec's URL or upload the document in the OpenAPI spec section below, or add endpoints manually."}
                   </p>
                 )}
             </div>
@@ -641,6 +674,61 @@ function ConnectionFormBody({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* OpenAPI spec (REST API only) — explicit spec input for APIs whose
+              document doesn't live at a well-known location: a direct URL to
+              the document, or an uploaded JSON/YAML file. Both fill the
+              Endpoints list below from the spec. */}
+          {form.type === "api" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div>
+                <p className="text-sm font-medium">OpenAPI spec</p>
+                <p className="text-xs text-muted-foreground">
+                  “Test &amp; discover” already checks well-known spec locations automatically. If the
+                  API’s OpenAPI/Swagger document lives somewhere else, paste its URL or upload the
+                  file — the endpoints below are then set up from it.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={specUrl}
+                  onChange={(e) => setSpecUrl(e.target.value)}
+                  placeholder="https://api.example.com/internal/docs/openapi.json"
+                  className="flex-1 text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void runTest({ spec_url: specUrl.trim() })}
+                  disabled={testConn.isPending || !specUrl.trim()}
+                  className="shrink-0"
+                >
+                  Discover from URL
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={specFileRef}
+                  type="file"
+                  accept=".json,.yaml,.yml,application/json"
+                  className="hidden"
+                  onChange={(e) => void handleSpecFile(e)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => specFileRef.current?.click()}
+                  disabled={testConn.isPending}
+                >
+                  <FileUp className="size-3.5 mr-1" />
+                  Upload spec file
+                </Button>
+                <span className="text-xs text-muted-foreground">JSON or YAML, max 8 MB</span>
+              </div>
             </div>
           )}
 
@@ -894,9 +982,15 @@ export function ConnectionCreatePage() {
       scopable_args: scopableArgs,
       default_access: form.default_access,
     };
-    await create.mutateAsync(input);
+    const created = await create.mutateAsync(input);
     toast.success("Connection created.");
-    router.push(wsPaths.settings());
+    // Stay on the connection after creating: land on its edit page so the admin
+    // can keep configuring (test, permissions) without re-finding it in the list.
+    if (created.id) {
+      router.push(wsPaths.connectionEdit(created.id));
+    } else {
+      router.push(wsPaths.settings());
+    }
   }
 
   return (
@@ -918,8 +1012,6 @@ export function ConnectionCreatePage() {
 
 export function ConnectionEditPage({ connId }: { connId: string }) {
   const wsId = useWorkspaceId();
-  const router = useNavigation();
-  const wsPaths = useWorkspacePaths();
   const { data: conn, isLoading } = useConnection(wsId ?? "", connId);
   const update = useUpdateConnection(wsId ?? "", connId);
 
@@ -931,7 +1023,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />
         </div>
-        <div className="mx-auto max-w-2xl px-6 py-8 space-y-4 w-full">
+        <div className="w-full px-6 py-8 space-y-4">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
@@ -991,8 +1083,9 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       default_access: form.default_access,
     };
     await update.mutateAsync(input);
+    // Stay on the page after saving — jumping back to the settings list loses
+    // the admin's place mid-configuration (FIR-2640).
     toast.success("Connection updated.");
-    router.push(wsPaths.settings());
   }
 
   return (

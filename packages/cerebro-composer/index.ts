@@ -16,3 +16,9 @@ export {
 export { MessageComposer, type MessageComposerProps } from "./message-composer";
 export { CommentComposer, type CommentComposerProps } from "./comment-composer";
 export { ChatComposer, type ChatComposerProps } from "./chat-composer";
+// Field editors (issue description, note, document) — the numbered image tray on
+// the shared ContentEditor, flag-gated + round-tripping through saved markdown.
+export {
+  EditorImageTray,
+  type EditorImageTrayProps,
+} from "./editor-image-tray";

@@ -135,7 +135,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Type:                req.Type,
 		URL:                 req.URL,
 		Internal:            req.Internal,
-		AuthConfig:          req.AuthConfig,
+		AuthConfig:          TrimCredentials(req.AuthConfig),
 		EndpointPermissions: req.EndpointPermissions,
 		ScopableArgs:        req.ScopableArgs,
 		DefaultAccess:       req.DefaultAccess,
@@ -184,7 +184,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "get connection failed")
 		return
 	}
-	req.AuthConfig = preserveMaskedAuth(req.AuthConfig, stored.AuthConfig)
+	req.AuthConfig = TrimCredentials(preserveMaskedAuth(req.AuthConfig, stored.AuthConfig))
 	c, err := h.Store.Update(r.Context(), UpdateParams{
 		ID:                  connID,
 		WorkspaceID:         wsID,

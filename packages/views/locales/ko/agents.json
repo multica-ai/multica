@@ -90,6 +90,9 @@
     "runs": "실행",
     "last_active": "최근 활동",
     "model": "모델",
+    "_comment_fir2669": "CEREBRO-PATCH(agent-columns-account-thinking-i18n): FIR-2669 Account + Thinking columns",
+    "account": "계정",
+    "thinking": "사고 수준",
     "created": "생성일",
     "owner": "소유자"
   },
@@ -310,7 +313,9 @@
     "common": {
       "save": "저장",
       "add": "추가",
-      "unsaved_changes": "저장하지 않은 변경사항"
+      "unsaved_changes": "저장하지 않은 변경사항",
+      "propose_change": "변경 제안",
+      "discard": "되돌리기"
     },
     "instructions": {
       "intro": "이 에이전트의 정체성과 작업 방식을 정의하세요. 모든 작업에서 에이전트 컨텍스트에 포함됩니다. Markdown을 지원합니다.",
@@ -382,7 +387,9 @@
       "saved_toast": "MCP config를 저장했습니다",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 - 현재 보기에서는 숨김",
-      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다.",
+      "_comment_agent_office_versioned": "CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — propose-flow strings for Skills/MCP tabs",
+      "versioned_note": "변경 사항은 버전으로 관리됩니다. 아래에서 편집한 뒤 소유자가 검토하도록 변경을 제안하세요."
     },
     "skills": {
       "intro": "이 에이전트에 할당된 워크스페이스 스킬입니다. 로컬 런타임 스킬은 항상 자동으로 사용할 수 있습니다.",
@@ -401,7 +408,10 @@
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다",
-      "add_dialog_confirm_one": "Add {{count}} skill"
+      "add_dialog_confirm_one": "Add {{count}} skill",
+      "versioned_note": "변경 사항은 버전으로 관리됩니다. 아래에서 추가하거나 제거한 뒤 소유자가 검토하도록 변경을 제안하세요.",
+      "added_draft_badge": "추가됨(초안)",
+      "draft_hint": "저장하지 않은 초안 — 검토를 위해 변경을 제안하세요."
     },
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",
@@ -539,6 +549,7 @@
     "none": "30일간 활동 없음"
   },
   "toolbar": {
+    "search_placeholder": "에이전트 검색…",
     "result_count_title": "일치하는 에이전트 / 범위 내 전체",
     "filter_label": "필터",
     "filter_active_count_one": "필터 {{count}}개",

@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { parseWithFallback } from "@multica/core/api";
 import {
+  EMPTY_ACTIVATE_WORKFLOW,
+  EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+  EMPTY_ISSUE_LOOP_RUNS,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
+  activateWorkflowSchema,
+  activeWorkflowForIssueSchema,
+  issueLoopRunsSchema,
   regenerateInboundTokenSchema,
   workflowRunsListSchema,
   workflowSchema,
@@ -154,6 +160,93 @@ describe("regenerateInboundTokenSchema (parseWithFallback wiring)", () => {
     );
     expect(out.inbound_webhook_token).toBe("tok-xyz");
     expect(out.inbound_webhook_url).toContain("/webhook/tok-xyz");
+  });
+});
+
+describe("activateWorkflowSchema (FIR-2283 v2 point 8, parseWithFallback wiring)", () => {
+  it("returns the empty fallback on a null body", () => {
+    const out = parseWithFallback(null, activateWorkflowSchema, EMPTY_ACTIVATE_WORKFLOW, {
+      endpoint: "activateWorkflow",
+    });
+    expect(out).toEqual({ activated: false, workflow_id: "", issue_id: "" });
+  });
+
+  it("returns the activated response on a happy body", () => {
+    const out = parseWithFallback(
+      { activated: true, workflow_id: "wf-1", issue_id: "issue-1" },
+      activateWorkflowSchema,
+      EMPTY_ACTIVATE_WORKFLOW,
+      { endpoint: "activateWorkflow" },
+    );
+    expect(out).toEqual({ activated: true, workflow_id: "wf-1", issue_id: "issue-1" });
+  });
+});
+
+describe("activeWorkflowForIssueSchema (parseWithFallback wiring)", () => {
+  it("returns the empty fallback (active: false) on a null body", () => {
+    const out = parseWithFallback(
+      null,
+      activeWorkflowForIssueSchema,
+      EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+      { endpoint: "activeWorkflowForIssue" },
+    );
+    expect(out).toEqual({ active: false });
+  });
+
+  it("carries workflow_id through when a recipe is active", () => {
+    const out = parseWithFallback(
+      { active: true, workflow_id: "wf-1" },
+      activeWorkflowForIssueSchema,
+      EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+      { endpoint: "activeWorkflowForIssue" },
+    );
+    expect(out).toEqual({ active: true, workflow_id: "wf-1" });
+  });
+});
+
+describe("issueLoopRunsSchema", () => {
+  it("parses a full issue-runs response", () => {
+    const out = parseWithFallback(
+      {
+        issue_runs: [
+          {
+            issue_id: "i-1",
+            issue_number: 42,
+            issue_title: "Ship it",
+            issue_status: "in_progress",
+            first_activated_at: "2026-07-03T10:00:00Z",
+            last_activated_at: "2026-07-03T12:00:00Z",
+          },
+        ],
+      },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    expect(out.issue_runs).toHaveLength(1);
+    expect(out.issue_runs[0]?.issue_number).toBe(42);
+  });
+
+  it("falls back to an empty list when the body is malformed", () => {
+    const out = parseWithFallback(
+      { issue_runs: "definitely-not-an-array" },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    expect(out).toEqual({ issue_runs: [] });
+  });
+
+  it("drops a row missing issue_id but keeps the response shape", () => {
+    const out = parseWithFallback(
+      { issue_runs: [{ issue_number: 1 }] },
+      issueLoopRunsSchema,
+      EMPTY_ISSUE_LOOP_RUNS,
+      { endpoint: "workflowLoopRuns" },
+    );
+    // A row without the required issue_id fails the array element parse, so the
+    // whole response falls back rather than rendering a keyless row.
+    expect(out).toEqual({ issue_runs: [] });
   });
 });
 

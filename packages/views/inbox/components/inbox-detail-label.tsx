@@ -45,6 +45,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     skill_agent_assigned: "Skill tildelt en agent",
     runtime_auto_paused: t(($) => $.types.runtime_auto_paused), // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611.
     agent_capability_drift: "Capability drift", // CEREBRO-PATCH(inbox-capability-drift-label): TECH-3738 Bid C inline label (locale parity untouched).
+    agent_context_change_request: "Foreslået ændring til en agent", // CEREBRO-PATCH(inbox-agent-context-change-request): FIR-1775 inline label, mirrors the skill change-request row (locale parity untouched).
     // CEREBRO-PATCH(inbox-detail-label-agent-comment-split): TECH-2961 — three labels for agent-authored comments split by the tag they carry.
     agent_comment_no_tag: t(($) => $.types.agent_comment_no_tag),
     agent_comment_member_tag: t(($) => $.types.agent_comment_member_tag),
@@ -120,7 +121,10 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{typeLabels[item.type]}</span>;
     }
     case "reaction_added": {
+      // CEREBRO-PATCH(inbox-reaction-label-actor): FIR-2954 — reactor name + emoji, bold, in the mention/label slot ("Mads Reacted with 👍").
       const emoji = details.emoji;
+      const reactor = item.actor_id ? getActorName(item.actor_type ?? "member", item.actor_id) : "";
+      if (emoji && reactor) return <span className="font-semibold">{reactor} Reacted with {emoji}</span>;
       if (emoji) return <span>{t(($) => $.labels.reacted_to_comment, { emoji })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
@@ -145,6 +149,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "skill_change_request_reviewed":
     case "skill_forked":
     case "skill_agent_assigned":
+    // CEREBRO-PATCH(inbox-agent-context-change-request): FIR-1775 — show the proposer/version/reason body instead of the generic label.
+    case "agent_context_change_request":
       return <span>{item.body || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;

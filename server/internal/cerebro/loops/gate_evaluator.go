@@ -26,11 +26,24 @@ import (
 // Tests that never trigger a revision can still assume round 1 throughout.
 const gateRound int32 = 1
 
+// StatusSetter reverts an issue's status when a gate revises, so the board
+// visibly shows where the loop actually is (e.g. back in Build) instead of
+// sitting on "in_review" while a revision quietly re-runs behind it. Optional
+// and nil-safe on GateEvaluator, mirroring CheckDispatcher: without one wired
+// (or without CheckGateConfig.RevertStatus set), revise() behaves exactly as
+// before. This is best-effort visibility, NOT the mechanism that re-runs the
+// build — DispatchRevision (via CheckDispatcher) still does that directly, so
+// a status-update failure here never blocks the actual revision work.
+type StatusSetter interface {
+	SetStatus(ctx context.Context, issueID pgtype.UUID, status string) error
+}
+
 // GateEvaluator decides loop delivery gates for the workflow engine. It is the
 // concrete implementation of workflows.GateEvaluator.
 type GateEvaluator struct {
-	store      *Store
-	dispatcher CheckDispatcher
+	store        *Store
+	dispatcher   CheckDispatcher
+	statusSetter StatusSetter
 }
 
 // NewGateEvaluator builds a GateEvaluator backed by a check-outcome store on
@@ -45,6 +58,13 @@ func NewGateEvaluator(pool *pgxpool.Pool) *GateEvaluator {
 // Returns the receiver for fluent construction at the call site.
 func (g *GateEvaluator) WithDispatcher(d CheckDispatcher) *GateEvaluator {
 	g.dispatcher = d
+	return g
+}
+
+// WithStatusSetter plugs in the status-revert egress (see StatusSetter).
+// Optional and nil-safe. Returns the receiver for fluent construction.
+func (g *GateEvaluator) WithStatusSetter(s StatusSetter) *GateEvaluator {
+	g.statusSetter = s
 	return g
 }
 
@@ -69,7 +89,19 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	if err != nil {
 		return false, fmt.Errorf("check gate: parse issue id: %w", err)
 	}
+	// Multi-phase loop (FIR-2283 followup point 6): the gate carries every
+	// phase's checks; route to the phase-aware path, which reads the issue's
+	// current phase and evaluates just that phase's gate.
+	if len(cfg.Phases) > 0 {
+		return g.evaluateMultiPhase(ctx, iid, gate, cfg)
+	}
+	return g.evaluateGateAt(ctx, iid, gate, cfg)
+}
 
+// evaluateGateAt runs the delivery-gate decision for one gate key + config.
+// It is the single-phase gate body, reused per phase (under a derived
+// per-phase gate key) by evaluateMultiPhase.
+func (g *GateEvaluator) evaluateGateAt(ctx context.Context, iid pgtype.UUID, gate string, cfg CheckGateConfig) (bool, error) {
 	state, err := g.store.LoadGateState(ctx, iid, gate)
 	if err != nil {
 		return false, err
@@ -110,7 +142,7 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 		if err := g.store.EnqueueHuman(ctx, iid, gate, state.Round, decision.EnqueueHuman); err != nil {
 			return false, err
 		}
-		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round); err != nil {
+		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round, cfg.RevisionModel, cfg.RevisionThinking); err != nil {
 			return false, err
 		}
 		if err := g.dispatchPendingJudge(ctx, iid, cfg, gate, state.Round); err != nil {
@@ -128,11 +160,119 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	}
 }
 
+// phaseGateKey derives a per-phase gate key from the base delivery-gate key so
+// each phase's caps tracking and check outcomes stay isolated (the phase
+// pointer itself is keyed by the base gate). Distinct keys are what let phase 2
+// start clean instead of colliding with phase 1's round-1 outcomes.
+func phaseGateKey(baseGate string, phase int) string {
+	return fmt.Sprintf("%s#phase%d", baseGate, phase)
+}
+
+// phaseLabel names a phase's build session ("Build k", or the phase's own Name
+// when set) for display/badging on the dispatched run.
+func phaseLabel(p GatePhase, index int) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return fmt.Sprintf("Build %d", index+1)
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// evaluateMultiPhase decides a multi-phase loop's delivery gate (FIR-2283
+// followup point 6). It reads the issue's current phase, evaluates that phase's
+// gate under its own isolated key, and on a pass either advances to the next
+// phase — dispatching its build in a fresh "Build k" session and moving the
+// board back to Build — or, on the final phase, returns true so the caller's
+// set-status(done) action fires. Every intermediate phase thus becomes a real
+// build→review pair, chained through the same gate engine as the single-phase
+// delivery gate.
+func (g *GateEvaluator) evaluateMultiPhase(ctx context.Context, iid pgtype.UUID, baseGate string, cfg CheckGateConfig) (bool, error) {
+	p, err := g.store.LoadPhase(ctx, iid, baseGate)
+	if err != nil {
+		return false, err
+	}
+	if p >= len(cfg.Phases) {
+		// Defensive: pointer past the last phase — treat as done.
+		return true, nil
+	}
+	phase := cfg.Phases[p]
+	subCfg := CheckGateConfig{
+		Checks:        phase.Checks,
+		AgentID:       firstNonEmpty(phase.BuildAgentID, cfg.AgentID),
+		Caps:          cfg.Caps,
+		RevisionSkill: phase.BuildSkill,
+		JudgeChecks:   phase.JudgeChecks,
+		JudgeAgentID:  cfg.JudgeAgentID,
+		JudgeSkill:    cfg.JudgeSkill,
+		HumanChecks:   phase.HumanChecks,
+		RevertStatus:  cfg.RevertStatus,
+	}
+	passed, err := g.evaluateGateAt(ctx, iid, phaseGateKey(baseGate, p), subCfg)
+	if err != nil || !passed {
+		// Holding (enqueue / revise / wait) — evaluateGateAt already recorded
+		// and dispatched whatever this phase needed.
+		return false, err
+	}
+	if p == len(cfg.Phases)-1 {
+		// Final phase passed — let the delivery-gate rule set the issue Done.
+		return true, nil
+	}
+	// Intermediate phase passed — advance the pointer and kick off the next
+	// phase's build.
+	np, err := g.store.AdvancePhase(ctx, iid, baseGate)
+	if err != nil {
+		return false, err
+	}
+	// Move the board back to Build for the next phase. This is a quiet update
+	// (StatusSetter) that does NOT re-fire the dispatch-build rule, so the only
+	// build dispatched for the next phase is the one below.
+	if g.statusSetter != nil && cfg.RevertStatus != "" {
+		if serr := g.statusSetter.SetStatus(ctx, iid, cfg.RevertStatus); serr != nil {
+			return false, serr
+		}
+	}
+	if g.dispatcher != nil && np < len(cfg.Phases) {
+		next := cfg.Phases[np]
+		agent := firstNonEmpty(next.BuildAgentID, cfg.AgentID)
+		if agent != "" && next.BuildSkill != "" {
+			if derr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
+				AgentID:       agent,
+				IssueID:       util.UUIDToString(iid),
+				Gate:          phaseGateKey(baseGate, np),
+				Round:         gateRound,
+				SkillName:     next.BuildSkill,
+				Model:         next.Model,
+				ThinkingLevel: next.ThinkingLevel,
+				PhaseLabel:    phaseLabel(next, np),
+			}); derr != nil {
+				return false, derr
+			}
+		}
+	}
+	// The gate does not advance to done on an intermediate phase.
+	return false, nil
+}
+
 // revise records a failed round against the spec's caps (Store.RecordRevision)
 // and, unless that trips a cap, re-dispatches the worker's build skill so it
 // can fix the failing checks in the fresh round the caps tracker just opened.
 // A cap trip freezes the gate instead: EvaluateCheckGate's Stopped check on
 // the next call is what actually stops the loop from consuming more rounds.
+//
+// When cfg.RevertStatus is set (Compile fills it in — BuildStatus for the
+// delivery gate, PlanningStatus for the plan gate), revise also moves the
+// issue's status back there so the board shows reality (kicked back to
+// Build/Plan) instead of sitting on a status the loop has already moved past.
+// This is deliberately best-effort and additive: a status-update failure is
+// logged-and-swallowed by the caller's error return being non-fatal to the
+// dispatch below in the sense that dispatch always still runs — the actual
+// re-run of the worker never depends on this succeeding.
 func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome, humanOutcomes []HumanOutcome) error {
 	signature := OutcomeSignature(outcomes, judgeOutcomes, humanOutcomes)
 	next, err := g.store.RecordRevision(ctx, issueID, gate, signature, cfg.Caps)
@@ -142,17 +282,30 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 	if next.Stopped {
 		return nil
 	}
-	if g.dispatcher == nil || cfg.AgentID == "" || cfg.RevisionSkill == "" {
-		return nil
+	var revertErr error
+	if g.statusSetter != nil && cfg.RevertStatus != "" {
+		revertErr = g.statusSetter.SetStatus(ctx, issueID, cfg.RevertStatus)
 	}
-	return g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
-		AgentID:   cfg.AgentID,
-		IssueID:   util.UUIDToString(issueID),
-		Gate:      gate,
-		Round:     next.Round,
-		SkillName: cfg.RevisionSkill,
-		Failures:  outcomes,
+	if g.dispatcher == nil || cfg.AgentID == "" || cfg.RevisionSkill == "" {
+		return revertErr
+	}
+	dispatchErr := g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
+		AgentID:       cfg.AgentID,
+		IssueID:       util.UUIDToString(issueID),
+		Gate:          gate,
+		Round:         next.Round,
+		SkillName:     cfg.RevisionSkill,
+		Model:         cfg.RevisionModel,
+		ThinkingLevel: cfg.RevisionThinking,
+		Failures:      outcomes,
 	})
+	// The actual re-run must never be silently lost behind a status-revert
+	// failure — surface whichever step failed (dispatch takes priority since
+	// it's the mechanism that matters; the revert is cosmetic).
+	if dispatchErr != nil {
+		return dispatchErr
+	}
+	return revertErr
 }
 
 // dispatchPending sends every enqueued-but-undispatched check for this gate
@@ -160,7 +313,7 @@ func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate st
 // so a later evaluation never re-sends it. A nil dispatcher (the pre-dispatch
 // wiring) or a config without an agent leaves the checks pending without
 // sending them — the gate still holds, it just has no egress.
-func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string, round int32) error {
+func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string, round int32, model, thinking string) error {
 	if g.dispatcher == nil || agentID == "" {
 		return nil
 	}
@@ -171,11 +324,13 @@ func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID
 	issueStr := util.UUIDToString(issueID)
 	for _, argv := range pending {
 		if err := g.dispatcher.DispatchCheck(ctx, CheckDispatch{
-			AgentID: agentID,
-			IssueID: issueStr,
-			Gate:    gate,
-			Round:   round,
-			Argv:    argv,
+			AgentID:       agentID,
+			IssueID:       issueStr,
+			Gate:          gate,
+			Round:         round,
+			Argv:          argv,
+			Model:         model,
+			ThinkingLevel: thinking,
 		}); err != nil {
 			return fmt.Errorf("dispatch pending check: %w", err)
 		}
@@ -212,13 +367,15 @@ func (g *GateEvaluator) dispatchPendingJudge(ctx context.Context, issueID pgtype
 			continue
 		}
 		if err := g.dispatcher.DispatchJudge(ctx, JudgeDispatch{
-			AgentID:   agentID,
-			IssueID:   issueStr,
-			Gate:      gate,
-			Round:     round,
-			CheckID:   check.ID,
-			Rubric:    check.Rubric,
-			SkillName: skill,
+			AgentID:       agentID,
+			IssueID:       issueStr,
+			Gate:          gate,
+			Round:         round,
+			CheckID:       check.ID,
+			Rubric:        check.Rubric,
+			SkillName:     skill,
+			Model:         firstNonEmpty(checkCfg.Model, cfg.JudgeModel),
+			ThinkingLevel: firstNonEmpty(checkCfg.ThinkingLevel, cfg.JudgeThinking),
 		}); err != nil {
 			return fmt.Errorf("dispatch pending judge check: %w", err)
 		}

@@ -12,6 +12,11 @@ import {
 } from "@multica/views/editor";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@multica/ui/components/ui/avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useEnsureNoteMentionScope } from "./note-mention-scope";
@@ -326,6 +331,12 @@ export function NoteCommentsPanel({
     return members.find((m) => m.user_id === id)?.name ?? "Unknown";
   }
 
+  // FIR-2826 — avatar image for a comment author, so each row leads with a face
+  // and comments are easier to tell apart. Null → the initials fallback.
+  function avatarFor(id: string) {
+    return members.find((m) => m.user_id === id)?.avatar_url ?? null;
+  }
+
   function doCreate(payload: CreateNoteCommentInput) {
     create.mutate(payload, {
       onSuccess: () => {
@@ -511,8 +522,68 @@ export function NoteCommentsPanel({
         </div>
       )}
 
-      {/* Composer */}
-      <div className="border-b p-3">
+      <ScrollArea className="min-h-0 flex-1">
+        <div ref={threadListRef} className="divide-y">
+          {open.length === 0 && resolved.length === 0 && (
+            <p className="p-4 text-sm text-muted-foreground">
+              No comments yet. Select text and add one.
+            </p>
+          )}
+          {open.map((t) => (
+            <ThreadView
+              key={t.root.id}
+              thread={t}
+              noteId={noteId}
+              myId={myId}
+              isOwner={isOwner}
+              nameFor={nameFor}
+              avatarFor={avatarFor}
+              active={activeAnchorId === t.root.id}
+              selectable={collabEnabled && Boolean(coupling)}
+              selected={selected}
+              onToggleSelect={toggleSelect}
+              onSelect={() =>
+                onSelectThread(t.root.anchor_quote ? t.root.id : null)
+              }
+              onAfterDecide={() =>
+                qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
+              }
+            />
+          ))}
+          {resolved.length > 0 && (
+            <details className="bg-muted/20">
+              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+                {resolved.length} resolved
+              </summary>
+              {resolved.map((t) => (
+                <ThreadView
+                  key={t.root.id}
+                  thread={t}
+                  noteId={noteId}
+                  myId={myId}
+                  isOwner={isOwner}
+                  nameFor={nameFor}
+                  avatarFor={avatarFor}
+                  active={activeAnchorId === t.root.id}
+                  selectable={collabEnabled && Boolean(coupling)}
+                  selected={selected}
+                  onToggleSelect={toggleSelect}
+                  onSelect={() =>
+                    onSelectThread(t.root.anchor_quote ? t.root.id : null)
+                  }
+                  onAfterDecide={() =>
+                    qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
+                  }
+                />
+              ))}
+            </details>
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* FIR-2826 — keep the composer at the bottom like a chat box, while the
+          existing comments scroll above it. */}
+      <div className="shrink-0 border-t bg-background p-3">
         <div className="mb-2 flex gap-1">
           <Button
             size="sm"
@@ -585,63 +656,6 @@ export function NoteCommentsPanel({
           </p>
         )}
       </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div ref={threadListRef} className="divide-y">
-          {open.length === 0 && resolved.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground">
-              No comments yet. Select text and add one.
-            </p>
-          )}
-          {open.map((t) => (
-            <ThreadView
-              key={t.root.id}
-              thread={t}
-              noteId={noteId}
-              myId={myId}
-              isOwner={isOwner}
-              nameFor={nameFor}
-              active={activeAnchorId === t.root.id}
-              selectable={collabEnabled && Boolean(coupling)}
-              selected={selected}
-              onToggleSelect={toggleSelect}
-              onSelect={() =>
-                onSelectThread(t.root.anchor_quote ? t.root.id : null)
-              }
-              onAfterDecide={() =>
-                qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
-              }
-            />
-          ))}
-          {resolved.length > 0 && (
-            <details className="bg-muted/20">
-              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
-                {resolved.length} resolved
-              </summary>
-              {resolved.map((t) => (
-                <ThreadView
-                  key={t.root.id}
-                  thread={t}
-                  noteId={noteId}
-                  myId={myId}
-                  isOwner={isOwner}
-                  nameFor={nameFor}
-                  active={activeAnchorId === t.root.id}
-                  selectable={collabEnabled && Boolean(coupling)}
-                  selected={selected}
-                  onToggleSelect={toggleSelect}
-                  onSelect={() =>
-                    onSelectThread(t.root.anchor_quote ? t.root.id : null)
-                  }
-                  onAfterDecide={() =>
-                    qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
-                  }
-                />
-              ))}
-            </details>
-          )}
-        </div>
-      </ScrollArea>
     </div>
   );
 }
@@ -652,6 +666,7 @@ function ThreadView({
   myId,
   isOwner,
   nameFor,
+  avatarFor,
   active,
   selectable,
   selected,
@@ -664,6 +679,7 @@ function ThreadView({
   myId: string | undefined;
   isOwner: boolean;
   nameFor: (id: string) => string;
+  avatarFor: (id: string) => string | null;
   active: boolean;
   selectable: boolean;
   selected: Set<string>;
@@ -708,25 +724,27 @@ function ThreadView({
       onClick={onSelect}
       data-thread-id={root.id}
       className={cn(
-        "p-3",
+        "px-3 py-3.5 transition-colors",
         root.resolved && "opacity-70",
         root.anchor_quote && "cursor-pointer",
-        active && "bg-orange-400/10",
+        active
+          ? "bg-orange-400/10 ring-1 ring-inset ring-orange-400/40"
+          : root.anchor_quote && "hover:bg-muted/40",
       )}
     >
       {root.anchor_quote && (
         <div
           className={cn(
-            "mb-1.5 border-l-2 pl-2 text-xs italic line-clamp-2",
+            "mb-2 rounded-r border-l-2 py-0.5 pl-2 text-xs italic line-clamp-2",
             active
-              ? "border-orange-500 text-orange-700"
+              ? "border-orange-500 bg-orange-400/5 text-orange-700"
               : "border-amber-500/60 text-muted-foreground",
           )}
         >
           “{root.anchor_quote}”
         </div>
       )}
-      <CommentRow c={root} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
+      <CommentRow c={root} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
 
       {isSuggestion && (
         <div className="mt-1.5 rounded bg-emerald-500/10 p-2 text-sm">
@@ -750,11 +768,13 @@ function ThreadView({
         </div>
       )}
 
-      {replies.map((r) => (
-        <div key={r.id} className="mt-2 pl-4">
-          <CommentRow c={r} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
+      {replies.length > 0 && (
+        <div className="mt-3 ml-3 flex flex-col gap-3 border-l border-border/70 pl-3">
+          {replies.map((r) => (
+            <CommentRow key={r.id} c={r} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
+          ))}
         </div>
-      ))}
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {pending && isOwner && (
@@ -835,6 +855,7 @@ function ThreadView({
 function CommentRow({
   c,
   nameFor,
+  avatarFor,
   myId,
   canDelete,
   onDelete,
@@ -844,6 +865,7 @@ function CommentRow({
 }: {
   c: NoteComment;
   nameFor: (id: string) => string;
+  avatarFor: (id: string) => string | null;
   myId: string | undefined;
   noteId: string;
   canDelete: boolean;
@@ -853,48 +875,73 @@ function CommentRow({
   onToggleSelect?: (id: string) => void;
 }) {
   const unsent = isUnsentToAgent(c);
+  // FIR-2826 — lead each comment with the author's avatar so rows read as
+  // distinct messages instead of one continuous block of text.
+  const authorName = c.author_id === myId ? "You" : nameFor(c.author_id);
+  const avatarUrl = avatarFor(c.author_id);
   return (
-    <div>
-      <div className="flex items-center gap-1.5 text-xs">
-        {selectable && unsent && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={(e) => e.stopPropagation()}
-            onChange={() => onToggleSelect?.(c.id)}
-            className="size-3 shrink-0 cursor-pointer accent-amber-600"
-            aria-label="Select comment to send"
+    <div className="group/comment flex gap-2.5">
+      {selectable && unsent && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect?.(c.id)}
+          className="mt-1 size-3 shrink-0 cursor-pointer accent-amber-600"
+          aria-label="Select comment to send"
+        />
+      )}
+      <Avatar size="sm" className="mt-0.5">
+        {avatarUrl && <AvatarImage src={avatarUrl} alt={nameFor(c.author_id)} />}
+        <AvatarFallback className="text-[10px] font-medium">
+          {initialsOf(nameFor(c.author_id))}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="font-semibold text-foreground">{authorName}</span>
+          <span className="text-muted-foreground">
+            {formatWhen(c.created_at)}
+          </span>
+          {unsent && (
+            <Badge
+              variant="outline"
+              className="border-amber-400/60 text-[10px] text-amber-700"
+            >
+              Unsent
+            </Badge>
+          )}
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              className="ml-auto text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/comment:opacity-100"
+              aria-label="Delete comment"
+            >
+              <Trash2 className="size-3" />
+            </button>
+          )}
+        </div>
+        {c.body && c.body !== "Suggested edit" && (
+          // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
+          // `[@Name](mention://…)` text.
+          <ReadonlyContent
+            content={c.body}
+            className="mt-1 break-words text-sm leading-relaxed"
           />
         )}
-        <span className="font-medium">
-          {c.author_id === myId ? "You" : nameFor(c.author_id)}
-        </span>
-        <span className="text-muted-foreground">{formatWhen(c.created_at)}</span>
-        {unsent && (
-          <Badge
-            variant="outline"
-            className="border-amber-400/60 text-[10px] text-amber-700"
-          >
-            Unsent
-          </Badge>
-        )}
-        {canDelete && (
-          <button
-            onClick={onDelete}
-            className="ml-auto text-muted-foreground hover:text-destructive"
-            aria-label="Delete comment"
-          >
-            <Trash2 className="size-3" />
-          </button>
-        )}
       </div>
-      {c.body && c.body !== "Suggested edit" && (
-        // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
-        // `[@Name](mention://…)` text.
-        <ReadonlyContent content={c.body} className="mt-0.5 break-words" />
-      )}
     </div>
   );
+}
+
+// FIR-2826 — up to two initials for the avatar fallback (first + last word).
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0];
+  if (!first) return "?";
+  const last = parts[parts.length - 1];
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase();
+  return ((first[0] ?? "") + (last?.[0] ?? "")).toUpperCase();
 }
 
 function formatWhen(iso: string): string {

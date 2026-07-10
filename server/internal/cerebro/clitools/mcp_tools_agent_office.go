@@ -94,9 +94,9 @@ by the context owner/approvers; on approval it is applied atomically and
 snapshotted as a new version. Nothing changes until approved.
 
 You may either edit individual fields (instructions, model, thinking_level,
-persona_sandbox, skill_ids) which are merged onto the agent's current context,
-OR pass a full proposed_snapshot object. proposed_version must be a semver
-X.Y.Z strictly greater than the agent's current context_version.`,
+persona_sandbox, skill_ids, mcp_config) which are merged onto the agent's current
+context, OR pass a full proposed_snapshot object. proposed_version must be a
+semver X.Y.Z strictly greater than the agent's current context_version.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"agent_id", "title", "proposed_version"},
@@ -113,6 +113,16 @@ X.Y.Z strictly greater than the agent's current context_version.`,
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
 					"description": "Full replacement set of bound skill ids",
+				},
+				"mcp_config": map[string]any{
+					"type":        "object",
+					"description": "Full replacement MCP server config object (e.g. {\"mcpServers\": …}); null/omit to leave unchanged",
+				},
+				"custom_args": map[string]any{
+					"description": "Full replacement custom runtime args (JSON)",
+				},
+				"runtime_config": map[string]any{
+					"description": "Full replacement runtime config (JSON)",
 				},
 			},
 		},
@@ -147,6 +157,18 @@ X.Y.Z strictly greater than the agent's current context_version.`,
 		}
 		if v, ok := args["skill_ids"]; ok {
 			body["skill_ids"] = v
+		}
+		// mcp_config / custom_args / runtime_config are free-form JSON that the
+		// API captures as RawMessage; forward them verbatim when present so the
+		// MCP/CLI/API surfaces stay symmetric.
+		if v, ok := args["mcp_config"]; ok {
+			body["mcp_config"] = v
+		}
+		if v, ok := args["custom_args"]; ok {
+			body["custom_args"] = v
+		}
+		if v, ok := args["runtime_config"]; ok {
+			body["runtime_config"] = v
 		}
 		// Link the proposal to the agent run that produced it when available.
 		if taskID := strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")); taskID != "" {
@@ -238,9 +260,11 @@ required version number; 'to' defaults to the live context when omitted.`,
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
 		Name: "agent_context_rollback",
-		Description: `Roll an agent's context back to a historical version. Restores that version's
-snapshot as a NEW version (history is append-only — nothing is deleted). Only
-the context owner/approvers (or a workspace admin) may roll back.`,
+		Description: `Propose rolling an agent's context back to a historical version. This does NOT
+apply directly: it opens a change request carrying that version's snapshot, which
+an approver must review and approve before it merges onto the live agent (history
+is append-only — nothing is deleted). Only the context owner/approvers (or a
+workspace admin) may propose a rollback.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"agent_id", "version"},
@@ -265,6 +289,53 @@ the context owner/approvers (or a workspace admin) may roll back.`,
 		}
 		var out any
 		if err := client.PostJSON(ctx, "/api/agents/"+url.PathEscape(id)+"/context/rollback", body, &out); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(out)
+	})
+
+	// -----------------------------------------------------------------------
+	// agent_context_lint
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "agent_context_lint",
+		Description: `Drift-lint agent context (FIR-1775 Phase 3). Three modes:
+- agent_id set: lint that agent — dead/unbound skill references in its
+  instructions, rules duplicated between instructions and bound skills, empty
+  governance fields, stale repo links.
+- nothing set: workspace-wide sweep over every non-archived agent.
+- file_name + file_content set: drift-lint a repo CLAUDE.md/AGENTS.md — flags
+  agent-behavior language (belongs in the versioned harness) and lines
+  duplicated from an agent's instructions or a skill.
+Read-only analysis; findings are review hints, never hard failures.`,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"agent_id":     map[string]any{"type": "string", "description": "Agent ID to lint (omit for a workspace sweep)"},
+				"file_name":    map[string]any{"type": "string", "description": "Repo instruction file name, e.g. CLAUDE.md (requires file_content)"},
+				"file_content": map[string]any{"type": "string", "description": "The repo instruction file's full content"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		fileName := optString(args, "file_name")
+		fileContent := optString(args, "file_content")
+		if fileName != "" || fileContent != "" {
+			if fileName == "" || fileContent == "" {
+				return mcp.ErrorResult("file_name and file_content must be provided together"), nil
+			}
+			body := map[string]any{"filename": fileName, "content": fileContent}
+			var out any
+			if err := client.PostJSON(ctx, "/api/agents/context/lint/repo-file", body, &out); err != nil {
+				return mcp.ErrorResult(err.Error()), nil
+			}
+			return jsonText(out)
+		}
+		path := "/api/agents/context/lint"
+		if id := optString(args, "agent_id"); id != "" {
+			path = "/api/agents/" + url.PathEscape(id) + "/context/lint"
+		}
+		var out any
+		if err := client.GetJSON(ctx, path, &out); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
 		return jsonText(out)

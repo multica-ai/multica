@@ -79,6 +79,12 @@ import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
+// CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account column reuses
+// the runtimes' Account cell; the search box + extra columns are flag-gated.
+// CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — mobile stacked-card list.
+// CEREBRO-PATCH(agent-search-by-account): FIR-2669 — accounts list + search matcher.
+import { RuntimeAccountCell, AgentMobileList, useCerebroAccountsList, matchesAgentSearch } from "@multica/cerebro-runtime/views";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -94,7 +100,8 @@ const GRID_COLS =
   // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (0px tracks still pick up gap-x-3).
   // Mobile matches Issues list: checkbox + name + kebab — a 144px status track left almost no room for names.
   "grid-cols-[1rem_minmax(120px,1fr)_1.75rem] " +
-  "@2xl:grid-cols-[1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem]";
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account + Thinking tracks after Model.
+  "@2xl:grid-cols-[1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-account)_var(--agc-thinking)_var(--agc-created)_1.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -110,12 +117,16 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   lastActive: 120,
   runs: 88,
   model: 120,
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — new column widths.
+  account: 180,
+  thinking: 120,
   created: 104,
 };
 
 // Fixed tracks (checkbox 16, name min 200, kebab 28) plus gap-x-3 between the
-// wide template's 10 tracks.
-const FIXED_TRACKS_WIDTH = 244 + 9 * 12;
+// wide template's 12 tracks.
+// CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — 11 gaps after +2 columns.
+const FIXED_TRACKS_WIDTH = 244 + 11 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -135,6 +146,9 @@ function columnTrackVars(
     "--agc-lastactive": width("lastActive"),
     "--agc-runs": width("runs"),
     "--agc-model": width("model"),
+    // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — new column tracks.
+    "--agc-account": width("account"),
+    "--agc-thinking": width("thinking"),
     "--agc-created": width("created"),
     "--agc-minw": `${minWidth}px`,
   } as React.CSSProperties;
@@ -563,6 +577,21 @@ function AgentListHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
+      {/* CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account + Thinking headers. */}
+      {isColVisible("account") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.account)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("thinking") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.thinking)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
       {isColVisible("created") ? (
         <ListGridHeaderCell
           className="hidden @2xl:flex"
@@ -813,6 +842,19 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search box + the
+  // Account/Thinking columns are gated by the interface-columns flag.
+  const extrasEnabled = useFlagValue("cerebro_interface_columns");
+  const [search, setSearch] = useState("");
+  // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — runtime account_id → "login provider"
+  // so the search box matches the Account email shown on each agent row.
+  const { data: cerebroAccounts = [] } = useCerebroAccountsList();
+  const accountLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of cerebroAccounts) m.set(a.id, `${a.login_identity} ${a.provider}`);
+    return m;
+  }, [cerebroAccounts]);
+
   const [showCreate, setShowCreate] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
@@ -835,7 +877,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const toggleFilter = useAgentsViewStore((s) => s.toggleFilter);
   const clearFilters = useAgentsViewStore((s) => s.clearFilters);
 
-  const isColVisible = (key: AgentColumnKey) => !hiddenColumns.includes(key);
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account/Thinking
+  // only exist when the flag is on, regardless of persisted visibility.
+  const isColVisible = (key: AgentColumnKey) =>
+    key === "account" || key === "thinking"
+      ? extrasEnabled && !hiddenColumns.includes(key)
+      : !hiddenColumns.includes(key);
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -928,7 +975,29 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Visible rows: filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
+    const q = extrasEnabled ? search.trim().toLowerCase() : "";
     const filtered = scopeRows.filter((row) => {
+      // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — free-text search now
+      // also matches the Account email/provider shown on the row (via runtime).
+      if (q) {
+        const accountId = row.runtime?.current_account_id;
+        if (
+          !matchesAgentSearch(
+            {
+              name: row.agent.name,
+              description: row.agent.description,
+              model: row.agent.model,
+              thinkingLevel: row.agent.thinking_level,
+              runtimeName: row.runtime?.name,
+              ownerName: row.owner?.name,
+              accountLabel: accountId ? accountLabelById.get(accountId) : null,
+            },
+            q,
+          )
+        ) {
+          return false;
+        }
+      }
       if (
         filters.availability.length > 0 &&
         (!row.presence ||
@@ -984,7 +1053,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+    // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search deps.
+    // CEREBRO-PATCH(agent-search-by-account): FIR-2669 — re-filter when account labels resolve.
+  }, [scopeRows, filters, sortField, sortDirection, extrasEnabled, search, accountLabelById]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -1089,13 +1160,23 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             allRows={scopeRows}
             members={members}
             visibleCount={rows.length}
+            // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search + extra columns.
+            search={search}
+            onSearchChange={setSearch}
+            showSearch={extrasEnabled}
+            showExtraColumns={extrasEnabled}
           />
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
           >
+            {/* CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — mobile stacked cards surface enabled columns; the virtualized table hides below @2xl. */}
+            {extrasEnabled && (
+              <AgentMobileList rows={rows} className="@2xl:hidden" />
+            )}
             <ListGrid
-              className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)]`}
+              // CEREBRO-PATCH(agent-mobile-cards): FIR-2669 — desktop-only when the mobile card layout is active.
+              className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)] ${extrasEnabled ? "hidden @2xl:grid" : ""}`}
               style={columnTrackVars(isColVisible)}
             >
               <AgentListHeader
@@ -1168,6 +1249,29 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         <ListGridCell className="hidden @2xl:flex">
                           <span className="min-w-0 truncate text-xs text-muted-foreground">
                             {row.agent.model || "—"}
+                          </span>
+                        </ListGridCell>
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
+                      {/* CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — Account + Thinking cells. */}
+                      {isColVisible("account") ? (
+                        <ListGridCell className="hidden @2xl:flex">
+                          {row.runtime ? (
+                            <RuntimeAccountCell runtime={row.runtime} />
+                          ) : (
+                            <span className="text-xs text-muted-foreground/40">
+                              —
+                            </span>
+                          )}
+                        </ListGridCell>
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
+                      {isColVisible("thinking") ? (
+                        <ListGridCell className="hidden @2xl:flex">
+                          <span className="min-w-0 truncate text-xs text-muted-foreground">
+                            {row.agent.thinking_level || "—"}
                           </span>
                         </ListGridCell>
                       ) : (

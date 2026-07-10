@@ -56,6 +56,10 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   usePendingChangeRequestSkillIds,
   withCerebroSkillColumns,
+  // CEREBRO-PATCH(skill-changes-review): FIR-2742 — owner alert + cross-skill review sheet.
+  useSkillChanges,
+  SkillChangesAlert,
+  SkillChangesReviewSheet,
 } from "@multica/cerebro-skill-ownership/views";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
@@ -232,12 +236,16 @@ export default function SkillsPage() {
     kind: "skill",
     items: folderItems,
     itemNoun: "skills",
+    navigation, // CEREBRO-PATCH(skill-folder-deeplink): FIR-2688 — inject nav for ?folder deep-link.
   });
   const folderIncludes = folderView.includes; // CEREBRO-PATCH(skill-folder-loop): FIR-1486 — keep the filter dependency stable.
   // CEREBRO-PATCH(skill-list-columns): FIR-1530 — pending change-request data + filter state.
   const pendingChangeIds = usePendingChangeRequestSkillIds();
   const ownershipEnabled = useFeatureFlag("cerebro_skill_ownership");
   const [pendingOnly, setPendingOnly] = useState(false);
+  // CEREBRO-PATCH(skill-changes-review): FIR-2742 — owner alert + review sheet state.
+  const skillChanges = useSkillChanges(skills);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -408,7 +416,11 @@ export default function SkillsPage() {
     !!agentsError || !!membersError || !!runtimesError;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    // CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — on mobile the whole page
+    // scrolls vertically (header + alert + filters scroll away), instead of
+    // trapping the list in a cramped inner-scroll pane. On sm+ the desktop
+    // app-shell layout (fixed chrome, list scrolls internally) is restored.
+    <div className="flex flex-1 flex-col overflow-y-auto sm:min-h-0 sm:overflow-hidden">
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
@@ -425,8 +437,20 @@ export default function SkillsPage() {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
-        {!showEmpty && (
+      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742/FIR-2748 — personal review alert (count + controls). */}
+      {ownershipEnabled && (
+        <SkillChangesAlert
+          count={skillChanges.mine.length}
+          onReview={() => setReviewOpen(true)}
+          pendingOnly={pendingOnly}
+          onTogglePending={() => setPendingOnly((v) => !v)}
+        />
+      )}
+
+      {/* CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — drop min-h-0 on mobile so this section grows with its content and the page (not an inner pane) scrolls. */}
+      <div className="flex flex-1 flex-col gap-4 p-3 sm:min-h-0 sm:p-6">
+        {/* CEREBRO-PATCH(skill-changes-review): FIR-2748 — the personal review alert replaces this intro banner when the user has pending reviews. */}
+        {!showEmpty && !(ownershipEnabled && skillChanges.mine.length > 0) && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">
               {t(($) => $.page.intro_banner.title)}
@@ -443,9 +467,11 @@ export default function SkillsPage() {
           </div>
         ) : (
           // CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar beside the list.
-          <div className="flex flex-1 min-h-0 overflow-hidden rounded-lg border bg-background">
+          // CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — on mobile this box sizes to its content (auto height) so the page scrolls; sm+ restores flex-1 min-h-0 internal scroll.
+          <div className="flex overflow-hidden rounded-lg border bg-background sm:min-h-0 sm:flex-1">
             {folderView.sidebar}
-            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            {/* CEREBRO-PATCH(skills-mobile-scroll): FIR-2748 — mobile: block flow so the DataTable renders at natural height (its flex-1/min-h-0 would otherwise collapse in an auto-height parent) and the page scrolls; sm+: flex column that fills so the table scrolls internally. */}
+            <div className="block min-w-0 sm:flex sm:flex-1 sm:flex-col sm:overflow-hidden">
             <CardToolbar
               search={search}
               setSearch={setSearch}
@@ -459,22 +485,7 @@ export default function SkillsPage() {
                 category={categoryFilter}
                 onCategoryChange={setCategoryFilter}
               />
-              {/* CEREBRO-PATCH(skill-list-columns): FIR-1530 — filter to skills awaiting review. */}
-              {ownershipEnabled && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className={
-                    pendingOnly
-                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "shrink-0 text-muted-foreground"
-                  }
-                  onClick={() => setPendingOnly((v) => !v)}
-                >
-                  Pending changes
-                </Button>
-              )}
+              {/* CEREBRO-PATCH(skill-changes-review): FIR-2748 — review entry (Pending changes + Review) moved into the personal SkillChangesAlert at the top of the page. */}
             </div>
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
@@ -512,6 +523,17 @@ export default function SkillsPage() {
         <CreateSkillDialog
           onClose={() => setCreateOpen(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {/* CEREBRO-PATCH(skill-changes-review): FIR-2742 — cross-skill change review sheet. */}
+      {ownershipEnabled && (
+        <SkillChangesReviewSheet
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          changes={skillChanges.all}
+          members={members}
+          hasMine={skillChanges.mine.length > 0}
         />
       )}
     </div>

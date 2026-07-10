@@ -4,10 +4,9 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
-// CEREBRO-PATCH(description-drafts): FIR-2648 — recover a description edit that never reached the server.
-import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -78,12 +77,14 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { type ContentEditorRef } from "../../editor/content-editor"; // CEREBRO-PATCH(issue-description-image-tray): description editor now uses EditorImageTray.
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { TitleEditor } from "../../editor/title-editor";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
 // CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments render in a dedicated tab as rows.
 import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(description-image-gallery): FIR-2710 — one image gallery for the description (inline + attachments).
+import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -118,6 +119,8 @@ import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 assign issue to a sprint sub-project from the sidebar, gated on cerebro_sprints.
 import { SprintPicker } from "@multica/cerebro-sprints/views";
+// CEREBRO-PATCH(issue-detail-workflow-picker): FIR-2283 v2 point 8 — activate an Issue workflow recipe on this issue from the sidebar, gated on cerebro_workflows.
+import { WorkflowPicker } from "@multica/cerebro-workflows/views/workflow-picker";
 // CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 optional time-of-day next to the start/due date pickers, gated on cerebro_issue_date_times.
 import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
@@ -137,7 +140,8 @@ import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
 // CEREBRO-PATCH(issue-composer-unify): FIR-1748 — issue comments use the shared CommentComposer preset.
-import { CommentComposer } from "@multica/cerebro-composer";
+// CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
+import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -956,6 +960,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+  // CEREBRO-PATCH(attachments-tab-aggregate): FIR-2710 — every comment's attachments feed the Attachments tab.
+  const commentAttachments = useMemo(
+    () => timeline.flatMap((e) => e.attachments ?? []),
+    [timeline],
+  );
   const { mutateAsync: moveCommentToSubIssue } = useMoveCommentToSubIssue(id, wsId);
   const handleMoveCommentToSubIssue = useCallback(
     async (commentId: string) => {
@@ -1230,6 +1239,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
   // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 gate the sidebar sprint picker.
   const sprintsEnabled = useFeatureFlag("cerebro_sprints");
+  // CEREBRO-PATCH(issue-detail-workflow-picker): FIR-2283 v2 gate the sidebar workflow picker.
+  const workflowsEnabled = useFeatureFlag("cerebro_workflows");
   // CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 gate the start/due time-of-day control.
   const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
@@ -1279,9 +1290,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
-  // CEREBRO-PATCH(description-drafts): FIR-2648 — mirror the description
-  // editor to per-device localStorage so a session-expiry mid-edit is
-  // recoverable instead of silently lost.
+  // CEREBRO-PATCH(description-drafts): FIR-2648 — mirror every edit locally so
+  // a session expiry cannot silently discard text before the save completes.
   const descriptionDraft = useDescriptionDraft(id, issue?.description ?? "");
   const [descRestoreEpoch, setDescRestoreEpoch] = useState(0);
 
@@ -1557,6 +1567,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           {sprintsEnabled && issue.project_id && (
             <PropRow label="Sprint">
               <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />
+            </PropRow>
+          )}
+          {/* CEREBRO-PATCH(issue-detail-workflow-picker): FIR-2283 v2 point 8 — activate an Issue workflow recipe on this issue; recipe stays reusable, this compiles rules scoped to this issue alone. */}
+          {workflowsEnabled && (
+            <PropRow label="Workflow">
+              <WorkflowPicker workspaceId={wsId} issueId={issue.id} />
             </PropRow>
           )}
           {/* CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue panel, gated on cerebro_recurring_issues. */}
@@ -2371,8 +2387,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               description as a small topic-strip in the channel-header bar
               instead, so the rich-text editor would be a duplicate. */}
           {!isChat && (
+            // CEREBRO-PATCH(description-image-gallery): FIR-2710 — description body + attachment images page as one gallery.
+            <ImageGalleryProvider>
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-              {/* CEREBRO-PATCH(description-drafts): FIR-2648 — offer to restore text that never reached the server. */}
+              {/* CEREBRO-PATCH(description-drafts): FIR-2648 — restore text that never reached the server. */}
               {descriptionDraft.hasRecoverableDraft && (
                 <DescriptionDraftBanner
                   onRestore={() => {
@@ -2382,13 +2400,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   onDiscard={() => descriptionDraft.discard()}
                 />
               )}
-              <ContentEditor
+              <EditorImageTray
                 ref={descEditorRef}
                 key={`${id}-${descRestoreEpoch}`}
                 defaultValue={descRestoreEpoch > 0 ? descriptionDraft.draftValue : (issue.description || "")}
                 placeholder={t(($) => $.detail.desc_placeholder)}
                 onUpdate={(md) => {
-                  descriptionDraft.save(md); // CEREBRO-PATCH(description-drafts): FIR-2648 — persist every keystroke locally, independent of save success.
+                  descriptionDraft.save(md);
                   handleUpdateField({ description: md });
                 }}
                 onUploadFile={handleDescriptionUpload}
@@ -2415,15 +2433,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               </div>
               {descDragOver && <FileDropOverlay />}
             </div>
-          )}
-
-          {!isChat && (
-            // CEREBRO-PATCH(attachments-tab): FIR-2034 — top slot shows a one-line hint when the tab is on, the inline list otherwise.
+            {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — top slot shows a one-line hint when the tab is on, the inline list otherwise. */}
             <IssueAttachmentsSlot
               attachments={issue.attachments}
               content={issue.description ?? ""}
               className="mt-3"
             />
+            </ImageGalleryProvider>
           )}
 
           {!isChat && <ArtifactList issueId={issue.id} className="mt-3" />}
@@ -2567,7 +2583,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments as a tab. */}
                   {attachmentsTabEnabled && (
                     <TabsTrigger value="attachments">
-                      <AttachmentsTabLabel attachments={issue.attachments} content={issue.description ?? ""} />
+                      <AttachmentsTabLabel attachments={issue.attachments} commentAttachments={commentAttachments} />
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -2593,7 +2609,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {!isChat && attachmentsTabEnabled && (
                 <TabsContent value="attachments">
                   <div className="mt-2">
-                    <AttachmentsTab attachments={issue.attachments} content={issue.description ?? ""} />
+                    <AttachmentsTab attachments={issue.attachments} commentAttachments={commentAttachments} />
                   </div>
                 </TabsContent>
               )}

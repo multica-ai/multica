@@ -146,6 +146,57 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  // FIR-2680 — create a named channel (kind='channel'). Channels are issues, so
+  // the returned id is tracked in createdIssueIds and torn down by cleanup().
+  async createChannel(name: string, memberIds: string[] = [], agentIds: string[] = []) {
+    const res = await this.authedFetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify({ kind: "channel", name, member_ids: memberIds, agent_ids: agentIds }),
+    });
+    if (!res.ok) {
+      throw new Error(`createChannel failed: ${res.status} ${await res.text()}`);
+    }
+    const channel = await res.json();
+    this.createdIssueIds.push(channel.id);
+    return channel;
+  }
+
+  // FIR-2680 — flip a cerebro workspace feature flag on/off directly in the DB
+  // (the flag defaults OFF; the guard + prompt only run when it is ON).
+  async setWorkspaceFeatureFlag(flagKey: string, enabled: boolean) {
+    if (!this.workspaceId) throw new Error("ensureWorkspace must run before setWorkspaceFeatureFlag");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
+         VALUES ($1, '00000000-0000-0000-0000-000000000000', $2, $3)
+         ON CONFLICT (workspace_id, user_id, flag_key)
+         DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()`,
+        [this.workspaceId, flagKey, enabled],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
+  // FIR-2680 — count 'mentioned' inbox rows for a recipient on an issue/channel,
+  // so a test can assert whether a mention notification was (not) delivered.
+  async countMentionedRows(issueId: string, recipientId: string): Promise<number> {
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const res = await client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM inbox_item
+         WHERE issue_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND type = 'mentioned'`,
+        [issueId, recipientId],
+      );
+      return Number(res.rows[0]?.n ?? "0");
+    } finally {
+      await client.end();
+    }
+  }
+
   async createProject(title: string, opts?: Record<string, unknown>) {
     const res = await this.authedFetch("/api/projects", {
       method: "POST",

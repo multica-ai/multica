@@ -3,6 +3,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { collectionFolderKeys } from "@multica/cerebro-collections";
 import {
   createEntityFolder,
   deleteEntityFolder,
@@ -17,6 +18,20 @@ import type {
   UpdateEntityFolderInput,
 } from "./types";
 
+// FIR-2688: the Settings → Collections tab reads skill/autopilot folders through
+// its own cache key (`collection-folders`), disjoint from `entityFolderKeys`. A
+// folder create/rename/move/delete here must also invalidate that key so the
+// Collections tree stays aligned with the surface without a hard refresh.
+function invalidateEntityCollections(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  kind: EntityFolderKind,
+) {
+  void qc.invalidateQueries({
+    queryKey: collectionFolderKeys.entity(wsId, kind),
+  });
+}
+
 export function useCreateEntityFolder() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -26,6 +41,7 @@ export function useCreateEntityFolder() {
       void qc.invalidateQueries({
         queryKey: entityFolderKeys.folders(wsId, input.kind),
       });
+      invalidateEntityCollections(qc, wsId, input.kind);
     },
   });
 }
@@ -40,6 +56,7 @@ export function useUpdateEntityFolder(kind: EntityFolderKind) {
       void qc.invalidateQueries({
         queryKey: entityFolderKeys.folders(wsId, kind),
       });
+      invalidateEntityCollections(qc, wsId, kind);
     },
   });
 }
@@ -58,6 +75,7 @@ export function useDeleteEntityFolder(kind: EntityFolderKind) {
       void qc.invalidateQueries({
         queryKey: entityFolderKeys.items(wsId, kind),
       });
+      invalidateEntityCollections(qc, wsId, kind);
     },
   });
 }

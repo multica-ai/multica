@@ -16,8 +16,17 @@ import { z } from "zod";
 
 // --- types ------------------------------------------------------------------
 
-/** The per-layer authoring choice for one tool. `inherit` follows the layer below. */
-export type ToolSetting = "inherit" | "allow" | "ask" | "deny";
+/**
+ * The per-layer authoring choice for one tool. `inherit` follows the layer
+ * below. `disable` (FIR-2351 follow-up, product decision 2026-07-06) is a
+ * WORKSPACE-ONLY state: it makes a workspace Deny a hard, unopenable floor for
+ * this one permission — no Group/User/Agent Allow can loosen it, unlike an
+ * ordinary workspace Deny. Only settable/clearable by a workspace owner/admin
+ * (enforced server-side; see requireWorkspaceOwnerAdmin in
+ * server/internal/handler/group_permissions_cerebro.go). The UI only offers it
+ * on the workspace-layer editor — see WORKSPACE_SETTING_CHOICES below.
+ */
+export type ToolSetting = "inherit" | "allow" | "ask" | "deny" | "disable";
 /**
  * A rung of the chain. The ceiling slot is filled by exactly one of `user` (a
  * human run) or `system` (a human-less autopilot run, FIR-1609) per resolution —
@@ -244,7 +253,7 @@ export function permissionDescription(
 
 // --- schemas (fail closed) --------------------------------------------------
 
-const TOOL_SETTINGS = ["inherit", "allow", "ask", "deny"] as const;
+const TOOL_SETTINGS = ["inherit", "allow", "ask", "deny", "disable"] as const;
 
 // A per-layer setting drifts to "no override" (null) rather than failing the
 // whole table parse.

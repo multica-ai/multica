@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { DocumentViewPage } from "@multica/cerebro-artifacts/views/pages";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
 import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
+import { NoteVersionsDialog } from "@multica/cerebro-notes/views/note-versions-dialog";
 
 export default function Page() {
   const params = useParams<{ id: string }>();
@@ -39,6 +40,16 @@ export default function Page() {
       )}
       renderReferences={({ artifactId }) => (
         <NoteReferencesSection noteId={artifactId} />
+      )}
+      // FIR-2697 — version history for a document reuses the note version dialog;
+      // the artifact id is a valid noteId for /api/notes/{id}/versions.
+      renderVersions={({ artifactId, open, onOpenChange, onRestored }) => (
+        <NoteVersionsDialog
+          noteId={artifactId}
+          open={open}
+          onOpenChange={onOpenChange}
+          onRestored={onRestored}
+        />
       )}
     />
   );

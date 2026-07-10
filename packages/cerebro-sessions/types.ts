@@ -17,6 +17,10 @@ export interface Session {
   root_comment_id: string | null;
   position: number;
   name: string;
+  // FIR-2283 followup: the workflow phase this session (thread) belongs to,
+  // when it was started by an Issue workflow — "plan" | "build" | "review".
+  // Null/absent for ordinary (non-workflow) sessions.
+  phase: string | null;
   handoff: HandoffBrief | null;
   created_at: string;
   updated_at: string;
@@ -61,6 +65,12 @@ export interface ContextUsage {
   // that predate footprint history (an older server omits them; default to 0).
   compactions: number;
   last_run_compaction: boolean;
+  // FIR-2279: RFC3339 timestamp of when the latest run in this session finished.
+  // Anthropic keeps the prompt cache warm ~5 minutes past the last call, so the
+  // bar counts down from here to a "cache cold" state (after which resuming
+  // re-pays the full cache-write). Null/absent when there is no run yet or an
+  // older server omits it — the bar then shows no timer.
+  last_activity_at?: string | null;
 }
 
 // FIR-1931: one row of the per-session usage breakdown the context bar opens in a

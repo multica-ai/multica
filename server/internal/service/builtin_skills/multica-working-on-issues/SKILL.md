@@ -164,6 +164,27 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+<!-- CEREBRO-PATCH(create-issue-workflow-skill): FIR-2283 followup — document starting a new issue on an Issue workflow from the CLI/API. -->
+
+## Start a new issue on an Issue workflow (`--workflow`)
+
+An **Issue workflow** is a saved recipe that runs a plan → build → delivery-gate
+loop on an issue. Attach one at create time so the issue starts on the loop in a
+single call — the same thing the Create-issue modal's workflow picker does.
+
+```bash
+multica workflow list                       # find the recipe ID (only Issue workflows)
+multica issue create --title "..." --workflow <workflow-id>
+```
+
+- `--workflow` takes an Issue workflow recipe ID (from `multica workflow list`).
+  Plain (standard) workflows are rejected.
+- Activation is best-effort: the issue is always created. If the workflow could
+  not start, the create still succeeds and a warning is printed on stderr; the
+  JSON response carries `workflow_activated` / `workflow_activation_error`.
+- **API parity:** `POST /api/issues` accepts the same `workflow_id` field, and
+  the response echoes `workflow_activated` / `workflow_activation_error`.
+
 <!-- CEREBRO-PATCH(handoff-start-new-skill): FIR-2021 — document the one-command handoff (--start-new / start_new). -->
 
 ## Sessions are comment threads (start fresh vs. resume)

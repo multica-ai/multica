@@ -1690,6 +1690,21 @@ func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(runtime-config-wakeup-mandatory): FIR-2679 — the wakeup brief must route agents to the cerebro-agent-triggers skill (the single home for interval choice, no-working-hours, event-triggers, cheaper-model) instead of restating the rules inline.
+func TestWakeupBriefRoutesToTriggersSkill(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "44444444-5555-6666-7777-888888888888"})
+	for _, want := range []string{
+		"read the `cerebro-agent-triggers` skill",
+		"NO working hours",
+		"never fires Opus",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("wakeup brief missing skill-routing text %q", want)
+		}
+	}
+}
+
 // CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — the "repository CLAUDE.md is repo-only" rule must reach every agent that edits repo files (issue-bound runs) and must NOT dilute chat/quick-create/autopilot runs.
 // FIR-1585 — keep workspace/agent/process content out of repository CLAUDE.md / AGENTS.md.
 func TestClaudeMdScopeRulePresentForIssueRunsOnly(t *testing.T) {

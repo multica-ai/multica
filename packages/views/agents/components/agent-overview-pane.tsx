@@ -311,7 +311,8 @@ export function AgentOverviewPane({
         <TabContent>
           <McpConfigTab
             agent={agent}
-            onSave={(updates) => onUpdate(agent.id, updates)}
+            // CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — MCP edits go through propose/approve.
+            canEdit={canEdit}
             onDirtyChange={setActiveDirty}
           />
         </TabContent>

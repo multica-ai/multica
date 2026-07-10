@@ -21,6 +21,19 @@ import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeList } from "./runtime-list";
+// CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — full-field search + column picker.
+import "@multica/cerebro-types";
+import {
+  matchesRuntimeSearch,
+  // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — bound-agent-name index.
+  buildAgentNamesByRuntime,
+  useCerebroAccountsList,
+  RuntimeColumnPicker,
+} from "@multica/cerebro-runtime/views";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — agents for the name index.
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { useHealthLabel } from "./shared";
 import { useT } from "../../i18n";
 
 type RuntimeFilter = "mine" | "all";
@@ -98,6 +111,27 @@ export function RuntimesPage({
     runtimeListOptions(wsId),
   );
 
+  // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — full-field search resolves
+  // per-row account identity, owner name, and health label so the search box
+  // matches every column. Gated by the flag; off = original name/provider search.
+  const columnsEnabled = useFlagValue("cerebro_interface_columns");
+  const labelOf = useHealthLabel();
+  const { data: accounts = [] } = useCerebroAccountsList();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const accountLabelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.id, `${a.login_identity} ${a.provider}`);
+    return m;
+  }, [accounts]);
+  const memberNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const mem of members) m.set(mem.user_id, mem.name);
+    return m;
+  }, [members]);
+  // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — runtime_id → bound agent names.
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentNamesByRuntime = useMemo(() => buildAgentNamesByRuntime(agents), [agents]);
+
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
   }, [qc, wsId]);
@@ -133,16 +167,45 @@ export function RuntimesPage({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scopedRuntimes.filter((r) => {
+      const health = deriveRuntimeHealth(r, now);
       if (healthFilter !== "all") {
-        if (deriveRuntimeHealth(r, now) !== healthFilter) return false;
+        if (health !== healthFilter) return false;
       }
       if (q) {
-        const haystack = `${r.name} ${r.provider} ${r.device_info ?? ""}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
+        // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — search all fields.
+        if (columnsEnabled) {
+          const ok = matchesRuntimeSearch(r, q, {
+            accountLabel: r.current_account_id
+              ? accountLabelById.get(r.current_account_id) ?? null
+              : null,
+            ownerName: r.owner_id
+              ? memberNameById.get(r.owner_id) ?? null
+              : null,
+            healthLabel: labelOf(health),
+            // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — match bound agent names.
+            agentNames: agentNamesByRuntime.get(r.id) ?? null,
+          });
+          if (!ok) return false;
+        } else {
+          const haystack =
+            `${r.name} ${r.provider} ${r.device_info ?? ""}`.toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
       }
       return true;
     });
-  }, [scopedRuntimes, healthFilter, search, now]);
+  }, [
+    scopedRuntimes,
+    healthFilter,
+    search,
+    now,
+    columnsEnabled,
+    accountLabelById,
+    memberNameById,
+    // CEREBRO-PATCH(runtime-search-by-agent-name): FIR-2669 — re-filter when agent index changes.
+    agentNamesByRuntime,
+    labelOf,
+  ]);
 
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
@@ -159,7 +222,8 @@ export function RuntimesPage({
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+      {/* CEREBRO-PATCH(runtime-list-mobile-unbox): FIR-2669 — edge-to-edge on mobile (no p-6 inset) like the agents page; keep the padded frame at md+. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-0 md:p-6">
         {topSlot}
 
         {showEmpty ? (
@@ -167,12 +231,14 @@ export function RuntimesPage({
             <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+          // CEREBRO-PATCH(runtime-list-mobile-unbox): FIR-2669 — no visible box on mobile (no border/rounding); the card frame returns at md+.
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-background md:rounded-lg md:border">
             <CardToolbar
               search={search}
               setSearch={setSearch}
               scope={scope}
               setScope={setScope}
+              showColumnPicker={columnsEnabled}
             />
             <FilterChipsRow
               healthFilter={healthFilter}
@@ -254,9 +320,18 @@ function PageHeaderBar({
             {t(($) => $.cloud_runtime.action)}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
+        {/* CEREBRO-PATCH(runtimes-add-computer-icon-only): FIR-2669 — icon-only "+" below md (mirrors the agents "New agent" button). */}
+        <Button
+          type="button"
+          size="sm"
+          onClick={onConnectRemote}
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.connect_remote)}
+        >
           <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
+          <span className="hidden md:inline">
+            {t(($) => $.page.connect_remote)}
+          </span>
         </Button>
       </div>
     </PageHeader>
@@ -281,29 +356,36 @@ function CardToolbar({
   setSearch,
   scope,
   setScope,
+  // CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — column picker toggle.
+  showColumnPicker,
 }: {
   search: string;
   setSearch: (v: string) => void;
   scope: RuntimeFilter;
   setScope: (v: RuntimeFilter) => void;
+  showColumnPicker: boolean;
 }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-      <div className="relative">
+    // CEREBRO-PATCH(runtime-toolbar-mobile-fit): FIR-2669 — flexible search + horizontal scroll so the scope toggle, column picker and Live indicator stay reachable on a phone (were clipped by the card's overflow-hidden).
+    <div className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b px-4">
+      <div className="relative min-w-0 flex-1 md:flex-none">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-64 pl-8 text-sm"
+          className="h-8 w-full pl-8 text-sm md:w-64"
         />
       </div>
       <ScopeSegment value={scope} onChange={setScope} />
+      {/* CEREBRO-PATCH(runtimes-page-columns): FIR-2669 — column picker + Live grouped right. */}
+      <div className="ml-auto flex items-center gap-2">
+        {showColumnPicker && <RuntimeColumnPicker />}
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="ml-auto inline-flex cursor-default select-none items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="inline-flex cursor-default select-none items-center gap-1.5 text-xs text-muted-foreground">
               <span className="relative inline-flex h-2 w-2 items-center justify-center">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success/60" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
@@ -316,6 +398,7 @@ function CardToolbar({
           {t(($) => $.page.live_tooltip)}
         </TooltipContent>
       </Tooltip>
+      </div>
     </div>
   );
 }

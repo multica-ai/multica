@@ -220,6 +220,7 @@ export function AutopilotsPage() {
     kind: "autopilot",
     items: folderItems,
     itemNoun: "autopilots",
+    navigation: router, // CEREBRO-PATCH(autopilot-folder-deeplink): FIR-2688 — inject nav for ?folder deep-link.
   });
   const folderIncludes = folderView.includes; // CEREBRO-PATCH(autopilot-folder-loop): FIR-1486 — keep the filter dependency stable.
   const visibleAutopilots = useMemo(

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -28,11 +29,13 @@ import (
 
 // CheckDispatch is one check the engine asks a runtime to run.
 type CheckDispatch struct {
-	AgentID string   // worker agent whose runtime runs the check
-	IssueID string   // issue the loop is building
-	Gate    string   // stable per-gate key (the workflow id)
-	Round   int32    // loop round the check belongs to
-	Argv    []string // the check command, argv form (never a shell string)
+	AgentID       string   // worker agent whose runtime runs the check
+	IssueID       string   // issue the loop is building
+	Gate          string   // stable per-gate key (the workflow id)
+	Round         int32    // loop round the check belongs to
+	Argv          []string // the check command, argv form (never a shell string)
+	Model         string
+	ThinkingLevel string
 }
 
 // CheckDispatcher sends a single enqueued check out to a runtime. It is the
@@ -81,24 +84,34 @@ type HumanDispatch struct {
 
 // JudgeDispatch is one judge check the engine asks a judge agent to score.
 type JudgeDispatch struct {
-	AgentID   string // judge agent whose runtime scores the check
-	IssueID   string // issue the loop is building
-	Gate      string // stable per-gate key (the workflow id)
-	Round     int32  // loop round the check belongs to
-	CheckID   string // the verification id from loop.yaml, echoed back on report
-	Rubric    string // what the judge scores the delivered work against
-	SkillName string // the skill dispatched to run the judgment
+	AgentID       string // judge agent whose runtime scores the check
+	IssueID       string // issue the loop is building
+	Gate          string // stable per-gate key (the workflow id)
+	Round         int32  // loop round the check belongs to
+	CheckID       string // the verification id from loop.yaml, echoed back on report
+	Rubric        string // what the judge scores the delivered work against
+	SkillName     string // the skill dispatched to run the judgment
+	Model         string
+	ThinkingLevel string
 }
 
 // RevisionDispatch is one round's worth of failed checks the engine asks the
 // worker agent to fix by re-running its build skill.
 type RevisionDispatch struct {
-	AgentID   string         // worker agent whose runtime re-runs the build
-	IssueID   string         // issue the loop is building
-	Gate      string         // stable per-gate key (the workflow id)
-	Round     int32          // the new round this revision starts
-	SkillName string         // the skill to re-dispatch (Compile sets the build skill)
-	Failures  []CheckOutcome // the outcomes that triggered this revision
+	AgentID       string // worker agent whose runtime re-runs the build
+	IssueID       string // issue the loop is building
+	Gate          string // stable per-gate key (the workflow id)
+	Round         int32  // the new round this revision starts
+	SkillName     string // the skill to re-dispatch (Compile sets the build skill)
+	Model         string
+	ThinkingLevel string
+	Failures      []CheckOutcome // the outcomes that triggered this revision
+	// PhaseLabel names the build phase this dispatch belongs to (e.g. "Build 2")
+	// for a multi-phase loop (FIR-2283 followup point 6). When set, this is a
+	// fresh next-phase build (not a fix-what-failed revision) — it is stamped
+	// on the task as loop_phase so the run's session is named/badged for the
+	// phase, and Failures is empty. Empty for a single-phase revision.
+	PhaseLabel string
 }
 
 // DispatchQueries is the narrow slice of the upstream issue queries the task
@@ -108,17 +121,40 @@ type RevisionDispatch struct {
 type DispatchQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
+	SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error
+	// Issue-bound phase dispatch (Tine live-test fix): a next-phase build run
+	// is enqueued ON the loop's issue behind a visible kickoff comment, not as
+	// a detached quick_create task. Both are satisfied by upstream db.Queries.
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error)
+	CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error)
+}
+
+// SessionStamper badges the session thread a phase dispatch opens (name +
+// phase on the cerebro_session row keyed by the thread root). Implemented by
+// workflows.SessionPhaseStamper; optional and nil-safe on the dispatcher.
+type SessionStamper interface {
+	StampSession(ctx context.Context, issueID, rootCommentID pgtype.UUID, phase, name string) error
 }
 
 // TaskDispatcher dispatches a check by enqueuing an agent task on the worker
 // agent's runtime, reusing the quick_create task shape the daemon already runs.
 type TaskDispatcher struct {
 	queries DispatchQueries
+	stamper SessionStamper
 }
 
 // NewTaskDispatcher builds a TaskDispatcher over the given issue queries.
 func NewTaskDispatcher(queries DispatchQueries) *TaskDispatcher {
 	return &TaskDispatcher{queries: queries}
+}
+
+// WithSessionStamper plugs in the dispatch-time session badge writer used by
+// issue-bound phase dispatches (DispatchRevision with a PhaseLabel).
+func (t *TaskDispatcher) WithSessionStamper(s SessionStamper) *TaskDispatcher {
+	t.stamper = s
+	return t
 }
 
 // DispatchCheck enqueues a quick_create task asking the worker agent to run the
@@ -163,13 +199,17 @@ func (t *TaskDispatcher) DispatchCheck(ctx context.Context, d CheckDispatch) err
 		return fmt.Errorf("dispatch check: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	task, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
 		RuntimeID: agent.RuntimeID,
 		Priority:  0,
 		Context:   contextJSON,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch check: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch check"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -208,10 +248,49 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		return fmt.Errorf("dispatch revision: agent has no runtime")
 	}
 
-	contextJSON, err := json.Marshal(map[string]any{
-		"type":         "quick_create",
-		"prompt":       buildRevisionPrompt(d),
-		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+	issueID, err := util.ParseUUID(d.IssueID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: parse issue id: %w", err)
+	}
+	issue, err := t.queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: load issue: %w", err)
+	}
+
+	// Issue-bound dispatch (Tine live-test fix): the revision / next-phase
+	// build runs ON the loop's issue. The kickoff comment opens the session
+	// thread the user watches; the task is comment-triggered so the agent's
+	// whole run lands on the issue timeline — never a detached quick_create
+	// task with no issue link.
+	prompt := buildRevisionPrompt(d)
+	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    agentID,
+		Content:     prompt,
+		Type:        "comment",
+		ParentID:    pgtype.UUID{}, // top-level == new session root
+	})
+	if err != nil {
+		return fmt.Errorf("dispatch revision: create kickoff comment: %w", err)
+	}
+
+	// Session name: the phase label for a multi-phase build ("Build 2"),
+	// otherwise the revision round ("Build round 3"). Badge is always "build".
+	name := d.PhaseLabel
+	if name == "" {
+		name = fmt.Sprintf("Build round %d", d.Round)
+	}
+	if t.stamper != nil {
+		if err := t.stamper.StampSession(ctx, issue.ID, comment.ID, "build", name); err != nil {
+			slog.Warn("dispatch revision: dispatch-time session badge failed",
+				"issue_id", d.IssueID, "error", err)
+		}
+	}
+
+	taskContext := map[string]any{
+		"type": "workflow_phase",
 		// Structured loop_revision fields, mirroring loop_check: bookkeeping
 		// the daemon ignores today, pinned for a later deterministic handler.
 		"loop_revision": map[string]any{
@@ -219,18 +298,31 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 			"gate":     d.Gate,
 			"round":    d.Round,
 		},
-	})
+		"workflow_target_issue_id": d.IssueID,
+		"loop_phase":               "build",
+		"loop_session_name":        name,
+	}
+	contextJSON, err := json.Marshal(taskContext)
 	if err != nil {
 		return fmt.Errorf("dispatch revision: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		AgentID:   agentID,
-		RuntimeID: agent.RuntimeID,
-		Priority:  0,
-		Context:   contextJSON,
-	}); err != nil {
+	task, err := t.queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		IssueID:           issue.ID,
+		Priority:          0,
+		TriggerCommentID:  comment.ID,
+		Context:           contextJSON,
+		TriggerSummary:    pgtype.Text{String: name + " — " + d.SkillName, Valid: true},
+		Title:             pgtype.Text{String: name + ": " + issue.Title, Valid: true},
+		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true},
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch revision: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch revision"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -278,13 +370,17 @@ func (t *TaskDispatcher) DispatchJudge(ctx context.Context, d JudgeDispatch) err
 		return fmt.Errorf("dispatch judge: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	task, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
 		RuntimeID: agent.RuntimeID,
 		Priority:  0,
 		Context:   contextJSON,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch judge: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch judge"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -357,6 +453,28 @@ func (t *TaskDispatcher) DispatchHuman(ctx context.Context, d HumanDispatch) err
 	return nil
 }
 
+func (t *TaskDispatcher) applyTaskOverrides(ctx context.Context, taskID pgtype.UUID, model, thinking, label string) error {
+	model = strings.TrimSpace(model)
+	thinking = strings.TrimSpace(thinking)
+	if model != "" {
+		if err := t.queries.SetAgentTaskModelOverride(ctx, db.SetAgentTaskModelOverrideParams{
+			ID:            taskID,
+			ModelOverride: model,
+		}); err != nil {
+			return fmt.Errorf("%s: set model override: %w", label, err)
+		}
+	}
+	if thinking != "" {
+		if err := t.queries.SetAgentTaskThinkingOverride(ctx, db.SetAgentTaskThinkingOverrideParams{
+			ID:               taskID,
+			ThinkingOverride: thinking,
+		}); err != nil {
+			return fmt.Errorf("%s: set thinking override: %w", label, err)
+		}
+	}
+	return nil
+}
+
 // buildHumanPrompt renders the instruction an agent standing in for a human
 // sign-off sees. Unlike a judge check (score a rubric), this asks for an
 // explicit approve/reject decision plus a note explaining it either way.
@@ -374,6 +492,14 @@ func buildHumanPrompt(d HumanDispatch) string {
 // on a revision: which checks failed and with what exit code, so the agent
 // does not have to re-discover the failure before it can fix it.
 func buildRevisionPrompt(d RevisionDispatch) string {
+	// A fresh next-phase build (multi-phase): no failures to fix — the previous
+	// phase's gate passed, this is the start of the next build phase.
+	if d.PhaseLabel != "" && len(d.Failures) == 0 {
+		return fmt.Sprintf(
+			"The previous build phase passed its review. Start build phase %q for this issue: run the phase's build skill, then move the issue to review when done so the loop can verify this phase.",
+			d.PhaseLabel,
+		)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Loop gate %s failed and needs round %d: the previous round's verification checks did not all pass. Fix the issue, then let the loop re-verify.\n\nFailed checks:\n", d.Gate, d.Round)
 	for _, o := range d.Failures {

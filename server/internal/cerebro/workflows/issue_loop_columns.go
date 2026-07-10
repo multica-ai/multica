@@ -12,8 +12,11 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -123,7 +126,9 @@ func (s *IssueLoopColumnStore) Set(ctx context.Context, id pgtype.UUID, workflow
 	return nil
 }
 
-// SetGeneratedFrom marks a row as one of parentID's compiled child rules.
+// SetGeneratedFrom marks a row as one of parentID's compiled child rules —
+// the PROJECT-WIDE compile of the recipe (generated_for_issue_id stays NULL).
+// Use SetGeneratedFromForIssue for a per-issue activation.
 func (s *IssueLoopColumnStore) SetGeneratedFrom(ctx context.Context, id, parentID pgtype.UUID) error {
 	if _, err := s.pool.Exec(ctx,
 		`UPDATE cerebro_workflow SET generated_from_workflow_id = $2 WHERE id = $1`,
@@ -134,15 +139,30 @@ func (s *IssueLoopColumnStore) SetGeneratedFrom(ctx context.Context, id, parentI
 	return nil
 }
 
-// GeneratedChildIDByName returns the id of one of parentID's generated child
-// rules by its rule name (e.g. "loop:delivery-gate") — this IS the "gate" key
-// loops.GateEvaluator uses (gate = the delivery-gate child workflow's own
-// id), so the control strip and the approve-human-check endpoint resolve it
-// once per request rather than the client having to know or store it.
+// SetGeneratedFromForIssue marks a row as one of parentID's compiled child
+// rules for one specific issue activation (FIR-2283 v2 point 8) — the same
+// recipe compiled again for a DIFFERENT issue gets its own independent set
+// of rows, distinguished by issueID.
+func (s *IssueLoopColumnStore) SetGeneratedFromForIssue(ctx context.Context, id, parentID, issueID pgtype.UUID) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_workflow SET generated_from_workflow_id = $2, generated_for_issue_id = $3 WHERE id = $1`,
+		id, parentID, issueID,
+	); err != nil {
+		return fmt.Errorf("set generated-from-workflow-id for issue: %w", err)
+	}
+	return nil
+}
+
+// GeneratedChildIDByName returns the id of one of parentID's PROJECT-WIDE
+// generated child rules by its rule name (e.g. "loop:delivery-gate") — this
+// IS the "gate" key loops.GateEvaluator uses (gate = the delivery-gate child
+// workflow's own id), so the control strip and the approve-human-check
+// endpoint resolve it once per request rather than the client having to know
+// or store it. Use GeneratedChildIDByNameForIssue for a per-issue activation.
 func (s *IssueLoopColumnStore) GeneratedChildIDByName(ctx context.Context, parentID pgtype.UUID, name string) (pgtype.UUID, error) {
 	var id pgtype.UUID
 	if err := s.pool.QueryRow(ctx,
-		`SELECT id FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND name = $2 LIMIT 1`,
+		`SELECT id FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id IS NULL AND name = $2 LIMIT 1`,
 		parentID, name,
 	).Scan(&id); err != nil {
 		return pgtype.UUID{}, fmt.Errorf("find generated child %q: %w", name, err)
@@ -150,16 +170,139 @@ func (s *IssueLoopColumnStore) GeneratedChildIDByName(ctx context.Context, paren
 	return id, nil
 }
 
-// DeleteGeneratedChildren removes every row previously generated from
-// parentID, so re-syncing a recipe (on Update) never leaves a stale rule
-// behind — the bridge always deletes-then-recreates rather than trying to
-// diff the old and new rule sets.
+// GeneratedChildIDByNameForIssue mirrors GeneratedChildIDByName, scoped to
+// one issue's activation of the recipe.
+func (s *IssueLoopColumnStore) GeneratedChildIDByNameForIssue(ctx context.Context, parentID, issueID pgtype.UUID, name string) (pgtype.UUID, error) {
+	var id pgtype.UUID
+	if err := s.pool.QueryRow(ctx,
+		`SELECT id FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id = $2 AND name = $3 LIMIT 1`,
+		parentID, issueID, name,
+	).Scan(&id); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("find generated child %q for issue: %w", name, err)
+	}
+	return id, nil
+}
+
+// DeleteGeneratedChildren removes every PROJECT-WIDE row previously
+// generated from parentID (generated_for_issue_id IS NULL), so re-syncing a
+// recipe (on Update) never leaves a stale rule behind — the bridge always
+// deletes-then-recreates rather than trying to diff the old and new rule
+// sets. Scoped to NULL so this never touches another issue's independent
+// activation of the same recipe — see DeleteGeneratedChildrenForIssue.
 func (s *IssueLoopColumnStore) DeleteGeneratedChildren(ctx context.Context, parentID pgtype.UUID) error {
 	if _, err := s.pool.Exec(ctx,
-		`DELETE FROM cerebro_workflow WHERE generated_from_workflow_id = $1`,
+		`DELETE FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id IS NULL`,
 		parentID,
 	); err != nil {
 		return fmt.Errorf("delete generated issue-loop rules: %w", err)
 	}
 	return nil
+}
+
+// DeleteGeneratedChildrenForIssue removes every row previously generated
+// from parentID for issueID's activation specifically — re-activating the
+// same recipe on the same issue deletes-then-recreates just that issue's
+// rows, leaving every OTHER issue's activation (and the project-wide compile)
+// untouched.
+func (s *IssueLoopColumnStore) DeleteGeneratedChildrenForIssue(ctx context.Context, parentID, issueID pgtype.UUID) error {
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM cerebro_workflow WHERE generated_from_workflow_id = $1 AND generated_for_issue_id = $2`,
+		parentID, issueID,
+	); err != nil {
+		return fmt.Errorf("delete generated issue-loop rules for issue: %w", err)
+	}
+	return nil
+}
+
+// DeleteAllGeneratedChildrenForIssue removes every issue-scoped generated row
+// for issueID, regardless of which recipe produced it. Use this before
+// activating a recipe from the issue sidebar: one issue can only have one
+// active Issue workflow recipe at a time, so switching recipes must remove
+// the old recipe's rules as well as any stale copy of the new recipe's rules.
+func (s *IssueLoopColumnStore) DeleteAllGeneratedChildrenForIssue(ctx context.Context, issueID pgtype.UUID) error {
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM cerebro_workflow WHERE generated_for_issue_id = $1`,
+		issueID,
+	); err != nil {
+		return fmt.Errorf("delete generated issue-loop rules for issue: %w", err)
+	}
+	return nil
+}
+
+// ActiveWorkflowForIssue returns the recipe (workflow) id currently activated
+// on issueID, if any. The binding is fully derivable from the materialized
+// rows — no separate "issue -> workflow" table — because every rule
+// SyncIssueLoop compiles for an activation carries both
+// generated_from_workflow_id (which recipe) and generated_for_issue_id
+// (which issue).
+func (s *IssueLoopColumnStore) ActiveWorkflowForIssue(ctx context.Context, issueID pgtype.UUID) (pgtype.UUID, bool, error) {
+	var id pgtype.UUID
+	err := s.pool.QueryRow(ctx,
+		`SELECT generated_from_workflow_id FROM cerebro_workflow
+		 WHERE generated_for_issue_id = $1 AND generated_from_workflow_id IS NOT NULL
+		 GROUP BY generated_from_workflow_id
+		 ORDER BY max(created_at) DESC
+		 LIMIT 1`,
+		issueID,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pgtype.UUID{}, false, nil
+	}
+	if err != nil {
+		return pgtype.UUID{}, false, fmt.Errorf("load active workflow for issue: %w", err)
+	}
+	return id, true, nil
+}
+
+// IssueLoopRun is one issue that has run through a recipe's loop — FIR-2283 v2
+// point 7's "which issues hit this workflow" log. Derived from the generated
+// child rows (each carries generated_from_workflow_id + generated_for_issue_id),
+// so it needs no separate run table, exactly as ActiveWorkflowForIssue derives
+// the reverse direction.
+type IssueLoopRun struct {
+	IssueID          string
+	IssueNumber      int32
+	IssueTitle       string
+	IssueStatus      string
+	FirstActivatedAt time.Time
+	LastActivatedAt  time.Time
+}
+
+// ListIssueRunsForWorkflow returns every issue that has been activated on
+// recipeID's loop, newest activation first. One row per issue: FIRST/LAST
+// activation collapse a re-activated issue into a single entry. This is the
+// read model behind the run-history page's issue list (point 7).
+func (s *IssueLoopColumnStore) ListIssueRunsForWorkflow(ctx context.Context, recipeID pgtype.UUID) ([]IssueLoopRun, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT i.id, i.number, i.title, i.status,
+		        MIN(w.created_at) AS first_activated_at,
+		        MAX(w.created_at) AS last_activated_at
+		 FROM cerebro_workflow w
+		 JOIN issue i ON i.id = w.generated_for_issue_id
+		 WHERE w.generated_from_workflow_id = $1
+		   AND w.generated_for_issue_id IS NOT NULL
+		 GROUP BY i.id, i.number, i.title, i.status
+		 ORDER BY max(w.created_at) DESC`,
+		recipeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list issue runs for workflow: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]IssueLoopRun, 0)
+	for rows.Next() {
+		var id pgtype.UUID
+		var run IssueLoopRun
+		if err := rows.Scan(&id, &run.IssueNumber, &run.IssueTitle, &run.IssueStatus,
+			&run.FirstActivatedAt, &run.LastActivatedAt); err != nil {
+			return nil, fmt.Errorf("scan issue run: %w", err)
+		}
+		run.IssueID = util.UUIDToString(id)
+		out = append(out, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate issue runs: %w", err)
+	}
+	return out, nil
 }

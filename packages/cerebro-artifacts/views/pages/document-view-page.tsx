@@ -12,6 +12,7 @@ import {
   Save,
   Replace,
   MessageSquare,
+  History,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -50,6 +51,7 @@ import { EditableTitle } from "../components/editable-title";
 import { EditorActionsMenu } from "../components/editor-actions-menu";
 import { EntityMetaHeader } from "../components/entity-meta-header";
 import { FindReplaceBar } from "../components/find-replace-bar";
+import { FolderSuggestionBanner } from "../components/folder-suggestion-banner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Artifact } from "@multica/core/types";
 
@@ -90,6 +92,21 @@ export type DocumentCommentsSlot = (opts: {
 // as the comments panel.
 export type DocumentReferencesSlot = (opts: {
   artifactId: string;
+}) => React.ReactNode;
+
+// FIR-2697 — version history for a document. Injected as a slot (same
+// package-cycle reason as the comments panel) so cerebro-artifacts does not need
+// to import cerebro-notes. The host renders the shared NoteVersionsDialog with
+// the artifact id as noteId — the /api/notes/{id}/versions routes accept a plain
+// artifact id, exactly as the comments panel already does.
+export type DocumentVersionsSlot = (opts: {
+  artifactId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  // FIR-2697: the host wires this so a restore re-seeds the inline editor with
+  // the restored body — the editor only re-seeds on a doc-id change or an
+  // explicit signal, so without this a restore leaves stale text until reload.
+  onRestored: (body: string) => void;
 }) => React.ReactNode;
 
 function slugifyForFilename(title: string): string {
@@ -245,10 +262,12 @@ export function DocumentViewPage({
   artifactId,
   renderComments,
   renderReferences,
+  renderVersions,
 }: {
   artifactId: string;
   renderComments?: DocumentCommentsSlot;
   renderReferences?: DocumentReferencesSlot;
+  renderVersions?: DocumentVersionsSlot;
 }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -274,6 +293,9 @@ export function DocumentViewPage({
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const agentCollabEnabled = useFeatureFlag("cerebro_note_agent_collab");
   const [showComments, setShowComments] = React.useState(false);
+  // FIR-2697 — version history for this document (reuses the note version engine).
+  const versionsEnabled = useFeatureFlag("cerebro_document_versions");
+  const [showVersions, setShowVersions] = React.useState(false);
   // FIR-1621 "marker og kommentér" — same select-and-comment state the Notes
   // editor owns: the live editor (for the anchor highlight), the in-progress
   // selection being commented on, and which existing comment is "active".
@@ -302,6 +324,7 @@ export function DocumentViewPage({
 
   React.useEffect(() => {
     setShowComments(false);
+    setShowVersions(false);
     setDraftQuote(null);
     setActiveAnchorId(null);
     setEditor(null);
@@ -444,6 +467,13 @@ export function DocumentViewPage({
                   onSelect: () =>
                     showComments ? closeComments() : setShowComments(true),
                 },
+              versionsEnabled &&
+                renderVersions && {
+                  key: "versions",
+                  label: "Version history",
+                  icon: History,
+                  onSelect: () => setShowVersions(true),
+                },
               canEdit &&
                 artifact.format === "md" && {
                   key: "find-replace",
@@ -506,6 +536,10 @@ export function DocumentViewPage({
           projectId={artifact.project_id}
           originIssueId={artifact.origin_issue_id}
         />
+
+        {/* FIR-2697 part 2 — a pending agent folder suggestion for this
+            document. Notes render the same banner with surface='note'. */}
+        <FolderSuggestionBanner artifactId={artifact.id} canResolve={canEdit} />
 
         {/* FIR-1621 (2.1) — couple this document/PDF/file to an issue or chat,
             so its comments can be sent to that destination's agent. Same picker
@@ -608,6 +642,19 @@ export function DocumentViewPage({
             </SheetContent>
           </Sheet>
         )}
+
+        {versionsEnabled && renderVersions &&
+          renderVersions({
+            artifactId: artifact.id,
+            open: showVersions,
+            onOpenChange: setShowVersions,
+            // Re-seed the inline editor with the restored content (same signal
+            // path as find&replace) so the restore shows live, not after reload.
+            onRestored: (body) => {
+              setDocBody(body);
+              setReplaceToken((t) => t + 1);
+            },
+          })}
 
         <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <AlertDialogContent>

@@ -23,6 +23,7 @@ import { useT } from "@multica/views/i18n";
 import { useNavigation } from "@multica/views/navigation";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { AddToRoundAction } from "@multica/cerebro-rounds";
 
 export function CerebroIssueDetailRoute({ id }: { id: string }) {
   const wsId = useWorkspaceId();
@@ -30,6 +31,7 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
   const router = useNavigation();
   const paths = useWorkspacePaths();
   const referencesEnabled = useFeatureFlag("cerebro_references");
+  const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
 
   // Defensive options so the gate fires the parent issue request exactly
   // once per page visit. Defaults from createQueryClient already give us
@@ -82,7 +84,7 @@ export function CerebroIssueDetailRoute({ id }: { id: string }) {
   return (
     <IssueDetail
       issueId={id}
-      extensions={referencesEnabled ? <IssueReferenceList issueId={id} /> : null}
+      extensions={<>{roundsEnabled && <AddToRoundAction issueId={id} />}{referencesEnabled && <IssueReferenceList issueId={id} />}</>}
     />
   );
 }

@@ -14,6 +14,22 @@ export const runtimeKeys = {
   latestVersion: () => ["runtimes", "latestVersion"] as const,
 };
 
+// CEREBRO-PATCH(model-registry-pricing-query): FIR-2698 the single-source model registry — a deployment-wide
+// singleton, so the key carries no workspace/entity id. Read by
+// useSyncModelRegistryPricing to feed the synchronous pricing cache that
+// packages/views/runtimes/utils.ts reads during cost estimation.
+export const modelRegistryKeys = {
+  all: () => ["cerebro", "model-registry"] as const,
+};
+
+export function modelRegistryOptions() {
+  return queryOptions({
+    queryKey: modelRegistryKeys.all(),
+    queryFn: () => api.getModelRegistry(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // Per-runtime usage. Used by the list view (each row pulls its own activity
 // sparkline + 30d cost) and by the detail page. TanStack Query naturally
 // deduplicates concurrent calls for the same runtime, so multiple components

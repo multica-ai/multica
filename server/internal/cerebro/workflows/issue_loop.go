@@ -33,12 +33,22 @@ import (
 // loops/materialize_issue_loop.go).
 type IssueLoopCompiler interface {
 	// SyncIssueLoop (re)compiles workflowID's loop_spec and replaces its
-	// previously-generated child rules with the fresh set — called after
-	// every create/update of an issue_loop workflow so the compiled rules
-	// never drift from the saved recipe. loopSpecJSON is the loop_spec
-	// column's raw JSON. Returns a user-facing error (invalid spec) as a
-	// plain error; the caller surfaces it as a 400.
+	// previously-generated PROJECT-WIDE child rules with the fresh set —
+	// called after every create/update of an issue_loop workflow so the
+	// compiled rules never drift from the saved recipe. loopSpecJSON is the
+	// loop_spec column's raw JSON. Returns a user-facing error (invalid spec)
+	// as a plain error; the caller surfaces it as a 400.
 	SyncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte) error
+
+	// ActivateOnIssue compiles workflowID's saved recipe scoped to ONE
+	// specific issue (FIR-2283 v2 point 8 — "per-issue workflow activation"):
+	// the recipe stays a reusable template on the project, and this compiles
+	// an independent set of rules for issueID alone, tagged so it never
+	// collides with the project-wide compile or another issue's activation of
+	// the SAME recipe. Re-activating the same (workflowID, issueID) pair
+	// deletes-then-recreates just that issue's rows. Returns a user-facing
+	// error (invalid spec) as a plain error; the caller surfaces it as a 400.
+	ActivateOnIssue(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string, loopSpecJSON []byte) error
 }
 
 // WithIssueLoopCompiler plugs in the issue-loop bridge implementation.

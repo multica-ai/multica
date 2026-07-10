@@ -5,6 +5,8 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search icon.
+  Search,
   X,
 } from "lucide-react";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -19,6 +21,8 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+// CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search input.
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -54,6 +58,9 @@ const COLUMN_KEYS: AgentColumnKey[] = [
   "lastActive",
   "runs",
   "model",
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — flag-gated columns.
+  "account",
+  "thinking",
   "created",
 ];
 
@@ -97,6 +104,11 @@ export function AgentListToolbar({
   allRows,
   members,
   visibleCount,
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search + extra columns.
+  search,
+  onSearchChange,
+  showSearch,
+  showExtraColumns,
 }: {
   scope: AgentsScope;
   onScopeChange: (scope: AgentsScope) => void;
@@ -117,6 +129,12 @@ export function AgentListToolbar({
   members: MemberWithUser[];
   /** Rows surviving the filters — shown as "n / total" when narrowed. */
   visibleCount: number;
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search box state
+  // and whether the flag-gated search + Account/Thinking columns are offered.
+  search: string;
+  onSearchChange: (value: string) => void;
+  showSearch: boolean;
+  showExtraColumns: boolean;
 }) {
   const { t } = useT("agents");
 
@@ -173,8 +191,16 @@ export function AgentListToolbar({
     lastActive: t(($) => $.columns.last_active),
     runs: t(($) => $.columns.runs),
     model: t(($) => $.columns.model),
+    // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — new column labels.
+    account: t(($) => $.columns.account),
+    thinking: t(($) => $.columns.thinking),
     created: t(($) => $.columns.created),
   };
+  // CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — hide the flag-gated
+  // columns from the picker when the feature is off.
+  const columnKeys = showExtraColumns
+    ? COLUMN_KEYS
+    : COLUMN_KEYS.filter((k) => k !== "account" && k !== "thinking");
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
@@ -188,6 +214,18 @@ export function AgentListToolbar({
           partitions the small set). Button styling and the <md dropdown
           collapse follow the issues header's scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
+        {/* CEREBRO-PATCH(agent-columns-account-thinking): FIR-2669 — search box. */}
+        {showSearch && (
+          <div className="relative shrink-0">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder={t(($) => $.toolbar.search_placeholder)}
+              className="h-8 w-40 pl-8 text-sm md:w-56"
+            />
+          </div>
+        )}
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {AGENT_SCOPES.map((s) => (
             <Button
@@ -528,7 +566,7 @@ export function AgentListToolbar({
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
-                {COLUMN_KEYS.map((key) => (
+                {columnKeys.map((key) => (
                   <label
                     key={key}
                     className="flex cursor-pointer items-center justify-between"

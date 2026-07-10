@@ -403,6 +403,37 @@ func (s *Service) FilterArchivedChannels(
 	return out
 }
 
+// OnlyArchivedChannels keeps only the rows userID has archived — the inverse
+// of FilterArchivedChannels, backing the `?archived_only=true` mode of
+// GET /api/channels (FIR-2791, the Archived block/view). On a DB failure it
+// returns an empty list: showing every channel as "archived" would be far
+// more misleading than an empty archived box.
+func (s *Service) OnlyArchivedChannels(
+	ctx context.Context,
+	userID pgtype.UUID,
+	rows []db.ListChannelsForUserRow,
+) []db.ListChannelsForUserRow {
+	if len(rows) == 0 {
+		return rows
+	}
+	archived, err := s.CerebroQueries.ListArchivedChannelsForUser(ctx, userID)
+	if err != nil {
+		slog.Warn("channel-list: list archived failed", "user_id", util.UUIDToString(userID), "error", err)
+		return nil
+	}
+	keep := make(map[string]bool, len(archived))
+	for _, a := range archived {
+		keep[util.UUIDToString(a.ChannelID)] = true
+	}
+	out := make([]db.ListChannelsForUserRow, 0, len(archived))
+	for _, row := range rows {
+		if keep[util.UUIDToString(row.ID)] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // registerArchiveResurfaceListener subscribes to inbox:new events. When a new
 // inbox item lands for a member-recipient on a channel/dm that the recipient
 // has archived, the archive row is deleted and a cerebro_channel_unarchived
