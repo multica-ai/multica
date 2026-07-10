@@ -275,6 +275,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create default space: "+err.Error())
 		return
 	}
+	if _, err := qtx.SetDefaultWorkspaceSpace(r.Context(), db.SetDefaultWorkspaceSpaceParams{
+		ID:          space.ID,
+		WorkspaceID: ws.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set default space: "+err.Error())
+		return
+	}
 	if err := qtx.AddWorkspaceSpaceMember(r.Context(), db.AddWorkspaceSpaceMemberParams{
 		WorkspaceID: ws.ID,
 		SpaceID:     space.ID,
@@ -313,14 +320,15 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Slug        *string `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
+	Name           *string `json:"name"`
+	Slug           *string `json:"slug"`
+	Description    *string `json:"description"`
+	Context        *string `json:"context"`
+	Settings       any     `json:"settings"`
+	Repos          any     `json:"repos"`
+	IssuePrefix    *string `json:"issue_prefix"`
+	AvatarURL      *string `json:"avatar_url"`
+	DefaultSpaceID *string `json:"default_space_id"`
 }
 
 type workspaceRepoRef struct {
@@ -437,10 +445,19 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
+	var requestedDefaultSpaceID pgtype.UUID
+	var changeDefaultSpace bool
+	if req.DefaultSpaceID != nil {
+		requestedDefaultSpaceID, ok = parseUUIDOrBadRequest(w, *req.DefaultSpaceID, "default_space_id")
+		if !ok {
+			return
+		}
+		changeDefaultSpace = true
+	}
 
 	var ws db.Workspace
 	var err error
-	if updateDefaultSpaceKey {
+	if updateDefaultSpaceKey || changeDefaultSpace {
 		tx, txErr := h.TxStarter.Begin(r.Context())
 		if txErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -449,22 +466,60 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 
-		defaultSpace, spaceErr := qtx.GetDefaultWorkspaceSpace(r.Context(), idUUID)
+		activeSpaces, spaceErr := qtx.ListActiveWorkspaceSpacesForUpdate(r.Context(), idUUID)
 		if spaceErr != nil {
-			writeError(w, http.StatusBadRequest, "default space not found")
+			writeError(w, http.StatusInternalServerError, "failed to validate default space")
 			return
 		}
-		if _, spaceErr := updateWorkspaceSpaceLocked(r.Context(), qtx, db.UpdateWorkspaceSpaceParams{
-			ID:          defaultSpace.ID,
-			WorkspaceID: idUUID,
-			Key:         params.IssuePrefix,
-		}); spaceErr != nil {
-			if isUniqueViolation(spaceErr) || isCheckViolation(spaceErr) {
-				writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
+		var defaultSpace db.WorkspaceSpace
+		for _, space := range activeSpaces {
+			if (changeDefaultSpace && space.ID == requestedDefaultSpaceID) || (!changeDefaultSpace && space.IsDefault) {
+				defaultSpace = space
+				break
+			}
+		}
+		if !defaultSpace.ID.Valid {
+			writeError(w, http.StatusBadRequest, "default_space_id must reference an active space in this workspace")
+			return
+		}
+		if defaultSpace.Visibility != "open" {
+			writeError(w, http.StatusBadRequest, "default_space_id must reference an open space")
+			return
+		}
+
+		if changeDefaultSpace {
+			if err := qtx.ClearDefaultWorkspaceSpace(r.Context(), idUUID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update default space")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "failed to update default space key")
-			return
+			defaultSpace, spaceErr = qtx.SetDefaultWorkspaceSpace(r.Context(), db.SetDefaultWorkspaceSpaceParams{
+				ID:          defaultSpace.ID,
+				WorkspaceID: idUUID,
+			})
+			if spaceErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update default space")
+				return
+			}
+			// Keep the legacy workspace prefix aligned for older clients. New issue
+			// identifiers are always derived from the selected Space.
+			if !updateDefaultSpaceKey {
+				params.IssuePrefix = pgtype.Text{String: defaultSpace.Key, Valid: true}
+			}
+		}
+
+		if updateDefaultSpaceKey {
+			if _, spaceErr := updateWorkspaceSpaceLocked(r.Context(), qtx, db.UpdateWorkspaceSpaceParams{
+				ID:          defaultSpace.ID,
+				WorkspaceID: idUUID,
+				Key:         params.IssuePrefix,
+			}); spaceErr != nil {
+				if isUniqueViolation(spaceErr) || isCheckViolation(spaceErr) {
+					writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to update default space key")
+				return
+			}
 		}
 		ws, err = qtx.UpdateWorkspace(r.Context(), params)
 		if err == nil {

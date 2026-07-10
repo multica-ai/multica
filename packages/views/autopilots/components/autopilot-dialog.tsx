@@ -52,7 +52,6 @@ import { agentListOptions, squadListOptions } from "@multica/core/workspace/quer
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
-import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -372,12 +371,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     [projects, projectId],
   );
   // Space is required. A selected Project makes its owning Space authoritative;
-  // otherwise explicit pick → last used → the user's first Space.
-  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
-  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
+  // otherwise an explicit pick falls back to the workspace Default Space.
   const projectSpaceId = selectedProject?.space_id;
   const effectiveSpaceId =
-    spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId, lastSpaceId }) ?? null;
+    spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId }) ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -417,7 +414,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             user_id,
           })),
         });
-        setLastSpaceId(effectiveSpaceId);
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
         let webhookTrigger: AutopilotTrigger | null = null;

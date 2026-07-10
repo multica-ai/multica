@@ -10,24 +10,27 @@ function space(overrides: Partial<Space>): Space {
     key: "SPC",
     icon: null,
     issue_counter: 0,
+    is_default: false,
+    visibility: "open",
     archived_at: null,
     created_by: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     is_member: false,
+    member_role: null,
     sort_order: 0,
     ...overrides,
   };
 }
 
 describe("creationDefaultSpaceId", () => {
-  it("prefers the first space in the user's personal sort order", () => {
+  it("uses the configured workspace default regardless of personal order", () => {
     const spaces = [
       space({ id: "a", is_member: true, sort_order: 2 }),
       space({ id: "b", is_member: true, sort_order: 1 }),
-      space({ id: "c", is_member: false, created_at: "2020-01-01T00:00:00Z" }),
+      space({ id: "c", is_default: true, is_member: false, created_at: "2020-01-01T00:00:00Z" }),
     ];
-    expect(creationDefaultSpaceId(spaces)).toBe("b");
+    expect(creationDefaultSpaceId(spaces)).toBe("c");
   });
 
   it("falls back to the earliest-created active space when the user has no membership rows", () => {
@@ -38,7 +41,7 @@ describe("creationDefaultSpaceId", () => {
     expect(creationDefaultSpaceId(spaces)).toBe("older");
   });
 
-  it("ignores archived spaces in both the personal and earliest-created fallbacks", () => {
+  it("ignores archived spaces in the configured and earliest-created fallbacks", () => {
     const spaces = [
       space({ id: "archived-mine", is_member: true, sort_order: 0, archived_at: "2026-01-01T00:00:00Z" }),
       space({ id: "archived-oldest", created_at: "2020-01-01T00:00:00Z", archived_at: "2026-01-01T00:00:00Z" }),
@@ -60,13 +63,9 @@ describe("resolveCreationSpaceId", () => {
       resolveCreationSpaceId(spaces, {
         parentSpaceId: "parent",
         projectSpaceId: "project",
-        lastSpaceId: "last",
       }),
     ).toBe("parent");
-    expect(resolveCreationSpaceId(spaces, { projectSpaceId: "project", lastSpaceId: "last" })).toBe(
-      "project",
-    );
-    expect(resolveCreationSpaceId(spaces, { lastSpaceId: "last" })).toBe("last");
+    expect(resolveCreationSpaceId(spaces, { projectSpaceId: "project" })).toBe("project");
   });
 
   it("falls through to the creation default when no context applies", () => {

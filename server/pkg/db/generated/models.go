@@ -1079,6 +1079,8 @@ type WorkspaceSpace struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	IsDefault    bool               `json:"is_default"`
+	Visibility   string             `json:"visibility"`
 }
 
 type WorkspaceSpaceMember struct {

@@ -32,7 +32,6 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
-import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -228,19 +227,16 @@ export function CreateProjectModal({
 
   // Seed the owning Space exactly once when Spaces first load.
   const contextSpaceId = (data?.space_id as string) || undefined;
-  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
-  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const seededDefaultSpaceRef = useRef(false);
   useEffect(() => {
     if (seededDefaultSpaceRef.current || spaces.length === 0) return;
     seededDefaultSpaceRef.current = true;
     if (spaceId) return;
     // The space the modal was opened from wins (e.g. a space's Projects
-    // page); otherwise the same shared fallback as the issue/quick-create/
-    // autopilot forms: last space used, then my first space.
-    const defaultSpaceId = contextSpaceId ?? resolveCreationSpaceId(spaces, { lastSpaceId });
+    // page); otherwise use the stable workspace Default Space.
+    const defaultSpaceId = contextSpaceId ?? resolveCreationSpaceId(spaces, {});
     if (defaultSpaceId) setSpaceId(defaultSpaceId);
-  }, [spaceId, spaces, contextSpaceId, lastSpaceId]);
+  }, [spaceId, spaces, contextSpaceId]);
 
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
@@ -302,7 +298,6 @@ export function CreateProjectModal({
         // Server attaches these in the same transaction as the project.
         resources,
       });
-      if (spaceId) setLastSpaceId(spaceId);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));

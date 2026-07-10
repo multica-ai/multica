@@ -23,15 +23,18 @@ type SpaceResponse struct {
 	Key          string  `json:"key"`
 	Icon         *string `json:"icon"`
 	IssueCounter int32   `json:"issue_counter"`
+	IsDefault    bool    `json:"is_default"`
+	Visibility   string  `json:"visibility"`
 	ArchivedAt   *string `json:"archived_at"`
 	CreatedBy    *string `json:"created_by"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
 	// Requesting user's membership view: the sidebar shows only joined
-	// spaces, ordered by SortOrder (per-user fractional position; the first
-	// space doubles as the issue-creation default when no context applies).
-	IsMember  bool    `json:"is_member"`
-	SortOrder float64 `json:"sort_order"`
+	// spaces, ordered by SortOrder. Default ownership is workspace-level and
+	// independent from this personal navigation order.
+	IsMember   bool    `json:"is_member"`
+	MemberRole *string `json:"member_role"`
+	SortOrder  float64 `json:"sort_order"`
 }
 
 func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
@@ -42,6 +45,8 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 		Key:          t.Key,
 		Icon:         textToPtr(t.Icon),
 		IssueCounter: t.IssueCounter,
+		IsDefault:    t.IsDefault,
+		Visibility:   t.Visibility,
 		ArchivedAt:   timestampToPtr(t.ArchivedAt),
 		CreatedBy:    uuidToPtr(t.CreatedBy),
 		CreatedAt:    timestampToString(t.CreatedAt),
@@ -49,21 +54,77 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 	}
 }
 
+func validSpaceRole(role string) bool {
+	return role == "lead" || role == "admin" || role == "member" || role == "guest"
+}
+
+func (h *Handler) requireSpaceView(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	allowed, err := h.Queries.CanViewWorkspaceSpace(r.Context(), db.CanViewWorkspaceSpaceParams{
+		WorkspaceID: workspaceID,
+		ID:          spaceID,
+		UserID:      parseUUID(requestUserID(r)),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check space access")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "space not found")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) requireSpaceCollaboration(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	allowed, err := h.Queries.CanCollaborateInWorkspaceSpace(r.Context(), db.CanCollaborateInWorkspaceSpaceParams{
+		WorkspaceID: workspaceID,
+		ID:          spaceID,
+		UserID:      parseUUID(requestUserID(r)),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check space access")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "join this space before changing its work")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) requireSpaceManagement(w http.ResponseWriter, r *http.Request, workspaceID, spaceID pgtype.UUID) bool {
+	allowed, err := h.Queries.CanManageWorkspaceSpace(r.Context(), db.CanManageWorkspaceSpaceParams{
+		WorkspaceID: workspaceID,
+		ID:          spaceID,
+		UserID:      parseUUID(requestUserID(r)),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check space access")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "space lead or admin access is required")
+		return false
+	}
+	return true
+}
+
 type CreateSpaceRequest struct {
-	Name        string  `json:"name"`
-	Key         string  `json:"key"`
-	Icon        *string `json:"icon"`
+	Name       string  `json:"name"`
+	Key        string  `json:"key"`
+	Icon       *string `json:"icon"`
+	Visibility *string `json:"visibility"`
 	// MemberIDs invites workspace members into the new space alongside the
-	// creator (who always joins as lead). Minimal v1 membership loop —
-	// there is no separate join/leave API yet, so a space is only visible in
-	// its members' sidebars.
+	// creator (who always joins as lead). Open Spaces can also be joined later;
+	// Private Spaces remain invitation-only.
 	MemberIDs []string `json:"member_ids"`
 }
 
 type UpdateSpaceRequest struct {
-	Name *string `json:"name"`
-	Key  *string `json:"key"`
-	Icon *string `json:"icon"`
+	Name       *string `json:"name"`
+	Key        *string `json:"key"`
+	Icon       *string `json:"icon"`
+	Visibility *string `json:"visibility"`
 }
 
 func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +149,7 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 	for i, row := range rows {
 		resp[i] = spaceToResponse(row.WorkspaceSpace)
 		resp[i].IsMember = row.IsMember
+		resp[i].MemberRole = textToPtr(row.MemberRole)
 		resp[i].SortOrder = row.MemberSortOrder
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": resp, "total": len(resp)})
@@ -110,6 +172,14 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validSpaceKey(key) {
 		writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$ and must not be a reserved word (e.g. NEW)")
+		return
+	}
+	visibility := "open"
+	if req.Visibility != nil {
+		visibility = strings.ToLower(strings.TrimSpace(*req.Visibility))
+	}
+	if visibility != "open" && visibility != "private" {
+		writeError(w, http.StatusBadRequest, "visibility must be 'open' or 'private'")
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
@@ -147,6 +217,7 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Key:         key,
 		Icon:        ptrToText(req.Icon),
+		Visibility:  pgtype.Text{String: visibility, Valid: true},
 		CreatedBy:   creatorUUID,
 	})
 	if err != nil {
@@ -219,13 +290,9 @@ type ReplaceSpaceMembersRequest struct {
 	MemberIDs []string `json:"member_ids"`
 }
 
-// ReplaceSpaceMembers sets a space's member list wholesale. Anyone in the
-// workspace may configure any space's members — membership only drives the
-// sidebar and personal defaults, never access, so there is no extra
-// permission layer. Kept rows are untouched (their sort_order and role
-// survive); added members land at the end of their own personal order. An
-// empty list is rejected: zero members means "archive the space", which the
-// client performs explicitly via DELETE /api/spaces/{id} after a confirm.
+// ReplaceSpaceMembers sets a space's member list wholesale. Space leads/admins
+// and workspace admins may manage it. Kept roles survive; added members join
+// with the member role. At least one lead/admin must remain.
 func (h *Handler) ReplaceSpaceMembers(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -234,6 +301,9 @@ func (h *Handler) ReplaceSpaceMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
 	if !ok {
+		return
+	}
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
 		return
 	}
 	var req ReplaceSpaceMembersRequest
@@ -277,8 +347,16 @@ func (h *Handler) ReplaceSpaceMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	currentSet := make(map[pgtype.UUID]struct{}, len(current))
+	remainingManagers := 0
 	for _, m := range current {
 		currentSet[m.UserID] = struct{}{}
+		if _, keep := next[m.UserID]; keep && (m.Role == "lead" || m.Role == "admin") {
+			remainingManagers++
+		}
+	}
+	if remainingManagers == 0 {
+		writeError(w, http.StatusConflict, "a space must keep at least one lead or admin")
+		return
 	}
 	for uid := range next {
 		if _, kept := currentSet[uid]; kept {
@@ -337,6 +415,9 @@ func (h *Handler) ListSpaceMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireSpaceView(w, r, wsUUID, spaceID) {
+		return
+	}
 	h.listSpaceMembersResponse(w, r, wsUUID, spaceID)
 }
 
@@ -363,6 +444,180 @@ func (h *Handler) listSpaceMembersResponse(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"members": resp, "total": len(resp)})
+}
+
+func (h *Handler) JoinSpace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	space, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil || space.ArchivedAt.Valid {
+		writeError(w, http.StatusNotFound, "space not found")
+		return
+	}
+	if space.Visibility != "open" {
+		writeError(w, http.StatusForbidden, "private spaces are invitation-only")
+		return
+	}
+	userUUID := parseUUID(userID)
+	if _, err := h.Queries.GetWorkspaceSpaceMember(r.Context(), db.GetWorkspaceSpaceMemberParams{
+		SpaceID: spaceID,
+		UserID:  userUUID,
+	}); err == nil {
+		writeJSON(w, http.StatusOK, h.withCallerMembership(r.Context(), spaceToResponse(space), spaceID, userID))
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join space")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if _, err := addSpaceMember(r.Context(), qtx, wsUUID, spaceID, userUUID, "member"); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join space")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join space")
+		return
+	}
+	resp := h.withCallerMembership(r.Context(), spaceToResponse(space), spaceID, userID)
+	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"space": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) LeaveSpace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID := parseUUID(userID)
+	membership, err := h.Queries.GetWorkspaceSpaceMember(r.Context(), db.GetWorkspaceSpaceMemberParams{
+		SpaceID: spaceID,
+		UserID:  userUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "you are not a member of this space")
+		return
+	}
+	if membership.Role == "lead" || membership.Role == "admin" {
+		count, err := h.Queries.CountWorkspaceSpaceManagers(r.Context(), db.CountWorkspaceSpaceManagersParams{
+			WorkspaceID: wsUUID,
+			SpaceID:     spaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to leave space")
+			return
+		}
+		if count <= 1 {
+			writeError(w, http.StatusConflict, "assign another space lead or admin before leaving")
+			return
+		}
+	}
+	if _, err := h.Queries.RemoveWorkspaceSpaceMember(r.Context(), db.RemoveWorkspaceSpaceMemberParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+		UserID:      userUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to leave space")
+		return
+	}
+	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"space_id": uuidToString(spaceID)})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type UpdateSpaceMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
+func (h *Handler) UpdateSpaceMemberRole(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
+	targetUserID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "userId"), "user id")
+	if !ok {
+		return
+	}
+	var req UpdateSpaceMemberRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
+	if !validSpaceRole(req.Role) {
+		writeError(w, http.StatusBadRequest, "role must be 'lead', 'admin', 'member', or 'guest'")
+		return
+	}
+	current, err := h.Queries.GetWorkspaceSpaceMember(r.Context(), db.GetWorkspaceSpaceMemberParams{
+		SpaceID: spaceID,
+		UserID:  targetUserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "space member not found")
+		return
+	}
+	if (current.Role == "lead" || current.Role == "admin") && req.Role != "lead" && req.Role != "admin" {
+		count, err := h.Queries.CountWorkspaceSpaceManagers(r.Context(), db.CountWorkspaceSpaceManagersParams{
+			WorkspaceID: wsUUID,
+			SpaceID:     spaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update space role")
+			return
+		}
+		if count <= 1 {
+			writeError(w, http.StatusConflict, "a space must keep at least one lead or admin")
+			return
+		}
+	}
+	updated, err := h.Queries.UpdateWorkspaceSpaceMemberRole(r.Context(), db.UpdateWorkspaceSpaceMemberRoleParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+		UserID:      targetUserID,
+		Role:        req.Role,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space role")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"space_id": uuidToString(updated.SpaceID),
+		"user_id":  uuidToString(updated.UserID),
+		"role":     updated.Role,
+	})
 }
 
 // UpdateSpaceMembership updates the caller's own membership row — currently
@@ -413,6 +668,9 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
 	var req UpdateSpaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -436,10 +694,17 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "identifier must match ^[A-Z][A-Z0-9]{0,6}$ and must not be a reserved word (e.g. NEW)")
 			return
 		}
-		// Key changes are admin-only: the key is the workspace-wide issue
-		// identifier namespace, and the legacy workspace issue_prefix path
-		// (admin-gated at the router) funnels into the same row — both
-		// doors must carry the same gate.
+		params.Key = pgtype.Text{String: key, Valid: true}
+	}
+	if req.Icon != nil {
+		params.Icon = pgtype.Text{String: *req.Icon, Valid: true}
+	}
+	if req.Visibility != nil {
+		visibility := strings.ToLower(strings.TrimSpace(*req.Visibility))
+		if visibility != "open" && visibility != "private" {
+			writeError(w, http.StatusBadRequest, "visibility must be 'open' or 'private'")
+			return
+		}
 		current, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
 			ID:          spaceID,
 			WorkspaceID: wsUUID,
@@ -448,17 +713,11 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "space not found")
 			return
 		}
-		if current.Key != key {
-			member, ok := ctxMember(r.Context())
-			if !ok || !roleAllowed(member.Role, "owner", "admin") {
-				writeError(w, http.StatusForbidden, "only workspace admins can change the space key")
-				return
-			}
+		if current.IsDefault && visibility == "private" {
+			writeError(w, http.StatusConflict, "the workspace default space must remain open")
+			return
 		}
-		params.Key = pgtype.Text{String: key, Valid: true}
-	}
-	if req.Icon != nil {
-		params.Icon = pgtype.Text{String: *req.Icon, Valid: true}
+		params.Visibility = pgtype.Text{String: visibility, Valid: true}
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -503,6 +762,7 @@ func (h *Handler) withCallerMembership(ctx context.Context, resp SpaceResponse, 
 	})
 	if err == nil {
 		resp.IsMember = true
+		resp.MemberRole = &m.Role
 		resp.SortOrder = m.SortOrder
 	}
 	return resp
@@ -546,11 +806,19 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Archiving is admin-only, matching the destructive-op convention
-	// (project delete, squad delete). Everything else on a space stays
-	// member-open — membership is not a permission layer.
-	if member, ok := ctxMember(r.Context()); !ok || !roleAllowed(member.Role, "owner", "admin") {
-		writeError(w, http.StatusForbidden, "only workspace admins can archive a space")
+	if !h.requireSpaceManagement(w, r, wsUUID, spaceID) {
+		return
+	}
+	space, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "space not found")
+		return
+	}
+	if space.IsDefault {
+		writeError(w, http.StatusConflict, "change the workspace default space before archiving this space")
 		return
 	}
 	// Block archiving a Space that still drives live autopilots — without this
@@ -594,7 +862,7 @@ func (h *Handler) ArchiveSpace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	space, err := qtx.ArchiveWorkspaceSpace(r.Context(), db.ArchiveWorkspaceSpaceParams{
+	space, err = qtx.ArchiveWorkspaceSpace(r.Context(), db.ArchiveWorkspaceSpaceParams{
 		ID:          spaceID,
 		WorkspaceID: wsUUID,
 		ArchivedBy:  parseUUID(userID),

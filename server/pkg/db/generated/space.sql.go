@@ -44,7 +44,7 @@ UPDATE workspace_space SET
 WHERE id = $1
   AND workspace_id = $2
   AND archived_at IS NULL
-RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility
 `
 
 type ArchiveWorkspaceSpaceParams struct {
@@ -71,16 +71,133 @@ func (q *Queries) ArchiveWorkspaceSpace(ctx context.Context, arg ArchiveWorkspac
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
 
+const canCollaborateInWorkspaceSpace = `-- name: CanCollaborateInWorkspaceSpace :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_space wt
+    JOIN member wm
+      ON wm.workspace_id = wt.workspace_id AND wm.user_id = $3
+    LEFT JOIN workspace_space_member sm
+      ON sm.space_id = wt.id AND sm.user_id = $3
+    WHERE wt.workspace_id = $1
+      AND wt.id = $2
+      AND wt.archived_at IS NULL
+      AND (wm.role IN ('owner', 'admin') OR sm.role IN ('lead', 'admin', 'member'))
+)::boolean
+`
+
+type CanCollaborateInWorkspaceSpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) CanCollaborateInWorkspaceSpace(ctx context.Context, arg CanCollaborateInWorkspaceSpaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canCollaborateInWorkspaceSpace, arg.WorkspaceID, arg.ID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const canManageWorkspaceSpace = `-- name: CanManageWorkspaceSpace :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_space wt
+    JOIN member wm
+      ON wm.workspace_id = wt.workspace_id AND wm.user_id = $3
+    LEFT JOIN workspace_space_member sm
+      ON sm.space_id = wt.id AND sm.user_id = $3
+    WHERE wt.workspace_id = $1
+      AND wt.id = $2
+      AND (wm.role IN ('owner', 'admin') OR sm.role IN ('lead', 'admin'))
+)::boolean
+`
+
+type CanManageWorkspaceSpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) CanManageWorkspaceSpace(ctx context.Context, arg CanManageWorkspaceSpaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canManageWorkspaceSpace, arg.WorkspaceID, arg.ID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const canViewWorkspaceSpace = `-- name: CanViewWorkspaceSpace :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_space wt
+    JOIN member wm
+      ON wm.workspace_id = wt.workspace_id AND wm.user_id = $3
+    LEFT JOIN workspace_space_member sm
+      ON sm.space_id = wt.id AND sm.user_id = $3
+    WHERE wt.workspace_id = $1
+      AND wt.id = $2
+      AND (wt.visibility = 'open' OR sm.user_id IS NOT NULL OR wm.role IN ('owner', 'admin'))
+)::boolean
+`
+
+type CanViewWorkspaceSpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) CanViewWorkspaceSpace(ctx context.Context, arg CanViewWorkspaceSpaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canViewWorkspaceSpace, arg.WorkspaceID, arg.ID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const clearDefaultWorkspaceSpace = `-- name: ClearDefaultWorkspaceSpace :exec
+UPDATE workspace_space
+SET is_default = false,
+    updated_at = now()
+WHERE workspace_id = $1
+  AND is_default = true
+`
+
+func (q *Queries) ClearDefaultWorkspaceSpace(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearDefaultWorkspaceSpace, workspaceID)
+	return err
+}
+
+const countWorkspaceSpaceManagers = `-- name: CountWorkspaceSpaceManagers :one
+SELECT count(*) FROM workspace_space_member
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND role IN ('lead', 'admin')
+`
+
+type CountWorkspaceSpaceManagersParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
+
+func (q *Queries) CountWorkspaceSpaceManagers(ctx context.Context, arg CountWorkspaceSpaceManagersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkspaceSpaceManagers, arg.WorkspaceID, arg.SpaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createWorkspaceSpace = `-- name: CreateWorkspaceSpace :one
 INSERT INTO workspace_space (
-    workspace_id, name, key, icon, created_by
+    workspace_id, name, key, icon, visibility, created_by
 ) VALUES (
-    $1, $2, $3, $4::text, $5
-) RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+    $1, $2, $3, $4::text,
+    COALESCE($5::text, 'open'), $6
+) RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility
 `
 
 type CreateWorkspaceSpaceParams struct {
@@ -88,6 +205,7 @@ type CreateWorkspaceSpaceParams struct {
 	Name        string      `json:"name"`
 	Key         string      `json:"key"`
 	Icon        pgtype.Text `json:"icon"`
+	Visibility  pgtype.Text `json:"visibility"`
 	CreatedBy   pgtype.UUID `json:"created_by"`
 }
 
@@ -97,6 +215,7 @@ func (q *Queries) CreateWorkspaceSpace(ctx context.Context, arg CreateWorkspaceS
 		arg.Name,
 		arg.Key,
 		arg.Icon,
+		arg.Visibility,
 		arg.CreatedBy,
 	)
 	var i WorkspaceSpace
@@ -112,21 +231,21 @@ func (q *Queries) CreateWorkspaceSpace(ctx context.Context, arg CreateWorkspaceS
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
 
 const getDefaultWorkspaceSpace = `-- name: GetDefaultWorkspaceSpace :one
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
-WHERE workspace_id = $1 AND archived_at IS NULL
-ORDER BY created_at ASC, id ASC
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
+WHERE workspace_id = $1
+  AND is_default = true
+  AND archived_at IS NULL
 LIMIT 1
 `
 
-// Fallback Space when none is specified: the workspace's earliest-created
-// active Space. No is_default flag — deterministic from created_at, and
-// always resolvable because ArchiveSpace refuses to archive a workspace's
-// last active Space.
+// Stable workspace-level fallback for context-free creation and imports.
 func (q *Queries) GetDefaultWorkspaceSpace(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceSpace, error) {
 	row := q.db.QueryRow(ctx, getDefaultWorkspaceSpace, workspaceID)
 	var i WorkspaceSpace
@@ -142,12 +261,14 @@ func (q *Queries) GetDefaultWorkspaceSpace(ctx context.Context, workspaceID pgty
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
 
 const getWorkspaceSpace = `-- name: GetWorkspaceSpace :one
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -171,12 +292,14 @@ func (q *Queries) GetWorkspaceSpace(ctx context.Context, arg GetWorkspaceSpacePa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
 
 const getWorkspaceSpaceByKey = `-- name: GetWorkspaceSpaceByKey :one
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE workspace_id = $1
   AND lower(key) = lower($2)
 LIMIT 1
@@ -202,6 +325,8 @@ func (q *Queries) GetWorkspaceSpaceByKey(ctx context.Context, arg GetWorkspaceSp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -254,7 +379,7 @@ func (q *Queries) IncrementSpaceIssueCounter(ctx context.Context, arg IncrementS
 }
 
 const listActiveWorkspaceSpaces = `-- name: ListActiveWorkspaceSpaces :many
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE workspace_id = $1
   AND archived_at IS NULL
 ORDER BY name ASC, created_at ASC
@@ -281,6 +406,8 @@ func (q *Queries) ListActiveWorkspaceSpaces(ctx context.Context, workspaceID pgt
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsDefault,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -293,7 +420,7 @@ func (q *Queries) ListActiveWorkspaceSpaces(ctx context.Context, workspaceID pgt
 }
 
 const listActiveWorkspaceSpacesForUpdate = `-- name: ListActiveWorkspaceSpacesForUpdate :many
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE workspace_id = $1
   AND archived_at IS NULL
 FOR UPDATE
@@ -324,10 +451,49 @@ func (q *Queries) ListActiveWorkspaceSpacesForUpdate(ctx context.Context, worksp
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsDefault,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPrivateWorkspaceSpaceAudienceUserIDs = `-- name: ListPrivateWorkspaceSpaceAudienceUserIDs :many
+SELECT DISTINCT wm.user_id
+FROM member wm
+LEFT JOIN workspace_space_member sm
+  ON sm.workspace_id = wm.workspace_id
+ AND sm.user_id = wm.user_id
+ AND sm.space_id = $2
+WHERE wm.workspace_id = $1
+  AND (wm.role IN ('owner', 'admin') OR sm.user_id IS NOT NULL)
+ORDER BY wm.user_id
+`
+
+type ListPrivateWorkspaceSpaceAudienceUserIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
+
+func (q *Queries) ListPrivateWorkspaceSpaceAudienceUserIDs(ctx context.Context, arg ListPrivateWorkspaceSpaceAudienceUserIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listPrivateWorkspaceSpaceAudienceUserIDs, arg.WorkspaceID, arg.SpaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -432,7 +598,7 @@ func (q *Queries) ListWorkspaceSpaceMembersWithUser(ctx context.Context, arg Lis
 }
 
 const listWorkspaceSpaces = `-- name: ListWorkspaceSpaces :many
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE workspace_id = $1
 ORDER BY archived_at NULLS FIRST, name ASC, created_at ASC
 `
@@ -458,6 +624,8 @@ func (q *Queries) ListWorkspaceSpaces(ctx context.Context, workspaceID pgtype.UU
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsDefault,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -470,7 +638,7 @@ func (q *Queries) ListWorkspaceSpaces(ctx context.Context, workspaceID pgtype.UU
 }
 
 const listWorkspaceSpacesByIDs = `-- name: ListWorkspaceSpacesByIDs :many
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
 `
@@ -501,6 +669,8 @@ func (q *Queries) ListWorkspaceSpacesByIDs(ctx context.Context, arg ListWorkspac
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsDefault,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -513,13 +683,17 @@ func (q *Queries) ListWorkspaceSpacesByIDs(ctx context.Context, arg ListWorkspac
 }
 
 const listWorkspaceSpacesForUser = `-- name: ListWorkspaceSpacesForUser :many
-SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at,
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at, wt.is_default, wt.visibility,
        (m.user_id IS NOT NULL)::boolean AS is_member,
+       m.role AS member_role,
        COALESCE(m.sort_order, 0)::double precision AS member_sort_order
 FROM workspace_space wt
 LEFT JOIN workspace_space_member m
     ON m.space_id = wt.id AND m.user_id = $2
+JOIN member wm
+    ON wm.workspace_id = wt.workspace_id AND wm.user_id = $2
 WHERE wt.workspace_id = $1
+  AND (wt.visibility = 'open' OR m.user_id IS NOT NULL OR wm.role IN ('owner', 'admin'))
 ORDER BY wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC
 `
 
@@ -531,6 +705,7 @@ type ListWorkspaceSpacesForUserParams struct {
 type ListWorkspaceSpacesForUserRow struct {
 	WorkspaceSpace  WorkspaceSpace `json:"workspace_space"`
 	IsMember        bool           `json:"is_member"`
+	MemberRole      pgtype.Text    `json:"member_role"`
 	MemberSortOrder float64        `json:"member_sort_order"`
 }
 
@@ -557,7 +732,10 @@ func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorksp
 			&i.WorkspaceSpace.CreatedBy,
 			&i.WorkspaceSpace.CreatedAt,
 			&i.WorkspaceSpace.UpdatedAt,
+			&i.WorkspaceSpace.IsDefault,
+			&i.WorkspaceSpace.Visibility,
 			&i.IsMember,
+			&i.MemberRole,
 			&i.MemberSortOrder,
 		); err != nil {
 			return nil, err
@@ -571,7 +749,7 @@ func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorksp
 }
 
 const lockWorkspaceSpaceForKeyUpdate = `-- name: LockWorkspaceSpaceForKeyUpdate :one
-SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at FROM workspace_space
+SELECT id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility FROM workspace_space
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -596,6 +774,8 @@ func (q *Queries) LockWorkspaceSpaceForKeyUpdate(ctx context.Context, arg LockWo
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -640,6 +820,42 @@ func (q *Queries) RemoveWorkspaceSpaceMember(ctx context.Context, arg RemoveWork
 	return result.RowsAffected(), nil
 }
 
+const setDefaultWorkspaceSpace = `-- name: SetDefaultWorkspaceSpace :one
+UPDATE workspace_space
+SET is_default = true,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND archived_at IS NULL
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility
+`
+
+type SetDefaultWorkspaceSpaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SetDefaultWorkspaceSpace(ctx context.Context, arg SetDefaultWorkspaceSpaceParams) (WorkspaceSpace, error) {
+	row := q.db.QueryRow(ctx, setDefaultWorkspaceSpace, arg.ID, arg.WorkspaceID)
+	var i WorkspaceSpace
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Key,
+		&i.Icon,
+		&i.IssueCounter,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
+	)
+	return i, err
+}
+
 const updateSpaceMemberSortOrder = `-- name: UpdateSpaceMemberSortOrder :one
 UPDATE workspace_space_member
 SET sort_order = $4
@@ -680,9 +896,10 @@ UPDATE workspace_space SET
     name = COALESCE($3, name),
     key = COALESCE($4, key),
     icon = COALESCE($5, icon),
+    visibility = COALESCE($6, visibility),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, key, icon, issue_counter, archived_at, archived_by, created_by, created_at, updated_at, is_default, visibility
 `
 
 type UpdateWorkspaceSpaceParams struct {
@@ -691,6 +908,7 @@ type UpdateWorkspaceSpaceParams struct {
 	Name        pgtype.Text `json:"name"`
 	Key         pgtype.Text `json:"key"`
 	Icon        pgtype.Text `json:"icon"`
+	Visibility  pgtype.Text `json:"visibility"`
 }
 
 func (q *Queries) UpdateWorkspaceSpace(ctx context.Context, arg UpdateWorkspaceSpaceParams) (WorkspaceSpace, error) {
@@ -700,6 +918,7 @@ func (q *Queries) UpdateWorkspaceSpace(ctx context.Context, arg UpdateWorkspaceS
 		arg.Name,
 		arg.Key,
 		arg.Icon,
+		arg.Visibility,
 	)
 	var i WorkspaceSpace
 	err := row.Scan(
@@ -714,6 +933,43 @@ func (q *Queries) UpdateWorkspaceSpace(ctx context.Context, arg UpdateWorkspaceS
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDefault,
+		&i.Visibility,
+	)
+	return i, err
+}
+
+const updateWorkspaceSpaceMemberRole = `-- name: UpdateWorkspaceSpaceMemberRole :one
+UPDATE workspace_space_member
+SET role = $4
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND user_id = $3
+RETURNING workspace_id, space_id, user_id, role, created_at, sort_order
+`
+
+type UpdateWorkspaceSpaceMemberRoleParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	Role        string      `json:"role"`
+}
+
+func (q *Queries) UpdateWorkspaceSpaceMemberRole(ctx context.Context, arg UpdateWorkspaceSpaceMemberRoleParams) (WorkspaceSpaceMember, error) {
+	row := q.db.QueryRow(ctx, updateWorkspaceSpaceMemberRole,
+		arg.WorkspaceID,
+		arg.SpaceID,
+		arg.UserID,
+		arg.Role,
+	)
+	var i WorkspaceSpaceMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.SpaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.SortOrder,
 	)
 	return i, err
 }

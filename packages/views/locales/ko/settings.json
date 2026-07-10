@@ -334,6 +334,8 @@
     "description_placeholder": "이 워크스페이스는 무엇에 집중하나요?",
     "context_label": "맥락",
     "context_placeholder": "이 워크스페이스에서 작업하는 AI 에이전트가 알아야 할 배경 정보와 맥락",
+    "default_space_label": "기본 스페이스",
+    "default_space_hint": "스페이스 맥락이 없을 때 전역 생성 및 가져오기에 사용합니다.",
     "slug_label": "슬러그",
     "slug_hint": "워크스페이스 URL입니다. 변경하면 이 워크스페이스를 가리키는 기존 링크가 작동하지 않습니다.",
     "slug_confirm_title": "워크스페이스 URL을 변경할까요?",

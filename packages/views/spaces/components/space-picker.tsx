@@ -37,6 +37,7 @@ export function SpacePicker({
   triggerRender,
   align = "start",
   disabled = false,
+  filter,
 }: {
   spaceId: string | null;
   onChange: (spaceId: string) => void;
@@ -44,13 +45,15 @@ export function SpacePicker({
   align?: "start" | "center" | "end";
   // Locked display (e.g. sub-issues inherit the parent's space server-side).
   disabled?: boolean;
+  filter?: (space: Space) => boolean;
 }) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
   // Always load the full active list. Callers lock the picker when a Project
   // or parent Issue makes one Space authoritative.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const current = spaces.find((space) => space.id === spaceId);
+  const visibleSpaces = filter ? spaces.filter(filter) : spaces;
+  const current = visibleSpaces.find((space) => space.id === spaceId);
 
   return (
     <DropdownMenu>
@@ -79,7 +82,7 @@ export function SpacePicker({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-56">
-        {spaces.map((space) => (
+        {visibleSpaces.map((space) => (
           <DropdownMenuItem key={space.id} onClick={() => onChange(space.id)}>
             <SpaceBadge space={space} />
             <span className="truncate">{space.name}</span>
@@ -88,7 +91,7 @@ export function SpacePicker({
             )}
           </DropdownMenuItem>
         ))}
-        {spaces.length === 0 && (
+        {visibleSpaces.length === 0 && (
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
             {t(($) => $.picker.empty)}
           </div>

@@ -78,6 +78,14 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	`, testWorkspaceID, ownerID); err != nil {
 		t.Fatalf("add owner as member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, ownerID); err != nil {
+		t.Fatalf("join owner to default space: %v", err)
+	}
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
@@ -96,6 +104,14 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, memberID); err != nil {
 		t.Fatalf("add plain member: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("join plain member to default space: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
@@ -589,7 +605,7 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+			got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)

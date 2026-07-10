@@ -2371,6 +2371,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	issue, ok := h.requireCommentSpaceAccess(w, r, wsUUID, existing)
+	if !ok {
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -2423,12 +2427,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
 	if oldContent != req.Content {
-		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
-		if err != nil {
-			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to load issue")
-			return
-		}
 		triggerIssue = &issue
 		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 		if err != nil {
@@ -2530,6 +2528,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	issue, ok := h.requireCommentSpaceAccess(w, r, wsUUID, comment)
+	if !ok {
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -2543,13 +2545,6 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
 		return
 	}
-	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
-	if err != nil {
-		slog.Warn("load issue for delete post-processing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load issue")
-		return
-	}
-
 	// Collect attachment URLs before CASCADE delete removes them.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
 
@@ -2703,8 +2698,27 @@ func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (d
 		writeError(w, http.StatusNotFound, "comment not found")
 		return db.Comment{}, "", "", "", false
 	}
+	if _, ok := h.requireCommentSpaceAccess(w, r, wsUUID, comment); !ok {
+		return db.Comment{}, "", "", "", false
+	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	return comment, workspaceID, actorType, actorID, true
+}
+
+// requireCommentSpaceAccess closes the direct-comment URL path over the same
+// Space gate used by issue endpoints. Reads require view access; mutations
+// require collaboration, so a Guest or a user who left a Private Space cannot
+// keep changing comments through an old URL.
+func (h *Handler) requireCommentSpaceAccess(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, comment db.Comment) (db.Issue, bool) {
+	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	if err != nil || issue.WorkspaceID != workspaceID {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return db.Issue{}, false
+	}
+	if !h.requireIssueSpaceAccess(w, r, workspaceID, issue.SpaceID) {
+		return db.Issue{}, false
+	}
+	return issue, true
 }
 
 func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {

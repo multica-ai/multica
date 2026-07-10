@@ -875,23 +875,37 @@ SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.pri
 FROM issue i
 LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND ($4::uuid IS NULL OR i.space_id = $4)
-  AND ($5::uuid[] IS NULL OR i.space_id = ANY($5::uuid[]))
-  AND ($6::text IS NULL OR i.status = $6)
-  AND ($7::text IS NULL OR i.priority = $7)
-  AND ($8::uuid IS NULL OR i.assignee_id = $8)
-  AND ($9::uuid[] IS NULL OR i.assignee_id = ANY($9::uuid[]))
-  AND ($10::uuid IS NULL OR i.creator_id = $10)
-  AND ($11::uuid IS NULL OR i.project_id = $11)
-  AND ($12::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
-  AND ($13::jsonb IS NULL OR i.metadata @> $13::jsonb)
   AND (
-    $14::uuid IS NULL
+    wt.visibility = 'open'
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member access_sm
+      WHERE access_sm.space_id = i.space_id
+        AND access_sm.user_id = $4::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member access_wm
+      WHERE access_wm.workspace_id = i.workspace_id
+        AND access_wm.user_id = $4::uuid
+        AND access_wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($5::uuid IS NULL OR i.space_id = $5)
+  AND ($6::uuid[] IS NULL OR i.space_id = ANY($6::uuid[]))
+  AND ($7::text IS NULL OR i.status = $7)
+  AND ($8::text IS NULL OR i.priority = $8)
+  AND ($9::uuid IS NULL OR i.assignee_id = $9)
+  AND ($10::uuid[] IS NULL OR i.assignee_id = ANY($10::uuid[]))
+  AND ($11::uuid IS NULL OR i.creator_id = $11)
+  AND ($12::uuid IS NULL OR i.project_id = $12)
+  AND ($13::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND ($14::jsonb IS NULL OR i.metadata @> $14::jsonb)
+  AND (
+    $15::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $15::uuid
     ))
     -- (2)(3)(4) assignee is a squad related to the user — three relations
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
@@ -901,7 +915,7 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $14::uuid
+             AND sm.member_id   = $15::uuid
           UNION
           -- (3) the squad's canonical leader is an agent owned by the user.
           -- We read squad.leader_id directly rather than relying on a
@@ -912,7 +926,7 @@ WHERE i.workspace_id = $1
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $15::uuid
           UNION
           -- (4) the squad has an agent member owned by the user
           SELECT sm.squad_id
@@ -922,7 +936,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $14::uuid
+             AND a.owner_id     = $15::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -933,6 +947,7 @@ type ListIssuesParams struct {
 	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
 	Limit          int32         `json:"limit"`
 	Offset         int32         `json:"offset"`
+	ViewerUserID   pgtype.UUID   `json:"viewer_user_id"`
 	SpaceID        pgtype.UUID   `json:"space_id"`
 	SpaceIds       []pgtype.UUID `json:"space_ids"`
 	Status         pgtype.Text   `json:"status"`
@@ -984,6 +999,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.WorkspaceID,
 		arg.Limit,
 		arg.Offset,
+		arg.ViewerUserID,
 		arg.SpaceID,
 		arg.SpaceIds,
 		arg.Status,
@@ -1047,25 +1063,39 @@ SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.pri
 FROM issue i
 LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
-  AND ($2::uuid IS NULL OR i.space_id = $2)
-  AND ($3::uuid[] IS NULL OR i.space_id = ANY($3::uuid[]))
+  AND (
+    wt.visibility = 'open'
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member access_sm
+      WHERE access_sm.space_id = i.space_id
+        AND access_sm.user_id = $2::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member access_wm
+      WHERE access_wm.workspace_id = i.workspace_id
+        AND access_wm.user_id = $2::uuid
+        AND access_wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($3::uuid IS NULL OR i.space_id = $3)
+  AND ($4::uuid[] IS NULL OR i.space_id = ANY($4::uuid[]))
   AND i.status NOT IN ('done', 'cancelled')
-  AND ($4::text IS NULL OR i.priority = $4)
-  AND ($5::uuid IS NULL OR i.assignee_id = $5)
-  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
-  AND ($7::uuid IS NULL OR i.creator_id = $7)
-  AND ($8::uuid IS NULL OR i.project_id = $8)
-  AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
+  AND ($5::text IS NULL OR i.priority = $5)
+  AND ($6::uuid IS NULL OR i.assignee_id = $6)
+  AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
+  AND ($8::uuid IS NULL OR i.creator_id = $8)
+  AND ($9::uuid IS NULL OR i.project_id = $9)
+  AND ($10::jsonb IS NULL OR i.metadata @> $10::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- containment patterns (built by parsePropertiesFilterParam): the issue
   -- must match at least one pattern from EVERY group (AND of ORs). The
   -- correlated form skips the GIN index, which is fine here: open_only is
   -- an unpaginated workspace scan already narrowed by status.
   AND (
-    $10::jsonb IS NULL
+    $11::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($10::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($11::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1074,11 +1104,11 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $11::uuid IS NULL
+    $12::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1086,14 +1116,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $11::uuid
+             AND sm.member_id   = $12::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1102,7 +1132,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $11::uuid
+             AND a.owner_id     = $12::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1110,6 +1140,7 @@ ORDER BY i.position ASC, i.created_at DESC
 
 type ListOpenIssuesParams struct {
 	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	ViewerUserID     pgtype.UUID   `json:"viewer_user_id"`
 	SpaceID          pgtype.UUID   `json:"space_id"`
 	SpaceIds         []pgtype.UUID `json:"space_ids"`
 	Priority         pgtype.Text   `json:"priority"`
@@ -1154,6 +1185,7 @@ type ListOpenIssuesRow struct {
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
+		arg.ViewerUserID,
 		arg.SpaceID,
 		arg.SpaceIds,
 		arg.Priority,
@@ -1245,66 +1277,6 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 		&i.CreatorType,
 		&i.CreatorID,
 		&i.FirstExecutedAt,
-	)
-	return i, err
-}
-
-const moveIssueToSpace = `-- name: MoveIssueToSpace :one
-UPDATE issue
-SET space_id = $2,
-    number = $3,
-    position = $4,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, space_id, properties
-`
-
-type MoveIssueToSpaceParams struct {
-	ID       pgtype.UUID `json:"id"`
-	SpaceID  pgtype.UUID `json:"space_id"`
-	Number   int32       `json:"number"`
-	Position float64     `json:"position"`
-}
-
-// Moving an issue between spaces renumbers it: numbers are allocated
-// per-space (uq_issue_space_number), so the caller passes a fresh number from
-// IncrementSpaceIssueCounter and a fresh position in the destination column.
-func (q *Queries) MoveIssueToSpace(ctx context.Context, arg MoveIssueToSpaceParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, moveIssueToSpace,
-		arg.ID,
-		arg.SpaceID,
-		arg.Number,
-		arg.Position,
-	)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.SpaceID,
-		&i.Properties,
 	)
 	return i, err
 }

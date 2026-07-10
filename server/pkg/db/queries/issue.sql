@@ -12,6 +12,20 @@ SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.pri
 FROM issue i
 LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
+  AND (
+    wt.visibility = 'open'
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member access_sm
+      WHERE access_sm.space_id = i.space_id
+        AND access_sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member access_wm
+      WHERE access_wm.workspace_id = i.workspace_id
+        AND access_wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND access_wm.role IN ('owner', 'admin')
+    )
+  )
   AND (sqlc.narg('space_id')::uuid IS NULL OR i.space_id = sqlc.narg('space_id'))
   AND (sqlc.narg('space_ids')::uuid[] IS NULL OR i.space_id = ANY(sqlc.narg('space_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -181,6 +195,20 @@ SELECT i.id, i.workspace_id, i.space_id, i.title, i.description, i.status, i.pri
 FROM issue i
 LEFT JOIN workspace_space wt ON wt.id = i.space_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
+  AND (
+    wt.visibility = 'open'
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member access_sm
+      WHERE access_sm.space_id = i.space_id
+        AND access_sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member access_wm
+      WHERE access_wm.workspace_id = i.workspace_id
+        AND access_wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND access_wm.role IN ('owner', 'admin')
+    )
+  )
   AND (sqlc.narg('space_id')::uuid IS NULL OR i.space_id = sqlc.narg('space_id'))
   AND (sqlc.narg('space_ids')::uuid[] IS NULL OR i.space_id = ANY(sqlc.narg('space_ids')::uuid[]))
   AND i.status NOT IN ('done', 'cancelled')
@@ -377,15 +405,3 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
-
--- name: MoveIssueToSpace :one
--- Moving an issue between spaces renumbers it: numbers are allocated
--- per-space (uq_issue_space_number), so the caller passes a fresh number from
--- IncrementSpaceIssueCounter and a fresh position in the destination column.
-UPDATE issue
-SET space_id = $2,
-    number = $3,
-    position = $4,
-    updated_at = now()
-WHERE id = $1
-RETURNING *;

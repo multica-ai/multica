@@ -192,22 +192,43 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 const listProjects = `-- name: ListProjects :many
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, space_id, start_date, due_date FROM project
 WHERE project.workspace_id = $1
-  AND ($2::uuid IS NULL OR project.space_id = $2::uuid)
-  AND ($3::text IS NULL OR project.status = $3)
-  AND ($4::text IS NULL OR project.priority = $4)
+  AND (
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = project.space_id
+        AND wt.workspace_id = project.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = project.space_id
+        AND sm.user_id = $2::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = project.workspace_id
+        AND wm.user_id = $2::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($3::uuid IS NULL OR project.space_id = $3::uuid)
+  AND ($4::text IS NULL OR project.status = $4)
+  AND ($5::text IS NULL OR project.priority = $5)
 ORDER BY created_at DESC
 `
 
 type ListProjectsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	SpaceID     pgtype.UUID `json:"space_id"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ViewerUserID pgtype.UUID `json:"viewer_user_id"`
+	SpaceID      pgtype.UUID `json:"space_id"`
+	Status       pgtype.Text `json:"status"`
+	Priority     pgtype.Text `json:"priority"`
 }
 
 func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
 	rows, err := q.db.Query(ctx, listProjects,
 		arg.WorkspaceID,
+		arg.ViewerUserID,
 		arg.SpaceID,
 		arg.Status,
 		arg.Priority,

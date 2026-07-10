@@ -1163,18 +1163,38 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
-  AND ($2::uuid IS NULL OR a.space_id = $2)
   AND (
-    ($3::text IS NULL AND a.status <> 'archived')
-    OR a.status = $3
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = a.space_id
+        AND wt.workspace_id = a.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = a.space_id
+        AND sm.user_id = $2::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = a.workspace_id
+        AND wm.user_id = $2::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($3::uuid IS NULL OR a.space_id = $3)
+  AND (
+    ($4::text IS NULL AND a.status <> 'archived')
+    OR a.status = $4
   )
 ORDER BY a.created_at DESC
 `
 
 type ListAutopilotsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	SpaceID     pgtype.UUID `json:"space_id"`
-	Status      pgtype.Text `json:"status"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ViewerUserID pgtype.UUID `json:"viewer_user_id"`
+	SpaceID      pgtype.UUID `json:"space_id"`
+	Status       pgtype.Text `json:"status"`
 }
 
 type ListAutopilotsRow struct {
@@ -1194,7 +1214,12 @@ type ListAutopilotsRow struct {
 // last_run_status is COALESCEd to ” (never ran) because sqlc cannot infer
 // nullability through a scalar subquery; the handler maps ” back to omitted.
 func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsRow, error) {
-	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.SpaceID, arg.Status)
+	rows, err := q.db.Query(ctx, listAutopilots,
+		arg.WorkspaceID,
+		arg.ViewerUserID,
+		arg.SpaceID,
+		arg.Status,
+	)
 	if err != nil {
 		return nil, err
 	}

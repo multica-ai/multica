@@ -23,12 +23,22 @@ const workspaceRef = vi.hoisted(() => ({
 const membersRef = vi.hoisted(() => ({
   current: [{ user_id: "user-1", role: "owner" as "owner" | "admin" | "member" }],
 }));
+const spacesRef = vi.hoisted(() => ({
+  current: [
+    { id: "space-1", name: "Default", is_default: true },
+    { id: "space-2", name: "Other", is_default: false },
+  ],
+}));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: membersRef.current, isFetched: true }),
+  useQuery: (options: { queryKey?: string[] }) =>
+    options.queryKey?.[0] === "spaces"
+      ? { data: spacesRef.current, isFetched: true }
+      : { data: membersRef.current, isFetched: true },
   useQueryClient: () => ({
     setQueryData: vi.fn(),
     getQueryData: vi.fn(() => []),
+    invalidateQueries: vi.fn(),
   }),
 }));
 
@@ -54,6 +64,33 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/workspace/mutations", () => ({
   useLeaveWorkspace: () => ({ mutateAsync: vi.fn() }),
   useDeleteWorkspace: () => ({ mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@multica/core/spaces/queries", () => ({
+  activeSpaceListOptions: () => ({ queryKey: ["spaces"], queryFn: vi.fn() }),
+  spaceKeys: { all: (wsId: string) => ["spaces", wsId] },
+}));
+
+vi.mock("../../spaces/components/space-picker", () => ({
+  SpacePicker: ({
+    spaceId,
+    onChange,
+    disabled,
+  }: {
+    spaceId: string | null;
+    onChange: (id: string) => void;
+    disabled?: boolean;
+  }) => (
+    <select
+      aria-label="Default space"
+      value={spaceId ?? ""}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled}
+    >
+      <option value="space-1">Default</option>
+      <option value="space-2">Other</option>
+    </select>
+  ),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -114,6 +151,10 @@ describe("WorkspaceTab — automatic updates", () => {
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
+    spacesRef.current = [
+      { id: "space-1", name: "Default", is_default: true },
+      { id: "space-2", name: "Other", is_default: false },
+    ];
     mockUpdateWorkspace.mockImplementation(
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
@@ -196,6 +237,19 @@ describe("WorkspaceTab — automatic updates", () => {
       "Workspace settings saved",
       { id: "settings-auto-save" },
     );
+  });
+
+  it("saves the selected workspace default space", async () => {
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.selectOptions(screen.getByLabelText("Default space"), "space-2");
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        default_space_id: "space-2",
+      });
+    });
   });
 
   it("does not persist a slug when confirmation is cancelled", async () => {

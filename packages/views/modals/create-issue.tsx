@@ -51,7 +51,6 @@ import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/que
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
-import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -278,14 +277,12 @@ export function ManualCreatePanel({
     [projects, projectId],
   );
   // Every Issue belongs to one Space. Parent or Project ownership is
-  // authoritative; standalone creation falls back to explicit/last/default.
+  // authoritative; standalone creation falls back to the workspace default.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
-  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
   const projectSpaceId = selectedProject?.space_id;
   const effectiveSpaceId =
-    spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId });
+    spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId });
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -391,8 +388,6 @@ export function ManualCreatePanel({
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
-      setLastSpaceId(finalSpaceId ?? null);
-
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
       // roll back the new issue — it's already committed.

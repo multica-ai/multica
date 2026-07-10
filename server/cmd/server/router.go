@@ -1122,11 +1122,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateSpace)
 					r.Put("/", h.UpdateSpace)
 					r.Delete("/", h.ArchiveSpace)
-					// Caller's own membership row (per-user sidebar sort).
+					r.Post("/join", h.JoinSpace)
+					// Caller's own membership row.
 					r.Patch("/membership", h.UpdateSpaceMembership)
-					// Member set is configured wholesale — anyone can edit.
+					r.Delete("/membership", h.LeaveSpace)
 					r.Get("/members", h.ListSpaceMembers)
 					r.Put("/members", h.ReplaceSpaceMembers)
+					r.Patch("/members/{userId}", h.UpdateSpaceMemberRole)
 				})
 			})
 

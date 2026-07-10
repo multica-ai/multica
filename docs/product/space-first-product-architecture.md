@@ -114,7 +114,7 @@ Workspace 是组织级边界，负责：
 
 Workspace 不应该直接承载普通 Project 和 Issue。所有实际工作必须有明确 Space，避免形成无法治理的「Workspace 根目录工作」。
 
-每个 Workspace 必须有一个 Default Space，作为导入、全局创建和兼容旧数据时的确定性 fallback。界面仍应明确展示最终 Space，不能悄悄把工作放进用户不知道的位置。
+每个 Workspace 必须有一个 Default Space，作为导入、全局创建和兼容旧数据时的确定性 fallback。创建 Workspace 时，初始 Space 自动成为 Default Space；Workspace Owner / Admin 可以在 Settings 中切换。个人 Sidebar 排序、Join、Follow 或 Pin 都不能改变 Default Space。界面仍应明确展示最终 Space，不能悄悄把工作放进用户不知道的位置。
 
 ## Space
 
@@ -185,6 +185,8 @@ Pin 不授予权限，Follow 不代表成员身份，拖动顺序也不改变任
 
 ### 移动 Project
 
+首个 Space-first 版本不提供 Move Project。创建后 Space 只读，避免在权限、Autopilot 和 identifier 的完整迁移语义尚未就绪时提供半成品入口。以下规则保留为未来支持移动时的产品契约。
+
 Move Project 是显式的高影响操作：
 
 - Project 和其全部 Issue、sub-issue 一起移入目标 Space；
@@ -215,6 +217,8 @@ Move Project 是显式的高影响操作：
 - Agent 或 Autopilot 创建：必须使用触发上下文的 Space，不能依赖模糊推断。
 
 ### 移动 Issue
+
+首个 Space-first 版本不提供 Move Issue。创建后 Space 只读；需要改变归属时先新建到目标 Space，再由用户自行处理旧工作。以下规则保留为未来支持移动时的产品契约。
 
 - Standalone Issue 可以移动到另一个 Space；
 - Project 内的 Issue 不能单独移动到其他 Space；用户需先移出 Project，或移动整个 Project；
@@ -423,7 +427,7 @@ Workspace membership
 - Project 强制选择一个 Space；
 - Project Issue 与 sub-issue 强制同 Space；
 - 完成现有多 Space Project 迁移；
-- 统一创建、移动、筛选和全局索引体验。
+- 统一创建、筛选和全局索引体验；移动能力明确延后，不展示不可完成的入口。
 
 ### Phase 2：成员与共享能力
 

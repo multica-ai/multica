@@ -1,6 +1,25 @@
 -- name: ListProjects :many
 SELECT * FROM project
 WHERE project.workspace_id = $1
+  AND (
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = project.space_id
+        AND wt.workspace_id = project.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = project.space_id
+        AND sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = project.workspace_id
+        AND wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
   AND (sqlc.narg('space_id')::uuid IS NULL OR project.space_id = sqlc.narg('space_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR project.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR project.priority = sqlc.narg('priority'))

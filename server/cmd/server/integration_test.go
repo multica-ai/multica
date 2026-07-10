@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var (
@@ -71,7 +72,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 
 	bus := events.New()
-	registerListeners(bus, hub)
+	registerListeners(bus, hub, db.New(pool))
 	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
 	testServer = httptest.NewServer(router)
 
@@ -135,8 +136,8 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
-		VALUES ($1, 'Default', $2, $3, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, 'Default', $2, $3, true, $4)
 	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}

@@ -84,6 +84,66 @@ export function useUpdateSpaceMembership() {
   });
 }
 
+export function useJoinSpace() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.joinSpace(id),
+    onSuccess: (space) => {
+      qc.setQueryData<ListSpacesResponse>(spaceKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              spaces: old.spaces.map((item) => (item.id === space.id ? space : item)),
+            }
+          : old,
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+    },
+  });
+}
+
+export function useLeaveSpace() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.leaveSpace(id),
+    onSuccess: (_data, id) => {
+      qc.setQueryData<ListSpacesResponse>(spaceKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              spaces: old.spaces.map((space) =>
+                space.id === id
+                  ? { ...space, is_member: false, member_role: null, sort_order: 0 }
+                  : space,
+              ),
+            }
+          : old,
+      );
+    },
+    onSettled: (_data, _error, id) => {
+      qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: spaceKeys.members(wsId, id) });
+    },
+  });
+}
+
+export function useUpdateSpaceMemberRole() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, userId, role }: { id: string; userId: string; role: "lead" | "admin" | "member" | "guest" }) =>
+      api.updateSpaceMemberRole(id, userId, role),
+    onSettled: (_data, _error, { id }) => {
+      qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: spaceKeys.members(wsId, id) });
+    },
+  });
+}
+
 export function useReplaceSpaceMembers() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

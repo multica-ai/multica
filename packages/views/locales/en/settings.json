@@ -342,6 +342,8 @@
     "description_placeholder": "What does this workspace focus on?",
     "context_label": "Context",
     "context_placeholder": "Background information and context for AI agents working in this workspace",
+    "default_space_label": "Default space",
+    "default_space_hint": "Used for global creation and imports when no space context is available.",
     "slug_label": "Slug",
     "slug_hint": "Your workspace URL. Changing it breaks existing links to this workspace.",
     "slug_confirm_title": "Change workspace URL?",

@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -375,54 +373,6 @@ func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpac
 		spaceID = space.ID
 	}
 	return ValidateActiveSpace(ctx, q, workspaceID, spaceID)
-}
-
-// MoveIssueToSpace moves a single issue into a different Space: allocates the
-// next per-space number, repositions it at the top of its status column in
-// the destination Space, and records the pre-move identifier as an alias so
-// external references (CLI/API lookups, GitHub branch/PR auto-linking) keep
-// resolving. Must run inside an already-open transaction — the caller owns
-// commit/rollback and passes both the tx-scoped Queries and the raw pgx.Tx
-// (issueposition.NextTopPositionForSpace needs the latter directly).
-func MoveIssueToSpace(ctx context.Context, qtx *db.Queries, tx pgx.Tx, workspaceID pgtype.UUID, issue db.Issue, newSpaceID pgtype.UUID) (db.Issue, error) {
-	newNumber, err := qtx.IncrementSpaceIssueCounter(ctx, db.IncrementSpaceIssueCounterParams{
-		ID:          newSpaceID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return db.Issue{}, fmt.Errorf("allocate issue number: %w", err)
-	}
-	newPosition, err := issueposition.NextTopPositionForSpace(ctx, tx, workspaceID, newSpaceID, issue.Status)
-	if err != nil {
-		return db.Issue{}, fmt.Errorf("position issue: %w", err)
-	}
-	moved, err := qtx.MoveIssueToSpace(ctx, db.MoveIssueToSpaceParams{
-		ID:       issue.ID,
-		SpaceID:  newSpaceID,
-		Number:   newNumber,
-		Position: newPosition,
-	})
-	if err != nil {
-		return db.Issue{}, fmt.Errorf("move issue to space: %w", err)
-	}
-	// Preserve the pre-move identifier so it keeps resolving.
-	if issue.SpaceID.Valid {
-		oldSpace, err := qtx.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
-			ID:          issue.SpaceID,
-			WorkspaceID: workspaceID,
-		})
-		if err == nil && oldSpace.Key != "" {
-			if err := qtx.UpsertIssueIdentifierAlias(ctx, db.UpsertIssueIdentifierAliasParams{
-				WorkspaceID:   workspaceID,
-				SpaceKeyLower: strings.ToLower(oldSpace.Key),
-				Number:        issue.Number,
-				IssueID:       issue.ID,
-			}); err != nil {
-				return db.Issue{}, fmt.Errorf("record identifier alias: %w", err)
-			}
-		}
-	}
-	return moved, nil
 }
 
 // ValidateActiveSpace loads a Space by ID and returns it only if it exists in the

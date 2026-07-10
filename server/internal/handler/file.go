@@ -412,6 +412,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusForbidden, "invalid issue_id")
 				return
 			}
+			if !h.requireSpaceCollaboration(w, r, parseUUID(workspaceID), issue.SpaceID) {
+				return
+			}
 			params.IssueID = issue.ID
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
@@ -422,6 +425,16 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
 			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          comment.IssueID,
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil || !h.requireSpaceCollaboration(w, r, parseUUID(workspaceID), issue.SpaceID) {
+				if err != nil {
+					writeError(w, http.StatusForbidden, "invalid comment_id")
+				}
 				return
 			}
 			params.CommentID = comment.ID
@@ -599,6 +612,10 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
+	if !h.canViewAttachmentSpace(r.Context(), requestUserID(r), att) {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return db.Attachment{}, false
+	}
 
 	return att, true
 }
@@ -646,15 +663,46 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return att, true
+	if !h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return db.Attachment{}, false
+		}
+		h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	}
-	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+	if !h.canViewAttachmentSpace(r.Context(), userID, att) {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	return att, true
+}
+
+func (h *Handler) canViewAttachmentSpace(ctx context.Context, userID string, att db.Attachment) bool {
+	var issueID pgtype.UUID
+	if att.IssueID.Valid {
+		issueID = att.IssueID
+	} else if att.CommentID.Valid {
+		comment, err := h.Queries.GetComment(ctx, att.CommentID)
+		if err != nil {
+			return false
+		}
+		issueID = comment.IssueID
+	} else {
+		return true
+	}
+	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          issueID,
+		WorkspaceID: att.WorkspaceID,
+	})
+	if err != nil {
+		return false
+	}
+	allowed, err := h.Queries.CanViewWorkspaceSpace(ctx, db.CanViewWorkspaceSpaceParams{
+		WorkspaceID: att.WorkspaceID,
+		ID:          issue.SpaceID,
+		UserID:      parseUUID(userID),
+	})
+	return err == nil && allowed
 }
 
 // ---------------------------------------------------------------------------

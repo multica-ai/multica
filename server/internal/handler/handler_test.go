@@ -127,8 +127,8 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
-		VALUES ($1, 'Default', $2, $3, $4)
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, 'Default', $2, $3, true, $4)
 	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
@@ -511,7 +511,7 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 	}
 }
 
-func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
+func TestUpdateIssueRejectsSpaceChange(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano() % 1_000_000
 	oldSpaceKey := fmt.Sprintf("OA%05d", suffix%100000)
@@ -575,19 +575,16 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 	})
 	req = withURLParam(req, "id", issueID)
 	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("UpdateIssue: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var updated IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode response: %v", err)
+	var persistedSpaceID, persistedProjectID string
+	if err := testPool.QueryRow(ctx, `SELECT space_id, project_id FROM issue WHERE id = $1`, issueID).Scan(&persistedSpaceID, &persistedProjectID); err != nil {
+		t.Fatalf("read unchanged issue: %v", err)
 	}
-	if updated.ProjectID == nil || *updated.ProjectID != targetProjectID {
-		t.Fatalf("project_id = %v, want %s", updated.ProjectID, targetProjectID)
-	}
-	if updated.SpaceID == nil || *updated.SpaceID != targetSpaceID {
-		t.Fatalf("space_id = %v, want %s", updated.SpaceID, targetSpaceID)
+	if persistedSpaceID != oldSpaceID || persistedProjectID != oldProjectID {
+		t.Fatalf("issue ownership changed despite rejection: space=%s project=%s", persistedSpaceID, persistedProjectID)
 	}
 
 	var persistedTargetSpaceID string
@@ -605,8 +602,8 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 	`, testWorkspaceID, oldSpaceKey, oldNumber, issueID).Scan(&aliasCount); err != nil {
 		t.Fatalf("count identifier alias: %v", err)
 	}
-	if aliasCount != 1 {
-		t.Fatalf("identifier alias count = %d, want 1", aliasCount)
+	if aliasCount != 0 {
+		t.Fatalf("identifier alias count = %d, want 0 when moves are unsupported", aliasCount)
 	}
 }
 

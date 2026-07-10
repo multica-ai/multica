@@ -491,11 +491,14 @@ export const SpaceSchema = z.object({
   key: z.string().default(""),
   icon: z.string().nullable().default(null),
   issue_counter: z.number().default(0),
+  is_default: z.boolean().default(false),
+  visibility: z.enum(["open", "private"]).default("open"),
   archived_at: z.string().nullable().default(null),
   created_by: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
   is_member: z.boolean().default(false),
+  member_role: z.enum(["lead", "admin", "member", "guest"]).nullable().default(null),
   sort_order: z.number().default(0),
 }).loose();
 
@@ -503,6 +506,12 @@ export const SpaceSchema = z.object({
 export const SpaceMembershipSchema = z.object({
   space_id: z.string().default(""),
   sort_order: z.number().default(0),
+}).loose();
+
+export const SpaceMemberRoleUpdateSchema = z.object({
+  space_id: z.string(),
+  user_id: z.string(),
+  role: z.enum(["lead", "admin", "member", "guest"]),
 }).loose();
 
 export const SpaceMemberSchema = z.object({
@@ -536,11 +545,14 @@ export const EMPTY_SPACE: Space = {
   key: "",
   icon: null,
   issue_counter: 0,
+  is_default: false,
+  visibility: "open",
   archived_at: null,
   created_by: null,
   created_at: "",
   updated_at: "",
   is_member: false,
+  member_role: null,
   sort_order: 0,
 };
 

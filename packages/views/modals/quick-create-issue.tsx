@@ -13,7 +13,6 @@ import { agentListOptions, squadListOptions } from "@multica/core/workspace/quer
 import { projectListOptions } from "@multica/core/projects/queries";
 import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
-import { useLastSpaceStore } from "@multica/core/spaces/last-space-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
@@ -220,10 +219,8 @@ export function AgentCreatePanel({
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
   // Every Issue belongs to one Space. Parent or Project ownership is
-  // authoritative; standalone creation falls back to explicit/last/default.
+  // authoritative; standalone creation falls back to the workspace default.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
-  const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -236,7 +233,7 @@ export function AgentCreatePanel({
   const projectSpaceId = selectedProject?.space_id;
   const effectiveSpaceId =
     spaceId ??
-    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId }) ??
+    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId }) ??
     null;
 
   // Stale-id sweep. Once the project list query has actually resolved
@@ -345,7 +342,6 @@ export function AgentCreatePanel({
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
-      setLastSpaceId(finalSpaceId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {

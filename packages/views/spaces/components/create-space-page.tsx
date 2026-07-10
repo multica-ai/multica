@@ -16,6 +16,13 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -44,6 +51,7 @@ export function CreateSpacePage() {
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
   const [icon, setIcon] = useState("");
+  const [visibility, setVisibility] = useState<"open" | "private">("open");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +87,7 @@ export function CreateSpacePage() {
         name: name.trim(),
         key,
         icon: icon.trim() || null,
+        visibility,
         member_ids: memberIds,
       });
       toast.success(t(($) => $.toast_created));
@@ -176,6 +185,31 @@ export function CreateSpacePage() {
                     maxLength={7}
                     className="w-40 shrink-0 font-mono"
                   />
+                </div>
+
+                <div className="flex items-center justify-between gap-6 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t(($) => $.form.visibility)}</div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {visibility === "open"
+                        ? t(($) => $.form.visibility_open_hint)
+                        : t(($) => $.form.visibility_private_hint)}
+                    </p>
+                  </div>
+                  <Select
+                    value={visibility}
+                    onValueChange={(value) => {
+                      if (value === "open" || value === "private") setVisibility(value);
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-40 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">{t(($) => $.form.visibility_open)}</SelectItem>
+                      <SelectItem value="private">{t(($) => $.form.visibility_private)}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>

@@ -9,8 +9,11 @@ import { cn } from "@multica/ui/lib/utils";
 import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
 import {
   useArchiveSpace,
+  useJoinSpace,
+  useLeaveSpace,
   useReplaceSpaceMembers,
   useUpdateSpace,
+  useUpdateSpaceMemberRole,
 } from "@multica/core/spaces/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
@@ -33,6 +36,13 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import {
   Popover,
   PopoverContent,
@@ -57,10 +67,11 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
   // Full list (not active-only): an archived space's settings stay viewable.
   const { data: spaces = [], isSuccess } = useQuery(spaceListOptions(wsId));
   const space = spaces.find((tm) => tm.key.toLowerCase() === spaceKey.toLowerCase());
-  // No space is flagged "default" — every workspace just always keeps at
-  // least one active space (archiving the last one is rejected server-side).
-  // This is that same rule surfaced client-side, computed from the sibling
-  // count rather than a stored flag.
+  const joinSpace = useJoinSpace();
+  const leaveSpace = useLeaveSpace();
+  // The server protects the configured Default Space separately. This count
+  // keeps the older, complementary invariant visible too: a workspace must
+  // never archive its final active Space.
   const isLastActiveSpace = spaces.filter((s) => !s.archived_at).length <= 1;
 
   if (!space) {
@@ -76,7 +87,42 @@ export function SpaceDetailPage({ spaceKey }: { spaceKey: string }) {
       <PageHeader className="gap-2">
         <SpaceIcon space={space} />
         <h1 className="text-sm font-medium">{space.name}</h1>
+        {space.is_default && <Badge variant="secondary">{t(($) => $.state.default)}</Badge>}
         {space.archived_at && <Badge variant="outline">{t(($) => $.state.archived)}</Badge>}
+        {!space.archived_at && !space.is_member && space.visibility === "open" && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={joinSpace.isPending}
+            onClick={async () => {
+              try {
+                await joinSpace.mutateAsync(space.id);
+                toast.success(t(($) => $.toast_joined));
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : t(($) => $.toast_save_failed));
+              }
+            }}
+          >
+            {t(($) => $.actions.join)}
+          </Button>
+        )}
+        {!space.archived_at && space.is_member && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={leaveSpace.isPending}
+            onClick={async () => {
+              try {
+                await leaveSpace.mutateAsync(space.id);
+                toast.success(t(($) => $.toast_left));
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : t(($) => $.toast_save_failed));
+              }
+            }}
+          >
+            {t(($) => $.actions.leave)}
+          </Button>
+        )}
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -101,6 +147,7 @@ function Identity({ space }: { space: Space }) {
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
   const isAdmin = role === "owner" || role === "admin";
+  const canManage = isAdmin || space.member_role === "lead" || space.member_role === "admin";
   const navigation = useNavigation();
   const p = useWorkspacePaths();
   const updateSpace = useUpdateSpace();
@@ -119,12 +166,12 @@ function Identity({ space }: { space: Space }) {
   // workspace-wide issue namespace, so key changes are admin-only. Renaming a
   // space that already has issues is allowed — the server records aliases so
   // old OLDKEY-N references keep resolving — but we confirm first (below).
-  const canEditKey = isAdmin;
+  const canEditKey = canManage;
   const keyReserved = RESERVED_SPACE_KEYS.has(keyDraft);
   const keyStartsWithDigit = /^[0-9]/.test(keyDraft);
   const keyError = keyDraft.length > 0 && !isValidSpaceKey(keyDraft);
 
-  const saveField = async (patch: { name?: string; icon?: string | null }) => {
+  const saveField = async (patch: { name?: string; icon?: string | null; visibility?: "open" | "private" }) => {
     try {
       await updateSpace.mutateAsync({ id: space.id, ...patch });
       toast.success(t(($) => $.toast_updated));
@@ -184,6 +231,7 @@ function Identity({ space }: { space: Space }) {
               <button
                 type="button"
                 aria-label={t(($) => $.form.icon)}
+                disabled={!canManage}
                 className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-muted/60 text-2xl transition-colors hover:bg-accent"
               />
             }
@@ -202,6 +250,7 @@ function Identity({ space }: { space: Space }) {
         <Input
           aria-label={t(($) => $.form.name)}
           value={name}
+          disabled={!canManage}
           onChange={(event) => setName(event.target.value)}
           onBlur={commitName}
           onKeyDown={(event) => {
@@ -242,6 +291,37 @@ function Identity({ space }: { space: Space }) {
             : keyError && keyStartsWithDigit
               ? t(($) => $.form.key_start_letter)
               : t(($) => $.form.key_hint)}
+        </p>
+      </div>
+      <div className="flex flex-col gap-1 pt-1">
+        <Label className="text-xs font-medium text-muted-foreground">
+          {t(($) => $.form.visibility)}
+        </Label>
+        <Select
+          value={space.visibility}
+          disabled={!canManage}
+          onValueChange={(value) => {
+            if (value === "open" || value === "private") {
+              void saveField({ visibility: value });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="open">{t(($) => $.form.visibility_open)}</SelectItem>
+            <SelectItem value="private" disabled={space.is_default}>
+              {t(($) => $.form.visibility_private)}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {space.is_default
+            ? t(($) => $.form.visibility_default_hint)
+            : space.visibility === "private"
+              ? t(($) => $.form.visibility_private_hint)
+              : t(($) => $.form.visibility_open_hint)}
         </p>
       </div>
 
@@ -300,9 +380,11 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
   const isAdmin = role === "owner" || role === "admin";
+  const canManage = isAdmin || space.member_role === "lead" || space.member_role === "admin";
   const { data: members = [] } = useQuery(spaceMembersOptions(wsId, space.id));
   const { data: allMembers = [] } = useQuery(memberListOptions(wsId));
   const replaceMembers = useReplaceSpaceMembers();
+  const updateMemberRole = useUpdateSpaceMemberRole();
   const archiveSpace = useArchiveSpace();
 
   const [open, setOpen] = useState(false);
@@ -328,6 +410,10 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
         member.email.toLowerCase().includes(q),
     );
   }, [allMembers, search]);
+  const membershipByUser = useMemo(
+    () => new Map(members.map((member) => [member.user_id, member])),
+    [members],
+  );
 
   const toggle = (userId: string) =>
     setSelected((prev) =>
@@ -355,7 +441,7 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
       }
       // Empty membership funnels into archive, which is admin-only —
       // pre-check here so members get the reason instead of a raw 403.
-      if (!isAdmin) {
+      if (!canManage) {
         toast.error(t(($) => $.settings.archive_admin_only));
         return;
       }
@@ -390,6 +476,7 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
             <Button
               type="button"
               variant="outline"
+              disabled={!canManage}
               className="h-auto min-w-48 max-w-full self-start justify-start gap-2 py-1.5 font-normal"
             />
           }
@@ -432,10 +519,12 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
             />
           </div>
           <div className="max-h-64 min-h-0 overflow-y-auto overflow-x-hidden">
-            {filteredMembers.map((member) => (
-              <label
+            {filteredMembers.map((member) => {
+              const membership = membershipByUser.get(member.user_id);
+              return (
+              <div
                 key={member.user_id}
-                className="flex cursor-pointer items-center gap-2 border-b px-1 py-2 transition-colors last:border-b-0 hover:bg-accent/40"
+                className="flex items-center gap-2 border-b px-1 py-2 transition-colors last:border-b-0 hover:bg-accent/40"
               >
                 <ActorAvatar
                   name={member.name}
@@ -446,12 +535,40 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {member.name || member.email}
                 </span>
+                {membership && canManage && selected.includes(member.user_id) && (
+                  <Select
+                    value={membership.role}
+                    disabled={updateMemberRole.isPending}
+                    onValueChange={(value) => {
+                      if (value === "lead" || value === "admin" || value === "member" || value === "guest") {
+                        void updateMemberRole.mutateAsync({
+                          id: space.id,
+                          userId: member.user_id,
+                          role: value,
+                        }).catch((err: unknown) => {
+                          toast.error(err instanceof Error ? err.message : t(($) => $.toast_save_failed));
+                        });
+                      }
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lead">lead</SelectItem>
+                      <SelectItem value="admin">admin</SelectItem>
+                      <SelectItem value="member">member</SelectItem>
+                      <SelectItem value="guest">guest</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
                 <Checkbox
                   checked={selected.includes(member.user_id)}
                   onCheckedChange={() => toggle(member.user_id)}
                 />
-              </label>
-            ))}
+              </div>
+              );
+            })}
             {filteredMembers.length === 0 && (
               <div className="px-1 py-4 text-center text-sm text-muted-foreground">
                 {t(($) => $.dialog.member_search_empty)}
@@ -547,6 +664,7 @@ function ArchiveSection({
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
   const isAdmin = role === "owner" || role === "admin";
+  const canManage = isAdmin || space.member_role === "lead" || space.member_role === "admin";
   const archiveSpace = useArchiveSpace();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -554,9 +672,11 @@ function ArchiveSection({
   // meaningless). Every other blocked state renders disabled with the reason
   // in a tooltip — nothing is hidden, so the rule is always discoverable.
   if (space.archived_at) return null;
-  const blockedReason = isLastActiveSpace
+  const blockedReason = space.is_default
+    ? "default"
+    : isLastActiveSpace
     ? "last"
-    : !isAdmin
+    : !canManage
       ? "admin"
       : null;
 
@@ -595,7 +715,9 @@ function ArchiveSection({
         </TooltipTrigger>
         {blockedReason !== null && (
           <TooltipContent>
-            {blockedReason === "last"
+            {blockedReason === "default"
+              ? t(($) => $.settings.default_space_cannot_archive)
+              : blockedReason === "last"
               ? t(($) => $.settings.last_space_cannot_archive)
               : t(($) => $.settings.archive_admin_only)}
           </TooltipContent>

@@ -79,6 +79,7 @@ import type {
   CancelTaskResponse,
   Space,
   SpaceMembership,
+  SpaceMemberRoleUpdate,
   ListSpaceMembersResponse,
   CreateSpaceRequest,
   UpdateSpaceRequest,
@@ -217,6 +218,7 @@ import {
   EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
   SpaceSchema,
   SpaceMembershipSchema,
+  SpaceMemberRoleUpdateSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -1671,7 +1673,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; slug?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; slug?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string; default_space_id?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -1708,6 +1710,25 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
     return parseOrWarn(raw, SpaceMembershipSchema, { endpoint: "PATCH /api/spaces/:id/membership" });
+  }
+
+  async joinSpace(id: string): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/join`, { method: "POST" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "POST /api/spaces/:id/join" });
+  }
+
+  async leaveSpace(id: string): Promise<void> {
+    await this.fetch(`/api/spaces/${id}/membership`, { method: "DELETE" });
+  }
+
+  async updateSpaceMemberRole(id: string, userId: string, role: SpaceMemberRoleUpdate["role"]): Promise<SpaceMemberRoleUpdate> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+    return parseOrWarn(raw, SpaceMemberRoleUpdateSchema, {
+      endpoint: "PATCH /api/spaces/:id/members/:userId",
+    });
   }
 
   async replaceSpaceMembers(id: string, memberIds: string[]): Promise<ListSpaceMembersResponse> {

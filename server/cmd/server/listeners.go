@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -21,7 +24,11 @@ import (
 // for a Redis-backed relay or a feature-flagged dual-write implementation
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
-func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+func registerListeners(bus *events.Bus, b realtime.Broadcaster, querySet ...*db.Queries) {
+	var queries *db.Queries
+	if len(querySet) > 0 {
+		queries = querySet[0]
+	}
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
@@ -184,6 +191,40 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 
 		if e.WorkspaceID != "" {
 			realtime.M.RecordEvent(e.Type)
+			if queries != nil {
+				if spaceID := resolveEventSpaceID(context.Background(), queries, e); spaceID != "" {
+					wsUUID, wsErr := util.ParseUUID(e.WorkspaceID)
+					spaceUUID, spaceErr := util.ParseUUID(spaceID)
+					if wsErr == nil && spaceErr == nil {
+						space, err := queries.GetWorkspaceSpace(context.Background(), db.GetWorkspaceSpaceParams{
+							ID:          spaceUUID,
+							WorkspaceID: wsUUID,
+						})
+						if err == nil && space.Visibility == "private" {
+							audience, err := queries.ListPrivateWorkspaceSpaceAudienceUserIDs(context.Background(), db.ListPrivateWorkspaceSpaceAudienceUserIDsParams{
+								WorkspaceID: wsUUID,
+								SpaceID:     spaceUUID,
+							})
+							if err != nil {
+								slog.Error("failed to resolve private space realtime audience", "event_type", e.Type, "space_id", spaceID, "error", err)
+								return
+							}
+							delivered := make(map[string]struct{}, len(audience)+1)
+							for _, userID := range audience {
+								id := util.UUIDToString(userID)
+								delivered[id] = struct{}{}
+								b.SendToUser(id, data)
+							}
+							if e.ActorType == "member" {
+								if _, ok := delivered[e.ActorID]; !ok {
+									b.SendToUser(e.ActorID, data)
+								}
+							}
+							return
+						}
+					}
+				}
+			}
 			b.BroadcastToWorkspace(e.WorkspaceID, data)
 		} else if strings.HasPrefix(e.Type, "daemon:") {
 			realtime.M.RecordEvent(e.Type)
@@ -191,4 +232,106 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		}
 		// Otherwise drop — no global broadcast for non-daemon events without a workspace.
 	})
+}
+
+func resolveEventSpaceID(ctx context.Context, queries *db.Queries, e events.Event) string {
+	var payload any
+	raw, err := json.Marshal(e.Payload)
+	if err == nil {
+		_ = json.Unmarshal(raw, &payload)
+	}
+	if id := findPayloadString(payload, "space_id"); id != "" {
+		return id
+	}
+	if space, ok := findPayloadObject(payload, "space"); ok {
+		if id := directPayloadString(space, "id"); id != "" {
+			return id
+		}
+	}
+	wsUUID, err := util.ParseUUID(e.WorkspaceID)
+	if err != nil {
+		return ""
+	}
+	if id := findPayloadString(payload, "issue_id"); id != "" {
+		if issueUUID, err := util.ParseUUID(id); err == nil {
+			if issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueUUID, WorkspaceID: wsUUID}); err == nil {
+				return util.UUIDToString(issue.SpaceID)
+			}
+		}
+	}
+	if id := findPayloadString(payload, "project_id"); id != "" {
+		if projectUUID, err := util.ParseUUID(id); err == nil {
+			if project, err := queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: projectUUID, WorkspaceID: wsUUID}); err == nil {
+				return util.UUIDToString(project.SpaceID)
+			}
+		}
+	}
+	if id := findPayloadString(payload, "autopilot_id"); id != "" {
+		if autopilotUUID, err := util.ParseUUID(id); err == nil {
+			if autopilot, err := queries.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{ID: autopilotUUID, WorkspaceID: wsUUID}); err == nil {
+				return util.UUIDToString(autopilot.SpaceID)
+			}
+		}
+	}
+	if e.TaskID != "" {
+		if taskUUID, err := util.ParseUUID(e.TaskID); err == nil {
+			if task, err := queries.GetAgentTask(ctx, taskUUID); err == nil && task.IssueID.Valid {
+				if issue, err := queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: task.IssueID, WorkspaceID: wsUUID}); err == nil {
+					return util.UUIDToString(issue.SpaceID)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func directPayloadString(value any, key string) string {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	text, _ := object[key].(string)
+	return text
+}
+
+func findPayloadString(value any, key string) string {
+	switch typed := value.(type) {
+	case map[string]any:
+		if text, ok := typed[key].(string); ok && text != "" {
+			return text
+		}
+		for _, child := range typed {
+			if found := findPayloadString(child, key); found != "" {
+				return found
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if found := findPayloadString(child, key); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
+func findPayloadObject(value any, key string) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if object, ok := typed[key].(map[string]any); ok {
+			return object, true
+		}
+		for _, child := range typed {
+			if found, ok := findPayloadObject(child, key); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if found, ok := findPayloadObject(child, key); ok {
+				return found, true
+			}
+		}
+	}
+	return nil, false
 }

@@ -330,6 +330,8 @@
     "description_placeholder": "このワークスペースは何に注力していますか？",
     "context_label": "コンテキスト",
     "context_placeholder": "このワークスペースで作業する AI エージェント向けの背景情報とコンテキスト",
+    "default_space_label": "デフォルトスペース",
+    "default_space_hint": "スペースのコンテキストがない場合のグローバル作成とインポートに使用されます。",
     "slug_label": "スラッグ",
     "slug_hint": "ワークスペースの URL です。変更すると、このワークスペースへの既存のリンクが無効になります。",
     "slug_confirm_title": "ワークスペースの URL を変更しますか?",

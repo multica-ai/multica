@@ -162,10 +162,11 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		spaceFilter = id
 	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: wsUUID,
-		SpaceID:     spaceFilter,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
+		WorkspaceID:  wsUUID,
+		ViewerUserID: parseUUID(requestUserID(r)),
+		SpaceID:      spaceFilter,
+		Status:       statusFilter,
+		Priority:     priorityFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
@@ -224,6 +225,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireSpaceView(w, r, wsUUID, project.SpaceID) {
 		return
 	}
 	resp := projectToResponse(project)
@@ -315,6 +319,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	spaceID, ok, msg := h.resolveProjectSpaceID(r.Context(), wsUUID, req.SpaceID)
 	if !ok {
 		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, spaceID) {
 		return
 	}
 
@@ -481,6 +488,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, prevProject.SpaceID) {
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -585,7 +595,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, touched := rawFields["space_id"]; touched {
-		writeError(w, http.StatusConflict, "Project Space cannot be changed here; use Move Project")
+		writeError(w, http.StatusConflict, "Project Space cannot be changed")
 		return
 	}
 
@@ -619,6 +629,9 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, project.SpaceID) {
+		return
+	}
 	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
 	if !ok {
 		return
@@ -631,7 +644,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
+	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{
+		"project_id": uuidToString(project.ID),
+		"space_id":   uuidToString(project.SpaceID),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -748,6 +764,12 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		)
 	}
 
+	viewerParam := nextArg(nil)
+	accessClause := fmt.Sprintf(`(
+		EXISTS (SELECT 1 FROM workspace_space wt WHERE wt.id = p.space_id AND wt.visibility = 'open')
+		OR EXISTS (SELECT 1 FROM workspace_space_member sm WHERE sm.space_id = p.space_id AND sm.user_id = %s::uuid)
+		OR EXISTS (SELECT 1 FROM member wm WHERE wm.workspace_id = p.workspace_id AND wm.user_id = %s::uuid AND wm.role IN ('owner', 'admin'))
+	)`, viewerParam, viewerParam)
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
 
@@ -758,11 +780,12 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
-	WHERE p.workspace_id = %s AND %s
+	WHERE p.workspace_id = %s AND %s AND %s
 	ORDER BY %s, p.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		wsParam,
+		accessClause,
 		whereClause,
 		rankExpr,
 		limitParam,
@@ -808,6 +831,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
 	args[1] = wsUUID
+	args[len(args)-3] = parseUUID(requestUserID(r))
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 

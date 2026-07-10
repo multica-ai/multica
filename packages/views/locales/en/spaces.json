@@ -15,6 +15,7 @@
   },
   "state": {
     "active": "Active",
+    "default": "Default",
     "archived": "Archived"
   },
   "actions": {
@@ -22,7 +23,9 @@
     "archive": "Archive space",
     "cancel": "Cancel",
     "save": "Save",
-    "saving": "Saving..."
+    "saving": "Saving...",
+    "join": "Join",
+    "leave": "Leave"
   },
   "dialog": {
     "create_title": "Create space",
@@ -50,7 +53,13 @@
     "members_placeholder": "Add spacemates…",
     "members_selected": "{{count}} spacemates selected",
     "icon_name": "Icon & name",
-    "key_hint_short": "Used to number this space’s issues (e.g. ENG-123)."
+    "key_hint_short": "Used to number this space’s issues (e.g. ENG-123).",
+    "visibility": "Visibility",
+    "visibility_open": "Open",
+    "visibility_private": "Private",
+    "visibility_open_hint": "Everyone in the workspace can discover and browse this space.",
+    "visibility_private_hint": "Only invited members and workspace admins can access this space.",
+    "visibility_default_hint": "The workspace default space must remain open."
   },
   "picker": {
     "placeholder": "Space",
@@ -59,6 +68,8 @@
     "selected_count_other": "{{count}} spaces"
   },
   "toast_created": "Space created",
+  "toast_joined": "Joined space",
+  "toast_left": "Left space",
   "toast_updated": "Space updated",
   "toast_archived": "Space archived",
   "toast_archive_failed": "Failed to archive space",
@@ -78,7 +89,8 @@
     "archive_confirm_title": "Archive space?",
     "archive_confirm_body": "Removing every member archives {{name}}. Existing issues stay readable.",
     "last_space_cannot_archive": "A workspace must keep at least one space",
-    "archive_admin_only": "Only admins can archive a space",
+    "default_space_cannot_archive": "Choose another default space before archiving this one",
+    "archive_admin_only": "Only space leads and admins can archive a space",
     "goto": "Go to"
   }
 }

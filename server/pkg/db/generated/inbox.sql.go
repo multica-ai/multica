@@ -158,8 +158,20 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 }
 
 const countUnreadInbox = `-- name: CountUnreadInbox :one
-SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
+SELECT count(*)
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN workspace_space s ON s.id = iss.space_id
+LEFT JOIN member wm ON wm.workspace_id = i.workspace_id AND wm.user_id = i.recipient_id
+LEFT JOIN workspace_space_member sm ON sm.space_id = s.id AND sm.user_id = i.recipient_id
+WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
+  AND i.read = false AND i.archived = false
+  AND (
+    i.issue_id IS NULL
+    OR s.visibility = 'open'
+    OR sm.user_id IS NOT NULL
+    OR wm.role IN ('owner', 'admin')
+  )
 `
 
 type CountUnreadInboxParams struct {
@@ -182,9 +194,18 @@ FROM (
         i.workspace_id, i.read
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+    LEFT JOIN issue iss ON iss.id = i.issue_id
+    LEFT JOIN workspace_space s ON s.id = iss.space_id
+    LEFT JOIN workspace_space_member sm ON sm.space_id = s.id AND sm.user_id = i.recipient_id
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
+      AND (
+        i.issue_id IS NULL
+        OR s.visibility = 'open'
+        OR sm.user_id IS NOT NULL
+        OR m.role IN ('owner', 'admin')
+      )
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -350,7 +371,16 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN workspace_space s ON s.id = iss.space_id
+LEFT JOIN member wm ON wm.workspace_id = i.workspace_id AND wm.user_id = i.recipient_id
+LEFT JOIN workspace_space_member sm ON sm.space_id = s.id AND sm.user_id = i.recipient_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+  AND (
+    i.issue_id IS NULL
+    OR s.visibility = 'open'
+    OR sm.user_id IS NOT NULL
+    OR wm.role IN ('owner', 'admin')
+  )
 ORDER BY i.created_at DESC
 `
 

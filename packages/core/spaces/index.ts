@@ -12,6 +12,8 @@ export {
   useArchiveSpace,
   useUpdateSpaceMembership,
   useReplaceSpaceMembers,
+  useJoinSpace,
+  useLeaveSpace,
+  useUpdateSpaceMemberRole,
 } from "./mutations";
 export { creationDefaultSpaceId, resolveCreationSpaceId } from "./default-space";
-export { useLastSpaceStore } from "./last-space-store";

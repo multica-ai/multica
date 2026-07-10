@@ -1,22 +1,17 @@
 import type { Space } from "../types";
 
 /**
- * The space a new issue defaults into when no other context (route, parent,
- * single-space project) applies: the first space in the user's personal order.
- * Falls back to the workspace's earliest-created active space for users whose
- * membership rows predate the membership rollout — no space is flagged
- * "default"; the earliest one is the same one the server resolves to when a
- * create request omits space_id (see GetDefaultWorkspaceSpace).
+ * The stable workspace Default Space used when no structural or route context
+ * applies. The earliest active Space is a compatibility fallback for clients
+ * talking to a server that predates the explicit is_default field.
  */
 export function creationDefaultSpaceId(spaces: Space[]): string | undefined {
   const active = spaces.filter((space) => !space.archived_at);
-  const mine = active
-    .filter((space) => space.is_member)
-    .sort((a, b) => a.sort_order - b.sort_order);
+  const configured = active.find((space) => space.is_default);
   const earliest = [...active].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   )[0];
-  return (mine[0] ?? earliest)?.id;
+  return (configured ?? earliest)?.id;
 }
 
 /**
@@ -26,8 +21,7 @@ export function creationDefaultSpaceId(spaces: Space[]): string | undefined {
  * from) and leave the rest undefined.
  *
  * Priority: structural inheritance (parent issue's space) > single-space
- * project inference > the space the user last created something in >
- * personal static default (first space in my sort order).
+ * project inference > workspace Default Space.
  *
  * Explicit picks and view/route context (e.g. a space's own Issues page)
  * are NOT part of this chain — callers seed their own local `spaceId` state
@@ -36,12 +30,11 @@ export function creationDefaultSpaceId(spaces: Space[]): string | undefined {
  */
 export function resolveCreationSpaceId(
   spaces: Space[],
-  ctx: { parentSpaceId?: string; projectSpaceId?: string; lastSpaceId?: string | null },
+  ctx: { parentSpaceId?: string; projectSpaceId?: string },
 ): string | undefined {
   return (
     ctx.parentSpaceId ??
     ctx.projectSpaceId ??
-    ctx.lastSpaceId ??
     creationDefaultSpaceId(spaces)
   );
 }

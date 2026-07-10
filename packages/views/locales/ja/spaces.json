@@ -15,6 +15,7 @@
   },
   "state": {
     "active": "アクティブ",
+    "default": "デフォルト",
     "archived": "アーカイブ済み"
   },
   "actions": {
@@ -22,7 +23,9 @@
     "archive": "Space をアーカイブ",
     "cancel": "キャンセル",
     "save": "保存",
-    "saving": "保存中..."
+    "saving": "保存中...",
+    "join": "参加",
+    "leave": "退出"
   },
   "dialog": {
     "create_title": "Space を作成",
@@ -50,7 +53,13 @@
     "members_placeholder": "メンバーを追加…",
     "members_selected": "{{count}} 人を選択済み",
     "icon_name": "アイコンと名前",
-    "key_hint_short": "この Space の issue 番号に使われます（例: ENG-123）。"
+    "key_hint_short": "この Space の issue 番号に使われます（例: ENG-123）。",
+    "visibility": "公開範囲",
+    "visibility_open": "オープン",
+    "visibility_private": "プライベート",
+    "visibility_open_hint": "ワークスペースの全メンバーがこの Space を見つけて閲覧できます。",
+    "visibility_private_hint": "招待されたメンバーとワークスペース管理者のみアクセスできます。",
+    "visibility_default_hint": "ワークスペースのデフォルト Space はオープンのままにする必要があります。"
   },
   "picker": {
     "placeholder": "Space",
@@ -58,6 +67,8 @@
     "selected_count_other": "{{count}} Space"
   },
   "toast_created": "Space を作成しました",
+  "toast_joined": "Space に参加しました",
+  "toast_left": "Space から退出しました",
   "toast_updated": "Space を更新しました",
   "toast_archived": "Space をアーカイブしました",
   "toast_archive_failed": "Space をアーカイブできませんでした",
@@ -77,7 +88,8 @@
     "archive_confirm_title": "Space をアーカイブしますか？",
     "archive_confirm_body": "全メンバーを外すと {{name}} はアーカイブされます。既存の issue は閲覧できます。",
     "last_space_cannot_archive": "ワークスペースには少なくとも 1 つの Space が必要です",
-    "archive_admin_only": "Space をアーカイブできるのは管理者のみです",
+    "default_space_cannot_archive": "先に別のデフォルト Space を選択してください",
+    "archive_admin_only": "Space のリードと管理者のみアーカイブできます",
     "goto": "移動"
   }
 }

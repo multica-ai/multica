@@ -102,9 +102,22 @@ func (q *Queries) GetMaxPinnedItemPosition(ctx context.Context, arg GetMaxPinned
 }
 
 const listPinnedItems = `-- name: ListPinnedItems :many
-SELECT id, workspace_id, user_id, item_type, item_id, position, created_at FROM pinned_item
-WHERE workspace_id = $1 AND user_id = $2
-ORDER BY position ASC, created_at ASC
+SELECT p.id, p.workspace_id, p.user_id, p.item_type, p.item_id, p.position, p.created_at
+FROM pinned_item p
+LEFT JOIN issue i
+  ON p.item_type = 'issue' AND i.id = p.item_id
+LEFT JOIN project pr
+  ON p.item_type = 'project' AND pr.id = p.item_id
+JOIN workspace_space s
+  ON s.id = COALESCE(i.space_id, pr.space_id)
+JOIN member wm
+  ON wm.workspace_id = p.workspace_id AND wm.user_id = p.user_id
+LEFT JOIN workspace_space_member sm
+  ON sm.space_id = s.id AND sm.user_id = p.user_id
+WHERE p.workspace_id = $1
+  AND p.user_id = $2
+  AND (s.visibility = 'open' OR sm.user_id IS NOT NULL OR wm.role IN ('owner', 'admin'))
+ORDER BY p.position ASC, p.created_at ASC
 `
 
 type ListPinnedItemsParams struct {
@@ -112,6 +125,9 @@ type ListPinnedItemsParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
+// A pin is only navigation state. If the user later loses access to the
+// item's Private Space, the stale pin must disappear instead of becoming a
+// back door to the item's identity.
 func (q *Queries) ListPinnedItems(ctx context.Context, arg ListPinnedItemsParams) ([]PinnedItem, error) {
 	rows, err := q.db.Query(ctx, listPinnedItems, arg.WorkspaceID, arg.UserID)
 	if err != nil {

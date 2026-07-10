@@ -30,6 +30,25 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
+  AND (
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = a.space_id
+        AND wt.workspace_id = a.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = a.space_id
+        AND sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = a.workspace_id
+        AND wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
   AND (sqlc.narg('space_id')::uuid IS NULL OR a.space_id = sqlc.narg('space_id'))
   AND (
     (sqlc.narg('status')::text IS NULL AND a.status <> 'archived')

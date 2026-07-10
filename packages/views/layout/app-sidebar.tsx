@@ -584,6 +584,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const spacesCollapse = useGroupCollapse("spaces");
 
   // Spaces section: only spaces the user joined, in their personal order.
+  // This order is navigation state; the workspace Default Space is configured
+  // independently in Settings.
   const { data: mySpaces = [] } = useQuery({
     ...mySpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
@@ -1011,8 +1013,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </Collapsible>
 
           {/* Spaces — joined spaces only, in the user's personal order.
-              Drag a space header to reorder; the first space doubles as the
-              issue-creation default. Always rendered: a user with no joined
+              Dragging only changes personal navigation; Default Space remains
+              the explicit workspace setting. Always rendered: a user with no joined
               spaces gets an empty-state row (join/create) instead of losing
               the section — and with it every create/browse entry point. */}
           <Collapsible open={spacesCollapse.open} onOpenChange={spacesCollapse.onOpenChange}>
