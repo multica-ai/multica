@@ -20,6 +20,7 @@
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-inbox-slack-block": "workspace:*",
     "@multica/cerebro-notes": "workspace:*",
+    "@multica/cerebro-skill-ownership": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*"

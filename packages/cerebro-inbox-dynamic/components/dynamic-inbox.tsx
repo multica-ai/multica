@@ -102,6 +102,8 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
+import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
+import { opensInDynamicInboxPane } from "../notification-routing";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -331,15 +333,9 @@ export function DynamicInbox() {
   // the empty "Select a message" pane. Returns true when it routed away.
   const routeNonIssueNotif = useCallback(
     (item: InboxItem): boolean => {
-      if (
-        (item.type === "skill_change_request_created" ||
-          item.type === "skill_change_request_reviewed") &&
-        item.details?.skill_id
-      ) {
-        const cr = item.details.change_request_id;
-        push(`${paths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`);
-        return true;
-      }
+      // FIR-3051 — skill change requests are messages, not navigation. They
+      // stay selected and render SkillChangeInboxDetail in this pane.
+      if (opensInDynamicInboxPane(item)) return false;
       // FIR-1587 — fork / agent-assignment items deep-link to the relevant skill detail.
       if (item.type === "skill_forked" && item.details?.forked_skill_id) {
         push(paths.skillDetail(String(item.details.forked_skill_id)));
@@ -856,10 +852,16 @@ export function DynamicInbox() {
     // TECH-3598 #2 — a notification with no issue_id that wasn't routed away
     // (reminder, quick-create-failed, runtime-auto-paused, private-agent run
     // request, …). Classic renders a real detail pane for these instead of the
-    // empty placeholder; mirror it so the row opens something. Skill change
-    // requests and note mentions never reach here — they deep-link in onSelect.
+    // empty placeholder; mirror it so the row opens something.
     if (selected.kind === "notif") {
       const item = selected.item;
+      if (opensInDynamicInboxPane(item)) {
+        return (
+          <ErrorBoundary resetKeys={[item.id]}>
+            <SkillChangeInboxDetail item={item} />
+          </ErrorBoundary>
+        );
+      }
       return (
         <div className="p-3 sm:p-6">
           <h2 className="text-lg font-semibold">{item.title}</h2>
