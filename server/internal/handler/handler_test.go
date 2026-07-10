@@ -122,8 +122,8 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 
 	// Seed the default Space so space-aware issue/autopilot creates resolve a Space
-	// the same way migration 131 backfills production workspaces, and so direct
-	// inserts can carry the NOT NULL space_id from migration 132. The space's
+	// the same way migration 161 backfills production workspaces, and so direct
+	// inserts can carry the NOT NULL space_id from migration 162. The space's
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
 	if _, err := pool.Exec(ctx, `

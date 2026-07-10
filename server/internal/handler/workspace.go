@@ -33,7 +33,7 @@ var reservedSpaceKeys = map[string]struct{}{
 // normalizeSpaceKey (the legacy-data mirror), it does NOT coerce digit-leading
 // or empty input with a mystery "T" prefix — an onboarding-derived key should
 // read cleanly or fall back to a readable "SPACE" (the same fallback migration
-// 131 uses). This matches the create-space page, which leaves an underivable
+// 161 uses). This matches the create-space page, which leaves an underivable
 // key blank for manual entry rather than seeding an invalid one.
 func defaultSpaceKeyFromSlug(slug string) string {
 	key := nonSpaceKeyChars.ReplaceAllString(strings.ToUpper(strings.TrimSpace(slug)), "")
@@ -47,7 +47,7 @@ func defaultSpaceKeyFromSlug(slug string) string {
 	return key
 }
 
-// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 131 (minus
+// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 161 (minus
 // the 'SPACE' fallback, which callers decide): uppercase, strip characters
 // outside [A-Z0-9], truncate to 7, and prefix digit-leading keys with 'T'.
 func normalizeSpaceKey(raw string) string {

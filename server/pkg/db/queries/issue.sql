@@ -85,7 +85,7 @@ INSERT INTO issue (
 ) RETURNING *;
 
 -- name: GetIssueBySpaceKeyAndNumber :one
--- issue.space_id is NOT NULL as of migration 132, which ships in the same
+-- issue.space_id is NOT NULL as of migration 162, which ships in the same
 -- release as this query, so no null-space fallback is needed.
 SELECT i.* FROM issue i
 JOIN workspace_space issue_space ON issue_space.id = i.space_id AND issue_space.workspace_id = i.workspace_id

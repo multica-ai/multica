@@ -169,7 +169,7 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 	}
 
 	// Seed the default Space so direct issue inserts can carry the NOT NULL
-	// space_id (migration 132), matching how migration 131 backfills production.
+	// space_id (migration 162), matching how migration 161 backfills production.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO workspace_space (workspace_id, name, key, created_by)
 		VALUES ($1, 'Default', 'CCR', $2)

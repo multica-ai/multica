@@ -124,13 +124,21 @@ func TestClaimDoesNotLeakForeignWorkspaceTriggerCommentOrSummary(t *testing.T) {
 
 	// A comment that lives entirely in a DIFFERENT workspace (its own issue).
 	otherWS := createOtherTestWorkspace(t)
+	var foreignSpaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Foreign Scope', 'OTH', 90001, $2)
+		RETURNING id
+	`, otherWS, testUserID).Scan(&foreignSpaceID); err != nil {
+		t.Fatalf("insert foreign-workspace space: %v", err)
+	}
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, space_id)
 		VALUES ($1, 'foreign issue', 'in_progress', 'none', $2, 'member',
-			(SELECT COALESCE(MAX(number), 90000) + 1 FROM issue WHERE workspace_id = $1), 0)
+			(SELECT COALESCE(MAX(number), 90000) + 1 FROM issue WHERE workspace_id = $1), 0, $3)
 		RETURNING id
-	`, otherWS, testUserID).Scan(&foreignIssueID); err != nil {
+	`, otherWS, testUserID, foreignSpaceID).Scan(&foreignIssueID); err != nil {
 		t.Fatalf("insert foreign-workspace issue: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, foreignIssueID) })

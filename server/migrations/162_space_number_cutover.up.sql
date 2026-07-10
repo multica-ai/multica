@@ -1,6 +1,6 @@
 -- Space numbering cutover ("Migration B").
 --
--- Phase 2 of the two-phase space-numbering rollout. Migration 131 added the
+-- Phase 2 of the two-phase space-numbering rollout. Migration 161 added the
 -- Space schema additively: issue.space_id / autopilot.space_id are nullable and
 -- the legacy uq_issue_workspace_number (UNIQUE(workspace_id, number)) still
 -- holds. This migration runs ONLY after every old, space-unaware server
@@ -16,7 +16,7 @@
 -- Steps, in order:
 --   1. Re-backfill any issue/autopilot rows an old instance wrote with a NULL
 --      space_id during the deploy window to the workspace's default Space, using
---      the same join shape as 131.
+--      the same join shape as 161.
 --   2. Sync each Space's issue_counter upward to cover the highest number
 --      actually minted into it, and — for default Spaces — the legacy
 --      workspace.issue_counter that old writers advanced during the window.
@@ -46,7 +46,7 @@
 -- 1. Re-backfill stragglers written by old instances during the deploy window,
 --    to the same workspace's earliest active Space — the same fallback
 --    GetDefaultWorkspaceSpace resolves to at runtime (no is_default flag; see
---    131's comment on workspace_space).
+--    161's comment on workspace_space).
 UPDATE issue i
 SET space_id = wt.id
 FROM workspace_space wt
@@ -76,7 +76,7 @@ WHERE wt.workspace_id = a.workspace_id
 -- 2. Sync counters upward. GREATEST of the current counter, the max number
 --    actually minted into the Space, and (for the workspace's earliest Space
 --    only — there is no is_default flag, but that Space is always the one
---    migration 131 backfilled from the legacy workspace counter, since no
+--    migration 161 backfilled from the legacy workspace counter, since no
 --    other Space could have existed before that migration ran) the legacy
 --    workspace counter old writers incremented. Deliberately not filtered to
 --    archived_at IS NULL: this identifies which Space historically inherited

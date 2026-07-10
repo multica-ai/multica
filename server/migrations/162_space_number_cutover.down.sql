@@ -1,6 +1,6 @@
 -- Reverse of the space-numbering cutover (Migration B).
 --
--- Restores the additive 131 state: space_id nullable again, space-scoped
+-- Restores the additive 161 state: space_id nullable again, space-scoped
 -- uniqueness dropped, legacy workspace-scoped uniqueness restored.
 --
 -- WARNING: re-adding uq_issue_workspace_number WILL FAIL if per-space numbering
@@ -15,7 +15,7 @@
 -- multi-space numbers have been minted.
 --
 -- The re-backfill of NULL space_id done by the up migration is not reversed:
--- which rows were originally NULL is not recoverable, and 131's own down
+-- which rows were originally NULL is not recoverable, and 161's own down
 -- migration drops the space_id column entirely anyway.
 
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS uq_issue_space_number;

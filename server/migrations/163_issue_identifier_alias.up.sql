@@ -15,7 +15,7 @@ CREATE TABLE issue_identifier_alias (
 
 CREATE INDEX idx_issue_identifier_alias_issue ON issue_identifier_alias(issue_id);
 
--- Backfill aliases for the renaming migration 131 already performed. 131
+-- Backfill aliases for the renaming migration 161 already performed. 161
 -- normalized every workspace's legacy issue_prefix into a Space key
 -- satisfying ^[A-Z][A-Z0-9]{0,6}$ (uppercase, strip non-alnum, truncate to 7).
 -- Legacy prefixes longer than 7 chars, digit-first, or punctuated therefore
@@ -23,8 +23,8 @@ CREATE INDEX idx_issue_identifier_alias_issue ON issue_identifier_alias(issue_id
 -- runtime move-to-space — that rename never went through the alias-writing
 -- path above, since no issue actually changed space_id. Old links/CLI/GitHub
 -- references using the pre-migration prefix would otherwise 404 forever.
--- workspace.issue_prefix is untouched by 131/132 (kept intentionally; see
--- 132's header comment), so the original value is still available here.
+-- workspace.issue_prefix is untouched by 161/162 (kept intentionally; see
+-- 162's header comment), so the original value is still available here.
 INSERT INTO issue_identifier_alias (workspace_id, space_key_lower, number, issue_id)
 SELECT i.workspace_id, lower(btrim(w.issue_prefix)), i.number, i.id
 FROM issue i

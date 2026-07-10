@@ -130,7 +130,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	}
 
 	// Seed the default Space so space-aware issue creates resolve a Space the same
-	// way migration 131 backfills production workspaces. Without this every
+	// way migration 161 backfills production workspaces. Without this every
 	// space-aware create fails "space not found in this workspace". The space's
 	// issue_counter mirrors the workspace counter so the two never hand out
 	// overlapping numbers.
@@ -177,7 +177,7 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 
 // defaultSpaceUUID returns the seeded default workspace_space for the given
 // workspace. Direct issue/autopilot inserts that bypass the space-aware service
-// layer must carry this so the NOT NULL space_id (migration 132) is satisfied
+// layer must carry this so the NOT NULL space_id (migration 162) is satisfied
 // the same way a real create would resolve it via ResolveSpace.
 func defaultSpaceUUID(t *testing.T, ctx context.Context, workspaceID string) pgtype.UUID {
 	t.Helper()

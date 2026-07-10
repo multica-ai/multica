@@ -74,7 +74,7 @@ func newUUID(t *testing.T) pgtype.UUID {
 // TestGeneratePrefix covers the pure name -> prefix derivation: strip
 // non-ASCII-letters, uppercase, truncate to 3, fall back to "WS" when nothing
 // usable remains. This function is unrelated to the workspace_space CHECK
-// constraint's normalize_space_key (migration 131) — it keeps digits out
+// constraint's normalize_space_key (migration 161) — it keeps digits out
 // entirely and falls back to "WS", not "SPACE" — so cases below assert only
 // what identifier.go itself does, not the migration's SQL semantics.
 func TestGeneratePrefix(t *testing.T) {

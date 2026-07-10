@@ -402,12 +402,12 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
                     name={member.name}
                     initials={(member.name || member.email || "?").charAt(0).toUpperCase()}
                     avatarUrl={member.avatar_url}
-                    size={22}
+                    size="sm"
                   />
                 </span>
               ))}
               {overflow > 0 && (
-                <span className="flex size-[22px] items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
+                <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background">
                   +{overflow}
                 </span>
               )}
@@ -441,7 +441,7 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
                   name={member.name}
                   initials={(member.name || member.email || "?").charAt(0).toUpperCase()}
                   avatarUrl={member.avatar_url}
-                  size={24}
+                  size="md"
                 />
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {member.name || member.email}

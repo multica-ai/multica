@@ -7,7 +7,8 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
-const mockInvalidateQueries = vi.hoisted(() => vi.fn());
+const mockNavigationPush = vi.hoisted(() => vi.fn());
+const mockNavigationReplace = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -16,7 +17,6 @@ const workspaceRef = vi.hoisted(() => ({
     slug: "test-workspace",
     description: "",
     context: "",
-    issue_prefix: "TES",
     repos: [] as { url: string }[],
   },
 }));
@@ -29,11 +29,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     setQueryData: vi.fn(),
     getQueryData: vi.fn(() => []),
-    invalidateQueries: mockInvalidateQueries,
   }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  paths: {
+    workspace: (slug: string) => ({ settings: () => `/${slug}/settings` }),
+  },
   useCurrentWorkspace: () => workspaceRef.current,
   useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
@@ -47,10 +49,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
   workspaceListOptions: () => ({ queryKey: ["workspaces"], queryFn: vi.fn() }),
   workspaceKeys: { list: () => ["workspaces"] },
-}));
-
-vi.mock("@multica/core/issues/queries", () => ({
-  issueKeys: { all: (workspaceId: string) => ["issues", workspaceId] },
 }));
 
 vi.mock("@multica/core/workspace/mutations", () => ({
@@ -75,7 +73,10 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ push: vi.fn() }),
+  useNavigation: () => ({
+    push: mockNavigationPush,
+    replace: mockNavigationReplace,
+  }),
 }));
 
 vi.mock("./delete-workspace-dialog", () => ({
@@ -110,7 +111,6 @@ describe("WorkspaceTab — automatic updates", () => {
       slug: "test-workspace",
       description: "",
       context: "",
-      issue_prefix: "TES",
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
@@ -118,8 +118,6 @@ describe("WorkspaceTab — automatic updates", () => {
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
         ...payload,
-        issue_prefix:
-          (payload.issue_prefix as string | undefined) ?? workspaceRef.current.issue_prefix,
       }),
     );
   });
@@ -132,33 +130,25 @@ describe("WorkspaceTab — automatic updates", () => {
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   }
 
-  it("renders the current prefix in the shared input control", () => {
+  it("renders the current slug in the shared input control", () => {
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
-    expect(input.value).toBe("TES");
+    const input = screen.getByPlaceholderText("test-workspace") as HTMLInputElement;
+    expect(input.value).toBe("test-workspace");
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
-  it("renders the workspace slug in the shared read-only input control", () => {
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    const input = screen.getByRole("textbox", { name: "Slug" }) as HTMLInputElement;
-    expect(input.value).toBe("test-workspace");
-    expect(input.readOnly).toBe(true);
-  });
-
-  it("uppercases and strips non-alphanumeric prefix input", async () => {
+  it("lowercases and strips unsupported slug characters", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("test-workspace") as HTMLInputElement;
 
     await user.clear(input);
-    await user.type(input, "ab-12!cd");
+    await user.type(input, "New_Workspace!");
 
-    expect(input.value).toBe("AB12CD");
+    expect(input.value).toBe("newworkspace");
   });
 
-  it("auto-saves ordinary workspace fields without invalidating issue caches", async () => {
+  it("auto-saves ordinary workspace fields", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     const nameInput = screen.getByDisplayValue("Test Workspace");
@@ -178,58 +168,55 @@ describe("WorkspaceTab — automatic updates", () => {
         { id: "settings-auto-save" },
       );
     });
-    expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("asks for confirmation on prefix blur and persists only after confirmation", async () => {
+  it("asks for confirmation on slug blur, persists, and navigates", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("test-workspace") as HTMLInputElement;
 
     await user.clear(input);
-    await user.type(input, "NEW");
+    await user.type(input, "new-workspace");
     await user.tab();
 
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
-    await screen.findByText(/Change issue prefix/i);
-    expect(screen.getByText(/TES-N/)).toBeTruthy();
-    expect(screen.getByText(/NEW-N/)).toBeTruthy();
+    await screen.findByText(/Change workspace URL/i);
+    expect(screen.getByText(/\/test-workspace/)).toBeTruthy();
+    expect(screen.getByText(/\/new-workspace/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
-        issue_prefix: "NEW",
+        slug: "new-workspace",
       });
     });
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["issues", "workspace-1"],
-    });
+    expect(mockNavigationReplace).toHaveBeenCalledWith("/new-workspace/settings");
     expect(mockToastSuccess).toHaveBeenCalledWith(
       "Workspace settings saved",
       { id: "settings-auto-save" },
     );
   });
 
-  it("does not persist a prefix when the confirmation is cancelled", async () => {
+  it("does not persist a slug when confirmation is cancelled", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("test-workspace") as HTMLInputElement;
 
     await user.clear(input);
-    await user.type(input, "NEW");
+    await user.type(input, "new-workspace");
     await user.tab();
-    await screen.findByText(/Change issue prefix/i);
+    await screen.findByText(/Change workspace URL/i);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
-    expect(input.value).toBe("NEW");
+    expect(input.value).toBe("new-workspace");
   });
 
-  it("marks an empty prefix invalid and does not persist it", async () => {
+  it("marks an empty slug invalid and does not persist it", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("test-workspace") as HTMLInputElement;
 
     await user.clear(input);
     await user.tab();
@@ -242,7 +229,7 @@ describe("WorkspaceTab — automatic updates", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByPlaceholderText("TES")).toBeDisabled();
+    expect(screen.getByPlaceholderText("test-workspace")).toBeDisabled();
     expect(screen.getByDisplayValue("Test Workspace")).toBeDisabled();
   });
 });

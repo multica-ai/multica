@@ -74,8 +74,9 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	// Issue assigned to the agent so a plain member comment routes to it.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-e2e fixture', 'in_progress', 'none', $2, 'member', 999001, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'reconcile-e2e fixture', 'in_progress', 'none', $2, 'member', 999001, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -139,8 +140,9 @@ func TestCompleteTask_NoReconcileWhenNoNewMemberComment(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-negative fixture', 'in_progress', 'none', $2, 'member', 999002, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'reconcile-negative fixture', 'in_progress', 'none', $2, 'member', 999002, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -202,8 +204,9 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	// Issue assigned to A so A's completion is the one that reconciles.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-other-agent fixture', 'in_progress', 'none', $2, 'member', 999003, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'reconcile-other-agent fixture', 'in_progress', 'none', $2, 'member', 999003, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentA).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -295,8 +298,9 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	// Issue assigned to B so B's completion is the one that reconciles.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-a2a-mention fixture', 'in_progress', 'none', $2, 'member', 999007, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'reconcile-a2a-mention fixture', 'in_progress', 'none', $2, 'member', 999007, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -396,8 +400,9 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-plain-agent-reply fixture', 'in_progress', 'none', $2, 'member', 999008, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'reconcile-plain-agent-reply fixture', 'in_progress', 'none', $2, 'member', 999008, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -548,8 +553,9 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'diff-originator fixture', 'in_progress', 'none', $2, 'member', 999004, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'diff-originator fixture', 'in_progress', 'none', $2, 'member', 999004, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -630,8 +636,9 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'dispatched-window fixture', 'in_progress', 'none', $2, 'member', 999005, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'dispatched-window fixture', 'in_progress', 'none', $2, 'member', 999005, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -729,8 +736,9 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'pre-dispatch race fixture', 'in_progress', 'none', $2, 'member', 999006, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'pre-dispatch race fixture', 'in_progress', 'none', $2, 'member', 999006, 0, 'agent', $3,
+			(SELECT id FROM workspace_space WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC, id ASC LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
