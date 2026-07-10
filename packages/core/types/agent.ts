@@ -664,6 +664,10 @@ export interface IssueTaskUsage {
   task_id: string;
   created_at: string;
   comment_triggered: boolean;
+  /** 1-based position of the trigger comment among the issue's top-level
+   *  comments (replies inherit their root's number); 0 when not
+   *  comment-triggered or the comment was deleted. */
+  comment_number: number;
   provider: string;
   model: string;
   input_tokens: number;

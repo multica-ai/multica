@@ -26,6 +26,7 @@ const USAGE: IssueUsageSummary = {
       task_id: "t2",
       created_at: "2026-07-08T10:00:00Z",
       comment_triggered: true,
+      comment_number: 2,
       provider: "anthropic",
       model: "claude-sonnet-4.6",
       input_tokens: 2000,
@@ -37,6 +38,7 @@ const USAGE: IssueUsageSummary = {
       task_id: "t1",
       created_at: "2026-07-08T09:00:00Z",
       comment_triggered: false,
+      comment_number: 0,
       provider: "anthropic",
       model: "claude-sonnet-4.6",
       input_tokens: 1000,
@@ -64,14 +66,13 @@ describe("IssueTokenUsageSection", () => {
   it("expands a per-run breakdown with cost and token split per run", () => {
     render(wrap(<IssueTokenUsageSection usage={USAGE} />));
     fireEvent.click(screen.getByText("2 runs"));
-    expect(screen.getByText("Comment")).toBeInTheDocument();
+    expect(screen.getByText("Comment 2")).toBeInTheDocument();
     expect(screen.getByText("Assignment")).toBeInTheDocument();
-    // t2: 2000 in, 100 out, 30k read / 5k write
+    // t2: cost (2000*3 + 100*15 + 30000*0.3 + 5000*3.75) / 1e6 ≈ $0.035,
+    // then 2000 in, 100 out, 30k read / 5k write on the same line
     expect(
-      screen.getByText("in 2.0k · out 100 · cache 30.0k read / 5.0k write"),
+      screen.getByText("$0.04 · in 2.0k · out 100 · cache 30.0k read / 5.0k write"),
     ).toBeInTheDocument();
-    // t2 cost: (2000*3 + 100*15 + 30000*0.3 + 5000*3.75) / 1e6 ≈ $0.035
-    expect(screen.getByText("$0.04")).toBeInTheDocument();
   });
 
   it("omits the write part of the cache segment when cache writes are zero", () => {
@@ -82,7 +83,8 @@ describe("IssueTokenUsageSection", () => {
     };
     render(wrap(<IssueTokenUsageSection usage={usage} />));
     fireEvent.click(screen.getByText("1 run"));
-    expect(screen.getByText("in 2.0k · out 100 · cache 30.0k")).toBeInTheDocument();
+    // cost without cache writes: (2000*3 + 100*15 + 30000*0.3) / 1e6 ≈ $0.017
+    expect(screen.getByText("$0.02 · in 2.0k · out 100 · cache 30.0k")).toBeInTheDocument();
   });
 
   it("explains cache read/write in a tooltip", () => {

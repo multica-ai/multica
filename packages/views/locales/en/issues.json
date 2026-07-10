@@ -228,6 +228,7 @@
     "usage_runs_toggle_one": "{{count}} run",
     "usage_runs_toggle_other": "{{count}} runs",
     "usage_run_comment": "Comment",
+    "usage_run_comment_numbered": "Comment {{n}}",
     "usage_run_assignment": "Assignment",
     "prop_runs": "Runs",
     "activity_section": "Activity",
