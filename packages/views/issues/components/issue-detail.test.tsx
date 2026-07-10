@@ -571,19 +571,23 @@ describe("IssueDetail (shared)", () => {
   it("renders the issue title leaf as a link to the issue detail page", async () => {
     renderIssueDetail();
 
-    // The breadcrumb leaf is the whole "identifier + title" string wrapped in a
-    // single link to the issue's own detail route (used to open the full page
-    // from the inline Inbox pane). A bare issue has no ancestor crumbs.
-    const leaf = await screen.findByText("TES-1 Implement authentication");
-    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+    // The breadcrumb leaf links to the issue's own detail route (used to open
+    // the full page from the inline Inbox pane), wrapping the identifier badge
+    // + title. A bare issue has no ancestor crumbs.
+    const title = await screen.findByText("Implement authentication");
+    const leaf = title.closest("a");
+    expect(leaf).toHaveAttribute("href", "/test/issues/issue-1");
+    // The identifier badge sits beside the title inside the same link.
+    expect(leaf).toHaveTextContent("TES-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
     // Default fixture has project_id: null.
     renderIssueDetail();
 
-    // Leaf renders once loaded; a bare issue has no ancestor crumbs at all.
-    await screen.findByText("TES-1 Implement authentication");
+    // Leaf renders once loaded (title text); a bare issue has no ancestor
+    // crumbs at all.
+    await screen.findByText("Implement authentication");
 
     // Project is never fetched and no project crumb appears.
     expect(mockApiObj.getProject).not.toHaveBeenCalled();
