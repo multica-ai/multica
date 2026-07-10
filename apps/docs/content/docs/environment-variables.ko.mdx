@@ -180,9 +180,6 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 하트비트 간격 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 작업 폴링 간격 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 최대 동시 작업 수 |
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | 로테이션 전 현재 `daemon.log`의 최대 크기(MB) |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 보관할 압축된 `daemon.log` 로테이션 백업 수 |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 로테이션된 `daemon.log` 백업의 최대 보관 기간(일) |
 | `MULTICA_<PROVIDER>_PATH` | CLI 이름과 일치 | 각 AI 코딩 도구 실행 파일의 경로 (예: `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | 비어 있음 | 각 AI 코딩 도구의 기본 모델 |
 | `MULTICA_<PROVIDER>_ARGS` | 비어 있음 | 백엔드별 데몬 전역 기본 CLI 인자. 각 작업에 대해 각 에이전트 자체의 `custom_args`보다 먼저 적용됩니다. `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`를 지원 |

@@ -180,9 +180,6 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
-| `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Maximum active `daemon.log` size in MB before rotation |
-| `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Number of compressed rotated `daemon.log` backups to retain |
-| `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Maximum age in days for rotated `daemon.log` backups |
 | `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
 | `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
