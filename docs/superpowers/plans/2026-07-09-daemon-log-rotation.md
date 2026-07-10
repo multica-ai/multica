@@ -51,7 +51,7 @@
 - [ ] **Step 2: Remove reproducible caches** while preserving Chrome data, CloudKit user state, Pictures, GBrain model/runtime data, Claude VM bundles, active Hermes runtime files, and Multica workspace ledgers.
 - [ ] **Step 3: Preserve recent daemon log tails and truncate active logs in place.**
 - [ ] **Step 4: Re-run disk census and verify free space exceeds 30 GiB.**
-- [ ] **Step 5: Kick the daemon-health launchd job and verify the disk check is loaded and reports the post-cleanup state.
+- [ ] **Step 5: Kick the daemon-health launchd job and verify the disk check is loaded and reports the post-cleanup state.**
 
 ### Task 5: Handoff
 

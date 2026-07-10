@@ -10,6 +10,95 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
+func TestRotateDaemonLogBelowLimitIsNoop(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	if err := os.WriteFile(logPath, []byte("small log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rotated, err := rotateDaemonLogIfNeeded(logPath, 1024, 2)
+	if err != nil {
+		t.Fatalf("rotateDaemonLogIfNeeded: %v", err)
+	}
+	if rotated {
+		t.Fatal("rotateDaemonLogIfNeeded rotated a below-limit log")
+	}
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "small log\n" {
+		t.Fatalf("active log = %q, want unchanged content", got)
+	}
+}
+
+func TestRotateDaemonLogCopiesTruncatesAndShiftsBackups(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "daemon.log")
+	if err := os.WriteFile(logPath, []byte("current log content\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath+".1", []byte("previous archive\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath+".2", []byte("expired archive\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	rotated, err := rotateDaemonLogIfNeeded(logPath, 8, 2)
+	if err != nil {
+		t.Fatalf("rotateDaemonLogIfNeeded: %v", err)
+	}
+	if !rotated {
+		t.Fatal("rotateDaemonLogIfNeeded did not rotate an over-limit log")
+	}
+
+	active, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active log length = %d, want 0 after in-place truncation", len(active))
+	}
+	archive1, err := os.ReadFile(logPath + ".1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(archive1) != "current log content\n" {
+		t.Fatalf("archive .1 = %q, want current log content", archive1)
+	}
+	archive2, err := os.ReadFile(logPath + ".2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(archive2) != "previous archive\n" {
+		t.Fatalf("archive .2 = %q, want previous .1 content", archive2)
+	}
+}
+
+func TestDaemonChildEnvReplacesExistingLogPath(t *testing.T) {
+	t.Setenv(daemonLogPathEnv, "/tmp/old.log")
+
+	env := daemonChildEnv("/tmp/new.log")
+	prefix := daemonLogPathEnv + "="
+	count := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			count++
+			if entry != prefix+"/tmp/new.log" {
+				t.Fatalf("daemon log env = %q, want replacement path", entry)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("daemon log env count = %d, want exactly one entry", count)
+	}
+}
+
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
 // on: both a ready ("running") and a still-booting ("starting") daemon count as
 // alive, so `daemon start` won't double-spawn over a starting daemon and

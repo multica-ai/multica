@@ -142,6 +142,97 @@ func daemonLogPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
 }
 
+const (
+	daemonLogMaxBytes      = 25 * 1024 * 1024
+	daemonLogBackupCount   = 2
+	daemonLogCheckInterval = time.Minute
+	daemonLogPathEnv       = "MULTICA_DAEMON_LOG_PATH"
+)
+
+// rotateDaemonLogIfNeeded archives an oversized daemon log and truncates the
+// active file in place. In-place truncation is intentional: background daemon
+// stdout/stderr hold append-only descriptors for the active inode, so renaming
+// the file alone would let the process keep writing to an unbounded archive.
+func rotateDaemonLogIfNeeded(logPath string, maxBytes int64, backupCount int) (bool, error) {
+	if logPath == "" || maxBytes <= 0 || backupCount < 1 {
+		return false, nil
+	}
+
+	info, err := os.Stat(logPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat daemon log: %w", err)
+	}
+	if info.Size() <= maxBytes {
+		return false, nil
+	}
+
+	source, err := os.Open(logPath)
+	if err != nil {
+		return false, fmt.Errorf("open daemon log for rotation: %w", err)
+	}
+	defer source.Close()
+
+	temp, err := os.CreateTemp(filepath.Dir(logPath), ".daemon-log-rotate-*")
+	if err != nil {
+		return false, fmt.Errorf("create daemon log archive: %w", err)
+	}
+	tempPath := temp.Name()
+	defer func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	if err := temp.Chmod(info.Mode().Perm()); err != nil {
+		return false, fmt.Errorf("set daemon log archive mode: %w", err)
+	}
+	if _, err := io.Copy(temp, source); err != nil {
+		return false, fmt.Errorf("copy daemon log archive: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		return false, fmt.Errorf("sync daemon log archive: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return false, fmt.Errorf("close daemon log archive: %w", err)
+	}
+
+	oldest := fmt.Sprintf("%s.%d", logPath, backupCount)
+	if err := os.Remove(oldest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("remove oldest daemon log archive: %w", err)
+	}
+	for i := backupCount - 1; i >= 1; i-- {
+		from := fmt.Sprintf("%s.%d", logPath, i)
+		to := fmt.Sprintf("%s.%d", logPath, i+1)
+		if err := os.Rename(from, to); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("shift daemon log archive %d: %w", i, err)
+		}
+	}
+	if err := os.Rename(tempPath, logPath+".1"); err != nil {
+		return false, fmt.Errorf("install daemon log archive: %w", err)
+	}
+	tempPath = ""
+
+	if err := os.Truncate(logPath, 0); err != nil {
+		return false, fmt.Errorf("truncate active daemon log: %w", err)
+	}
+	return true, nil
+}
+
+func daemonChildEnv(logPath string) []string {
+	prefix := daemonLogPathEnv + "="
+	env := os.Environ()
+	result := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return append(result, prefix+logPath)
+}
+
 // healthPortForProfile returns the health check port for the given profile.
 // Default profile uses the standard port (19514). Named profiles get a
 // deterministic offset derived from the profile name.
@@ -206,6 +297,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	child := exec.Command(exePath, args...)
+	child.Env = daemonChildEnv(logPath)
 	child.Stdout = logFile
 	child.Stderr = logFile
 	// On Windows we want to break the child out of the parent shell's Job
@@ -220,6 +312,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 			// Retry without breakaway. Reset the cmd state — exec.Cmd is
 			// not safe to Start() twice, so build a fresh one.
 			child = exec.Command(exePath, args...)
+			child.Env = daemonChildEnv(logPath)
 			child.Stdout = logFile
 			child.Stderr = logFile
 			child.SysProcAttr = daemonSysProcAttr(false)
@@ -388,7 +481,35 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
 
+	logPath := os.Getenv(daemonLogPathEnv)
+	if logPath != "" {
+		if rotated, err := rotateDaemonLogIfNeeded(logPath, daemonLogMaxBytes, daemonLogBackupCount); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not rotate daemon log: %v\n", err)
+		} else if rotated {
+			fmt.Fprintf(os.Stderr, "Rotated daemon log at %s\n", logPath)
+		}
+	}
+
 	logger := logger_pkg.NewLogger("daemon")
+	if logPath != "" {
+		go func() {
+			ticker := time.NewTicker(daemonLogCheckInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					rotated, err := rotateDaemonLogIfNeeded(logPath, daemonLogMaxBytes, daemonLogBackupCount)
+					if err != nil {
+						logger.Warn("daemon log rotation failed", "error", err)
+					} else if rotated {
+						logger.Info("daemon log rotated", "path", logPath)
+					}
+				}
+			}
+		}()
+	}
 
 	d := daemon.New(cfg, logger)
 
@@ -419,6 +540,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			// duplicate cleanup here.
 			return fmt.Errorf("failed to open daemon log file %s for restart: %w", logPath, err)
 		}
+		child.Env = daemonChildEnv(logPath)
 		child.Stdout = logFile
 		child.Stderr = logFile
 		// Break out of the parent's Job Object on Windows; see the
@@ -431,6 +553,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			// duplicate cleanup here.
 			if isAccessDeniedSpawnErr(err) {
 				child = exec.Command(restartBin, args...)
+				child.Env = daemonChildEnv(logPath)
 				child.Stdout = logFile
 				child.Stderr = logFile
 				child.SysProcAttr = daemonSysProcAttr(false)
