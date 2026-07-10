@@ -2553,7 +2553,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
 		if actorType != "member" {
-			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, c.ID))
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
 		}
 		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: c.ID,

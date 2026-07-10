@@ -1474,14 +1474,14 @@ func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, ag
 // one-pending-per-(issue,agent) unique index) and so silently dropped the
 // mismatched-originator comment.
 func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
-	originator := h.TaskService.ResolveOriginatorFromTriggerComment(ctx, newTriggerCommentID)
+	originator := h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, newTriggerCommentID)
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, originator, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
 		NewTriggerCommentID:     newTriggerCommentID,
 		NewOriginatorUserID:     originator,
-		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, newTriggerCommentID),
+		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, issue.WorkspaceID, newTriggerCommentID),
 		NewRuntimeMcpOverlay:    overlay,
 		NewRuntimeConnectedApps: connectedApps,
 	})
