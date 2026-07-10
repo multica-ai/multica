@@ -187,6 +187,12 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
+  //    The gpt-5.6 tiers (sol/terra/luna) have no published OpenAI rate yet;
+  //    they are provisionally priced at their 5.5/5.4/5.4-mini equivalents and
+  //    should be corrected once official pricing lands.
+  "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
+  "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
+  "gpt-5.6-luna":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
   "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },

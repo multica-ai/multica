@@ -43,3 +43,33 @@ func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
 		}
 	}
 }
+
+func TestPriceForModelAliasCodexGPT56(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "gpt-5.6-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 0.5, OutputPerM: 30},
+		},
+		{
+			model: "openai:gpt-5.6-terra",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.5, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15},
+		},
+		{
+			model: "gpt-5.6-luna",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.5},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+}

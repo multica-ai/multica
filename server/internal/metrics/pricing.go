@@ -15,6 +15,13 @@ type ModelPrice struct {
 }
 
 var modelPrices = map[string]ModelPrice{
+	// GPT-5.6 series (Codex `codex` provider). OpenAI has not published public
+	// rates for these yet, so each tier is provisionally priced at its 5.5/5.4
+	// equivalent (sol=frontier, terra=everyday, luna=fast/affordable). Replace
+	// with the official numbers once they land.
+	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 0.50, OutputPerM: 30.00},
+	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15.00},
+	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.50},
 	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 0.50, OutputPerM: 30.00},
 	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15.00},
 	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.50},
@@ -46,6 +53,9 @@ var modelAliasRules = []struct {
 	re       *regexp.Regexp
 	priceKey string
 }{
+	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-sol($|[^a-z0-9])`), "openai:gpt-5.6-sol"},
+	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-terra($|[^a-z0-9])`), "openai:gpt-5.6-terra"},
+	{regexp.MustCompile(`(^|/|:)gpt-5[.-]6-luna($|[^a-z0-9])`), "openai:gpt-5.6-luna"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]5$|^gpt-5-5$`), "openai:gpt-5.5"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4($|-2026-03-05|-xhigh)`), "openai:gpt-5.4"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4-mini($|[^a-z0-9])`), "openai:gpt-5.4-mini"},

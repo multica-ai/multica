@@ -234,6 +234,21 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBeCloseTo(1.75 + 14, 5);
+    // gpt-5.6 series (provisionally priced at their 5.5/5.4/5.4-mini tiers).
+    expect(
+      estimateCost({ ...zeroUsage, model: "gpt-5.6-sol", input_tokens: 1_000_000 }),
+    ).toBeCloseTo(5, 5);
+    expect(
+      estimateCost({ ...zeroUsage, model: "gpt-5.6-terra", output_tokens: 1_000_000 }),
+    ).toBeCloseTo(15, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gpt-5.6-luna",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.75 + 4.5, 5);
   });
 
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
