@@ -277,15 +277,13 @@ export function ManualCreatePanel({
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
-  // Every issue belongs to exactly one space, so the picker always resolves to
-  // a value. Associations are creation-time defaults, never constraints:
-  // explicit pick → parent's space → single-space project → last used → personal default.
+  // Every Issue belongs to one Space. Parent or Project ownership is
+  // authoritative; standalone creation falls back to explicit/last/default.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
   const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
   const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
-  const projectSpaceId =
-    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const projectSpaceId = selectedProject?.space_id;
   const effectiveSpaceId =
     spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId, lastSpaceId });
 
@@ -601,6 +599,7 @@ export function ManualCreatePanel({
                 <SpacePicker
                   spaceId={effectiveSpaceId ?? null}
                   onChange={setSpaceId}
+                  disabled={!!projectId || !!parentIssueId}
                   triggerRender={<PillButton />}
                   align="start"
                 />
@@ -719,6 +718,7 @@ export function ManualCreatePanel({
               <ProjectPicker
                 projectId={projectId ?? null}
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                spaceId={effectiveSpaceId}
                 triggerRender={<PillButton />}
                 align="start"
               />

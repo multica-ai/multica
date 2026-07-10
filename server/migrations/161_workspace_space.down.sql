@@ -8,8 +8,9 @@ DROP INDEX IF EXISTS idx_issue_workspace_space_status_position;
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS fk_issue_workspace_space;
 ALTER TABLE issue DROP COLUMN IF EXISTS space_id;
 
-DROP TABLE IF EXISTS project_space;
-ALTER TABLE project DROP CONSTRAINT IF EXISTS uq_project_workspace_id;
+DROP INDEX IF EXISTS idx_project_workspace_space_created_at;
+ALTER TABLE project DROP CONSTRAINT IF EXISTS fk_project_workspace_space;
+ALTER TABLE project DROP COLUMN IF EXISTS space_id;
 
 DROP TABLE IF EXISTS workspace_space_member;
 

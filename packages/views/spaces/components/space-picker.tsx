@@ -47,9 +47,8 @@ export function SpacePicker({
 }) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
-  // Always the full active list: space is a creation-time default, never
-  // constrained by the selected project (the old allowedSpaceIds filter was
-  // a strong-association-model leftover).
+  // Always load the full active list. Callers lock the picker when a Project
+  // or parent Issue makes one Space authoritative.
   const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const current = spaces.find((space) => space.id === spaceId);
 

@@ -163,8 +163,8 @@ func seedProject(t *testing.T, ctx context.Context) pgtype.UUID {
 	t.Helper()
 	var s string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, status, priority)
-		VALUES ($1, 'scope-guard test project', 'planned', 'none')
+		INSERT INTO project (workspace_id, space_id, title, status, priority)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'scope-guard test project', 'planned', 'none')
 		RETURNING id
 	`, testWorkspaceID).Scan(&s); err != nil {
 		t.Fatalf("seed project: %v", err)

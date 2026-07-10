@@ -39,8 +39,8 @@ func TestDashboardEndpoints(t *testing.T) {
 	// Two issues: one bound to a project, one not.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, 'dashboard test project')
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard test project')
 		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -754,7 +754,9 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	mkProject := func(name string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+			INSERT INTO project (workspace_id, space_id, title)
+			VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
+			RETURNING id
 		`, testWorkspaceID, name).Scan(&id); err != nil {
 			t.Fatalf("create project: %v", err)
 		}
@@ -863,7 +865,9 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard cascade test')
+		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -996,7 +1000,9 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	// and populates the project bucket.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard link test')
+		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}

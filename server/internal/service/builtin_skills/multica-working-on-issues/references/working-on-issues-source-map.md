@@ -81,10 +81,11 @@ workspace has a default space whose key is the legacy workspace prefix, so a bar
 counter and records the old `key-number` in `issue_identifier_alias`
 (`UpsertIssueIdentifierAlias`). Identifier resolution falls back to that alias
 in `resolveIssueByIdentifier` (`handler.go`) and in GitHub branch/PR linking
-(`github.go`), so pre-move references keep resolving. The CLI exposes this as
+(`github.go`), so pre-move references keep resolving. The CLI exposes standalone
+Issue moves as
 `multica issue update <id> --space <UUID-or-key>` (`cmd_issue.go`,
-`resolveSpaceRef` accepts a key or UUID). Space is a creation-time default
-elsewhere: parent/child and project↔space carry no cross-space validation.
+`resolveSpaceRef` accepts a key or UUID). Parent/child and Project/Issue pairs
+are validated to remain in the same Space.
 
 **Reference-only flag (MUL-3739).** The link row carries a `reference_only`
 boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler

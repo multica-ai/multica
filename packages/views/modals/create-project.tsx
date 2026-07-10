@@ -53,7 +53,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
-import { SpaceMultiPicker } from "../spaces/components/space-picker";
+import { SpacePicker } from "../spaces/components/space-picker";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -128,7 +128,7 @@ export function CreateProjectModal({
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
-  const [spaceIds, setSpaceIds] = useState<string[]>([]);
+  const [spaceId, setSpaceId] = useState<string | null>(null);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
@@ -226,10 +226,7 @@ export function CreateProjectModal({
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
-  // Seed the default space exactly once, when spaces first load. Guarding only
-  // on `spaceIds.length` re-seeded the moment the user cleared the selection,
-  // fighting the deselection; the ref makes seeding a one-shot so clearing
-  // sticks.
+  // Seed the owning Space exactly once when Spaces first load.
   const contextSpaceId = (data?.space_id as string) || undefined;
   const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
   const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
@@ -237,24 +234,21 @@ export function CreateProjectModal({
   useEffect(() => {
     if (seededDefaultSpaceRef.current || spaces.length === 0) return;
     seededDefaultSpaceRef.current = true;
-    if (spaceIds.length > 0) return;
+    if (spaceId) return;
     // The space the modal was opened from wins (e.g. a space's Projects
     // page); otherwise the same shared fallback as the issue/quick-create/
     // autopilot forms: last space used, then my first space.
     const defaultSpaceId = contextSpaceId ?? resolveCreationSpaceId(spaces, { lastSpaceId });
-    if (defaultSpaceId) setSpaceIds([defaultSpaceId]);
-  }, [spaceIds.length, spaces, contextSpaceId, lastSpaceId]);
+    if (defaultSpaceId) setSpaceId(defaultSpaceId);
+  }, [spaceId, spaces, contextSpaceId, lastSpaceId]);
 
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
 
-  // A project always keeps at least one space (server rule) — otherwise it
-  // would vanish from every space's Projects page. Single source for the
-  // inline hint, the disabled submit button, and the submit guard; moot
-  // while the workspace has no spaces loaded yet.
+  // A Project always has exactly one owning Space.
   const spaceSelectionMissing = useMemo(
-    () => spaces.length > 0 && spaceIds.length === 0,
-    [spaces.length, spaceIds.length],
+    () => spaces.length > 0 && !spaceId,
+    [spaces.length, spaceId],
   );
 
   const createProject = useCreateProject();
@@ -304,13 +298,11 @@ export function CreateProjectModal({
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        space_ids: spaceIds.length > 0 ? spaceIds : undefined,
+        space_id: spaceId ?? undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
-      // A project can span multiple spaces; the first selected one stands in
-      // as "primary" for the shared last-used memory.
-      if (spaceIds[0]) setLastSpaceId(spaceIds[0]);
+      if (spaceId) setLastSpaceId(spaceId);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
@@ -356,14 +348,14 @@ export function CreateProjectModal({
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            {/* Owning spaces lead the breadcrumb — same slot as the issue
-                modal's space picker, multi-select since projects can span
-                spaces. */}
-            <SpaceMultiPicker
-              spaceIds={spaceIds}
-              onChange={setSpaceIds}
+            {/* The owning Space leads the breadcrumb. When creation starts
+                from a Space surface the context is fixed. */}
+            <SpacePicker
+              spaceId={spaceId}
+              onChange={setSpaceId}
               triggerRender={<PillButton />}
               align="start"
+              disabled={!!contextSpaceId}
             />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>

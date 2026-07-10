@@ -784,6 +784,7 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
 }
@@ -798,13 +799,6 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
-}
-
-type ProjectSpace struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
-	SpaceID     pgtype.UUID        `json:"space_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type RuntimeProfile struct {

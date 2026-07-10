@@ -22,7 +22,9 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 	// the assertion isn't polluted by other issues seeded by parallel tests.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
+		RETURNING id
 	`, testWorkspaceID, fmt.Sprintf("Gantt Scheduled %d", suffix)).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}

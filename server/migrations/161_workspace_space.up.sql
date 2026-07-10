@@ -102,20 +102,14 @@ CREATE TABLE workspace_space_member (
 );
 
 ALTER TABLE project
-    ADD CONSTRAINT uq_project_workspace_id UNIQUE (workspace_id, id);
+    ADD COLUMN space_id UUID;
 
-CREATE TABLE project_space (
-    workspace_id UUID NOT NULL,
-    project_id UUID NOT NULL,
-    space_id UUID NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (project_id, space_id),
-    FOREIGN KEY (workspace_id, project_id) REFERENCES project(workspace_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (workspace_id, space_id) REFERENCES workspace_space(workspace_id, id) ON DELETE CASCADE
-);
+ALTER TABLE project
+    ADD CONSTRAINT fk_project_workspace_space
+    FOREIGN KEY (workspace_id, space_id) REFERENCES workspace_space(workspace_id, id);
 
-CREATE INDEX idx_project_space_workspace_space
-    ON project_space(workspace_id, space_id);
+CREATE INDEX idx_project_workspace_space_created_at
+    ON project(workspace_id, space_id, created_at DESC);
 
 ALTER TABLE issue
     ADD COLUMN space_id UUID;
@@ -178,9 +172,10 @@ FROM workspace_space wt
 WHERE wt.workspace_id = a.workspace_id
   AND a.space_id IS NULL;
 
-INSERT INTO project_space (workspace_id, project_id, space_id)
-SELECT p.workspace_id, p.id, wt.id
-FROM project p
-JOIN workspace_space wt ON wt.workspace_id = p.workspace_id;
+UPDATE project p
+SET space_id = wt.id
+FROM workspace_space wt
+WHERE wt.workspace_id = p.workspace_id
+  AND p.space_id IS NULL;
 
 DROP FUNCTION pg_temp.normalize_space_key(text);

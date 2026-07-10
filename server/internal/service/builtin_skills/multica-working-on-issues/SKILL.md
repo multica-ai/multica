@@ -202,16 +202,15 @@ one explicitly (the space owns the `SPACE_KEY-NUMBER` identifier namespace), or 
 it to fall back to the workspace's default space, whose key is the legacy workspace
 prefix. `multica issue list --space <UUID>` filters a listing to one space.
 
-Space binds at creation time only, and it can change later:
+Every Issue has one owning Space:
 
-- `multica issue update <id> --space <UUID-or-key>` moves the issue to another
-  space. It is renumbered under the target space's key; the old identifier is
+- `multica issue update <id> --space <UUID-or-key>` moves a standalone Issue to
+  another Space. It is renumbered under the target Space's key; the old identifier is
   recorded as an alias and keeps resolving (CLI lookups, API, GitHub branch/PR
   linking), so existing references never break.
-- Parent and child issues may live in different spaces. A child only inherits
-  its parent's space as a creation-time default when you don't pass `--space`.
-- A project's space set is likewise a creation-time default, not a constraint —
-  an issue in a project may belong to any space.
+- Parent and child Issues must share a Space.
+- A Project Issue must use its Project's owning Space. Detach it from the
+  Project before moving it independently.
 
 Parallel children — all start now:
 

@@ -20,8 +20,26 @@
 
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS uq_issue_space_number;
 
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS fk_issue_workspace_project_space;
+ALTER TABLE issue
+    ADD CONSTRAINT issue_project_id_fkey
+    FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE SET NULL;
+
+ALTER TABLE autopilot DROP CONSTRAINT IF EXISTS fk_autopilot_workspace_project_space;
+ALTER TABLE autopilot
+    ADD CONSTRAINT autopilot_project_id_fkey
+    FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE SET NULL;
+
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS fk_issue_workspace_parent_space;
+ALTER TABLE issue
+    ADD CONSTRAINT issue_parent_issue_id_fkey
+    FOREIGN KEY (parent_issue_id) REFERENCES issue(id) ON DELETE SET NULL;
+ALTER TABLE issue DROP CONSTRAINT IF EXISTS uq_issue_workspace_id_space_id;
+ALTER TABLE project DROP CONSTRAINT IF EXISTS uq_project_workspace_id_space_id;
+
 ALTER TABLE autopilot ALTER COLUMN space_id DROP NOT NULL;
 ALTER TABLE issue ALTER COLUMN space_id DROP NOT NULL;
+ALTER TABLE project ALTER COLUMN space_id DROP NOT NULL;
 
 -- May fail by design; see the WARNING above.
 ALTER TABLE issue ADD CONSTRAINT uq_issue_workspace_number UNIQUE (workspace_id, number);

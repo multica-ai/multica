@@ -1,7 +1,7 @@
 # Projects and resources source map
 
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
-- `project list --space` (single UUID or key) sets `space_id`; `project create`/`project update` take a repeatable `--space` (`StringArray`, UUID or key) resolved via `resolveSpaceRefs` into `space_ids`. On `update` the resolved list **replaces** the project's space set.
+- `project list --space` filters by one Space UUID or key; `project create --space` resolves one owning Space into `space_id`. Generic project updates cannot move a Project between Spaces; that requires the dedicated Move Project workflow.
 - `server/cmd/multica/cmd_space.go` registers space `list`, `create`, `update`, and `archive`. `create` requires `--name`; `--key` (issue prefix), `--description`, `--icon` are optional; `update` accepts the same optional flags. The CLI maps to `/api/spaces` (GET/POST) and `/api/spaces/{id}` (PATCH/PUT update, DELETE archive), routes registered at `server/cmd/server/router.go:951`.
 - `resolveSpaceRef`/`resolveSpaceRefs` (`cmd_space.go`) resolve a `--space` value by exact UUID or case-insensitive key against `GET /api/spaces`. `spaceCLIResponse` carries `key`, `issue_counter`, and `is_default`.
 - A space owns the issue-key prefix and its own issue-number counter, so identifiers read `SPACE_KEY-NUMBER`. Each workspace has a default space whose key is the legacy workspace prefix; omitting `--space` uses that default space.

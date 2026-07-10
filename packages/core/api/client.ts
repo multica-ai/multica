@@ -191,7 +191,9 @@ import {
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
   EMPTY_LIST_SPACES_RESPONSE,
+  EMPTY_PROJECT,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -209,6 +211,7 @@ import {
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
+  ListProjectsResponseSchema,
   ListSpacesResponseSchema,
   ListSpaceMembersResponseSchema,
   EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
@@ -219,6 +222,7 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  ProjectSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SquadSchema,
@@ -2137,25 +2141,33 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
     if (params?.space_id) search.set("space_id", params.space_id);
-    return this.fetch(`/api/projects?${search}`);
+    const raw = await this.fetch<unknown>(`/api/projects?${search}`);
+    return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
+      endpoint: "GET /api/projects",
+    });
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`);
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
+      endpoint: "GET /api/projects/:id",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    return this.fetch("/api/projects", {
+    const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseOrWarn<Project>(raw, ProjectSchema, { endpoint: "POST /api/projects" });
   }
 
   async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseOrWarn<Project>(raw, ProjectSchema, { endpoint: "PUT /api/projects/:id" });
   }
 
   async deleteProject(id: string): Promise<void> {

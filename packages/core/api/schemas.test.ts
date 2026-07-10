@@ -20,9 +20,11 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
+  ListProjectsResponseSchema,
   ListSpacesResponseSchema,
   SpaceSchema,
   EMPTY_LIST_SPACES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -796,11 +798,12 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
   });
 });
 
-describe("ProjectSchema space_ids drift", () => {
+describe("ProjectSchema space_id ownership", () => {
   const ENDPOINT = { endpoint: "GET /api/projects/search" };
   const baseProject = {
     id: "proj-1",
     workspace_id: "ws-1",
+    space_id: "space-1",
     title: "Website",
     description: null,
     icon: null,
@@ -813,34 +816,36 @@ describe("ProjectSchema space_ids drift", () => {
     match_source: "title",
   };
 
-  it("preserves a populated space_ids array", () => {
-    const parsed = parseWithFallback(
-      { projects: [{ ...baseProject, space_ids: ["space-1", "space-2"] }], total: 1 },
-      SearchProjectsResponseSchema,
-      EMPTY_SEARCH_PROJECTS_RESPONSE,
-      ENDPOINT,
-    );
-    expect(parsed.projects[0]?.space_ids).toEqual(["space-1", "space-2"]);
-  });
-
-  it("defaults space_ids to an empty array when the field is missing", () => {
+  it("preserves the owning space_id", () => {
     const parsed = parseWithFallback(
       { projects: [baseProject], total: 1 },
       SearchProjectsResponseSchema,
       EMPTY_SEARCH_PROJECTS_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.projects[0]?.space_ids).toEqual([]);
+    expect(parsed.projects[0]?.space_id).toBe("space-1");
   });
 
-  it("coerces a null space_ids to an empty array", () => {
+  it("preserves owning space_id in the ordinary Project list", () => {
+    const { match_source: _matchSource, ...project } = baseProject;
     const parsed = parseWithFallback(
-      { projects: [{ ...baseProject, space_ids: null }], total: 1 },
+      { projects: [project], total: 1 },
+      ListProjectsResponseSchema,
+      EMPTY_LIST_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects" },
+    );
+    expect(parsed.projects[0]?.space_id).toBe("space-1");
+  });
+
+  it("rejects a project with no owning space", () => {
+    const { space_id: _spaceId, ...withoutSpace } = baseProject;
+    const parsed = parseWithFallback(
+      { projects: [withoutSpace], total: 1 },
       SearchProjectsResponseSchema,
       EMPTY_SEARCH_PROJECTS_RESPONSE,
       ENDPOINT,
     );
-    expect(parsed.projects[0]?.space_ids).toEqual([]);
+    expect(parsed).toBe(EMPTY_SEARCH_PROJECTS_RESPONSE);
   });
 });
 

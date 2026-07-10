@@ -137,6 +137,11 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrProjectSpaceMismatch signals that an Issue Space differs from the owning
+// Space of its Project. Project ownership is authoritative; callers must either
+// use the Project Space or leave the Issue standalone.
+var ErrProjectSpaceMismatch = errors.New("issue space must match project space")
+
 // ErrSpaceNotFound signals that the requested or fallback Space does not exist
 // in the workspace. Callers translate this into 400.
 var ErrSpaceNotFound = errors.New("space not found in this workspace")
@@ -145,6 +150,10 @@ var ErrSpaceNotFound = errors.New("space not found in this workspace")
 // cannot receive new work. Kept distinct from ErrSpaceNotFound so callers can
 // return a clear "space is archived" message instead of a misleading "not found".
 var ErrSpaceArchived = errors.New("space is archived")
+
+// ErrParentSpaceMismatch signals that a parent and child would end up in
+// different Spaces. Parent relationships never cross Space boundaries.
+var ErrParentSpaceMismatch = errors.New("parent and child issues must share a space")
 
 // IssueCreateResult is the typed return from IssueService.Create.
 //
@@ -217,19 +226,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
-		// Space is a creation-time default, not a constraint: a sub-issue
-		// seeds its space from the parent only when the caller didn't pick
-		// one. Parent and child may diverge afterwards.
-		if !spaceID.Valid && parent.SpaceID.Valid {
-			spaceID = parent.SpaceID
+		if spaceID.Valid && parent.SpaceID.Valid && spaceID != parent.SpaceID {
+			return IssueCreateResult{}, ErrParentSpaceMismatch
 		}
-	}
-	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
-			ID:          projectID,
-			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
-			return IssueCreateResult{}, ErrProjectNotFound
+		if parent.SpaceID.Valid {
+			spaceID = parent.SpaceID
 		}
 	}
 	space, err := ResolveSpace(ctx, qtx, p.WorkspaceID, spaceID, projectID)
@@ -345,28 +346,26 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 // by IssueService.Create and by the HTTP quick-create / autopilot handlers so
 // every issue-producing path shares one inference and validation policy:
 //
-//   - an explicit requestedSpaceID is validated and used;
-//   - otherwise, when a Project is given: a single-space Project infers that
-//     Space; a multi-space Project (or a Project with no Space links) falls
-//     through to the workspace default Space — no error;
+//   - when a Project is given, its owning Space is authoritative; an explicit
+//     different Space is rejected;
+//   - otherwise an explicit requestedSpaceID is validated and used;
 //   - otherwise the workspace default Space is used.
 //
-// The chosen Space must be active (ErrSpaceNotFound / ErrSpaceArchived). The
-// project association is a creation-time default only — an explicit space is
-// never validated against the project's space set.
+// The chosen Space must be active (ErrSpaceNotFound / ErrSpaceArchived).
 func ResolveSpace(ctx context.Context, q *db.Queries, workspaceID, requestedSpaceID, projectID pgtype.UUID) (db.WorkspaceSpace, error) {
 	spaceID := requestedSpaceID
-	if !spaceID.Valid && projectID.Valid {
-		spaces, err := q.ListProjectSpaces(ctx, db.ListProjectSpacesParams{
+	if projectID.Valid {
+		project, err := q.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID:          projectID,
 			WorkspaceID: workspaceID,
-			ProjectID:   projectID,
 		})
 		if err != nil {
-			return db.WorkspaceSpace{}, fmt.Errorf("list project spaces: %w", err)
+			return db.WorkspaceSpace{}, ErrProjectNotFound
 		}
-		if len(spaces) == 1 {
-			spaceID = spaces[0].ID
+		if spaceID.Valid && spaceID != project.SpaceID {
+			return db.WorkspaceSpace{}, ErrProjectSpaceMismatch
 		}
+		spaceID = project.SpaceID
 	}
 	if !spaceID.Valid {
 		space, err := q.GetDefaultWorkspaceSpace(ctx, workspaceID)

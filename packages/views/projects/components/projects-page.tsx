@@ -772,9 +772,8 @@ function ProjectBatchToolbar({
 // Page
 // ---------------------------------------------------------------------------
 
-// `spaceId` narrows the list to projects associated with that space — used by
-// the space surface pages (/space/:key/projects). Association is a creation-time
-// tag, so this stays a client-side filter over the shared list cache.
+// `spaceId` narrows the list to Projects owned by that Space — used by the
+// Space surface pages (/space/:key/projects).
 export function ProjectsPage({ spaceId }: { spaceId?: string } = {}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -800,7 +799,7 @@ export function ProjectsPage({ spaceId }: { spaceId?: string } = {}) {
 
   const { data: allProjects = [], isLoading } = useQuery(projectListOptions(wsId));
   const projects = useMemo(
-    () => (spaceId ? allProjects.filter((p) => p.space_ids?.includes(spaceId)) : allProjects),
+    () => (spaceId ? allProjects.filter((p) => p.space_id === spaceId) : allProjects),
     [allProjects, spaceId],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));

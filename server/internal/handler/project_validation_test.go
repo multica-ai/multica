@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // An unknown project status must fail fast with a 400 and the valid list, not
@@ -60,6 +62,123 @@ func TestCreateProjectValidStatusReturns201(t *testing.T) {
 	})
 	if project.Status != "in_progress" {
 		t.Errorf("expected status in_progress, got %q", project.Status)
+	}
+}
+
+func TestProjectOwnsExactlyOneSpace(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	key := fmt.Sprintf("P%06d", suffix%1_000_000)
+
+	var spaceID, defaultSpaceID, projectID, issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Project Space %d", suffix), key, testUserID).Scan(&spaceID); err != nil {
+		t.Fatalf("create Space fixture: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM workspace_space
+		WHERE workspace_id = $1 AND id <> $2 AND archived_at IS NULL
+		ORDER BY created_at, id LIMIT 1
+	`, testWorkspaceID, spaceID).Scan(&defaultSpaceID); err != nil {
+		t.Fatalf("load default Space fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if issueID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if projectID != "" {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+		}
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_space WHERE id = $1`, spaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    fmt.Sprintf("single Space project %d", suffix),
+		"space_id": spaceID,
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	projectID = project.ID
+	if project.SpaceID != spaceID {
+		t.Fatalf("Project space_id = %q, want %q", project.SpaceID, spaceID)
+	}
+
+	// A Project's Space is authoritative for new Project Issues when the caller
+	// omits space_id.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      fmt.Sprintf("Project Space issue %d", suffix),
+		"project_id": project.ID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue in Project: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode CreateIssue: %v", err)
+	}
+	issueID = issue.ID
+	if issue.SpaceID == nil || *issue.SpaceID != spaceID {
+		t.Fatalf("Project Issue space_id = %v, want %q", issue.SpaceID, spaceID)
+	}
+
+	// Explicitly pairing the Project with a different Space is rejected.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      fmt.Sprintf("mismatched Project Space issue %d", suffix),
+		"project_id": project.ID,
+		"space_id":   defaultSpaceID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), projectSpaceMismatchMessage) {
+		t.Fatalf("CreateIssue with mismatched Space: expected 400 mismatch, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Listing is a direct ownership filter, not a many-to-many membership join.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID+"&space_id="+spaceID, nil)
+	testHandler.ListProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjects by Space: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listed struct {
+		Projects []ProjectResponse `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode ListProjects: %v", err)
+	}
+	found := false
+	for _, candidate := range listed.Projects {
+		if candidate.ID == project.ID {
+			found = true
+			if candidate.SpaceID != spaceID {
+				t.Fatalf("listed Project space_id = %q, want %q", candidate.SpaceID, spaceID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Project %s missing from its owning Space filter", project.ID)
+	}
+
+	// Space changes require a future impact-aware Move Project workflow; the
+	// generic metadata endpoint cannot silently move the whole issue tree.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{"space_id": defaultSpaceID})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("UpdateProject space_id: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

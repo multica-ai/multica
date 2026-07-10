@@ -8,12 +8,13 @@ import (
 )
 
 // Unified, transport-facing messages for the service-layer space-resolution
-// errors. Every issue-producing handler (create, quick-create, autopilot,
-// project space lists) maps the same typed error to the same string so callers
-// see one wording per condition.
+// errors. Every issue-producing handler (create, quick-create, autopilot) maps
+// the same typed error to the same string so callers see one wording per
+// condition.
 const (
-	spaceNotFoundMessage = "space not found in this workspace"
-	spaceArchivedMessage = "space is archived"
+	spaceNotFoundMessage        = "space not found in this workspace"
+	spaceArchivedMessage        = "space is archived"
+	projectSpaceMismatchMessage = "issue space must match project space"
 )
 
 // spaceResolveMessage maps a service space-resolution error to its unified
@@ -24,6 +25,8 @@ func spaceResolveMessage(err error) string {
 		return spaceNotFoundMessage
 	case errors.Is(err, service.ErrSpaceArchived):
 		return spaceArchivedMessage
+	case errors.Is(err, service.ErrProjectSpaceMismatch):
+		return projectSpaceMismatchMessage
 	default:
 		return ""
 	}

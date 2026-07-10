@@ -38,10 +38,10 @@ issue-number counter, so issue identifiers read `SPACE_KEY-NUMBER` (e.g. `MUL-42
 Every workspace has a default space whose key is the legacy workspace prefix;
 commands that omit `--space` fall back to it.
 
-Projects belong to one or more spaces. `project create` and `project update` take a
-repeatable `--space <space-id-or-key>` (UUID or key); on `update` the flag
-**replaces** the project's space set. `project list --space <space-id-or-key>` filters
-a listing to one space.
+Each Project belongs to exactly one Space. `project create` accepts one
+`--space <space-id-or-key>` (UUID or key), or falls back to the workspace's
+default Space. Generic project updates do not move ownership; `project list
+--space <space-id-or-key>` filters a listing to one Space.
 
 ```bash
 multica space list --output json
@@ -65,7 +65,6 @@ multica project create --title "<title>" --space <space-id-or-key> --start-date 
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
 multica project update <project-id> --start-date "" --output json   # clear the start date
-multica project update <project-id> --space <space-id-or-key> --output json
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json

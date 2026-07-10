@@ -2186,10 +2186,13 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		requestedSpaceUUID = tid
 	}
-	// A sub-issue seeds its Space from the parent when the caller didn't pick
-	// one — a creation-time default, not a constraint; an explicit space_id
-	// always wins and parent/child may diverge afterwards.
+	// Parent and child Issues always share a Space. Reject an explicit mismatch
+	// before enqueueing so the async worker never receives an impossible pair.
 	spaceUUID := requestedSpaceUUID
+	if spaceUUID.Valid && parentIssueUUID.Valid && parentIssue.SpaceID.Valid && spaceUUID != parentIssue.SpaceID {
+		writeError(w, http.StatusBadRequest, "parent and child issues must share a space")
+		return
+	}
 	if !spaceUUID.Valid && parentIssueUUID.Valid && parentIssue.SpaceID.Valid {
 		spaceUUID = parentIssue.SpaceID
 	}
@@ -2568,6 +2571,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if errors.Is(err, service.ErrParentSpaceMismatch) {
+		writeError(w, http.StatusBadRequest, "parent and child issues must share a space")
+		return
+	}
 	if writeSpaceResolveError(w, err) {
 		return
 	}
@@ -2735,8 +2742,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "an issue cannot be its own parent")
 				return
 			}
-			// Validate parent exists in the same workspace. Cross-space
-			// parent/child is allowed — space only binds at creation time.
+			// Validate parent exists in the same workspace. The final Space
+			// equality check runs after parsing an optional space_id move below.
 			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
@@ -2838,6 +2845,50 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			spaceChanged = true
+		}
+	}
+
+	// Validate the final ownership pair, not the fields independently. A
+	// Project owns exactly one Space, so assigning a Project and moving to its
+	// Space may be done atomically in one request, while every partial mismatch
+	// is rejected before opening the transaction.
+	if params.ProjectID.Valid {
+		project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          params.ProjectID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+		if project.SpaceID != finalSpaceID {
+			writeError(w, http.StatusConflict, projectSpaceMismatchMessage)
+			return
+		}
+	}
+	if params.ParentIssueID.Valid {
+		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          params.ParentIssueID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+			return
+		}
+		if parent.SpaceID != finalSpaceID {
+			writeError(w, http.StatusConflict, "parent and child issues must share a space")
+			return
+		}
+	}
+	if spaceChanged {
+		children, err := h.Queries.ListChildIssues(r.Context(), prevIssue.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate child issues")
+			return
+		}
+		if len(children) > 0 {
+			writeError(w, http.StatusConflict, "an issue with children must be moved as a tree")
+			return
 		}
 	}
 
@@ -3356,11 +3407,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if newParentID == prevIssue.ID {
 					continue
 				}
-				// Validate parent exists in the same workspace.
-				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				// Validate parent exists in the same workspace and Space.
+				parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
-				}); err != nil {
+				})
+				if err != nil || parent.SpaceID != prevIssue.SpaceID {
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -3389,6 +3441,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if req.Updates.ProjectID != nil {
 				projectUUID, err := util.ParseUUID(*req.Updates.ProjectID)
 				if err != nil {
+					continue
+				}
+				project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          projectUUID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				})
+				if err != nil || project.SpaceID != prevIssue.SpaceID {
 					continue
 				}
 				params.ProjectID = projectUUID

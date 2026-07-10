@@ -351,7 +351,7 @@ export function applyWorkspaceUpdatedToCache(
   if (space?.workspace_id) {
     qc.invalidateQueries({ queryKey: spaceKeys.list(space.workspace_id) });
     qc.invalidateQueries({ queryKey: issueKeys.all(space.workspace_id) });
-    // Mirror useArchiveSpace.onSettled: projects carry space_ids, autopilots
+    // Mirror useArchiveSpace.onSettled: projects and autopilots carry space_id,
     // carry space_id, and both group under spaces in the sidebar — an archive
     // or rename on another client must refresh them too.
     qc.invalidateQueries({ queryKey: projectKeys.all(space.workspace_id) });

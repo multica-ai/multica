@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,6 +122,60 @@ func TestBatchUpdateValidUpdatesPersistAndCount(t *testing.T) {
 		if got.Status != "in_progress" {
 			t.Errorf("issue %s: expected status=in_progress, got %q", id, got.Status)
 		}
+	}
+}
+
+func TestBatchUpdateRejectsProjectFromAnotherSpace(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	key := fmt.Sprintf("B%06d", suffix%1_000_000)
+	issueID := createTestIssue(t, fmt.Sprintf("BU cross-Space %d", suffix), "todo", "low")
+	var spaceID, projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Batch Space %d", suffix), key, testUserID).Scan(&spaceID); err != nil {
+		t.Fatalf("create Space fixture: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, testWorkspaceID, spaceID, fmt.Sprintf("Batch Project %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create Project fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		deleteTestIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_space WHERE id = $1`, spaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID},
+		"updates":   map[string]any{"project_id": projectID},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode BatchUpdateIssues: %v", err)
+	}
+	if resp.Updated != 0 {
+		t.Fatalf("cross-Space batch assignment updated %d issues, want 0", resp.Updated)
+	}
+
+	var persistedProjectID *string
+	if err := testPool.QueryRow(ctx, `SELECT project_id::text FROM issue WHERE id = $1`, issueID).Scan(&persistedProjectID); err != nil {
+		t.Fatalf("load updated issue: %v", err)
+	}
+	if persistedProjectID != nil {
+		t.Fatalf("cross-Space Project assignment persisted as %q", *persistedProjectID)
 	}
 }
 

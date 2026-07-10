@@ -371,14 +371,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
-  // Space is required and always resolves to a value — same model as the
-  // issue modal. Associations are creation-time defaults, never constraints:
-  // explicit pick → single-space project → last used → the user's first space.
-  // The picker is never restricted to the project's space set.
+  // Space is required. A selected Project makes its owning Space authoritative;
+  // otherwise explicit pick → last used → the user's first Space.
   const lastSpaceId = useLastSpaceStore((s) => s.lastSpaceId);
   const setLastSpaceId = useLastSpaceStore((s) => s.setLastSpaceId);
-  const projectSpaceId =
-    selectedProject?.space_ids?.length === 1 ? selectedProject.space_ids[0] : undefined;
+  const projectSpaceId = selectedProject?.space_id;
   const effectiveSpaceId =
     spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId, lastSpaceId }) ?? null;
 
@@ -574,6 +571,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <SpacePicker
               spaceId={effectiveSpaceId}
               onChange={setSpaceId}
+              disabled={!!projectId}
               triggerRender={<PillButton />}
               align="start"
             />
@@ -715,6 +713,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 projectId={projectId}
                 selectedProject={selectedProject}
                 onChange={setProjectId}
+                spaceId={effectiveSpaceId}
               />
             )}
 
@@ -925,10 +924,12 @@ function ProjectSection({
   projectId,
   selectedProject,
   onChange,
+  spaceId,
 }: {
   projectId: string | null;
   selectedProject: { title: string; icon: string | null } | null;
   onChange: (projectId: string | null) => void;
+  spaceId: string | null;
 }) {
   const { t } = useT("autopilots");
   return (
@@ -937,6 +938,7 @@ function ProjectSection({
       <ProjectPicker
         projectId={projectId}
         onUpdate={(updates) => onChange(updates.project_id ?? null)}
+        spaceId={spaceId}
         align="start"
         triggerRender={
           <button

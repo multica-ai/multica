@@ -1,7 +1,8 @@
 -- Space numbering cutover ("Migration B").
 --
 -- Phase 2 of the two-phase space-numbering rollout. Migration 161 added the
--- Space schema additively: issue.space_id / autopilot.space_id are nullable and
+-- Space schema additively: project.space_id / issue.space_id /
+-- autopilot.space_id are nullable and
 -- the legacy uq_issue_workspace_number (UNIQUE(workspace_id, number)) still
 -- holds. This migration runs ONLY after every old, space-unaware server
 -- instance has drained, so no writer can still emit a NULL space_id.
@@ -14,7 +15,7 @@
 -- number independently from 1 (Linear-style ENG-1, DES-1, ...).
 --
 -- Steps, in order:
---   1. Re-backfill any issue/autopilot rows an old instance wrote with a NULL
+--   1. Re-backfill any project/issue/autopilot rows an old instance wrote with a NULL
 --      space_id during the deploy window to the workspace's default Space, using
 --      the same join shape as 161.
 --   2. Sync each Space's issue_counter upward to cover the highest number
@@ -22,12 +23,15 @@
 --      workspace.issue_counter that old writers advanced during the window.
 --      Counters never regress.
 --   3. Validate (DO block, RAISE EXCEPTION on failure): zero remaining NULL
---      space_id in issue and autopilot; zero duplicate (space_id, number) pairs
---      in issue. Duplicates are theoretically impossible while
+--      space_id in project, issue and autopilot; every Project Issue and
+--      Project-bound Autopilot matches its Project's Space; every parent/child
+--      pair shares a Space; zero duplicate (space_id, number) pairs in issue.
+--      Duplicates are theoretically impossible while
 --      uq_issue_workspace_number holds and every issue maps to exactly one
 --      Space within its workspace, but we validate anyway and fail loudly
 --      rather than mint a broken unique index.
---   4. Cut over: space_id NOT NULL on issue + autopilot; drop
+--   4. Cut over: space_id NOT NULL on project + issue + autopilot; enforce
+--      Project/Issue, Project/Autopilot and parent/child same-Space ownership; drop
 --      uq_issue_workspace_number; add uq_issue_space_number UNIQUE(space_id,
 --      number).
 --
@@ -73,6 +77,19 @@ WHERE wt.workspace_id = a.workspace_id
   )
   AND a.space_id IS NULL;
 
+UPDATE project p
+SET space_id = wt.id
+FROM workspace_space wt
+WHERE wt.workspace_id = p.workspace_id
+  AND wt.archived_at IS NULL
+  AND wt.id = (
+      SELECT w2.id FROM workspace_space w2
+      WHERE w2.workspace_id = p.workspace_id AND w2.archived_at IS NULL
+      ORDER BY w2.created_at ASC, w2.id ASC
+      LIMIT 1
+  )
+  AND p.space_id IS NULL;
+
 -- 2. Sync counters upward. GREATEST of the current counter, the max number
 --    actually minted into the Space, and (for the workspace's earliest Space
 --    only — there is no is_default flag, but that Space is always the one
@@ -112,16 +129,51 @@ WHERE wt.issue_counter < GREATEST(
 -- 3. Validation preflight. Fail loudly with actionable counts/ids; never fix.
 DO $$
 DECLARE
+    null_project_count integer;
     null_issue_count integer;
     null_autopilot_count integer;
+    project_issue_mismatch_count integer;
+    project_autopilot_mismatch_count integer;
+    parent_child_mismatch_count integer;
     dup_count integer;
     offenders text;
 BEGIN
+    SELECT count(*) INTO null_project_count FROM project WHERE space_id IS NULL;
     SELECT count(*) INTO null_issue_count FROM issue WHERE space_id IS NULL;
     SELECT count(*) INTO null_autopilot_count FROM autopilot WHERE space_id IS NULL;
-    IF null_issue_count > 0 OR null_autopilot_count > 0 THEN
-        RAISE EXCEPTION 'space_number_cutover preflight failed: % issue and % autopilot rows still have NULL space_id. An old, space-unaware instance is likely still writing; drain every old instance before running Migration B.',
-            null_issue_count, null_autopilot_count;
+    IF null_project_count > 0 OR null_issue_count > 0 OR null_autopilot_count > 0 THEN
+        RAISE EXCEPTION 'space_number_cutover preflight failed: % project, % issue and % autopilot rows still have NULL space_id. An old, space-unaware instance is likely still writing; drain every old instance before running Migration B.',
+            null_project_count, null_issue_count, null_autopilot_count;
+    END IF;
+
+    SELECT count(*) INTO project_issue_mismatch_count
+    FROM issue i
+    JOIN project p ON p.id = i.project_id
+    WHERE i.project_id IS NOT NULL
+      AND (i.workspace_id, i.space_id) IS DISTINCT FROM (p.workspace_id, p.space_id);
+    IF project_issue_mismatch_count > 0 THEN
+        RAISE EXCEPTION 'space_number_cutover preflight failed: % Project Issues do not match their Project workspace/space; refusing to enforce single-Space Project ownership.',
+            project_issue_mismatch_count;
+    END IF;
+
+    SELECT count(*) INTO project_autopilot_mismatch_count
+    FROM autopilot a
+    JOIN project p ON p.id = a.project_id
+    WHERE a.project_id IS NOT NULL
+      AND (a.workspace_id, a.space_id) IS DISTINCT FROM (p.workspace_id, p.space_id);
+    IF project_autopilot_mismatch_count > 0 THEN
+        RAISE EXCEPTION 'space_number_cutover preflight failed: % Project-bound Autopilots do not match their Project workspace/space; refusing to enforce single-Space Project ownership.',
+            project_autopilot_mismatch_count;
+    END IF;
+
+    SELECT count(*) INTO parent_child_mismatch_count
+    FROM issue child
+    JOIN issue parent ON parent.id = child.parent_issue_id
+    WHERE child.parent_issue_id IS NOT NULL
+      AND (child.workspace_id, child.space_id) IS DISTINCT FROM (parent.workspace_id, parent.space_id);
+    IF parent_child_mismatch_count > 0 THEN
+        RAISE EXCEPTION 'space_number_cutover preflight failed: % child Issues do not match their parent workspace/space; refusing to enforce same-Space issue trees.',
+            parent_child_mismatch_count;
     END IF;
 
     SELECT count(*) INTO dup_count
@@ -148,8 +200,41 @@ BEGIN
 END $$;
 
 -- 4. Cutover. Validation above guarantees these succeed.
+ALTER TABLE project ALTER COLUMN space_id SET NOT NULL;
 ALTER TABLE issue ALTER COLUMN space_id SET NOT NULL;
 ALTER TABLE autopilot ALTER COLUMN space_id SET NOT NULL;
+
+ALTER TABLE project
+    ADD CONSTRAINT uq_project_workspace_id_space_id
+    UNIQUE (workspace_id, id, space_id);
+
+ALTER TABLE issue
+    ADD CONSTRAINT uq_issue_workspace_id_space_id
+    UNIQUE (workspace_id, id, space_id);
+
+ALTER TABLE issue DROP CONSTRAINT issue_project_id_fkey;
+ALTER TABLE issue
+    ADD CONSTRAINT fk_issue_workspace_project_space
+    FOREIGN KEY (workspace_id, project_id, space_id)
+    REFERENCES project(workspace_id, id, space_id)
+    ON DELETE SET NULL (project_id)
+    DEFERRABLE INITIALLY DEFERRED;
+
+ALTER TABLE autopilot DROP CONSTRAINT autopilot_project_id_fkey;
+ALTER TABLE autopilot
+    ADD CONSTRAINT fk_autopilot_workspace_project_space
+    FOREIGN KEY (workspace_id, project_id, space_id)
+    REFERENCES project(workspace_id, id, space_id)
+    ON DELETE SET NULL (project_id)
+    DEFERRABLE INITIALLY DEFERRED;
+
+ALTER TABLE issue DROP CONSTRAINT issue_parent_issue_id_fkey;
+ALTER TABLE issue
+    ADD CONSTRAINT fk_issue_workspace_parent_space
+    FOREIGN KEY (workspace_id, parent_issue_id, space_id)
+    REFERENCES issue(workspace_id, id, space_id)
+    ON DELETE SET NULL (parent_issue_id)
+    DEFERRABLE INITIALLY DEFERRED;
 
 -- Swap workspace-scoped uniqueness for space-scoped uniqueness. Dropping the
 -- constraint drops its backing unique index; the new uq_issue_space_number

@@ -1,12 +1,7 @@
 -- name: ListProjects :many
 SELECT * FROM project
 WHERE project.workspace_id = $1
-  AND (sqlc.narg('space_id')::uuid IS NULL OR EXISTS (
-    SELECT 1 FROM project_space pt
-    WHERE pt.project_id = project.id
-      AND pt.workspace_id = project.workspace_id
-      AND pt.space_id = sqlc.narg('space_id')::uuid
-  ))
+  AND (sqlc.narg('space_id')::uuid IS NULL OR project.space_id = sqlc.narg('space_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR project.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR project.priority = sqlc.narg('priority'))
 ORDER BY created_at DESC;
@@ -21,10 +16,10 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateProject :one
 INSERT INTO project (
-    workspace_id, title, description, icon, status,
+    workspace_id, space_id, title, description, icon, status,
     lead_type, lead_id, priority, start_date, due_date
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -57,36 +52,3 @@ SELECT project_id,
 FROM issue
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
-
--- name: ListProjectSpaces :many
-SELECT wt.* FROM workspace_space wt
-JOIN project_space pt ON pt.space_id = wt.id AND pt.workspace_id = wt.workspace_id
-WHERE pt.workspace_id = $1
-  AND pt.project_id = $2
-ORDER BY wt.name ASC, wt.created_at ASC;
-
--- name: ListProjectSpacesByProjects :many
-SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key,
-       wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by,
-       wt.created_by, wt.created_at, wt.updated_at
-FROM project_space pt
-JOIN workspace_space wt ON wt.id = pt.space_id AND wt.workspace_id = pt.workspace_id
-WHERE pt.workspace_id = $1
-  AND pt.project_id = ANY(sqlc.arg('project_ids')::uuid[])
-ORDER BY pt.project_id, wt.name ASC, wt.created_at ASC;
-
--- name: AddProjectSpace :exec
-INSERT INTO project_space (workspace_id, project_id, space_id)
-VALUES ($1, $2, $3)
-ON CONFLICT (project_id, space_id) DO NOTHING;
-
--- name: ReplaceProjectSpaces :exec
-WITH deleted AS (
-  DELETE FROM project_space
-  WHERE workspace_id = sqlc.arg('workspace_id')
-    AND project_id = sqlc.arg('project_id')
-    AND NOT (space_id = ANY(sqlc.arg('space_ids')::uuid[]))
-)
-INSERT INTO project_space (workspace_id, project_id, space_id)
-SELECT sqlc.arg('workspace_id'), sqlc.arg('project_id'), unnest(sqlc.arg('space_ids')::uuid[])
-ON CONFLICT (project_id, space_id) DO NOTHING;

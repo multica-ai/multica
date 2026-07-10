@@ -25,12 +25,14 @@ import type {
   IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
+  ListProjectsResponse,
   ListSpacesResponse,
   ListSpaceMembersResponse,
   ListWebhookDeliveriesResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  Project,
   Squad,
   Space,
   TimelineEntry,
@@ -547,9 +549,10 @@ export const EMPTY_LIST_SPACES_RESPONSE: ListSpacesResponse = {
   total: 0,
 };
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  space_id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
   icon: z.string().nullable(),
@@ -567,10 +570,35 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
-  // Tolerate a missing key or an explicit null (older backends) by defaulting
-  // to an empty membership list.
-  space_ids: z.array(z.string()).nullish().transform((ids) => ids ?? []),
 }).loose();
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "",
+  workspace_id: "",
+  space_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),

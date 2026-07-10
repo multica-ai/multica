@@ -535,24 +535,18 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 
 	var oldProjectID, targetProjectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, priority)
-		VALUES ($1, $2, 'none')
+		INSERT INTO project (workspace_id, space_id, title, priority)
+		VALUES ($1, $2, $3, 'none')
 		RETURNING id
-	`, testWorkspaceID, "Old Project").Scan(&oldProjectID); err != nil {
+	`, testWorkspaceID, oldSpaceID, "Old Project").Scan(&oldProjectID); err != nil {
 		t.Fatalf("insert old project: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, priority)
-		VALUES ($1, $2, 'none')
+		INSERT INTO project (workspace_id, space_id, title, priority)
+		VALUES ($1, $2, $3, 'none')
 		RETURNING id
-	`, testWorkspaceID, "Target Project").Scan(&targetProjectID); err != nil {
+	`, testWorkspaceID, targetSpaceID, "Target Project").Scan(&targetProjectID); err != nil {
 		t.Fatalf("insert target project: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO project_space (workspace_id, project_id, space_id)
-		VALUES ($1, $2, $3), ($1, $4, $5)
-	`, testWorkspaceID, oldProjectID, oldSpaceID, targetProjectID, targetSpaceID); err != nil {
-		t.Fatalf("insert project spaces: %v", err)
 	}
 
 	var issueID string
@@ -596,28 +590,12 @@ func TestUpdateIssueProjectAndSpaceUsesFinalProjectSpacePair(t *testing.T) {
 		t.Fatalf("space_id = %v, want %s", updated.SpaceID, targetSpaceID)
 	}
 
-	projectSpaceCount := func(projectID, spaceID string) int {
-		t.Helper()
-		var count int
-		if err := testPool.QueryRow(ctx, `
-			SELECT count(*) FROM project_space
-			WHERE workspace_id = $1 AND project_id = $2 AND space_id = $3
-		`, testWorkspaceID, projectID, spaceID).Scan(&count); err != nil {
-			t.Fatalf("count project_space %s/%s: %v", projectID, spaceID, err)
-		}
-		return count
+	var persistedTargetSpaceID string
+	if err := testPool.QueryRow(ctx, `SELECT space_id FROM project WHERE id = $1`, targetProjectID).Scan(&persistedTargetSpaceID); err != nil {
+		t.Fatalf("read target Project Space: %v", err)
 	}
-	if got := projectSpaceCount(targetProjectID, targetSpaceID); got != 1 {
-		t.Fatalf("target project/target space count = %d, want 1", got)
-	}
-	if got := projectSpaceCount(targetProjectID, oldSpaceID); got != 0 {
-		t.Fatalf("target project/old space count = %d, want 0", got)
-	}
-	if got := projectSpaceCount(oldProjectID, targetSpaceID); got != 0 {
-		t.Fatalf("old project/target space count = %d, want 0", got)
-	}
-	if got := projectSpaceCount(oldProjectID, oldSpaceID); got != 1 {
-		t.Fatalf("old project/old space count = %d, want 1", got)
+	if persistedTargetSpaceID != targetSpaceID {
+		t.Fatalf("target Project Space = %s, want %s", persistedTargetSpaceID, targetSpaceID)
 	}
 
 	var aliasCount int
@@ -779,11 +757,17 @@ func TestCreateIssueRejectsCrossWorkspaceProject(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
 	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key)
+		VALUES ($1, 'Default', 'XPP')
+	`, otherWorkspaceID); err != nil {
+		t.Fatalf("insert foreign default space: %v", err)
+	}
 
 	var foreignProjectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, status, priority)
-		VALUES ($1, $2, 'planned', 'none')
+		INSERT INTO project (workspace_id, space_id, title, status, priority)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'planned', 'none')
 		RETURNING id
 	`, otherWorkspaceID, "Foreign project").Scan(&foreignProjectID); err != nil {
 		t.Fatalf("insert foreign project: %v", err)
@@ -980,8 +964,8 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
 		RETURNING id
 	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
 		t.Fatalf("create project fixture: %v", err)
@@ -1445,8 +1429,8 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
 		RETURNING id::text
 	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
 		t.Fatalf("create project fixture: %v", err)
@@ -1518,8 +1502,8 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
 		RETURNING id::text
 	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
 		t.Fatalf("create project fixture: %v", err)

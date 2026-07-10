@@ -498,7 +498,7 @@ function GotoSection({ space }: { space: Space }) {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: autopilots = [] } = useQuery(autopilotListOptions(wsId));
   const projectCount = useMemo(
-    () => projects.filter((project) => project.space_ids?.includes(space.id)).length,
+    () => projects.filter((project) => project.space_id === space.id).length,
     [projects, space.id],
   );
   const autopilotCount = useMemo(

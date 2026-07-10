@@ -114,7 +114,8 @@ CREATE TABLE member (
 );
 CREATE TABLE project (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL
+    workspace_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE issue (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -123,12 +124,17 @@ CREATE TABLE issue (
     status TEXT NOT NULL DEFAULT 'todo',
     position DOUBLE PRECISION NOT NULL DEFAULT 0,
     project_id UUID,
+    parent_issue_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_issue_workspace_number UNIQUE (workspace_id, number)
+    CONSTRAINT uq_issue_workspace_number UNIQUE (workspace_id, number),
+    CONSTRAINT issue_project_id_fkey FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE SET NULL,
+    CONSTRAINT issue_parent_issue_id_fkey FOREIGN KEY (parent_issue_id) REFERENCES issue(id) ON DELETE SET NULL
 );
 CREATE TABLE autopilot (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL
+    workspace_id UUID NOT NULL,
+    project_id UUID,
+    CONSTRAINT autopilot_project_id_fkey FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE SET NULL
 );
 `
 
@@ -189,23 +195,35 @@ func seedPre161(t *testing.T, pool *pgxpool.Pool) string {
 		t.Fatalf("insert workspace: %v", err)
 	}
 	execCutover(t, pool, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, wsID, userID)
+	var projectID string
+	if err := pool.QueryRow(ctx, `INSERT INTO project (workspace_id) VALUES ($1) RETURNING id`, wsID).Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
 	for n := 1; n <= 3; n++ {
-		execCutover(t, pool,
-			`INSERT INTO issue (workspace_id, number, status) VALUES ($1, $2, 'todo')`, wsID, n)
+		if n == 1 {
+			execCutover(t, pool,
+				`INSERT INTO issue (workspace_id, number, status, project_id) VALUES ($1, $2, 'todo', $3)`, wsID, n, projectID)
+			continue
+		}
+		execCutover(t, pool, `INSERT INTO issue (workspace_id, number, status) VALUES ($1, $2, 'todo')`, wsID, n)
 	}
 	return wsID
 }
 
 func constraintExists(t *testing.T, pool *pgxpool.Pool, name string) bool {
+	return constraintExistsOn(t, pool, "issue", name)
+}
+
+func constraintExistsOn(t *testing.T, pool *pgxpool.Pool, table, name string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var exists bool
 	if err := pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname = $1 AND conrelid = 'issue'::regclass)`,
-		name,
+		`SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname = $1 AND conrelid = to_regclass($2))`,
+		name, table,
 	).Scan(&exists); err != nil {
-		t.Fatalf("check constraint %s: %v", name, err)
+		t.Fatalf("check constraint %s on %s: %v", name, table, err)
 	}
 	return exists
 }
@@ -220,21 +238,30 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 	if err := applyCutoverMigration(pool, schema, up161); err != nil {
 		t.Fatalf("apply 161: %v", err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Simulate the deploy window: an old, space-unaware instance mints issue #4
-	// with a NULL space_id and advances the legacy workspace counter to 5.
-	execCutover(t, pool, `INSERT INTO issue (workspace_id, number, status) VALUES ($1, 4, 'todo')`, wsID)
+	// Simulate the deploy window: an old, Space-unaware instance creates a
+	// Project and issue #4 with NULL space_id, then advances the legacy counter.
+	var windowProjectID string
+	if err := pool.QueryRow(ctx, `INSERT INTO project (workspace_id) VALUES ($1) RETURNING id`, wsID).Scan(&windowProjectID); err != nil {
+		t.Fatalf("insert deploy-window project: %v", err)
+	}
+	execCutover(t, pool, `INSERT INTO issue (workspace_id, number, status, project_id) VALUES ($1, 4, 'todo', $2)`, wsID, windowProjectID)
 	execCutover(t, pool, `UPDATE workspace SET issue_counter = 5 WHERE id = $1`, wsID)
 
 	if err := applyCutoverMigration(pool, schema, up162); err != nil {
 		t.Fatalf("apply 162: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Re-backfill: no issue may still carry a NULL space_id.
+	// Re-backfill: no Project or Issue may still carry a NULL space_id.
 	var nullSpaceCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM project WHERE space_id IS NULL`).Scan(&nullSpaceCount); err != nil {
+		t.Fatalf("count null-space projects: %v", err)
+	}
+	if nullSpaceCount != 0 {
+		t.Fatalf("re-backfill left %d NULL-space projects, want 0", nullSpaceCount)
+	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE space_id IS NULL`).Scan(&nullSpaceCount); err != nil {
 		t.Fatalf("count null-space issues: %v", err)
 	}
@@ -261,12 +288,33 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 		t.Fatalf("default space key = %q, want ENG", defaultKey)
 	}
 
+	var projectIssueMismatchCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM issue i
+		JOIN project p ON p.id = i.project_id
+		WHERE i.space_id <> p.space_id OR i.workspace_id <> p.workspace_id
+	`).Scan(&projectIssueMismatchCount); err != nil {
+		t.Fatalf("count Project Issue Space mismatches: %v", err)
+	}
+	if projectIssueMismatchCount != 0 {
+		t.Fatalf("found %d Project Issue Space mismatches, want 0", projectIssueMismatchCount)
+	}
+
 	// Cutover: legacy uniqueness gone, space-scoped uniqueness present.
 	if constraintExists(t, pool, "uq_issue_workspace_number") {
 		t.Fatal("uq_issue_workspace_number should have been dropped")
 	}
 	if !constraintExists(t, pool, "uq_issue_space_number") {
 		t.Fatal("uq_issue_space_number should exist after cutover")
+	}
+	if !constraintExists(t, pool, "fk_issue_workspace_project_space") {
+		t.Fatal("Project Issue same-Space constraint should exist after cutover")
+	}
+	if !constraintExistsOn(t, pool, "autopilot", "fk_autopilot_workspace_project_space") {
+		t.Fatal("Project Autopilot same-Space constraint should exist after cutover")
+	}
+	if !constraintExists(t, pool, "fk_issue_workspace_parent_space") {
+		t.Fatal("parent/child same-Space constraint should exist after cutover")
 	}
 
 	// space_id is NOT NULL now: a NULL insert must fail.
@@ -288,6 +336,35 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 		`INSERT INTO issue (workspace_id, space_id, number, status) VALUES ($1, $2, 1, 'todo')`, wsID, designSpaceID,
 	); err != nil {
 		t.Fatalf("DES-1 should coexist with ENG-1: %v", err)
+	}
+
+	// Ownership constraints reject attaching a Design issue to an Engineering
+	// Project or parent, even if a future write path forgets handler validation.
+	var engProjectID, engParentID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM project WHERE workspace_id = $1 ORDER BY created_at, id LIMIT 1`, wsID,
+	).Scan(&engProjectID); err != nil {
+		t.Fatalf("read Engineering project: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM issue WHERE workspace_id = $1 AND space_id = $2 ORDER BY number LIMIT 1`, wsID, defaultSpaceID,
+	).Scan(&engParentID); err != nil {
+		t.Fatalf("read Engineering parent: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO issue (workspace_id, space_id, number, status, project_id) VALUES ($1, $2, 2, 'todo', $3)`, wsID, designSpaceID, engProjectID,
+	); err == nil {
+		t.Fatal("expected Project Issue same-Space constraint violation")
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO autopilot (workspace_id, space_id, project_id) VALUES ($1, $2, $3)`, wsID, designSpaceID, engProjectID,
+	); err == nil {
+		t.Fatal("expected Project Autopilot same-Space constraint violation")
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO issue (workspace_id, space_id, number, status, parent_issue_id) VALUES ($1, $2, 2, 'todo', $3)`, wsID, designSpaceID, engParentID,
+	); err == nil {
+		t.Fatal("expected parent/child same-Space constraint violation")
 	}
 	// But a duplicate (space_id, number) within one Space is rejected.
 	if _, err := pool.Exec(ctx,
