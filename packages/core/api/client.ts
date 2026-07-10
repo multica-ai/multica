@@ -4590,6 +4590,15 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-note-author-codes): FIR-2810 — per-note toggle that
+  // stamps the writer's member code (e.g. "JEH") on every line they write.
+  async setNoteAuthorCodes<T = unknown>(id: string, authorCodes: boolean): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/author-codes`, {
+      method: "PUT",
+      body: JSON.stringify({ author_codes: authorCodes }),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-notes-client): TECH-3421 — Note references: mirror of
   // the issue-reference methods above, keyed by the note's artifact id.
   //   GET    /api/notes/{id}/references            — list references on a note

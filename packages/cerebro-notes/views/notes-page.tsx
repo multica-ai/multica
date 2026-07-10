@@ -23,6 +23,8 @@ import {
   Check,
   Copy,
   GitMerge,
+  Users,
+  PenLine,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -84,7 +86,9 @@ import {
   useNoteEditLock,
   useNoteComments,
   useSetNoteFolder,
+  useSetNoteAuthorCodes,
   firstLineTitle,
+  memberCode,
   NoteConflictError,
 } from "../core";
 import type { Note } from "../core";
@@ -104,6 +108,9 @@ import { NoteConflictDialog } from "./note-conflict-dialog";
 import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
+import { useAuthorCodeStamper } from "./use-author-codes";
+import { LineAuthorsGutter } from "./line-authors-gutter";
+import { useLineAuthorsPull } from "./use-line-authors-pull";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -853,6 +860,19 @@ export function NoteEditor({
     setConflictMergeEnabled(next);
     localStorage.setItem(`note:conflict-merge:${note.id}`, next ? "1" : "0");
   }
+  // FIR-2810: per-note (and per-user) toggle showing the line-authors gutter —
+  // who wrote / last edited every line, Apple Notes-style. Defaults to OFF;
+  // stored in localStorage like the conflict-merge toggle above.
+  const lineAuthorsEnabled = useFeatureFlag("cerebro_note_line_authors");
+  const [showLineAuthors, setShowLineAuthors] = React.useState(
+    () => localStorage.getItem(`note:line-authors:${note.id}`) === "1",
+  );
+  function toggleLineAuthors() {
+    const next = !showLineAuthors;
+    setShowLineAuthors(next);
+    localStorage.setItem(`note:line-authors:${note.id}`, next ? "1" : "0");
+  }
+  const setAuthorCodesMutation = useSetNoteAuthorCodes();
   const isMobile = useIsMobile();
 
   // FIR-1317 Plan A: track the server's updated_at when we last fetched/saved
@@ -964,6 +984,54 @@ export function NoteEditor({
   const { data: noteDetail } = useQuery(noteDetailOptions(wsId, note.id));
   const canEdit = isOwner || noteDetail?.can_edit === true;
   const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
+
+  // FIR-2810: line attribution + author codes. The single-note read carries
+  // the per-line attribution and the note's author-codes toggle; member names
+  // resolve the stored user ids into member codes ("JEH") for the gutter and
+  // the stamper.
+  const authorCodesOn = noteDetail?.author_codes === true;
+  const lineAttrs = React.useMemo(
+    () => noteDetail?.line_attrs ?? [],
+    [noteDetail],
+  );
+  const { data: gutterMembers = [] } = useQuery(memberListOptions(wsId));
+  const membersById = React.useMemo(
+    () =>
+      new Map(
+        (gutterMembers as OwnerInfo[]).map((m) => [
+          m.user_id,
+          { name: m.name },
+        ]),
+      ),
+    [gutterMembers],
+  );
+  const myCode = memberCode(
+    (myId && membersById.get(myId)?.name) || "",
+  );
+  useAuthorCodeStamper(
+    editor,
+    lineAuthorsEnabled && authorCodesOn && !readOnly,
+    myCode,
+  );
+  const showGutter = lineAuthorsEnabled && showLineAuthors;
+  const editorWrapRef = React.useRef<HTMLDivElement>(null);
+  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or touch
+  // and pull right on the body (mobile) to peek at the gutter; it springs back
+  // on release. Disabled while the permanent toggle already shows it.
+  const contentSlideRef = React.useRef<HTMLDivElement>(null);
+  const gutterBoxRef = React.useRef<HTMLDivElement>(null);
+  const pull = useLineAuthorsPull({
+    enabled: lineAuthorsEnabled && !showGutter,
+    slideRef: contentSlideRef,
+    gutterRef: gutterBoxRef,
+  });
+  const gutterMounted = showGutter || pull.visible;
+  // Bump after every (debounced) editor change so the gutter re-measures the
+  // rendered blocks; also when the comments rail opens/closes (layout reflow).
+  const [gutterVersion, setGutterVersion] = React.useState(0);
+  React.useEffect(() => {
+    if (gutterMounted) setGutterVersion((v) => v + 1);
+  }, [gutterMounted, liveBody, showComments, readOnly]);
 
   const { data: comments = [] } = useNoteComments(note.id);
   const { data: folders = [] } = useQuery(
@@ -1235,6 +1303,32 @@ export function NoteEditor({
               icon: GitMerge,
               onSelect: toggleConflictMerge,
             },
+            // FIR-2810: show/hide the line-authors gutter (who wrote / last
+            // edited every line). Per-user view preference, like conflict merge.
+            lineAuthorsEnabled && {
+              key: "line-authors",
+              label: showLineAuthors
+                ? "Line authors: On"
+                : "Line authors: Off",
+              icon: Users,
+              onSelect: toggleLineAuthors,
+            },
+            // FIR-2810: per-note author-codes toggle — stamp the writer's
+            // member code (e.g. JEH) on every line they write. Saved on the
+            // note itself, so it is on for everyone who writes in it.
+            lineAuthorsEnabled &&
+              !readOnly && {
+                key: "author-codes",
+                label: authorCodesOn
+                  ? "Author codes: On"
+                  : "Author codes: Off",
+                icon: PenLine,
+                onSelect: () =>
+                  setAuthorCodesMutation.mutate({
+                    id: note.id,
+                    authorCodes: !authorCodesOn,
+                  }),
+              },
             // Delete is owner-only (the backend rejects others with 403). Show
             // it solely to the owner so the action never silently fails
             // (FIR-1460, request 2). The onSuccess navigates back to the
@@ -1291,6 +1385,50 @@ export function NoteEditor({
               the note is locked by someone else we render it read-only instead.
               The bubble menu's "Comment" icon (commentsEnabled) opens the
               comments panel anchored to the selected text. */}
+          {/* FIR-2810: the relative wrapper hosts the line-authors gutter,
+              which measures the rendered blocks inside it. With the gutter on,
+              the body shifts right to make room for the attribution column.
+              With it off, a click-and-drag on the left-edge handle (desktop)
+              or a touch-and-pull right on the body (mobile) slides the body
+              aside for a temporary peek that springs back on release. */}
+          <div
+            ref={editorWrapRef}
+            {...pull.wrapperProps}
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-x-clip",
+              showGutter && "pl-24",
+            )}
+          >
+          {gutterMounted && (
+            <div
+              ref={gutterBoxRef}
+              className="absolute inset-y-0 left-0 w-24"
+              style={showGutter ? undefined : { opacity: 0 }}
+            >
+              <LineAuthorsGutter
+                contentRef={editorWrapRef}
+                body={noteDetail?.body ?? note.body}
+                attrs={lineAttrs}
+                membersById={membersById}
+                version={gutterVersion}
+              />
+            </div>
+          )}
+          {lineAuthorsEnabled && !showGutter && !isMobile && (
+            // Desktop grab handle for the temporary peek; the faint bar shows
+            // on hover so the affordance is discoverable without being loud.
+            <div
+              {...pull.stripProps}
+              aria-hidden
+              className="group absolute inset-y-0 left-0 z-10 w-3 cursor-ew-resize touch-none"
+            >
+              <div className="absolute left-[3px] top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-border opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+          )}
+          <div
+            ref={contentSlideRef}
+            className="flex min-h-0 flex-1 flex-col bg-background"
+          >
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
@@ -1329,6 +1467,8 @@ export function NoteEditor({
               />
             </div>
           )}
+          </div>
+          </div>
         </div>
 
         {/* Heading navigation ("Oversigt") + word/character count, shared with

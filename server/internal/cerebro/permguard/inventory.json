@@ -1553,6 +1553,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/notes/{id}/author-codes",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/notes/{id}/comments/{commentId}",
       "gate": "workspace_member"
     },

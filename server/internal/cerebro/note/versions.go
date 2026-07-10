@@ -245,6 +245,12 @@ func (h *Handler) RestoreVersion(w http.ResponseWriter, r *http.Request) {
 	// Record the restored state as its own version entry.
 	h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", updated.Title, updated.Body, "restore", "", false)
 
+	// FIR-2810: advance per-line attribution — lines the restore brings back
+	// or changes are credited to the restorer; untouched lines keep their author.
+	if updated.Body != artifact.Body {
+		h.advanceAndSaveLineAttrs(r.Context(), noteID, artifact.Body, updated.Body, userID)
+	}
+
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(updated.ID),
 		WorkspaceID: uuidStr(updated.WorkspaceID),
