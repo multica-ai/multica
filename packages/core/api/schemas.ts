@@ -457,6 +457,7 @@ export const IssueTaskUsageSchema = z.object({
   task_id: z.string().default(""),
   created_at: z.string().default(""),
   comment_triggered: z.boolean().default(false),
+  comment_number: z.number().default(0),
   provider: z.string().default(""),
   model: z.string().default(""),
   input_tokens: z.number().default(0),

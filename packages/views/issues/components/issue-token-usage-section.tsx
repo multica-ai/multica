@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { IssueTaskUsage, IssueUsageSummary } from "@multica/core/types";
 import { PropRow } from "../../common/prop-row";
@@ -16,6 +16,7 @@ function formatTokenCount(n: number): string {
 interface RunEntry {
   taskId: string;
   commentTriggered: boolean;
+  commentNumber: number;
   input: number;
   output: number;
   cacheRead: number;
@@ -29,6 +30,7 @@ function foldRuns(tasks: IssueTaskUsage[]): RunEntry[] {
     const entry = byTask.get(t.task_id) ?? {
       taskId: t.task_id,
       commentTriggered: t.comment_triggered,
+      commentNumber: t.comment_number,
       input: 0,
       output: 0,
       cacheRead: 0,
@@ -129,26 +131,23 @@ export function IssueTokenUsageSection({ usage }: { usage: IssueUsageSummary }) 
                       t(($) => $.detail.usage_seg_cache, { n: formatTokenCount(run.cacheRead) }),
                     );
                   }
+                  if (run.cost > 0) segments.unshift(formatCost(run.cost));
                   return (
-                    <Fragment key={run.taskId}>
-                      <PropRow
-                        label={
-                          run.commentTriggered
-                            ? t(($) => $.detail.usage_run_comment)
-                            : t(($) => $.detail.usage_run_assignment)
-                        }
-                      >
-                        <span className="truncate text-muted-foreground">
-                          {run.cost > 0 && formatCost(run.cost)}
-                        </span>
-                      </PropRow>
-                      <div
-                        className="col-span-2 truncate pb-1 text-[11px] text-muted-foreground/80"
-                        title={t(($) => $.detail.usage_run_split_tooltip)}
-                      >
+                    <PropRow
+                      key={run.taskId}
+                      label={
+                        run.commentTriggered
+                          ? run.commentNumber > 0
+                            ? t(($) => $.detail.usage_run_comment_numbered, { n: run.commentNumber })
+                            : t(($) => $.detail.usage_run_comment)
+                          : t(($) => $.detail.usage_run_assignment)
+                      }
+                      title={t(($) => $.detail.usage_run_split_tooltip)}
+                    >
+                      <span className="truncate text-muted-foreground">
                         {segments.join(" · ")}
-                      </div>
-                    </Fragment>
+                      </span>
+                    </PropRow>
                   );
                 })}
             </>

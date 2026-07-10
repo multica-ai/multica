@@ -224,6 +224,7 @@
     "usage_run_split_tooltip": "입력: 모델에 새로 전송된 토큰. 출력: 모델이 생성한 토큰. 캐시: 이전 컨텍스트를 입력 가격의 약 10%로 재사용한 것. 긴 실행에서 캐시 값이 큰 것은 정상입니다.",
     "usage_runs_toggle_other": "실행 {{count}}회",
     "usage_run_comment": "댓글",
+    "usage_run_comment_numbered": "댓글 {{n}}",
     "usage_run_assignment": "할당",
     "prop_runs": "실행",
     "activity_section": "활동",

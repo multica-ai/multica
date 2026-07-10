@@ -2785,6 +2785,7 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		TaskID           string `json:"task_id"`
 		CreatedAt        string `json:"created_at"`
 		CommentTriggered bool   `json:"comment_triggered"`
+		CommentNumber    int32  `json:"comment_number"`
 		Provider         string `json:"provider"`
 		Model            string `json:"model"`
 		InputTokens      int64  `json:"input_tokens"`
@@ -2802,6 +2803,7 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 			TaskID:           uuidToString(tr.TaskID),
 			CreatedAt:        createdAt,
 			CommentTriggered: tr.CommentTriggered,
+			CommentNumber:    tr.CommentNumber,
 			Provider:         tr.Provider,
 			Model:            tr.Model,
 			InputTokens:      tr.InputTokens,

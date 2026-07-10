@@ -224,6 +224,7 @@
     "usage_run_split_tooltip": "输入:新发送给模型的 token。输出:模型生成的 token。缓存:以约一折的价格复用之前的上下文,长时间运行时缓存数值大是正常现象。",
     "usage_runs_toggle_other": "{{count}} 次运行",
     "usage_run_comment": "评论",
+    "usage_run_comment_numbered": "评论 {{n}}",
     "usage_run_assignment": "指派",
     "prop_runs": "运行次数",
     "activity_section": "动态",
