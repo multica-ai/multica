@@ -2109,6 +2109,14 @@
       "gate": "via:POST /api/agents/{id}/context/change-requests"
     },
     {
+      "id": "agent context region-sync",
+      "exempt": "local-only — rewrites the sealed Agent Office managed region in a repo CLAUDE.md/AGENTS.md on the caller's own disk (FIR-1775 §10); no API call, and the result is still gated by PR review + scripts/validate-agent-office-region.sh in CI"
+    },
+    {
+      "id": "agent context region-verify",
+      "exempt": "read-only, local-only — parses a repo CLAUDE.md/AGENTS.md on the caller's own disk and checks the managed-region seal (FIR-1775 §10); no API call, nothing is written"
+    },
+    {
       "id": "agent context review",
       "gate": "via:POST /api/agents/context/change-requests/{crId}/review"
     },
