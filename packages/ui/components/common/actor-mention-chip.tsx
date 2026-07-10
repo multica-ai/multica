@@ -51,6 +51,21 @@ const TYPE_STYLES: Record<ActorMentionType, string> = {
   all: "bg-warning/10 border-warning/20",
 };
 
+/**
+ * Per-type hover tint for consumers that opt into hover feedback (the editor
+ * and readonly both use it). The chip's base background is the type-tint;
+ * this layers a deeper tint on hover so R12's "background transitions to a
+ * slightly deeper tint" is visible. For members the base is `bg-muted`, so the
+ * hover tint is `bg-accent` (not `bg-muted`, which would equal the base and
+ * show no transition).
+ */
+export const ACTOR_MENTION_HOVER_CLASS: Record<ActorMentionType, string> = {
+  member: "hover:bg-accent transition-colors",
+  agent: "hover:bg-brand/15 transition-colors",
+  squad: "hover:bg-info/15 transition-colors",
+  all: "hover:bg-warning/15 transition-colors",
+};
+
 function ariaLabelFor(type: ActorMentionType, label: string): string {
   return type === "all"
     ? "Mention: all workspace members"
