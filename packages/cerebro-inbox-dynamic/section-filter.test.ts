@@ -84,6 +84,7 @@ describe("section-filter", () => {
     expect(entryIsUnread(notifEntry(1, { read: false }))).toBe(true);
     expect(entryIsUnread(notifEntry(1, { read: true }))).toBe(false);
     expect(entryIsUnread(channelEntry(1, { unread_count: 3 }))).toBe(true);
+    expect(entryIsUnread(channelEntry(1, { unread_count: 0, has_unread_activity: true }))).toBe(true);
     expect(entryIsUnread(channelEntry(1, { unread_count: 0 }))).toBe(false);
   });
 
