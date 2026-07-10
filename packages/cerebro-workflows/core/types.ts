@@ -142,6 +142,8 @@ export interface LoopVerification {
   // both agents and people in one list.
   assignee_type?: LoopAssigneeType;
   assignee_id?: string;
+  model?: string;
+  thinking_level?: string;
 }
 
 export interface LoopCaps {
@@ -158,6 +160,8 @@ export interface LoopBuildPhase {
   name?: string;
   build_skill: string;
   build_agent_id?: string;
+  model?: string;
+  thinking_level?: string;
   goal?: string;
   verification: LoopVerification[];
 }
@@ -185,6 +189,8 @@ export interface LoopSpec {
   // skill/agent and its own delivery gate.
   build_agent_id: string;
   build_skill: string;
+  build_model?: string;
+  build_thinking?: string;
 
   // Multi-phase build chain (FIR-2283 followup point 6). When non-empty, the
   // build is split into ordered phases, each gated by its own review that must
@@ -194,6 +200,8 @@ export interface LoopSpec {
   // Planning bindings — only meaningful when planning is true.
   plan_agent_id?: string;
   plan_skill?: string;
+  plan_model?: string;
+  plan_thinking?: string;
 
   // Status names — optional, server defaults apply (todo / in_progress /
   // in_review / done) when omitted.
@@ -206,6 +214,8 @@ export interface LoopSpec {
   // assignee_id.
   judge_agent_id?: string;
   judge_skill?: string;
+  judge_model?: string;
+  judge_thinking?: string;
 }
 
 export const DEFAULT_LOOP_CAPS: LoopCaps = {

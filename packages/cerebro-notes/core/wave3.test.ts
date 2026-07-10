@@ -4,8 +4,12 @@ import {
   buildThreads,
   type NoteComment,
 } from "./comments";
-import { safeParseNoteVersions } from "./versions";
+import {
+  safeParseNoteVersions,
+  restoreVersionInvalidationKeys,
+} from "./versions";
 import { safeParseNoteLock } from "./lock";
+import { artifactKeys } from "@multica/cerebro-artifacts/core";
 
 // Wave 3 (TECH-3556) — defensive parsing + threading. The API Response
 // Compatibility rule requires malformed responses to fail soft, never throw.
@@ -82,5 +86,16 @@ describe("safeParseNoteVersions / safeParseNoteLock", () => {
     const free = safeParseNoteLock(undefined);
     expect(free.live).toBe(false);
     expect(free.locked_by).toBeNull();
+  });
+});
+
+// FIR-2697 — a document restore is read back through the artifact cache, not the
+// note cache, so the restore must invalidate artifactKeys too or the Documents
+// editor shows stale body text until reload. Guard that alignment here.
+describe("restoreVersionInvalidationKeys", () => {
+  it("invalidates the artifact detail + list caches, not just the note caches", () => {
+    const keys = restoreVersionInvalidationKeys("ws-1", "doc-1");
+    expect(keys).toContainEqual(artifactKeys.detail("ws-1", "doc-1"));
+    expect(keys).toContainEqual(artifactKeys.all("ws-1"));
   });
 });

@@ -97,6 +97,22 @@ export interface SprintUpdateInput {
   goal?: string;
 }
 
+// FIR-2828: how to handle the issues still assigned to a sprint when it is
+// completed. "leave" keeps them on the now-done sprint, "backlog" unassigns
+// them and moves their status to backlog, "move_to_sprint" reassigns them to
+// another open sprint in the same project (target_sprint_id required).
+export type IncompleteIssuesAction = "leave" | "backlog" | "move_to_sprint";
+
+export interface CompleteSprintInput {
+  incomplete_issues_action: IncompleteIssuesAction;
+  target_sprint_id?: string;
+}
+
+export interface CompleteSprintResponse {
+  sprint: Sprint;
+  issues_moved: number;
+}
+
 export interface SprintIssueLink {
   issue_id: string;
   sprint_id: string;

@@ -556,9 +556,11 @@ func TestResolveChannelTransport_HonoursOverride(t *testing.T) {
 
 // ----------- listener integration: preferences shape inbox_item.route ------------
 
-// TestRouting_OffPreventsItemCreation verifies that a user routing
-// 'reaction_added' to 'off' gets zero inbox items when the event fires.
-func TestRouting_OffPreventsItemCreation(t *testing.T) {
+// CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — replaces the old "off = zero rows" assertion; a reaction now always lands a soft row.
+// TestRouting_ReactionOffStillLandsSoftRow verifies FIR-2954: a user who
+// routes 'reaction_added' to 'off' still gets exactly one soft (already-read)
+// inbox row on the inbox route — the setting only gates unread, never the row.
+func TestRouting_ReactionOffStillLandsSoftRow(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
@@ -599,8 +601,14 @@ func TestRouting_OffPreventsItemCreation(t *testing.T) {
 	})
 
 	items := inboxItemsForRecipient(t, queries, creatorID)
-	if len(items) != 0 {
-		t.Fatalf("expected 0 items (route=off), got %d", len(items))
+	if len(items) != 1 {
+		t.Fatalf("expected 1 soft item (reaction row always lands), got %d", len(items))
+	}
+	if items[0].Type != "reaction_added" || items[0].Route != routeInbox {
+		t.Fatalf("expected reaction_added on inbox route, got type=%q route=%q", items[0].Type, items[0].Route)
+	}
+	if !items[0].Read {
+		t.Fatalf("expected the reaction row to be soft (read=true) when the setting is off, got unread")
 	}
 }
 

@@ -130,7 +130,11 @@ Archived messages have two surfaces in the dynamic inbox:
   (`ArchivedInboxBlock`, `packages/cerebro-inbox-dynamic/components/archived-inbox-block.tsx`).
   It is **not** part of the merged inbox feed — like the Chat block it renders
   over its own archived queries via the shared `useArchivedInboxEntries` hook
-  (archived inbox notifications + archived chats). It **starts folded** by
+  (archived inbox notifications + archived chats + archived channels/DMs,
+  FIR-2791 via `GET /api/channels?archived_only=true`). An archived channel/DM
+  shows as **one** row: its message notifications are folded into the channel
+  row (`buildArchivedEntries` drops notifs whose `issue_id` is an archived
+  channel). It **starts folded** by
   default and offers an in-block search, sort (newest/oldest), and
   group-by-type (Issues / Channels / Chat). It needs no extra flag — it lives
   inside the existing `cerebro_inbox_dynamic` inbox.
@@ -143,7 +147,8 @@ upstream `InboxListItem`, the block wraps each message row in
 and `CerebroUnarchiveAction` reads that context to upgrade its single restore
 button into a two-action menu. Absent the provider (the classic archived view),
 the button stays a plain single "unarchive". Chat rows keep their own restore
-flow and get no "mark unread" affordance.
+flow and get no "mark unread" affordance. Channel/DM rows (FIR-2791) restore
+via `useUnarchiveChannel` (single "unarchive" only, both surfaces).
 
 ---
 

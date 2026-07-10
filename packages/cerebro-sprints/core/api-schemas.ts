@@ -45,6 +45,11 @@ export const sprintsListSchema = z.object({
   sprints: z.array(sprintSchema),
 });
 
+export const completeSprintResponseSchema = z.object({
+  sprint: sprintSchema,
+  issues_moved: z.number().int().min(0).default(0),
+});
+
 // FIR-1657: one sprint option in an issue's picker, with the owning project's
 // title and a flag for the issue's own project.
 export const selectableSprintSchema = z.object({

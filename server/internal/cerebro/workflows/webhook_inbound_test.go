@@ -494,4 +494,3 @@ func TestReadLimitedBody_NilReader(t *testing.T) {
 		t.Fatalf("nil reader must yield (nil,false,nil), got %v %v %v", body, tooBig, err)
 	}
 }
-

@@ -5,20 +5,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { InboxItem, ChatSession } from "@multica/core/types";
+import type { InboxItem, ChatSession, Channel } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 import type { InboxSectionConfig } from "../layout";
 import { ArchivedInboxBlock } from "./archived-inbox-block";
 
-const { unarchiveMock, markUnreadMock } = vi.hoisted(() => ({
+const { unarchiveMock, markUnreadMock, unarchiveChannelMock } = vi.hoisted(() => ({
   unarchiveMock: vi.fn(),
   markUnreadMock: vi.fn(),
+  unarchiveChannelMock: vi.fn(),
 }));
 
 afterEach(() => {
   cleanup();
   unarchiveMock.mockReset();
   markUnreadMock.mockReset();
+  unarchiveChannelMock.mockReset();
   mockEntries = [];
 });
 
@@ -51,6 +53,11 @@ vi.mock("@multica/cerebro-inbox", async () => {
     useMarkInboxUnread: () => ({ mutate: markUnreadMock }),
   };
 });
+
+// FIR-2791 — channel/DM rows unarchive through the cerebro-channels mutation.
+vi.mock("@multica/cerebro-channels", () => ({
+  useUnarchiveChannel: () => ({ mutate: unarchiveChannelMock }),
+}));
 
 // Stub the row to expose the two restore affordances declaratively.
 vi.mock("./dynamic-inbox-row", async () => {
@@ -112,6 +119,14 @@ function chat(id: string, title: string): DynInboxEntry {
     id,
     time: Number(id),
     session: { id, title } as unknown as ChatSession,
+  };
+}
+function channelEntry(id: string): DynInboxEntry {
+  return {
+    kind: "channel",
+    id,
+    time: Number(id) || 0,
+    channel: { id, kind: "dm", unread_count: 0 } as unknown as Channel,
   };
 }
 
@@ -185,5 +200,17 @@ describe("ArchivedInboxBlock", () => {
 
     // Chat rows expose no "mark unread" affordance.
     expect(screen.queryByRole("button", { name: "unarchive-unread Beta" })).toBeNull();
+  });
+
+  it("channel/DM rows unarchive via the channel mutation (FIR-2791)", async () => {
+    mockEntries = [channelEntry("7")];
+    renderBlock({ defaultCollapsed: false });
+
+    await userEvent.click(screen.getByRole("button", { name: "unarchive 7" }));
+    expect(unarchiveChannelMock).toHaveBeenCalledWith("7");
+    expect(unarchiveMock).not.toHaveBeenCalled();
+
+    // Channel rows expose no "mark unread" affordance either.
+    expect(screen.queryByRole("button", { name: "unarchive-unread 7" })).toBeNull();
   });
 });

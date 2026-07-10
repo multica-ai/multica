@@ -128,16 +128,20 @@ type issueLoopSpecWire struct {
 	Spec
 
 	// Build bindings — who builds, and what skill it runs each round.
-	BuildAgentID string `json:"build_agent_id"`
-	BuildSkill   string `json:"build_skill"`
+	BuildAgentID  string `json:"build_agent_id"`
+	BuildSkill    string `json:"build_skill"`
+	BuildModel    string `json:"build_model,omitempty"`
+	BuildThinking string `json:"build_thinking,omitempty"`
 
 	// Planning bindings — only meaningful when Spec.Planning is true.
 	// PlanAgentID is accepted for a future per-phase agent but not yet wired:
 	// Compile always dispatches the planning phase to the worker agent (see
 	// PlanningDispatchRule(params.AgentID, ...)), so today planning and build
 	// share the same agent regardless of PlanAgentID.
-	PlanAgentID string `json:"plan_agent_id,omitempty"`
-	PlanSkill   string `json:"plan_skill,omitempty"`
+	PlanAgentID  string `json:"plan_agent_id,omitempty"`
+	PlanSkill    string `json:"plan_skill,omitempty"`
+	PlanModel    string `json:"plan_model,omitempty"`
+	PlanThinking string `json:"plan_thinking,omitempty"`
 
 	// Status names. Empty falls back to CompileParams.withDefaults()
 	// (todo / in_progress / in_review / done).
@@ -148,8 +152,10 @@ type issueLoopSpecWire struct {
 
 	// Spec-wide judge fallback bindings, used only by a judge check whose own
 	// Verification doesn't carry AssigneeID/Skill.
-	JudgeAgentID string `json:"judge_agent_id,omitempty"`
-	JudgeSkill   string `json:"judge_skill,omitempty"`
+	JudgeAgentID  string `json:"judge_agent_id,omitempty"`
+	JudgeSkill    string `json:"judge_skill,omitempty"`
+	JudgeModel    string `json:"judge_model,omitempty"`
+	JudgeThinking string `json:"judge_thinking,omitempty"`
 }
 
 // SyncIssueLoop parses workflowID's loop_spec, compiles it PROJECT-WIDE, and
@@ -199,13 +205,20 @@ func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workfl
 	params := CompileParams{
 		AgentID:        wire.BuildAgentID,
 		BuildSkill:     wire.BuildSkill,
+		BuildModel:     wire.BuildModel,
+		BuildThinking:  wire.BuildThinking,
 		BuildStatus:    wire.BuildStatus,
 		ReviewStatus:   wire.ReviewStatus,
 		DoneStatus:     wire.DoneStatus,
+		PlanAgentID:    wire.PlanAgentID,
 		PlanSkill:      wire.PlanSkill,
+		PlanModel:      wire.PlanModel,
+		PlanThinking:   wire.PlanThinking,
 		PlanningStatus: wire.PlanningStatus,
 		JudgeAgentID:   wire.JudgeAgentID,
 		JudgeSkill:     wire.JudgeSkill,
+		JudgeModel:     wire.JudgeModel,
+		JudgeThinking:  wire.JudgeThinking,
 	}
 	if issueID.Valid {
 		params.IssueID = util.UUIDToString(issueID)

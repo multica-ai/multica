@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/agentoffice"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
@@ -80,6 +82,51 @@ var agentContextRollbackCmd = &cobra.Command{
 	RunE:  runAgentContextRollback,
 }
 
+var agentContextRegionSyncCmd = &cobra.Command{
+	Use:   "region-sync <file>",
+	Short: "Write or update the Agent Office managed region in a repo CLAUDE.md/AGENTS.md",
+	Long: `Managed region (FIR-1775, docs/agents/agent-office.md §10). The region keeps
+Agent Office-governed guidance inside the repo file between markers:
+
+  <!-- agent-office:start vN sha256:... -->
+  ...governed body...
+  <!-- agent-office:end -->
+
+This command is the ONLY sanctioned way to edit that region: it replaces the
+body, recomputes the seal, and bumps the version (existing+1, or 1 when the
+file has no region yet). Content outside the markers is never touched. CI
+(scripts/validate-agent-office-region.sh) rejects hand-edited regions.`,
+	Args: exactArgs(1),
+	RunE: runAgentContextRegionSync,
+}
+
+var agentContextRegionVerifyCmd = &cobra.Command{
+	Use:   "region-verify <file>",
+	Short: "Verify the Agent Office managed region seal in a repo CLAUDE.md/AGENTS.md",
+	Args:  exactArgs(1),
+	RunE:  runAgentContextRegionVerify,
+}
+
+var agentContextLintCmd = &cobra.Command{
+	Use:   "lint [agent-id]",
+	Short: "Drift-lint an agent's context (or the whole workspace), and repo CLAUDE.md/AGENTS.md files",
+	Long: `Context lint (FIR-1775 Phase 3). Three modes:
+
+  multica agent context lint <agent-id>        one agent: dead/unbound skill
+                                               refs, duplicated rules across
+                                               layers, empty governance fields,
+                                               stale repo links
+  multica agent context lint                   workspace-wide sweep over every
+                                               non-archived agent
+  multica agent context lint --repo-file <p>   drift-lint a repo CLAUDE.md /
+                                               AGENTS.md: flags agent-behavior
+                                               language and lines duplicated
+                                               from the versioned harness
+                                               (repeatable)`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runAgentContextLint,
+}
+
 func init() {
 	agentCmd.AddCommand(agentContextCmd)
 	agentContextCmd.AddCommand(agentContextVersionsCmd)
@@ -89,6 +136,9 @@ func init() {
 	agentContextCmd.AddCommand(agentContextDiffCmd)
 	agentContextCmd.AddCommand(agentContextOwnershipCmd)
 	agentContextCmd.AddCommand(agentContextRollbackCmd)
+	agentContextCmd.AddCommand(agentContextLintCmd)
+	agentContextCmd.AddCommand(agentContextRegionSyncCmd)
+	agentContextCmd.AddCommand(agentContextRegionVerifyCmd)
 
 	agentContextVersionsCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -126,6 +176,16 @@ func init() {
 	agentContextRollbackCmd.Flags().String("version", "", "Historical version to roll back to, e.g. 1.0.0 (required)")
 	agentContextRollbackCmd.Flags().String("comment", "", "Optional note describing why (becomes the change request description)")
 	agentContextRollbackCmd.Flags().String("output", "json", "Output format: json")
+
+	agentContextLintCmd.Flags().StringArray("repo-file", nil, "Path to a repo CLAUDE.md/AGENTS.md to drift-lint (repeatable)")
+	agentContextLintCmd.Flags().String("output", "json", "Output format: json")
+
+	agentContextRegionSyncCmd.Flags().String("content-file", "", "Read the new region body from a local file (mutually exclusive with --content-stdin)")
+	agentContextRegionSyncCmd.Flags().Bool("content-stdin", false, "Read the new region body from stdin")
+	agentContextRegionSyncCmd.Flags().Int("version", 0, "Explicit region version (default: existing version + 1, or 1)")
+	agentContextRegionSyncCmd.Flags().String("output", "json", "Output format: json")
+
+	agentContextRegionVerifyCmd.Flags().String("output", "json", "Output format: json")
 }
 
 func runAgentContextVersions(cmd *cobra.Command, args []string) error {
@@ -342,6 +402,125 @@ func runAgentContextOwnership(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update ownership: %w", err)
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+func runAgentContextLint(cmd *cobra.Command, args []string) error {
+	repoFiles, _ := cmd.Flags().GetStringArray("repo-file")
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if len(repoFiles) > 0 {
+		// Repo-file drift lint: the server has no checkout of the repo, so the
+		// CLI reads each file and posts its content to be checked against the
+		// workspace harness (agent instructions + skills).
+		results := make([]any, 0, len(repoFiles))
+		for _, path := range repoFiles {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("read repo-file: %w", err)
+			}
+			body := map[string]any{"filename": path, "content": string(data)}
+			var out any
+			if err := client.PostJSON(ctx, "/api/agents/context/lint/repo-file", body, &out); err != nil {
+				return fmt.Errorf("lint repo-file %s: %w", path, err)
+			}
+			results = append(results, out)
+		}
+		if len(results) == 1 {
+			return cli.PrintJSON(os.Stdout, results[0])
+		}
+		return cli.PrintJSON(os.Stdout, results)
+	}
+
+	path := "/api/agents/context/lint"
+	if len(args) == 1 {
+		path = "/api/agents/" + url.PathEscape(args[0]) + "/context/lint"
+	}
+	var out any
+	if err := client.GetJSON(ctx, path, &out); err != nil {
+		return fmt.Errorf("lint: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, out)
+}
+
+func runAgentContextRegionSync(cmd *cobra.Command, args []string) error {
+	path := args[0]
+	contentFile, _ := cmd.Flags().GetString("content-file")
+	contentStdin, _ := cmd.Flags().GetBool("content-stdin")
+	if (contentFile == "") == !contentStdin {
+		return fmt.Errorf("provide the new region body via exactly one of --content-file or --content-stdin")
+	}
+	var body []byte
+	var err error
+	if contentStdin {
+		body, err = io.ReadAll(os.Stdin)
+	} else {
+		body, err = os.ReadFile(contentFile)
+	}
+	if err != nil {
+		return fmt.Errorf("read region body: %w", err)
+	}
+
+	existing := ""
+	if data, err := os.ReadFile(path); err == nil {
+		existing = string(data)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	region, err := agentoffice.ParseManagedRegion(existing)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
+	version, _ := cmd.Flags().GetInt("version")
+	previousVersion := 0
+	if region != nil {
+		previousVersion = region.Version
+	}
+	if version == 0 {
+		version = previousVersion + 1
+	}
+	if version <= previousVersion {
+		return fmt.Errorf("--version must be greater than the existing region version v%d", previousVersion)
+	}
+
+	updated, err := agentoffice.UpsertManagedRegion(existing, version, string(body))
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"file":             path,
+		"version":          version,
+		"previous_version": previousVersion,
+		"created":          region == nil,
+	})
+}
+
+func runAgentContextRegionVerify(cmd *cobra.Command, args []string) error {
+	path := args[0]
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	region, err := agentoffice.ParseManagedRegion(string(data))
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if region == nil {
+		return cli.PrintJSON(os.Stdout, map[string]any{"file": path, "region": false, "valid": true})
+	}
+	if !region.Verify() {
+		_ = cli.PrintJSON(os.Stdout, map[string]any{"file": path, "region": true, "valid": false, "version": region.Version})
+		return fmt.Errorf("%s: managed-region seal is broken — the body was edited without 'multica agent context region-sync'", path)
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{"file": path, "region": true, "valid": true, "version": region.Version})
 }
 
 func runAgentContextRollback(cmd *cobra.Command, args []string) error {

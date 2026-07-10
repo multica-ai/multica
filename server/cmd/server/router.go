@@ -62,6 +62,8 @@ import (
 	cerebrotoolaccess "github.com/multica-ai/multica/server/internal/cerebro/toolaccess"
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
+	// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 controlled inbox rounds.
+	cerebrorounds "github.com/multica-ai/multica/server/internal/cerebro/rounds"
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
 	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
@@ -577,6 +579,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance handler.
 	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool, bus)) // CEREBRO-PATCH(agent-office-notif-bus): FIR-1775 — bus drives change-request inbox notifications.
+	h.AgentContextDirectEdit = cerebroAgentOfficeHandler.Svc                                                      // CEREBRO-PATCH(agent-office-direct-edit-wire): FIR-1775 Phase 2 — direct UpdateAgent edits snapshot into version history.
 	cerebroModelRegistryHandler := wireCerebroModelRegistry(cerebroQueries, pool)                                 // CEREBRO-PATCH(cerebro-model-registry-routes): FIR-2698 model registry — startup table load + metrics hook + handler (cerebro_model_registry_routes.go).
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
@@ -805,6 +808,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroReminderHandler := cerebroreminder.New(queries, cerebroQueries)
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
 	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus))
+	// CEREBRO-PATCH(cerebro-rounds-routes): server-owned hold/release lifecycle.
+	cerebroRoundsService := cerebrorounds.New(pool, queries, h.TaskService)
+	cerebroRoundsHandler := cerebrorounds.NewHandler(cerebroRoundsService)
+	h.RoundCommentGate = cerebroRoundsService
 
 	r := chi.NewRouter()
 
@@ -1435,6 +1442,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/cancel", cerebroWakeupHandler.Cancel)
 			})
 
+			// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 round CRUD, membership and starts.
+			r.Route("/api/cerebro/rounds", func(r chi.Router) {
+				r.Get("/", cerebroRoundsHandler.List)
+				r.Post("/", cerebroRoundsHandler.Create)
+				r.Route("/{roundId}", func(r chi.Router) {
+					r.Get("/", cerebroRoundsHandler.Get)
+					r.Patch("/", cerebroRoundsHandler.Update)
+					r.Delete("/", cerebroRoundsHandler.Delete)
+					r.Get("/status", cerebroRoundsHandler.Status)
+					r.Post("/start", cerebroRoundsHandler.Start)
+					r.Post("/members", cerebroRoundsHandler.AddMember)
+					r.Delete("/members/{issueId}", cerebroRoundsHandler.RemoveMember)
+				})
+			})
+			r.Get("/api/cerebro/issues/{issueId}/round", cerebroRoundsHandler.IssueMembership)
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
@@ -1633,6 +1656,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// pending agent-context change requests + review action.
 				r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListPendingChangeRequests)
 				r.Post("/context/change-requests/{crId}/review", cerebroAgentOfficeHandler.ReviewChangeRequest)
+				// CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 —
+				// workspace-wide context lint sweep + repo CLAUDE.md/AGENTS.md drift lint.
+				r.Get("/context/lint", cerebroAgentOfficeHandler.LintWorkspace)
+				r.Post("/context/lint/repo-file", cerebroAgentOfficeHandler.LintRepoFile)
 				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
 				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
 				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill) // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
@@ -1657,6 +1684,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
 					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
 					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
+					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent) // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
@@ -1907,7 +1935,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/{id}", h.UpdateArtifact)
 				r.Put("/{id}/scope", h.UpdateArtifactScope)
 				r.Put("/{id}/folder", h.MoveArtifactToFolder)
+				// CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — propose/read a folder for an artifact.
+				r.Post("/{id}/folder-suggestion", h.CreateArtifactFolderSuggestion)
+				r.Get("/{id}/folder-suggestion", h.GetArtifactFolderSuggestion)
 				r.Delete("/{id}", h.DeleteArtifact)
+			})
+			// CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — review inbox + accept/reject.
+			r.Route("/api/artifact-folder-suggestions", func(r chi.Router) {
+				r.Get("/", h.ListArtifactFolderSuggestions)
+				r.Post("/{id}/accept", h.AcceptArtifactFolderSuggestion)
+				r.Post("/{id}/reject", h.RejectArtifactFolderSuggestion)
 			})
 			r.Route("/api/artifact-folders", func(r chi.Router) {
 				r.Get("/", h.ListArtifactFolders)
@@ -2107,6 +2144,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroSprintsHandler.UpdateSprint)
 				r.Delete("/", cerebroSprintsHandler.DeleteSprint)
 				r.Get("/issues", cerebroSprintsHandler.ListSprintIssues)
+				r.Post("/complete", cerebroSprintsHandler.CompleteSprint) // CEREBRO-PATCH(cerebro-sprints-routes): FIR-2828 end-a-sprint action.
 			})
 			r.Route("/api/cerebro/issues/{issueID}/sprint", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)

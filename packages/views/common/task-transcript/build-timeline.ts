@@ -1,4 +1,5 @@
 import type { TaskMessagePayload } from "@multica/core/types/events";
+import { normalizeTaskTranscriptMessages } from "@multica/cerebro-sessions/task-transcript-safety"; // CEREBRO-PATCH(transcript-safe-values): normalize malformed historical run-log fields before React renders them.
 import { redactSecrets } from "./redact";
 
 /** A unified timeline entry: tool calls, thinking, text, errors, and activity reports. */
@@ -63,7 +64,7 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
 /** Build a chronologically ordered timeline from raw task messages. */
 export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
   const items: TimelineItem[] = [];
-  for (const msg of msgs) {
+  for (const msg of normalizeTaskTranscriptMessages(msgs)) {
     items.push({
       seq: msg.seq,
       type: msg.type,

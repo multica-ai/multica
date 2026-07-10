@@ -23,6 +23,8 @@ import {
   Check,
   Copy,
   GitMerge,
+  Users,
+  PenLine,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -41,6 +43,7 @@ import {
   EditorActionsMenu,
   EntityMetaHeader,
   FindReplaceBar,
+  FolderSuggestionBanner,
 } from "@multica/cerebro-artifacts/views/components";
 import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import {
@@ -83,7 +86,9 @@ import {
   useNoteEditLock,
   useNoteComments,
   useSetNoteFolder,
+  useSetNoteAuthorCodes,
   firstLineTitle,
+  memberCode,
   NoteConflictError,
 } from "../core";
 import type { Note } from "../core";
@@ -103,6 +108,9 @@ import { NoteConflictDialog } from "./note-conflict-dialog";
 import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
+import { useAuthorCodeStamper } from "./use-author-codes";
+import { LineAuthorsGutter } from "./line-authors-gutter";
+import { useLineAuthorsPull } from "./use-line-authors-pull";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -185,6 +193,17 @@ export function NotesPage({
     () => notes.find((n) => n.id === selectedId) ?? null,
     [notes, selectedId],
   );
+  const urlNoteId = navigation.searchParams.get("note");
+  const urlCommentId = navigation.searchParams.get("comment");
+  const initialCommentForSelected =
+    selectedId && (selectedId === initialNoteId || selectedId === urlNoteId)
+      ? initialCommentId ?? urlCommentId
+      : null;
+
+  React.useEffect(() => {
+    const noteFromUrl = initialNoteId ?? urlNoteId;
+    if (!selectedId && noteFromUrl) setSelectedId(noteFromUrl);
+  }, [initialNoteId, selectedId, urlNoteId]);
 
   // FIR-2595 + FIR-2688: keep the browser address bar in sync with the open
   // note OR the open folder, so both URLs are shareable ("kopier den fra
@@ -202,18 +221,29 @@ export function NotesPage({
     if (selectedId) {
       // Note open: `/notes/:id`. Guard on pathname so a deep link like
       // /notes/:id?comment=x keeps its ?comment param untouched on load.
-      const desired = wsPaths.noteDetail(selectedId);
-      if (navigation.pathname === desired) return;
+      // FIR-2826 — when the legacy `/notes?note=<id>&comment=<comment-id>`
+      // entry route is normalized to `/notes/<id>`, keep the comment param so
+      // the route remount still passes initialCommentId to NoteEditor.
+      const commentParam = initialCommentForSelected
+        ? `?comment=${encodeURIComponent(initialCommentForSelected)}`
+        : "";
+      const desired = `${wsPaths.noteDetail(selectedId)}${commentParam}`;
+      const searchString = navigation.searchParams.toString();
+      const current = searchString
+        ? `${navigation.pathname}?${searchString}`
+        : navigation.pathname;
+      if (current === desired) return;
       navigation.replaceSilent(desired);
       return;
     }
+    if (urlNoteId) return;
     // No note open: the folder owns the URL. Write unconditionally so leaving a
     // folder clears a stale `?folder`; History-API writes don't re-render, so
     // the effect only fires on a real selection change (loop-free).
     navigation.replaceSilent(
       folderId ? wsPaths.notesFolder(folderId) : wsPaths.notes(),
     );
-  }, [selectedId, folderId, wsPaths, navigation]);
+  }, [selectedId, folderId, wsPaths, navigation, urlNoteId, initialCommentForSelected]);
 
   const noteFolderIds = React.useMemo(
     () => new Set(folders.map((f) => f.id)),
@@ -409,9 +439,7 @@ export function NotesPage({
               note={selected}
               wsId={wsId}
               onBack={() => setSelectedId(null)}
-              initialCommentId={
-                selected.id === initialNoteId ? initialCommentId : null
-              }
+              initialCommentId={initialCommentForSelected}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -785,6 +813,13 @@ function NoteListSection({
   );
 }
 
+// FIR-2826 — the desktop comments rail is wider by default and drag-resizable.
+// Width is clamped and remembered per browser so it survives reloads.
+const COMMENTS_WIDTH_KEY = "note:comments-width";
+const COMMENTS_MIN_WIDTH = 300;
+const COMMENTS_MAX_WIDTH = 760;
+const COMMENTS_DEFAULT_WIDTH = 420;
+
 export function NoteEditor({
   note,
   wsId,
@@ -795,7 +830,7 @@ export function NoteEditor({
   note: Note;
   wsId: string;
   onBack: () => void;
-  // TECH-3690: when set, renders an "Åbn fuldt" button in the action bar that
+  // TECH-3690: when set, renders an "Open full" button in the action bar that
   // jumps to the full Notes surface. Used when the editor is embedded in the
   // inbox detail pane; undefined on the full Notes page (already full).
   onOpenFull?: () => void;
@@ -825,6 +860,19 @@ export function NoteEditor({
     setConflictMergeEnabled(next);
     localStorage.setItem(`note:conflict-merge:${note.id}`, next ? "1" : "0");
   }
+  // FIR-2810: per-note (and per-user) toggle showing the line-authors gutter —
+  // who wrote / last edited every line, Apple Notes-style. Defaults to OFF;
+  // stored in localStorage like the conflict-merge toggle above.
+  const lineAuthorsEnabled = useFeatureFlag("cerebro_note_line_authors");
+  const [showLineAuthors, setShowLineAuthors] = React.useState(
+    () => localStorage.getItem(`note:line-authors:${note.id}`) === "1",
+  );
+  function toggleLineAuthors() {
+    const next = !showLineAuthors;
+    setShowLineAuthors(next);
+    localStorage.setItem(`note:line-authors:${note.id}`, next ? "1" : "0");
+  }
+  const setAuthorCodesMutation = useSetNoteAuthorCodes();
   const isMobile = useIsMobile();
 
   // FIR-1317 Plan A: track the server's updated_at when we last fetched/saved
@@ -837,6 +885,46 @@ export function NoteEditor({
 
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
+  // FIR-2826 — remembered width of the desktop comments rail (drag-resizable via
+  // the handle on its left edge). Seeded from localStorage, clamped to sane
+  // bounds so a stale/garbage value can't collapse or overflow the rail.
+  const [commentsWidth, setCommentsWidth] = React.useState<number>(() => {
+    const saved = Number(localStorage.getItem(COMMENTS_WIDTH_KEY));
+    return Number.isFinite(saved) &&
+      saved >= COMMENTS_MIN_WIDTH &&
+      saved <= COMMENTS_MAX_WIDTH
+      ? saved
+      : COMMENTS_DEFAULT_WIDTH;
+  });
+  const startCommentsResize = React.useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = commentsWidth;
+      let latest = startW;
+      const onMove = (ev: PointerEvent) => {
+        // The rail sits on the right edge, so dragging its left handle to the
+        // left (smaller clientX) widens it.
+        const next = Math.min(
+          COMMENTS_MAX_WIDTH,
+          Math.max(COMMENTS_MIN_WIDTH, startW + (startX - ev.clientX)),
+        );
+        latest = next;
+        setCommentsWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.style.userSelect = "";
+        localStorage.setItem(COMMENTS_WIDTH_KEY, String(Math.round(latest)));
+      };
+      // Suppress text selection while dragging across the editor.
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [commentsWidth],
+  );
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
@@ -896,6 +984,55 @@ export function NoteEditor({
   const { data: noteDetail } = useQuery(noteDetailOptions(wsId, note.id));
   const canEdit = isOwner || noteDetail?.can_edit === true;
   const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
+
+  // FIR-2810: line attribution + author codes. The single-note read carries
+  // the per-line attribution and the note's author-codes toggle; member names
+  // resolve the stored user ids into member codes ("JEH") for the gutter and
+  // the stamper.
+  const authorCodesOn = noteDetail?.author_codes === true;
+  const lineAttrs = React.useMemo(
+    () => noteDetail?.line_attrs ?? [],
+    [noteDetail],
+  );
+  const { data: gutterMembers = [] } = useQuery(memberListOptions(wsId));
+  const membersById = React.useMemo(
+    () =>
+      new Map(
+        (gutterMembers as OwnerInfo[]).map((m) => [
+          m.user_id,
+          { name: m.name },
+        ]),
+      ),
+    [gutterMembers],
+  );
+  const myCode = memberCode(
+    (myId && membersById.get(myId)?.name) || "",
+  );
+  useAuthorCodeStamper(
+    editor,
+    lineAuthorsEnabled && authorCodesOn && !readOnly,
+    myCode,
+  );
+  const showGutter = lineAuthorsEnabled && showLineAuthors;
+  const editorWrapRef = React.useRef<HTMLDivElement>(null);
+  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or touch
+  // and pull right on the body (mobile). Released past the threshold it stays
+  // open; a small pull back to the left closes it. Disabled while the
+  // permanent toggle already shows it.
+  const contentSlideRef = React.useRef<HTMLDivElement>(null);
+  const gutterBoxRef = React.useRef<HTMLDivElement>(null);
+  const pull = useLineAuthorsPull({
+    enabled: lineAuthorsEnabled && !showGutter,
+    slideRef: contentSlideRef,
+    gutterRef: gutterBoxRef,
+  });
+  const gutterMounted = showGutter || pull.visible;
+  // Bump after every (debounced) editor change so the gutter re-measures the
+  // rendered blocks; also when the comments rail opens/closes (layout reflow).
+  const [gutterVersion, setGutterVersion] = React.useState(0);
+  React.useEffect(() => {
+    if (gutterMounted) setGutterVersion((v) => v + 1);
+  }, [gutterMounted, liveBody, showComments, readOnly]);
 
   const { data: comments = [] } = useNoteComments(note.id);
   const { data: folders = [] } = useQuery(
@@ -969,9 +1106,30 @@ export function NoteEditor({
   // FIR-1317 Plan A: sends base_updated_at (when conflict merge is on) so the
   // backend can detect if someone else saved in the meantime. On a 409 the
   // NoteConflictError is caught and the merge dialog opens.
+  //
+  // FIR-2810 follow-up: saves are SERIALIZED — at most one in flight, the
+  // newest body queued behind it. Firing a second save before the first
+  // response refreshed baseUpdatedAt made the backend see a stale base and
+  // answer 409, so the "two people edited this note" dialog opened for a user
+  // typing alone (the author-code stamp plus the blur + debounce double-save
+  // made this frequent). lastSentBody additionally drops no-change saves.
+  const saveInFlight = React.useRef(false);
+  const queuedBody = React.useRef<string | null>(null);
+  const lastSentBody = React.useRef<string | null>(note.body);
+
   function saveBody(markdown: string) {
     setLiveBody(markdown);
-    if (markdown === note.body) return;
+    pushSave(markdown);
+  }
+
+  function pushSave(markdown: string) {
+    if (saveInFlight.current) {
+      queuedBody.current = markdown;
+      return;
+    }
+    if (markdown === lastSentBody.current) return;
+    saveInFlight.current = true;
+    lastSentBody.current = markdown;
     updateNote.mutate(
       {
         id: note.id,
@@ -985,8 +1143,20 @@ export function NoteEditor({
         },
         onError: (err) => {
           if (err instanceof NoteConflictError) {
+            // The dialog takes over; anything queued predates the conflict
+            // and must not fire behind the user's resolution.
+            queuedBody.current = null;
             setConflict(err.conflict);
+          } else {
+            // Failed save: forget the body so the next edit retries it.
+            lastSentBody.current = null;
           }
+        },
+        onSettled: () => {
+          saveInFlight.current = false;
+          const next = queuedBody.current;
+          queuedBody.current = null;
+          if (next !== null) pushSave(next);
         },
       },
     );
@@ -1025,8 +1195,8 @@ export function NoteEditor({
           rest (pin, comments, history, add reference, create issue, delete)
           collapse into a single "⋯" menu so the bar no longer feels cluttered.
           FIR-1676: on mobile the row wraps to a second line instead of clipping
-          the "⋯" menu off the right edge (Jesper: "ellers skal der være 2
-          rækker"). On desktop it stays a single row with "⋯" pushed right. */}
+          the "⋯" menu off the right edge (Jesper: otherwise there must be two
+          rows). On desktop it stays a single row with "⋯" pushed right. */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
@@ -1046,11 +1216,11 @@ export function NoteEditor({
             className="shrink-0 gap-1.5"
             onClick={onOpenFull}
           >
-            <ExternalLink className="size-4" /> Åbn fuldt
+            <ExternalLink className="size-4" /> Open full
           </Button>
         )}
 
-        {/* Folder first (request 4 — "folders skal ligge i række 1"). Only the
+        {/* Folder first (request 4 — "folders must be on row 1"). Only the
             owner may move a note; everyone else sees a read-only folder badge
             (FIR-1460, request 2). */}
         {isOwner ? (
@@ -1167,6 +1337,32 @@ export function NoteEditor({
               icon: GitMerge,
               onSelect: toggleConflictMerge,
             },
+            // FIR-2810: show/hide the line-authors gutter (who wrote / last
+            // edited every line). Per-user view preference, like conflict merge.
+            lineAuthorsEnabled && {
+              key: "line-authors",
+              label: showLineAuthors
+                ? "Line authors: On"
+                : "Line authors: Off",
+              icon: Users,
+              onSelect: toggleLineAuthors,
+            },
+            // FIR-2810: per-note author-codes toggle — stamp the writer's
+            // member code (e.g. JEH) on every line they write. Saved on the
+            // note itself, so it is on for everyone who writes in it.
+            lineAuthorsEnabled &&
+              !readOnly && {
+                key: "author-codes",
+                label: authorCodesOn
+                  ? "Author codes: On"
+                  : "Author codes: Off",
+                icon: PenLine,
+                onSelect: () =>
+                  setAuthorCodesMutation.mutate({
+                    id: note.id,
+                    authorCodes: !authorCodesOn,
+                  }),
+              },
             // Delete is owner-only (the backend rejects others with 403). Show
             // it solely to the owner so the action never silently fails
             // (FIR-1460, request 2). The onSuccess navigates back to the
@@ -1214,11 +1410,59 @@ export function NoteEditor({
 
           <NoteReferences noteId={note.id} />
 
+          {/* FIR-2697 part 2 — a pending agent folder suggestion for this note.
+              A note is an artifact, so it reuses the Documents banner. */}
+          <FolderSuggestionBanner artifactId={note.id} canResolve={canEdit} />
+
           {/* Body uses the SAME rich editor as issue comments + descriptions, so
               "@" behaves identically (people, agents, issues, …) inline. When
               the note is locked by someone else we render it read-only instead.
               The bubble menu's "Comment" icon (commentsEnabled) opens the
               comments panel anchored to the selected text. */}
+          {/* FIR-2810: the relative wrapper hosts the line-authors gutter,
+              which measures the rendered blocks inside it. With the gutter on,
+              the body shifts right to make room for the attribution column.
+              With it off, a click-and-drag on the left-edge handle (desktop)
+              or a touch-and-pull right on the body (mobile) slides the body
+              aside; past the threshold it latches open until pulled back. */}
+          <div
+            ref={editorWrapRef}
+            {...pull.wrapperProps}
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-x-clip",
+              showGutter && "pl-24",
+            )}
+          >
+          {gutterMounted && (
+            <div
+              ref={gutterBoxRef}
+              className="absolute inset-y-0 left-0 w-24"
+              style={showGutter ? undefined : { opacity: 0 }}
+            >
+              <LineAuthorsGutter
+                contentRef={editorWrapRef}
+                body={noteDetail?.body ?? note.body}
+                attrs={lineAttrs}
+                membersById={membersById}
+                version={gutterVersion}
+              />
+            </div>
+          )}
+          {lineAuthorsEnabled && !showGutter && !isMobile && (
+            // Desktop grab handle for the temporary peek; the faint bar shows
+            // on hover so the affordance is discoverable without being loud.
+            <div
+              {...pull.stripProps}
+              aria-hidden
+              className="group absolute inset-y-0 left-0 z-10 w-3 cursor-ew-resize touch-none"
+            >
+              <div className="absolute left-[3px] top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-border opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+          )}
+          <div
+            ref={contentSlideRef}
+            className="flex min-h-0 flex-1 flex-col bg-background"
+          >
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
@@ -1257,6 +1501,8 @@ export function NoteEditor({
               />
             </div>
           )}
+          </div>
+          </div>
         </div>
 
         {/* Heading navigation ("Oversigt") + word/character count, shared with
@@ -1266,9 +1512,24 @@ export function NoteEditor({
           <DocumentToolsSidebar body={liveBody} contentRef={contentScrollRef} />
         </div>
 
-        {/* Desktop: comments as an inline side rail. */}
+        {/* Desktop: comments as an inline side rail. FIR-2826 — wider default
+            and drag-resizable via the handle on its left edge. */}
         {commentsEnabled && showComments && !isMobile && (
-          <div className="w-80 shrink-0 border-l">
+          <div
+            className="relative shrink-0 border-l"
+            style={{ width: commentsWidth }}
+          >
+            {/* Drag handle: a hit strip straddling the left border with a
+                thin bar that brightens on hover/drag. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize comments panel"
+              onPointerDown={startCommentsResize}
+              className="group absolute -left-1 top-0 bottom-0 z-10 w-2 cursor-col-resize"
+            >
+              <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-primary/40 group-active:bg-primary/60" />
+            </div>
             <NoteCommentsPanel
               noteId={note.id}
               noteBody={note.body}
@@ -1349,6 +1610,11 @@ export function NoteEditor({
             setConflict(null);
             // Save the resolved body without the base_updated_at check so it
             // goes through unconditionally (the user just made the decision).
+            // Runs through the same in-flight bookkeeping as pushSave so a
+            // queued autosave can never race the resolution.
+            saveInFlight.current = true;
+            lastSentBody.current = resolvedBody;
+            queuedBody.current = null;
             updateNote.mutate(
               { id: note.id, body: resolvedBody },
               {
@@ -1357,6 +1623,12 @@ export function NoteEditor({
                   setLiveBody(resolvedBody);
                   // Remount the editor so it shows the resolved content.
                   setReplaceToken((t) => t + 1);
+                },
+                onSettled: () => {
+                  saveInFlight.current = false;
+                  const next = queuedBody.current;
+                  queuedBody.current = null;
+                  if (next !== null) pushSave(next);
                 },
               },
             );

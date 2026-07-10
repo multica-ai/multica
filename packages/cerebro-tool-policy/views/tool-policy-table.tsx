@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ChevronDown,
   ChevronRight,
@@ -41,6 +42,7 @@ import {
   ShieldCheck,
   ShieldQuestion,
   SlidersHorizontal,
+  UsersRound,
   X,
 } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -100,6 +102,7 @@ import {
   type ScopeConfig,
   type ScopeOption,
 } from "./data-source-scope";
+import { GROUP_ARG, useGroupScopeOptions } from "./group-scope";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
 import { ConnectionToolList } from "./connection-config-sheet";
@@ -494,7 +497,25 @@ export function ToolPolicyTable({
       clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
       return;
     }
-    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+    setPolicy.mutate(
+      { tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope },
+      {
+        // FIR-2706 follow-up: the server ACCEPTS a write a higher layer then
+        // overrides, so the pill snapped back with no message — a silent
+        // failure to the user. Rejected writes already toast via the hook's
+        // onError; this covers the accepted-but-overridden case by naming the
+        // blocking layer out loud the moment the write lands.
+        onSuccess: () => {
+          const row = rows.find(
+            (r) =>
+              r.tool_key === toolKey && (r.resource_pattern || "") === (resourcePattern || ""),
+          );
+          if (!row) return;
+          const warning = futileWriteWarning(row, editLayer, setting);
+          if (warning) toast.warning(warning, { duration: 8000 });
+        },
+      },
+    );
   }
 
   // Write (or clear) the Condition — the WHEN layer (FIR-1609) — on this page's
@@ -534,11 +555,25 @@ export function ToolPolicyTable({
   }
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
+    let skipped = 0;
     for (const row of filtered) {
       // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
       // skip those instead of firing a silent dead write that reverts on refetch.
-      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) continue;
+      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) {
+        skipped += 1;
+        continue;
+      }
       setPolicy.mutate({ tool_key: row.tool_key, layer: editLayer, subject_id: subjectId, setting });
+    }
+    // Skipping silently looked like the bulk action half-failed (FIR-2706
+    // follow-up) — say how many rows a higher layer holds locked.
+    if (skipped > 0) {
+      toast.info(
+        skipped === 1
+          ? "1 permission was left unchanged — a higher layer locks it. The lock icon on the row names the blocker."
+          : `${skipped} permissions were left unchanged — higher layers lock them. The lock icon on each row names the blocker.`,
+        { duration: 8000 },
+      );
     }
   }
 
@@ -1180,6 +1215,25 @@ function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
   return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
 }
 
+// futileWriteWarning — the message to toast when a write the server ACCEPTED
+// is nonetheless overridden by a layer this page cannot loosen (FIR-2706
+// follow-up: an accepted-but-capped write used to revert with no explanation
+// beyond a hover tooltip). Returns null when the write actually takes effect:
+// tightening (deny/disable) always bites, and so does any choice at or above
+// the effective verdict's restrictiveness. Exported for unit tests.
+export function futileWriteWarning(
+  row: ToolPolicyRow,
+  editLayer: ToolLayer,
+  setting: ToolSetting,
+): string | null {
+  if (setting !== "allow" && setting !== "ask") return null;
+  if (!isLockedFromElsewhere(row, editLayer)) return null;
+  const effective = row.effective.setting;
+  if (SETTING_RANK[setting] >= SETTING_RANK[effective]) return null;
+  const { phrase, hint } = blockerText(row);
+  return `"${SETTING_LABEL[setting]}" was saved on the ${LAYER_LABEL[editLayer]} layer, but it has no effect: the decision stays "${SETTING_LABEL[effective]}" because ${phrase} blocks it. ${hint}`.trim();
+}
+
 // rowAttribution is the single source of truth for what the Origin badge says.
 //
 // TECH-3287 hul 2/4/5 reframes two things WITHOUT touching the established
@@ -1283,6 +1337,15 @@ export function DecisionControl({
         <ChevronDown className="size-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
+        {/* FIR-2706 follow-up: the lock explanation lived only in a hover
+            tooltip, so a capped row read as silently broken. Show the reason
+            in the menu itself, right where the user is about to choose. */}
+        {locked && lockTooltip ? (
+          <div className="flex max-w-64 items-start gap-1.5 border-b px-2 py-1.5 text-xs text-muted-foreground">
+            <Lock className="mt-0.5 size-3 shrink-0" />
+            <span>{lockTooltip}</span>
+          </div>
+        ) : null}
         {settingChoicesFor(editLayer).map((choice) => (
           <DropdownMenuItem
             key={choice}
@@ -1357,9 +1420,11 @@ export function CatalogDecisionControl({
   const current = conditionForLayer(row, editLayer);
   const active = !conditionIsEmpty(current);
   const facets = conditionFacets(row);
-  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
   const meaningful =
-    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+    facets.host || facets.actions.length > 0 || facets.cel || showArg || showGroupArg;
   const showWhen = editLayer !== "group" && (meaningful || active);
 
   return (
@@ -1383,6 +1448,14 @@ export function CatalogDecisionControl({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-0">
         <div className="flex flex-col">
+          {/* FIR-2706 follow-up: same visible lock explanation as
+              DecisionControl — a hover-only tooltip read as a silent failure. */}
+          {locked && lockTooltip ? (
+            <div className="flex items-start gap-1.5 border-b px-3 py-2 text-xs text-muted-foreground">
+              <Lock className="mt-0.5 size-3 shrink-0" />
+              <span>{lockTooltip}</span>
+            </div>
+          ) : null}
           <div className="flex flex-col gap-0.5 p-1.5">
             <span className="px-2 pb-0.5 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Decision
@@ -1486,6 +1559,7 @@ function argSummary(list: ToolCondition["arg_allowlist"]): string | null {
   const entry = (list ?? []).find((a) => a.values.length > 0);
   if (!entry) return null;
   const n = entry.values.length;
+  if (entry.arg === GROUP_ARG) return n === 1 ? "1 group" : `${n} groups`;
   if (entry.arg === FOLDER_ARG) return n === 1 ? "1 folder" : `${n} folders`;
   return n === 1 ? "1 source" : `${n} sources`;
 }
@@ -1696,6 +1770,8 @@ export function ConditionEditorBody({
   const [argMode, setArgMode] = useState<"folder" | "source">("source");
   const [argValues, setArgValues] = useState<string[]>([]);
   const [argSearch, setArgSearch] = useState("");
+  const [groupValues, setGroupValues] = useState<string[]>([]);
+  const [groupSearch, setGroupSearch] = useState("");
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
   const current = conditionForLayer(row, editLayer);
@@ -1703,7 +1779,9 @@ export function ConditionEditorBody({
   const facets = conditionFacets(row);
   // The arg picker shows only when the row is arg-scoped AND a scope binding
   // (connection + options source) was resolved for the workspace.
-  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const showGroupArg = facets.arg && row.tool_key === "manage_group_overrides" && !!wsId;
+  const showArg =
+    facets.arg && row.tool_key !== "manage_group_overrides" && !!wsId && !!argScopeConfig;
 
   // Lazily fetch the scope options only while the editor is open (one cached
   // registry round-trip per edit session, not on every table render).
@@ -1711,6 +1789,10 @@ export function ConditionEditorBody({
     wsId ?? "",
     showArg ? argScopeConfig ?? null : null,
     enabled && showArg,
+  );
+  const { options: groupOptions, loading: groupLoading } = useGroupScopeOptions(
+    wsId ?? "",
+    enabled && showGroupArg,
   );
 
   // Seed the form from the persisted condition each time the editor opens, so an
@@ -1723,6 +1805,10 @@ export function ConditionEditorBody({
     setHostDraft("");
     setHostError(null);
     setArgSearch("");
+    setGroupSearch("");
+    setGroupValues(
+      current?.arg_allowlist?.find((a) => a.arg === GROUP_ARG)?.values ?? [],
+    );
     // Seed the arg picker from the stored allowlist: a folder_id entry → folder
     // mode, otherwise the data_source_id entry → source mode.
     const folderEntry = current?.arg_allowlist?.find(
@@ -1759,6 +1845,12 @@ export function ConditionEditorBody({
     );
   }
 
+  function toggleGroupValue(id: string) {
+    setGroupValues((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
   function addHost() {
     const h = normalizeHost(hostDraft);
     if (!h) return;
@@ -1782,9 +1874,11 @@ export function ConditionEditorBody({
     // One arg-allowlist entry per condition: the gate ANDs entries, so a folder
     // OR source rule is expressed as a single entry on the chosen axis.
     const arg_allowlist =
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [];
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [];
     const next: ToolCondition = {
       host_allowlist: hosts,
       actions,
@@ -1804,9 +1898,11 @@ export function ConditionEditorBody({
     host_allowlist: hosts,
     actions,
     arg_allowlist:
-      showArg && argValues.length > 0
-        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
-        : [],
+      showGroupArg && groupValues.length > 0
+        ? [{ arg: GROUP_ARG, values: groupValues }]
+        : showArg && argValues.length > 0
+          ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+          : [],
     expr,
   });
 
@@ -1897,6 +1993,17 @@ export function ConditionEditorBody({
             />
           )}
 
+          {showGroupArg && (
+            <GroupScopePicker
+              values={groupValues}
+              onToggle={toggleGroupValue}
+              options={groupOptions}
+              loading={groupLoading}
+              search={groupSearch}
+              onSearch={setGroupSearch}
+            />
+          )}
+
           {facets.cel && (
             <div className="flex flex-col gap-1">
               <button
@@ -1952,6 +2059,83 @@ export function ConditionEditorBody({
             </div>
           </div>
         </div>
+  );
+}
+
+function GroupScopePicker({
+  values,
+  onToggle,
+  options,
+  loading,
+  search,
+  onSearch,
+}: {
+  values: string[];
+  onToggle: (id: string) => void;
+  options: ScopeOption[];
+  loading: boolean;
+  search: string;
+  onSearch: (s: string) => void;
+}) {
+  const q = search.trim().toLowerCase();
+  const rows = options.filter((o) => !q || o.name.toLowerCase().includes(q));
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="flex items-center gap-1.5 text-xs">
+        <UsersRound className="size-3.5" /> Groups
+      </Label>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search groups…"
+          className="h-8 pl-7"
+          aria-label="Search groups"
+        />
+      </div>
+
+      <div className="max-h-52 overflow-y-auto rounded-md border">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Loading…
+          </div>
+        ) : options.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups available.
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No groups match.
+          </p>
+        ) : (
+          <ul className="divide-y">
+            {rows.map((o) => {
+              const selected = values.includes(o.id);
+              return (
+                <li key={o.id}>
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => onToggle(o.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <Checkbox checked={selected} className="pointer-events-none" />
+                    <span className="flex-1 truncate">{o.name}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Allows only the selected groups. None selected means every group.
+      </p>
+    </div>
   );
 }
 

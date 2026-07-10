@@ -238,13 +238,14 @@ type AgentTaskResponse struct {
 	WakeupPrompt      string `json:"wakeup_prompt,omitempty"`       // prompt stored on a platform wakeup task
 	WakeupTriggerType string `json:"wakeup_trigger_type,omitempty"` // time, issue_status, or github_ci for wakeup tasks
 
-	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
-	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
-	IssueKind         string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
-	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
-	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
-	GraphifyNudge     string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
-	MemoryContext     string `json:"memory_context,omitempty"`      // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	TriggerUserID       string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
+	TriggerUserName     string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
+	IssueKind           string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
+	IssueSnapshot       string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint   bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+	GraphifyNudge       string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
+	MemoryContext       string `json:"memory_context,omitempty"`      // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	RoundRelevanceCheck bool   `json:"round_relevance_check,omitempty"`
 
 	NewCommentCount          int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
@@ -276,7 +277,8 @@ type AgentTaskResponse struct {
 	Title                            *string `json:"title,omitempty"` // CEREBRO-PATCH(task-title-builder): short generated headline.
 	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
 	WaitReason            *string              `json:"wait_reason,omitempty"`
-	ModelOverride         string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ModelOverride         string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ThinkingOverride      string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(agent-task-thinking-override): per-task thinking override for issue workflow steps.
 	SandboxEnabled        *bool                `json:"sandbox_enabled,omitempty"`
 	RuntimeSandboxPolicy  json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox string               `json:"runtime_persona_sandbox,omitempty"`
@@ -375,6 +377,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		json.Unmarshal(t.Result, &result)
 	}
 	wakeupCtx := wakeupContextFromTask(t) // CEREBRO-PATCH(wakeup-system-activity): parse task context into daemon response fields.
+	roundCtx := roundContextFromTask(t)
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -388,28 +391,29 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		handoffNote = t.HandoffNote.String
 	}
 	return AgentTaskResponse{
-		ID:                uuidToString(t.ID),
-		AgentID:           uuidToString(t.AgentID),
-		RuntimeID:         uuidToString(t.RuntimeID),
-		IssueID:           uuidToString(t.IssueID),
-		WorkspaceID:       workspaceID,
-		Status:            t.Status,
-		Priority:          t.Priority,
-		DispatchedAt:      timestampToPtr(t.DispatchedAt),
-		StartedAt:         timestampToPtr(t.StartedAt),
-		CompletedAt:       timestampToPtr(t.CompletedAt),
-		Result:            result,
-		Error:             textToPtr(t.Error),
-		FailureReason:     failureReason,
-		Attempt:           t.Attempt,
-		MaxAttempts:       t.MaxAttempts,
-		ParentTaskID:      uuidToPtr(t.ParentTaskID),
-		CreatedAt:         timestampToString(t.CreatedAt),
-		TriggerCommentID:  uuidToPtr(t.TriggerCommentID),
-		TriggerSummary:    textToPtr(t.TriggerSummary),
-		HandoffNote:       handoffNote,
-		WakeupPrompt:      wakeupCtx.Prompt,
-		WakeupTriggerType: wakeupCtx.TriggerType,
+		ID:                  uuidToString(t.ID),
+		AgentID:             uuidToString(t.AgentID),
+		RuntimeID:           uuidToString(t.RuntimeID),
+		IssueID:             uuidToString(t.IssueID),
+		WorkspaceID:         workspaceID,
+		Status:              t.Status,
+		Priority:            t.Priority,
+		DispatchedAt:        timestampToPtr(t.DispatchedAt),
+		StartedAt:           timestampToPtr(t.StartedAt),
+		CompletedAt:         timestampToPtr(t.CompletedAt),
+		Result:              result,
+		Error:               textToPtr(t.Error),
+		FailureReason:       failureReason,
+		Attempt:             t.Attempt,
+		MaxAttempts:         t.MaxAttempts,
+		ParentTaskID:        uuidToPtr(t.ParentTaskID),
+		CreatedAt:           timestampToString(t.CreatedAt),
+		TriggerCommentID:    uuidToPtr(t.TriggerCommentID),
+		TriggerSummary:      textToPtr(t.TriggerSummary),
+		HandoffNote:         handoffNote,
+		WakeupPrompt:        wakeupCtx.Prompt,
+		WakeupTriggerType:   wakeupCtx.TriggerType,
+		RoundRelevanceCheck: roundCtx.Type == service.RoundTaskContextType,
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
 		Title: textToPtr(t.Title),
 		// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — explain queued waits without issue comments.
@@ -423,8 +427,20 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
-		ModelOverride: t.ModelOverride.String,
+		ModelOverride:    t.ModelOverride.String,
+		ThinkingOverride: t.ThinkingOverride.String,
 	}
+}
+
+func roundContextFromTask(t db.AgentTaskQueue) service.RoundTaskContext {
+	if len(t.Context) == 0 {
+		return service.RoundTaskContext{}
+	}
+	var payload service.RoundTaskContext
+	if err := json.Unmarshal(t.Context, &payload); err != nil {
+		return service.RoundTaskContext{}
+	}
+	return payload
 }
 
 // CEREBRO-PATCH(wakeup-system-activity): wakeup task context is intentionally separate from comments.
@@ -1356,6 +1372,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+
+	// CEREBRO-PATCH(agent-office-direct-edit-version): FIR-1775 Phase 2 — a direct edit (outside the change-request flow) records an agent_context_version so version history stays complete. Best-effort; logic in agent_context_direct_edit_cerebro.go.
+	h.recordAgentContextDirectEdit(r, updated)
 
 	resp := agentToResponse(updated)
 	// agentToResponse always initialises Skills as []; junction-table rows

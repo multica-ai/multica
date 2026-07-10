@@ -50,6 +50,7 @@ import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
 import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
+import { NoteVersionsDialog } from "@multica/cerebro-notes/views/note-versions-dialog";
 import { ReminderOverview } from "@multica/cerebro-reminders/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
@@ -441,6 +442,15 @@ function DocumentViewRoute() {
       )}
       renderReferences={({ artifactId }) => (
         <NoteReferencesSection noteId={artifactId} />
+      )}
+      // FIR-2697 — version history for a document reuses the note version dialog.
+      renderVersions={({ artifactId, open, onOpenChange, onRestored }) => (
+        <NoteVersionsDialog
+          noteId={artifactId}
+          open={open}
+          onOpenChange={onOpenChange}
+          onRestored={onRestored}
+        />
       )}
     />
   );

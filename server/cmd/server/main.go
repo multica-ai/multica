@@ -29,6 +29,8 @@ import (
 	cerebroskillsync "github.com/multica-ai/multica/server/internal/cerebro/skillsync"
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 agent wakeup scheduler.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
+	// CEREBRO-PATCH(main-rounds): FIR-2736 scheduled round starts.
+	cerebrorounds "github.com/multica-ai/multica/server/internal/cerebro/rounds"
 	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
@@ -43,6 +45,8 @@ import (
 	cerebrodriftwatch "github.com/multica-ai/multica/server/internal/cerebro/driftwatch"
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 note types sweeper import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 artifact version listener import
+	cerebronote "github.com/multica-ai/multica/server/internal/cerebro/note"
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning sweeper import
 	cerebrolearn "github.com/multica-ai/multica/server/internal/cerebro"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -387,6 +391,8 @@ func main() {
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
 	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
 	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 snapshot a version whenever an agent-created document (artifact) is created/updated, reusing the note version engine.
+	cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -403,6 +409,8 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 due-time wakeup sweeper.
 	go cerebrowakeup.RunSweeper(sweepCtx, wakeupSvc, 30*time.Second)
+	// CEREBRO-PATCH(main-rounds): due schedules release held round replies.
+	go cerebrorounds.New(pool, queries, taskSvc).RunSweeper(sweepCtx, 30*time.Second)
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 — fire standalone reminders and re-surface the source conversation in the inbox.

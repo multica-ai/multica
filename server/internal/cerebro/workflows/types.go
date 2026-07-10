@@ -191,9 +191,11 @@ type ActionConfigSendReminder struct {
 // of skill versioning is intentionally absent — workflows always run the
 // latest version of the skill bundled on the agent.
 type ActionConfigRunSkill struct {
-	SkillName  string         `json:"skill_name"`
-	AgentID    string         `json:"agent_id"`
-	SkillInput map[string]any `json:"skill_input,omitempty"`
+	SkillName     string         `json:"skill_name"`
+	AgentID       string         `json:"agent_id"`
+	Model         string         `json:"model,omitempty"`
+	ThinkingLevel string         `json:"thinking_level,omitempty"`
+	SkillInput    map[string]any `json:"skill_input,omitempty"`
 	// LoopPlanning signals that this run_skill action is the build step of a
 	// loop that requires an explicit planning phase. When true, the loop engine
 	// (FIR-2283) prepends a planning-dispatch rule so the agent must produce a

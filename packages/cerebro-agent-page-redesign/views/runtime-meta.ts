@@ -14,3 +14,12 @@ export function runtimeVersion(runtime: AgentRuntime | null): string | null {
   const v = bag.version ?? bag.cli_version;
   return typeof v === "string" && v.length > 0 ? v : null;
 }
+
+/** Read the shared Multica daemon CLI version from the runtime metadata. */
+export function daemonVersion(runtime: AgentRuntime | null): string | null {
+  const meta = runtime?.metadata;
+  if (!meta || typeof meta !== "object") return null;
+  const bag = meta as Record<string, unknown>;
+  const v = bag.cli_version;
+  return typeof v === "string" && v.length > 0 ? v : null;
+}

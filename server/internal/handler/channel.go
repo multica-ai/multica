@@ -308,9 +308,15 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 
 	// CEREBRO-PATCH(channel-list-archived-filter): hide channels archived by
 	// the caller unless `?include_archived=true` is passed (used by the
-	// "Show archived" view in the frontend). JEH-851.
+	// "Show archived" view in the frontend). JEH-851. FIR-2791 adds
+	// `?archived_only=true`: return ONLY the caller's archived channels/DMs
+	// (backs the Archived block + archived view in the inbox).
 	if h.ChannelListen != nil {
-		rows = h.ChannelListen.FilterArchivedChannels(r.Context(), parseUUID(userID), rows, r.URL.Query().Get("include_archived") == "true")
+		if r.URL.Query().Get("archived_only") == "true" { // CEREBRO-PATCH(channel-list-archived-filter): FIR-2791 archived-only mode
+			rows = h.ChannelListen.OnlyArchivedChannels(r.Context(), parseUUID(userID), rows)
+		} else {
+			rows = h.ChannelListen.FilterArchivedChannels(r.Context(), parseUUID(userID), rows, r.URL.Query().Get("include_archived") == "true")
+		}
 	}
 
 	// Batch the latest-message lookup so the inbox can render previews

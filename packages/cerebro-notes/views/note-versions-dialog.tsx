@@ -37,10 +37,16 @@ export function NoteVersionsDialog({
   noteId,
   open,
   onOpenChange,
+  onRestored,
 }: {
   noteId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // FIR-2697: called with the restored body after a successful restore, so a
+  // host editor that seeds its own buffer (the Documents editor) can re-seed
+  // and show the restored content live instead of stale text until reload. The
+  // Notes editor reads straight from the invalidated query and can ignore it.
+  onRestored?: (body: string) => void;
 }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -143,7 +149,10 @@ export function NoteVersionsDialog({
                     className="ml-auto"
                     onClick={() =>
                       restore.mutate(selected.id, {
-                        onSuccess: () => onOpenChange(false),
+                        onSuccess: (restored) => {
+                          if (restored) onRestored?.(restored.body);
+                          onOpenChange(false);
+                        },
                       })
                     }
                     disabled={restore.isPending}

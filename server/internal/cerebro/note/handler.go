@@ -206,6 +206,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Delete("/{id}", h.DeleteNote)
 	r.Put("/{id}/visibility", h.SetVisibility)
 	r.Put("/{id}/pin", h.SetPin)
+	// FIR-2810 — per-note "stamp the writer's member code on every line" toggle.
+	r.Put("/{id}/author-codes", h.SetAuthorCodes)
 	r.Get("/{id}/shares", h.ListShares)
 	// FIR-2595 — the "give access?" prompt: check which tagged members can't open
 	// the note, and grant them access when the author confirms. See mention_access.go.
@@ -283,6 +285,11 @@ type setPinRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
+// FIR-2810: body for PUT /{id}/author-codes.
+type setAuthorCodesRequest struct {
+	AuthorCodes bool `json:"author_codes"`
+}
+
 // NoteResponse is the wire shape for a note: the artifact essentials plus the
 // note-specific state. It is intentionally lighter than the full artifact
 // response — the Notes list and editor only need these fields.
@@ -311,6 +318,14 @@ type NoteResponse struct {
 	CanEdit   bool   `json:"can_edit"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// FIR-2810: per-note toggle — when true the editor stamps the writer's
+	// member code (e.g. "JEH") on every line they write. Populated on the
+	// single-note reads; false on lightweight list rows.
+	AuthorCodes bool `json:"author_codes"`
+	// FIR-2810: per-line attribution (who created / last edited each body
+	// line), aligned index-for-index with the body's lines. Populated on the
+	// single-note reads that feed the editor; omitted on list rows.
+	LineAttrs []LineAttr `json:"line_attrs,omitempty"`
 }
 
 // --- handlers ---
@@ -442,6 +457,9 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	// Tagging a person in the note body notifies them (and shares the note).
 	h.notifyNoteMentions(r.Context(), wsUUID, artifact.ID, ownerUUID, artifact.Title, "", artifact.Body, noteRow.Visibility, "", "")
 
+	// FIR-2810: seed per-line attribution — every initial line is the creator's.
+	lineAttrs := h.advanceAndSaveLineAttrs(r.Context(), artifact.ID, "", artifact.Body, userID)
+
 	// FIR-2145: when the note is scoped to an issue, auto-create a reference so
 	// the note's References panel shows the issue link immediately, without the
 	// user or agent needing a separate API call.
@@ -470,6 +488,8 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
 		UpdatedAt:   tsStr(artifact.UpdatedAt),
+		AuthorCodes: false, // new notes start with the toggle off
+		LineAttrs:   lineAttrs,
 	})
 }
 
@@ -600,6 +620,10 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load note")
 		return
 	}
+	// FIR-2810: attach per-line attribution, healing it first when the body
+	// was changed outside the note handler (agent via the artifact API, the
+	// note-types sweeper, …) so the array always aligns with the body.
+	lineAttrs := h.ensureLineAttrs(r.Context(), artifact.ID, artifact.Body)
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(artifact.ID),
 		WorkspaceID: uuidStr(artifact.WorkspaceID),
@@ -614,6 +638,8 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
 		UpdatedAt:   tsStr(artifact.UpdatedAt),
+		AuthorCodes: noteRow.AuthorCodes,
+		LineAttrs:   lineAttrs,
 	})
 }
 
@@ -646,6 +672,39 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	artifact, err := h.Upstream.GetArtifact(r.Context(), db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "note not found")
+		return
+	}
+
+	// FIR-2810 follow-up: a save that changes nothing can never conflict.
+	// The editor's blur + debounce autosaves (and the author-code stamper)
+	// can re-send an identical body while an earlier save's response is in
+	// flight; answering 409 on those surfaced a bogus "two people edited this
+	// note" merge dialog to a user typing alone. Answer with the current
+	// state instead so the client re-syncs its base timestamp.
+	if (req.Body == nil || *req.Body == artifact.Body) &&
+		(req.Title == nil || *req.Title == artifact.Title) {
+		noteRow, err := h.Cerebro.GetNote(r.Context(), noteID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update note")
+			return
+		}
+		writeJSON(w, http.StatusOK, NoteResponse{
+			ID:          uuidStr(artifact.ID),
+			WorkspaceID: uuidStr(artifact.WorkspaceID),
+			FolderID:    uuidPtr(artifact.FolderID),
+			Title:       artifact.Title,
+			Body:        artifact.Body,
+			OwnerID:     uuidStr(noteRow.OwnerID),
+			Visibility:  noteRow.Visibility,
+			Pinned:      noteRow.Pinned,
+			CanEdit:     true, // caller just passed requireCanEdit
+			IssueID:     uuidPtr(artifact.IssueID),
+			ProjectID:   uuidPtr(artifact.ProjectID),
+			CreatedAt:   tsStr(artifact.CreatedAt),
+			UpdatedAt:   tsStr(artifact.UpdatedAt),
+			AuthorCodes: noteRow.AuthorCodes,
+			LineAttrs:   h.ensureLineAttrs(r.Context(), noteID, artifact.Body),
+		})
 		return
 	}
 
@@ -695,11 +754,20 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	// Notify only people newly tagged by this edit (diff vs. the old body).
 	h.notifyNoteMentions(r.Context(), wsUUID, noteID, ownerUUID, updated.Title, artifact.Body, updated.Body, noteRow.Visibility, "", "")
 
+	// FIR-2810: advance per-line attribution — kept lines keep their author,
+	// changed/added lines are credited to this caller.
+	var lineAttrs []LineAttr
+	if updated.Body != artifact.Body {
+		lineAttrs = h.advanceAndSaveLineAttrs(r.Context(), noteID, artifact.Body, updated.Body, userID)
+	} else {
+		lineAttrs = h.ensureLineAttrs(r.Context(), noteID, updated.Body)
+	}
+
 	// Wave 3 / G2 — snapshot a version for the history. Coalesced: a burst of
 	// edits by the same author becomes one entry (see snapshotVersion). Only
 	// snapshot when something actually changed.
 	if updated.Title != artifact.Title || updated.Body != artifact.Body {
-		h.snapshotVersion(r.Context(), noteID, ownerUUID, updated.Title, updated.Body, "edit", "", true)
+		h.snapshotVersion(r.Context(), noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", true)
 	}
 
 	writeJSON(w, http.StatusOK, NoteResponse{
@@ -716,6 +784,8 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		ProjectID:   uuidPtr(updated.ProjectID),
 		CreatedAt:   tsStr(updated.CreatedAt),
 		UpdatedAt:   tsStr(updated.UpdatedAt),
+		AuthorCodes: noteRow.AuthorCodes,
+		LineAttrs:   lineAttrs,
 	})
 }
 
@@ -801,6 +871,42 @@ func (h *Handler) SetPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"pinned": req.Pinned})
+}
+
+// SetAuthorCodes toggles the per-note "stamp the writer's member code on every
+// line" behaviour (FIR-2810). Anyone who may edit the note may toggle it — the
+// toggle changes how the note is written, not who can see it, and a
+// business-review note is often owned by whoever created the recurring note
+// rather than the person running the meeting.
+func (h *Handler) SetAuthorCodes(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	_, ownerUUID, ok := h.scope(w, r, userID)
+	if !ok {
+		return
+	}
+	noteID, ok := pathUUID(w, r)
+	if !ok {
+		return
+	}
+	if !h.requireCanEdit(w, r, noteID, ownerUUID) {
+		return
+	}
+	var req setAuthorCodesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.Cerebro.SetNoteAuthorCodes(r.Context(), cerebrodb.SetNoteAuthorCodesParams{
+		ArtifactID:  noteID,
+		AuthorCodes: req.AuthorCodes,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update author codes")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"author_codes": req.AuthorCodes})
 }
 
 // DeleteNote removes a note: the cerebro_note row, its shares, and the
@@ -928,6 +1034,36 @@ func (h *Handler) requireOwner(w http.ResponseWriter, r *http.Request, noteID, o
 	}
 	if uuidStr(noteRow.OwnerID) != uuidStr(ownerUUID) {
 		writeError(w, http.StatusForbidden, "only the owner can change this note")
+		return false
+	}
+	return true
+}
+
+// requireCanSaveVersion gates the manual "Save version" and "Restore" endpoints
+// for BOTH notes and documents (FIR-2697). A note keeps its stricter, unchanged
+// rule: only its owner may checkpoint or restore it (requireOwner). A plain
+// document (no cerebro_note row) is instead gated by document edit access
+// (CanUserEditArtifact) — folder-grant or the member author. This never loosens
+// note behavior; it only extends save/restore to documents.
+func (h *Handler) requireCanSaveVersion(w http.ResponseWriter, r *http.Request, artifactID, callerUUID pgtype.UUID) bool {
+	if _, err := h.Cerebro.GetNote(r.Context(), artifactID); err == nil {
+		// It is a Notes-feature note → preserve owner-only behavior.
+		return h.requireOwner(w, r, artifactID, callerUUID)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load document")
+		return false
+	}
+	// Plain document → edit access controls save/restore.
+	allowed, err := h.Cerebro.CanUserEditArtifact(r.Context(), cerebrodb.CanUserEditArtifactParams{
+		ID:    artifactID,
+		PUser: callerUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load document")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "you don't have edit access to this document")
 		return false
 	}
 	return true

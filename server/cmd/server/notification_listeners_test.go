@@ -443,6 +443,153 @@ func TestNotification_IssueCreated_StartedIssueWorkspaceSettingSkipsBacklog(t *t
 	}
 }
 
+// CEREBRO-PATCH(triggered-agent-started-inbox): locks inbox routing for agent-created issues on behalf of a member.
+func TestNotification_IssueCreated_TriggeredAgentStartedIssueNotifiesOriginalUser(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	workspaceID := createNotificationTestWorkspace(t, `{"started_issues_in_inbox": true}`)
+	t.Cleanup(func() { cleanupNotificationTestWorkspace(t, workspaceID) })
+
+	originalEmail := "notif-triggered-agent-started@multica.ai"
+	originalUserID := createTestUser(t, originalEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, originalEmail)
+		clearUserPrefs(t, originalUserID)
+	})
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT a.id::text, a.runtime_id::text FROM agent a WHERE a.workspace_id = $1 AND a.runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Skipf("no agent with runtime in test workspace: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, original_user_id)
+		VALUES ($1, $2, 'queued', 0, $3)
+		RETURNING id::text
+	`, agentID, runtimeID, originalUserID).Scan(&taskID); err != nil {
+		t.Fatalf("insert agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	issueID := createTestIssue(t, workspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: workspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: workspaceID,
+				Title:       "agent-created issue on behalf of member",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "agent",
+				CreatorID:   agentID,
+			},
+			"triggering_task_id": taskID,
+		},
+	})
+
+	items, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(originalUserID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems: %v", err)
+	}
+	if len(items) != 1 || items[0].Type != "issue_started" || items[0].Route != routeInbox {
+		t.Fatalf("expected one inbox-routed issue_started item for original user, got %+v", items)
+	}
+}
+
+func TestNotification_IssueCreated_TriggeredAgentStartedIssueRespectsWorkspaceSetting(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	workspaceID := createNotificationTestWorkspace(t, `{"started_issues_in_inbox": false}`)
+	t.Cleanup(func() { cleanupNotificationTestWorkspace(t, workspaceID) })
+
+	originalEmail := "notif-triggered-agent-started-off@multica.ai"
+	originalUserID := createTestUser(t, originalEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, originalEmail)
+		clearUserPrefs(t, originalUserID)
+	})
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT a.id::text, a.runtime_id::text FROM agent a WHERE a.workspace_id = $1 AND a.runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Skipf("no agent with runtime in test workspace: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, original_user_id)
+		VALUES ($1, $2, 'queued', 0, $3)
+		RETURNING id::text
+	`, agentID, runtimeID, originalUserID).Scan(&taskID); err != nil {
+		t.Fatalf("insert agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	issueID := createTestIssue(t, workspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: workspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: workspaceID,
+				Title:       "agent-created issue on behalf of member",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "agent",
+				CreatorID:   agentID,
+			},
+			"triggering_task_id": taskID,
+		},
+	})
+
+	items, err := queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(workspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(originalUserID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no inbox items when started_issues_in_inbox is off, got %+v", items)
+	}
+}
+
 // TestNotification_IssueCreated_SelfAssign verifies that when the creator
 // assigns the issue to themselves, no assignment notification is generated.
 func TestNotification_IssueCreated_SelfAssign(t *testing.T) {

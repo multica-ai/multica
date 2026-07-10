@@ -20,6 +20,7 @@ export const noteTypeSchema = z.object({
   numbering_enabled: z.boolean().catch(false),
   next_number: z.number().catch(1),
   anchor_weekday: z.number().nullable().catch(null).default(null),
+  author_codes: z.boolean().catch(false).default(false),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 });

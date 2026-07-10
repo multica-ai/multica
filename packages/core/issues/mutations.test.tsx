@@ -226,6 +226,40 @@ describe("useLoadMoreByStatus", () => {
     const updated = qc.getQueryData<ListIssuesCache>(activeKey);
     expect(updated?.byStatus.todo?.issues).toHaveLength(2);
   });
+
+  // FIR-2817: the project/sprint board built its cache with
+  // `{ ...filter, on_behalf_of_ids }` but threaded the caller's plain
+  // `filter` (without `on_behalf_of_ids`) down to this hook. The two
+  // objects hash to different query keys, so the lookup below always
+  // missed and `total` silently fell back to 0 — while the board's cards
+  // (sourced from the same fetch, just via `select: flattenIssueBuckets`)
+  // still rendered correctly. This pins the contract: the filter passed
+  // to useLoadMoreByStatus must be object-equal to the one the query that
+  // populated the cache was keyed with, or the count regresses to 0.
+  it("regresses to a stale 0 total when the caller's filter object doesn't match the one the cache was populated with", async () => {
+    const sort: IssueSortParam = { sort_by: "position" };
+    const populatedFilter = { project_id: "proj-1", on_behalf_of_ids: [] as string[] };
+    const activeKey = issueKeys.myListSorted(WS_ID, "project:proj-1", populatedFilter, sort);
+    qc.setQueryData<ListIssuesCache>(activeKey, {
+      byStatus: { todo: { issues: [makeIssue(1), makeIssue(2)], total: 2 } },
+    });
+
+    // Same logical filter, but missing the `on_behalf_of_ids` key that was
+    // present when the cache above was written — this is the pre-fix bug.
+    const mismatchedFilter = { project_id: "proj-1" };
+    const { result: buggy } = renderHook(
+      () => useLoadMoreByStatus("todo", { scope: "project:proj-1", filter: mismatchedFilter }, sort),
+      { wrapper: createWrapper(qc) },
+    );
+    expect(buggy.current.total).toBe(0);
+
+    // The fix: thread the exact same filter object used to populate the cache.
+    const { result: fixed } = renderHook(
+      () => useLoadMoreByStatus("todo", { scope: "project:proj-1", filter: populatedFilter }, sort),
+      { wrapper: createWrapper(qc) },
+    );
+    expect(fixed.current.total).toBe(2);
+  });
 });
 
 describe("useLoadMoreByAssigneeGroup", () => {

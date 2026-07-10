@@ -6,7 +6,18 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockListAutopilots = vi.hoisted(() => vi.fn());
+const mockListCerebroGroups = vi.hoisted(() => vi.fn());
 const mockUseFeatureFlag = vi.hoisted(() => vi.fn((_key: string) => false));
+const mockToast = vi.hoisted(() => ({
+  warning: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  success: vi.fn(),
+}));
+
+// FIR-2706 follow-up: writes a higher layer overrides must toast an explanation
+// instead of failing silently — the mock lets tests assert the message.
+vi.mock("sonner", () => ({ toast: mockToast }));
 
 vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/cerebro-feature-flags")>();
@@ -19,7 +30,11 @@ vi.mock("@multica/core/api", async () => {
   );
   return {
     ...actual,
-    api: { cerebroRequest: mockCerebroRequest, listAutopilots: mockListAutopilots },
+    api: {
+      cerebroRequest: mockCerebroRequest,
+      listAutopilots: mockListAutopilots,
+      listCerebroGroups: mockListCerebroGroups,
+    },
   };
 });
 
@@ -111,7 +126,8 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
   };
 });
 
-import { ToolPolicyTable, ToolPolicyTabs } from "./tool-policy-table";
+import { ToolPolicyTable, ToolPolicyTabs, futileWriteWarning } from "./tool-policy-table";
+import type { ToolPolicyRow } from "../core";
 
 const TABLE = {
   tools: [
@@ -164,6 +180,8 @@ beforeEach(() => {
   // picker); the mock stays defined so the api shape is complete.
   mockListAutopilots.mockReset();
   mockListAutopilots.mockResolvedValue({ autopilots: [] });
+  mockListCerebroGroups.mockReset();
+  mockListCerebroGroups.mockResolvedValue([]);
   // Credentials feature is OFF by default; the credential-specific tests opt in.
   mockUseFeatureFlag.mockReset();
   mockUseFeatureFlag.mockReturnValue(false);
@@ -775,6 +793,69 @@ describe("ToolPolicyTable (Condition editor)", () => {
       expect(body.condition).toBeNull();
     });
   });
+
+  it("uses a group picker for Manage group permissions and writes group_id", async () => {
+    const user = userEvent.setup();
+    mockListCerebroGroups.mockResolvedValue([
+      {
+        id: "group-finance",
+        workspace_id: "ws-1",
+        name: "Finance",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+      {
+        id: "group-support",
+        workspace_id: "ws-1",
+        name: "Customer service",
+        description: null,
+        created_by: null,
+        created_at: "2026-07-07T00:00:00Z",
+        updated_at: "2026-07-07T00:00:00Z",
+      },
+    ]);
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "manage_group_overrides",
+          title: "Manage group permissions",
+          category: "Permissions",
+          source: "platform",
+          enforced_conditions: ["arg", "cel"],
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          conditions: { workspace: null, runtime: null, agent: null, user: null },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-manage_group_overrides");
+    await user.click(within(row).getByTestId("condition-control-manage_group_overrides"));
+    const editor = within(await screen.findByTestId("condition-editor-manage_group_overrides"));
+
+    expect(await editor.findByLabelText("Search groups")).toBeInTheDocument();
+    expect(editor.getByText("Groups")).toBeInTheDocument();
+    await user.click(await editor.findByRole("button", { name: /Finance/ }));
+    await user.click(editor.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        tool_key: "manage_group_overrides",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "allow",
+      });
+      expect(body.condition.arg_allowlist).toEqual([
+        { arg: "group_id", values: ["group-finance"] },
+      ]);
+    });
+  });
 });
 
 describe("ToolPolicyTable (firtal_registry data sources — FIR-1609 Phase 5)", () => {
@@ -1289,5 +1370,134 @@ describe("ToolPolicyTable — redesigned capability cards (FIR-2670 #8, FIR-2706
     expect(
       within(slackRow).getByTestId("catalog-decision-slack.post_message-deny"),
     ).toBeInTheDocument();
+  });
+});
+
+// FIR-2706 follow-up — a write the server accepts but a higher layer overrides
+// used to fail silently: the pill snapped back with only a hover tooltip.
+describe("silent-failure feedback (FIR-2706 follow-up)", () => {
+  const NO_LAYERS = { workspace: null, runtime: null, agent: null, group: null, user: null, system: null };
+  const NO_CONDITIONS = { workspace: null, runtime: null, agent: null, user: null, system: null };
+  function cappedRow(
+    effective: Partial<ToolPolicyRow["effective"]> = {},
+    extra: Partial<ToolPolicyRow> = {},
+  ): ToolPolicyRow {
+    return {
+      tool_key: "slack.post_message",
+      resource_pattern: "",
+      title: "Post Slack message",
+      category: "MCP · Slack",
+      source: "scan",
+      managed_externally: false,
+      layers: { ...NO_LAYERS },
+      conditions: { ...NO_CONDITIONS },
+      effective: {
+        setting: "deny",
+        decided_by: "user",
+        capped_by: "user",
+        reason: "Capped by user",
+        ...effective,
+      },
+      capped_by_groups: [],
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    mockToast.warning.mockReset();
+    mockToast.info.mockReset();
+  });
+
+  describe("futileWriteWarning", () => {
+    it("names the blocking layer and where to change it when a looser write cannot take effect", () => {
+      const msg = futileWriteWarning(cappedRow(), "agent", "allow");
+      expect(msg).toContain('"Allow" was saved on the Agent layer');
+      expect(msg).toContain('the decision stays "Deny"');
+      expect(msg).toContain("User blocks it");
+      expect(msg).toContain("ceiling");
+    });
+
+    it("names the blocking group and its owner", () => {
+      const msg = futileWriteWarning(
+        cappedRow(
+          { decided_by: "group", capped_by: "group" },
+          { capped_by_groups: [{ name: "Support", owner: "Jesper Hvejsel" }] },
+        ),
+        "agent",
+        "ask",
+      );
+      expect(msg).toContain("group Support (owner: Jesper Hvejsel) blocks it");
+      expect(msg).toContain("Settings → Groups");
+    });
+
+    it("is silent when the write tightens — deny always bites", () => {
+      expect(futileWriteWarning(cappedRow({ setting: "ask" }), "agent", "deny")).toBeNull();
+    });
+
+    it("is silent when nothing locks the row", () => {
+      expect(
+        futileWriteWarning(
+          cappedRow({ setting: "allow", decided_by: "", capped_by: "", reason: "" }),
+          "agent",
+          "allow",
+        ),
+      ).toBeNull();
+    });
+
+    it("is silent when the choice matches the effective verdict's restrictiveness", () => {
+      // Workspace decided Ask; writing Ask on the agent layer is consistent, not futile.
+      expect(
+        futileWriteWarning(
+          cappedRow({ setting: "ask", decided_by: "workspace", capped_by: "" }),
+          "agent",
+          "ask",
+        ),
+      ).toBeNull();
+    });
+  });
+
+  it("shows the lock explanation inside the decision menu, not only as a hover tooltip", async () => {
+    renderTable("agent");
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    // The dropdown mock renders content inline, so the visible in-menu banner
+    // (Case 1 attribution: futile local override beneath the user cap) is
+    // queryable directly.
+    expect(
+      within(slackRow).getByText(/Your Agent setting has no effect — blocked by User/),
+    ).toBeInTheDocument();
+  });
+
+  it("toasts an explanation when an accepted write is overridden by a higher layer", async () => {
+    const user = userEvent.setup();
+    renderTable("agent");
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Allow" }));
+
+    await waitFor(() => {
+      expect(mockToast.warning).toHaveBeenCalledWith(
+        expect.stringContaining("has no effect"),
+        expect.anything(),
+      );
+    });
+    expect(mockToast.warning).toHaveBeenCalledWith(
+      expect.stringContaining("because User blocks it"),
+      expect.anything(),
+    );
+  });
+
+  it("does not toast when the write takes effect", async () => {
+    const user = userEvent.setup();
+    renderTable("agent");
+    // list_issues is unlocked (effective allow, nothing decides it) — writing
+    // Deny tightens and must produce no warning.
+    const row = await screen.findByTestId("tool-row-list_issues");
+    await user.click(within(row).getByLabelText(/^Decision:/));
+    await user.click(within(row).getByRole("menuitem", { name: "Deny" }));
+
+    await waitFor(() => {
+      expect(findPutCalls().length).toBeGreaterThan(0);
+    });
+    expect(mockToast.warning).not.toHaveBeenCalled();
   });
 });

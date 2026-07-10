@@ -997,6 +997,17 @@ func (q *Queries) MoveIncompleteCerebroSprintIssuesToStatus(ctx context.Context,
 	return err
 }
 
+const removeCerebroSprintIssuesBatch = `-- name: RemoveCerebroSprintIssuesBatch :exec
+DELETE FROM cerebro_sprint_issue WHERE issue_id = ANY($1::uuid[])
+`
+
+// FIR-2828: bulk-unassign issues from a sprint that is being completed, e.g.
+// when the operator chose "move remaining issues to backlog".
+func (q *Queries) RemoveCerebroSprintIssuesBatch(ctx context.Context, dollar_1 []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, removeCerebroSprintIssuesBatch, dollar_1)
+	return err
+}
+
 const removeIssueFromCerebroSprint = `-- name: RemoveIssueFromCerebroSprint :exec
 DELETE FROM cerebro_sprint_issue WHERE issue_id = $1
 `

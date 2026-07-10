@@ -36,6 +36,7 @@ export type CerebroFlagKey =
   // instead of auto-advancing to the next message. Per-user preference.
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
+  | "cerebro_inbox_rounds"
   // FIR-1854: split a channel/DM thread with unread replies into its own
   // inbox row so replies buried in a thread are not missed.
   | "cerebro_inbox_thread_split"
@@ -74,6 +75,31 @@ export type CerebroFlagKey =
   | "cerebro_note_comments"
   //   - version history (see who changed what, restore an earlier version),
   | "cerebro_note_versions"
+  // FIR-2697: extend that same version-history engine to agent-created
+  // DOCUMENTS (any artifact, not just personal notes). When on, updating a
+  // document snapshots a new version of the same file instead of leaving no
+  // trail, and the Documents editor shows a "Version history" action to view /
+  // restore earlier versions. Off by default until QA'd on staging.
+  | "cerebro_document_versions"
+  // FIR-2697 part 2: folder suggestions with accept. When on, an agent can
+  // PROPOSE an existing folder for a document/note instead of moving it
+  // outright; the artifact only moves once a human accepts the proposal, shown
+  // as a banner in the editor. Notes and Documents keep separate folder trees.
+  // Off by default until QA'd on staging.
+  | "cerebro_folder_suggestions"
+  // FIR-2697 part 3: automatic Agent Runs folder structure at Collections level.
+  // When on, the first time an agent saves a document/note in a run the server
+  // silently creates (get-or-create) the folder path
+  // Agent Runs > member > agent > run and files the artifact there, stamping a
+  // Collections sharing grant on every folder it creates. No notifications.
+  // Off by default until QA'd on staging.
+  | "cerebro_agent_runs_folders"
+  // FIR-2697 part 4: an agent-authored document/note attached to a chat message
+  // or issue comment (via a `mention://artifact/<id>` token) must always have a
+  // folder — the server files a folder-less one into the same Agent Runs
+  // structure part 3 builds — and the artifact card links to that folder.
+  // Off by default until QA'd on staging.
+  | "cerebro_attachment_folder"
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
@@ -140,6 +166,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
+  | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
   // FIR-1496: surface the group/person → tool grant editor alongside the unified
@@ -210,6 +237,8 @@ export type CerebroFlagKey =
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
+  // FIR-2810: per-line note attribution (see who wrote/edited every line) + the per-note "stamp my member code on each line" toggle.
+  | "cerebro_note_line_authors"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-1673: recover a stalled/half-loaded image on the document page — loading
@@ -402,6 +431,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
   cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
+  cerebro_inbox_rounds: false,
   // FIR-1854 (Jesper): ON — a thread reply that would otherwise hide inside
   // the channel row gets its own inbox row so it is not missed.
   cerebro_inbox_thread_split: true,
@@ -434,6 +464,14 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
   cerebro_note_versions: false,
+  // FIR-2697: document version history — off until QA'd on staging.
+  cerebro_document_versions: false,
+  // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.
+  cerebro_folder_suggestions: false,
+  // FIR-2697 part 3: automatic Agent Runs folder structure — off until QA'd.
+  cerebro_agent_runs_folders: false,
+  // FIR-2697 part 4: attach ⇒ always has a folder + card links to it — off until QA'd.
+  cerebro_attachment_folder: false,
   cerebro_note_lock: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
@@ -478,6 +516,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
   // FIR-1496: grant editor (group/person → tool) on the runtime page. Default OFF
@@ -587,6 +626,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
+  // FIR-2810: ON by default. Line authors is opt-in per note (a toggle in the
+  // note's ⋯ menu), so the flag only controls whether the toggles exist.
+  cerebro_note_line_authors: true,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -896,6 +938,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
   },
   {
+    key: "cerebro_attachment_folder",
+    label: "Attached documents show their folder",
+    group: "issues",
+    description:
+      "FIR-2697 part 4. When an agent-authored document/note is attached to a chat message or issue comment (via a `mention://artifact/<id>` token), guarantee it has a folder: a folder-less one is filed into the same automatic Agent Runs structure (part 3). The white artifact card then shows and links to that folder. Only agent documents are affected — raw file uploads have no document behind them. Needs `Artifact references in comments` on to render the card; pairs with `Automatic Agent Runs folders`. Off leaves attaching unchanged.",
+  },
+  {
     key: "cerebro_attachment_chips",
     label: "Unified attachment cards",
     group: "issues",
@@ -1013,6 +1062,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+  },
+  {
+    key: "cerebro_inbox_rounds",
+    label: "Inbox rounds",
+    group: "inbox",
+    description:
+      "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
   },
   {
     key: "cerebro_note_inbox_pane",
@@ -1143,6 +1199,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+  },
+  {
+    key: "cerebro_workflow_step_model_override",
+    label: "Workflow step model override",
+    group: "workspace",
+    description:
+      "Let Issue workflow steps choose a model and thinking level per Plan, Build, build phase, and AI review condition. Empty values use the selected agent's default.",
   },
   {
     key: "cerebro_skill_mention",
@@ -1431,6 +1494,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+  },
+  {
+    key: "cerebro_note_line_authors",
+    label: "Note line authors",
+    group: "workspace",
+    description:
+      "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
   },
   {
     key: "cerebro_skill_folders",

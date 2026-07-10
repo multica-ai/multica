@@ -81,7 +81,7 @@ func TestCompile_MultiPhase(t *testing.T) {
 		Version: SpecVersion,
 		Caps:    Caps{MaxIterations: 5, MaxRevisions: 3, NoProgressStalls: 2},
 		Phases: []BuildPhase{
-			{Name: "Backend", BuildSkill: "build-be", Verification: []Verification{
+			{Name: "Backend", BuildSkill: "build-be", Model: "phase-model", ThinkingLevel: "high", Verification: []Verification{
 				{ID: "be-tests", Type: CheckProgrammatic, Check: []string{"make", "test-be"}},
 			}},
 			{Name: "Frontend", BuildSkill: "build-fe", Verification: []Verification{
@@ -105,6 +105,9 @@ func TestCompile_MultiPhase(t *testing.T) {
 	if rs.SkillName != "build-be" {
 		t.Fatalf("dispatch-build should run phase 0's skill, got %q", rs.SkillName)
 	}
+	if rs.Model != "phase-model" || rs.ThinkingLevel != "high" {
+		t.Fatalf("dispatch-build should carry phase 0 model/thinking, got model=%q thinking=%q", rs.Model, rs.ThinkingLevel)
+	}
 
 	gate := byName["loop:delivery-gate"]
 	var cfg CheckGateConfig
@@ -119,6 +122,9 @@ func TestCompile_MultiPhase(t *testing.T) {
 	if cfg.Phases[0].BuildSkill != "build-be" || cfg.Phases[1].BuildSkill != "build-fe" {
 		t.Fatalf("phase build skills wrong: %+v", cfg.Phases)
 	}
+	if cfg.Phases[0].Model != "phase-model" || cfg.Phases[0].ThinkingLevel != "high" {
+		t.Fatalf("phase model/thinking not carried: %+v", cfg.Phases[0])
+	}
 	if len(cfg.Phases[0].Checks) != 1 || cfg.Phases[0].Checks[0][0] != "make" {
 		t.Fatalf("phase 0 checks wrong: %+v", cfg.Phases[0].Checks)
 	}
@@ -127,6 +133,73 @@ func TestCompile_MultiPhase(t *testing.T) {
 	}
 	if cfg.RevertStatus != "in_progress" {
 		t.Fatalf("gate revert status wrong: %q", cfg.RevertStatus)
+	}
+}
+
+func TestCompile_CarriesModelAndThinkingPerRole(t *testing.T) {
+	spec := goodSpec(t)
+	spec.Verification = append(spec.Verification, Verification{
+		ID:            "judge-with-override",
+		Type:          CheckJudge,
+		Rubric:        "Review with stronger model",
+		AssigneeType:  AssigneeAgent,
+		AssigneeID:    "judge-agent-2",
+		Skill:         "judge-skill-2",
+		Model:         "judge-check-model",
+		ThinkingLevel: "max",
+	})
+	spec.Planning = true
+
+	rules, err := Compile(spec, CompileParams{
+		AgentID:       "build-agent",
+		BuildSkill:    "build",
+		BuildModel:    "build-model",
+		BuildThinking: "low",
+		PlanAgentID:   "plan-agent",
+		PlanSkill:     "plan",
+		PlanModel:     "plan-model",
+		PlanThinking:  "medium",
+		JudgeAgentID:  "judge-agent",
+		JudgeSkill:    "judge",
+		JudgeModel:    "judge-model",
+		JudgeThinking: "high",
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+	byName := map[string]Rule{}
+	for _, r := range rules {
+		byName[r.Name] = r
+	}
+
+	plan := byName["loop:planning-dispatch"].ActionConfig.(workflows.ActionConfigRunSkill)
+	if plan.AgentID != "plan-agent" || plan.Model != "plan-model" || plan.ThinkingLevel != "medium" {
+		t.Fatalf("plan dispatch config wrong: %+v", plan)
+	}
+	build := byName["loop:dispatch-build"].ActionConfig.(workflows.ActionConfigRunSkill)
+	if build.AgentID != "build-agent" || build.Model != "build-model" || build.ThinkingLevel != "low" {
+		t.Fatalf("build dispatch config wrong: %+v", build)
+	}
+
+	gate := byName["loop:delivery-gate"]
+	cfg := gate.Conditions[0].Value.(CheckGateConfig)
+	if cfg.RevisionModel != "build-model" || cfg.RevisionThinking != "low" {
+		t.Fatalf("revision should inherit build model/thinking, got %+v", cfg)
+	}
+	if cfg.JudgeModel != "judge-model" || cfg.JudgeThinking != "high" {
+		t.Fatalf("judge fallback model/thinking wrong: %+v", cfg)
+	}
+	var foundOverride bool
+	for _, jc := range cfg.JudgeChecks {
+		if jc.ID == "judge-with-override" {
+			foundOverride = true
+			if jc.Model != "judge-check-model" || jc.ThinkingLevel != "max" {
+				t.Fatalf("per-check judge model/thinking wrong: %+v", jc)
+			}
+		}
+	}
+	if !foundOverride {
+		t.Fatal("expected per-check judge override to be carried")
 	}
 }
 

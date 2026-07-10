@@ -248,6 +248,11 @@ SET sprint_id = $1,
     added_at  = now()
 WHERE issue_id = ANY($2::uuid[]);
 
+-- name: RemoveCerebroSprintIssuesBatch :exec
+-- FIR-2828: bulk-unassign issues from a sprint that is being completed, e.g.
+-- when the operator chose "move remaining issues to backlog".
+DELETE FROM cerebro_sprint_issue WHERE issue_id = ANY($1::uuid[]);
+
 -- ===========================================================================
 -- cerebro_sprint_recurring_task
 -- ===========================================================================

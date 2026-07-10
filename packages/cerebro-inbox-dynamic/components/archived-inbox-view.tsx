@@ -6,6 +6,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useUnarchiveInbox } from "@multica/cerebro-inbox";
+import { useUnarchiveChannel } from "@multica/cerebro-channels";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import type { DynInboxEntry } from "../section-filter";
 import { useArchivedInboxEntries } from "../use-archived-entries";
@@ -26,11 +27,13 @@ export function ArchivedInboxView({ wsId, selectedKey, onSelect, onBack }: Archi
   const { entries, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useArchivedInboxEntries(wsId);
   const unarchive = useUnarchiveInbox();
+  const unarchiveChannel = useUnarchiveChannel();
 
   const onUnarchive = (entry: DynInboxEntry) => {
     // Chats unarchive through their own row menu (CerebroChatSessionRowActions);
-    // here we only handle inbox notifications.
+    // here we handle inbox notifications and channels/DMs (FIR-2791).
     if (entry.kind === "notif") unarchive.mutate(entry.item.id);
+    else if (entry.kind === "channel") unarchiveChannel.mutate(entry.channel.id);
   };
 
   return (

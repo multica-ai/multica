@@ -4,12 +4,12 @@
 INSERT INTO cerebro_note_type (
     workspace_id, name, icon, template_body, recurrence_mode,
     cadence_unit, cadence_count, target_folder_id, enabled, created_by,
-    numbering_enabled, next_number, anchor_weekday
+    numbering_enabled, next_number, anchor_weekday, author_codes
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, sqlc.narg(target_folder_id), $8, $9,
-    $10, $11, sqlc.narg(anchor_weekday)
+    $10, $11, sqlc.narg(anchor_weekday), $12
 )
 RETURNING *;
 
@@ -34,6 +34,7 @@ SET name = $2,
     numbering_enabled = $9,
     next_number = $10,
     anchor_weekday = sqlc.narg(anchor_weekday),
+    author_codes = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

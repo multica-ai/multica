@@ -1175,13 +1175,26 @@ func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion str
 	}
 }
 
+// normalizeRepoURL trims incidental whitespace and a trailing slash so that
+// "https://github.com/org/repo" and "https://github.com/org/repo/" are
+// treated as the same repo when checking allowlists. Without this, a repo
+// whose configured URL happens to carry a trailing slash falls outside the
+// allowlist and every checkout of it fails with ErrRepoNotConfigured even
+// though the repo is legitimately configured (FIR-2786).
+// CEREBRO-PATCH(repo-url-trailing-slash): upstream allowlist keys/lookups
+// were exact-string matches with no URL normalization.
+func normalizeRepoURL(rawURL string) string {
+	return strings.TrimRight(strings.TrimSpace(rawURL), "/")
+}
+
 func repoAllowlist(repos []RepoData) map[string]struct{} {
 	allowed := make(map[string]struct{}, len(repos))
 	for _, repo := range repos {
-		if repo.URL == "" {
+		url := normalizeRepoURL(repo.URL) // CEREBRO-PATCH(repo-url-trailing-slash)
+		if url == "" {
 			continue
 		}
-		allowed[repo.URL] = struct{}{}
+		allowed[url] = struct{}{}
 	}
 	return allowed
 }
@@ -1195,6 +1208,7 @@ func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
 }
 
 func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
+	repoURL = normalizeRepoURL(repoURL) // CEREBRO-PATCH(repo-url-trailing-slash)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1298,7 +1312,7 @@ func (d *Daemon) registerTaskRepos(workspaceID string, args ...any) {
 	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
-		url := strings.TrimSpace(repo.URL)
+		url := normalizeRepoURL(repo.URL) // CEREBRO-PATCH(repo-url-trailing-slash)
 		if url == "" {
 			continue
 		}
@@ -1602,7 +1616,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("repo cache not initialized")
 	}
 
-	repoURL = strings.TrimSpace(repoURL)
+	repoURL = normalizeRepoURL(repoURL) // CEREBRO-PATCH(repo-url-trailing-slash)
 
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -3814,25 +3828,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if toolPolicySpawn != nil && provider == "claude" && toolPolicySpawn.SettingsPath != "" {
 		customArgs = append(customArgs, "--settings", toolPolicySpawn.SettingsPath)
 	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
+	// CEREBRO-PATCH(daemon-run-task-model-override): task model_override wins over agent.model for workflow/wakeup runs.
+	model := resolveTaskModel(task, entry)
 	thinkingLevel := ""
+	// CEREBRO-PATCH(daemon-run-task-thinking-override): task thinking_override wins over agent.thinking_level for workflow steps.
+	if task.ThinkingOverride != "" {
+		thinkingLevel = task.ThinkingOverride
+	}
 	if task.Agent != nil {
-		thinkingLevel = task.Agent.ThinkingLevel
+		if thinkingLevel == "" {
+			thinkingLevel = task.Agent.ThinkingLevel
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
