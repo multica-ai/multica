@@ -307,6 +307,7 @@ export function ActiveTaskRow({
     <RowShell task={task}>
       <TriggerText text={trigger} />
       <AttributionBadge attribution={task.attribution} className="shrink-0" />
+      <TaskCommentCoverage task={task} />
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
@@ -401,6 +402,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     <RowShell task={task}>
       <TriggerText text={trigger} />
       <AttributionBadge attribution={task.attribution} className="shrink-0" />
+      <TaskCommentCoverage task={task} />
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">{failureLabel ?? label}</span>
@@ -463,6 +465,49 @@ function RowShell({
 
 function TriggerText({ text }: { text: string }) {
   return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+}
+
+function supportsCommentCoverage(status: AgentTask["status"]): boolean {
+  switch (status) {
+    case "queued":
+    case "dispatched":
+    case "waiting_local_directory":
+    case "running":
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function TaskCommentCoverage({ task }: { task: AgentTask }) {
+  const { t } = useT("issues");
+  if (!supportsCommentCoverage(task.status)) return null;
+
+  // Queued rows show the planned coverage: coalesced_comment_ids deliberately
+  // excludes the newest trigger. Once claimed, prefer the server's actual
+  // delivery receipt. Only legacy rows where that field is absent fall back to
+  // the plan; an explicit [] means the claim delivered no comments.
+  const plannedCommentIds = [
+    task.trigger_comment_id,
+    ...(task.coalesced_comment_ids ?? []),
+  ];
+  const coverageIds =
+    task.status !== "queued" && task.delivered_comment_ids !== undefined
+      ? task.delivered_comment_ids
+      : plannedCommentIds;
+  const commentIds = new Set(
+    coverageIds.filter((id): id is string => Boolean(id)),
+  );
+  if (commentIds.size <= 1) return null;
+
+  return (
+    <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">
+      {t(($) => $.execution_log.included_comments, { count: commentIds.size })}
+    </span>
+  );
 }
 
 function RowStatus({

@@ -126,6 +126,7 @@ type AgentTaskQueue struct {
 	// Non-secret per-task connected app metadata corresponding to runtime_mcp_overlay, used by the daemon brief to tell agents which app capabilities are mounted. Cleared with runtime_mcp_overlay after task completion.
 	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
+	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
 	// Waterfall level that resolved originator_user_id for this run: direct_human | delegation | comment_source | rule_owner | owner_fallback | backfill | unattributed. Audit/visibility metadata only — never consulted for authorization. TEXT with no CHECK so new trigger paths can add a source without a migration (MUL-4302 §7). NULL on pre-migration rows.
 	OriginatorSource pgtype.Text `json:"originator_source"`
 	// For originator_source=delegation: the parent task whose accountable human was copied onto this run. Value is copied, not chained, so delegation cycles are harmless (MUL-4302 §3.2). No FK; app-layer integrity only.

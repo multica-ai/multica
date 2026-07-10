@@ -33,6 +33,75 @@ describe("ApiClient", () => {
     }
   });
 
+  it("preserves planned and delivered comment coverage from issue task runs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "queued",
+              trigger_comment_id: "comment-3",
+              coalesced_comment_ids: ["comment-1", "comment-2"],
+              delivered_comment_ids: ["comment-1", "comment-2", "comment-3"],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks[0]?.trigger_comment_id).toBe("comment-3");
+    expect(tasks[0]?.coalesced_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+    ]);
+    expect(tasks[0]?.delivered_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+      "comment-3",
+    ]);
+  });
+
+  it("keeps task runs when optional comment coverage is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "task-1",
+              status: "queued",
+              coalesced_comment_ids: ["comment-1", 2],
+              delivered_comment_ids: "not-an-array",
+            },
+            {
+              id: "task-2",
+              status: "completed",
+              delivered_comment_ids: ["comment-2", "comment-3"],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]?.coalesced_comment_ids).toBeUndefined();
+    expect(tasks[0]?.delivered_comment_ids).toBeUndefined();
+    expect(tasks[1]?.delivered_comment_ids).toEqual([
+      "comment-2",
+      "comment-3",
+    ]);
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {

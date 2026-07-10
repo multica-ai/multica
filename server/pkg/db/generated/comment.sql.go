@@ -661,21 +661,26 @@ const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableComments
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
 WHERE issue_id = $1
   AND author_type IN ('member', 'agent')
-  AND created_at > $2
+  AND (
+      created_at > $2
+      OR id = ANY($3::uuid[])
+  )
 ORDER BY created_at ASC, id ASC
 `
 
 type ListReconcilableCommentsForIssueSinceParams struct {
-	IssueID pgtype.UUID        `json:"issue_id"`
-	Since   pgtype.Timestamptz `json:"since"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	Since             pgtype.Timestamptz `json:"since"`
+	PlannedCommentIds []pgtype.UUID      `json:"planned_comment_ids"`
 }
 
 // MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
 // comment on an issue created strictly after @since (the completing run's
-// created_at anchor), oldest first. The reconcile pass replays each undelivered
-// one through the normal trigger pipeline so a single coalesced follow-up run
-// covers all of them, guaranteeing at-least-once processing for input that
-// landed after the completing run's claim response was built.
+// created_at anchor), plus every id in its planned trigger/coalesced batch.
+// Planned ids matter for retry children because their input comments predate
+// the child's created_at; if one could not be embedded at claim time it still
+// needs reconciliation. The handler excludes only delivered_comment_ids, then
+// replays the remainder through the normal trigger pipeline oldest first.
 //
 // Author-type scope (MUL-4304): originally restricted to author_type = 'member'.
 // That left a gap — an explicit agent→agent @mention (agent A comments
@@ -697,7 +702,7 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 // replaying in order lets later comments coalesce onto the follow-up created by
 // the first.
 func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg ListReconcilableCommentsForIssueSinceParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince, arg.IssueID, arg.Since)
+	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince, arg.IssueID, arg.Since, arg.PlannedCommentIds)
 	if err != nil {
 		return nil, err
 	}

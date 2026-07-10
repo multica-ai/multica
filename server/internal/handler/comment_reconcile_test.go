@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -94,8 +95,8 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	// A running task whose started_at is in the past.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -157,8 +158,8 @@ func TestCompleteTask_NoReconcileWhenNoNewMemberComment(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -222,8 +223,8 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	// A running task for A whose started_at is in the past.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentA, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -323,8 +324,8 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	// drop at creation time.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, dispatched_at)
-		VALUES ($1, $2, $3, $4, 'dispatched', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: dispatched task: %v", err)
@@ -414,8 +415,8 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -650,8 +651,8 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 	// built at dispatch.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, dispatched_at, started_at)
-		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes', now() - interval '2 minutes')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes', now() - interval '2 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: running task: %v", err)
@@ -760,8 +761,8 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue
-			(agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, status, priority, created_at, dispatched_at, started_at)
-		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], 'running', 0,
+			(agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, delivered_comment_ids, status, priority, created_at, dispatched_at, started_at)
+		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], ARRAY[$4::uuid, $5::uuid], 'running', 0,
 			now() - interval '10 minutes', now() - interval '6 minutes', now() - interval '5 minutes')
 		RETURNING id
 	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID); err != nil {
@@ -785,5 +786,97 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	if containsUUID(coalesced, deliveredCoalescedID) || trigger == deliveredCoalescedID {
 		t.Errorf("the already-delivered coalesced comment %s must be excluded from the follow-up, got trigger=%s coalesced=%v",
 			deliveredCoalescedID, trigger, coalesced)
+	}
+}
+
+// TestCompleteTask_ReconcilesPlannedButUndeliveredComments pins the distinction
+// between the enqueue plan and the claim receipt. The planned comments predate
+// the task (as they do on an auto-retry), so the planned-id query branch is the
+// only way completion can recover payload-overflow or legacy-undelivered input.
+func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	tests := []struct {
+		name              string
+		deliveredOldCount int
+		wantFollowup      int
+	}{
+		{name: "partial receipt replays only omitted suffix", deliveredOldCount: 1, wantFollowup: 1},
+		{name: "legacy trigger-only receipt replays whole coalesced batch", deliveredOldCount: 0, wantFollowup: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			runtimeID := createClaimReclaimRuntime(t, ctx, "Planned undelivered runtime "+tc.name)
+			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Planned undelivered agent "+tc.name)
+			if _, err := testPool.Exec(ctx, `
+				UPDATE issue
+				SET assignee_type = 'agent', assignee_id = $2
+				WHERE id = $1
+			`, issueID, agentID); err != nil {
+				t.Fatalf("assign issue: %v", err)
+			}
+
+			insertComment := func(content, age string) string {
+				t.Helper()
+				var id string
+				if err := testPool.QueryRow(ctx, `
+					INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+					VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval)
+					RETURNING id
+				`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
+					t.Fatalf("insert comment: %v", err)
+				}
+				return id
+			}
+			old1 := insertComment("planned old one", "10 minutes")
+			old2 := insertComment("planned old two", "9 minutes")
+			trigger := insertComment("planned trigger", "8 minutes")
+			delivered := []string{trigger}
+			if tc.deliveredOldCount > 0 {
+				delivered = append([]string{old1}, delivered...)
+			}
+
+			var taskID string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (
+					agent_id, runtime_id, issue_id, trigger_comment_id,
+					coalesced_comment_ids, delivered_comment_ids,
+					status, priority, created_at, dispatched_at, started_at
+				)
+				VALUES (
+					$1, $2, $3, $4,
+					ARRAY[$5::uuid, $6::uuid], $7::uuid[],
+					'running', 0, now() - interval '5 minutes', now() - interval '4 minutes', now() - interval '3 minutes'
+				)
+				RETURNING id
+			`, agentID, runtimeID, issueID, trigger, old1, old2, delivered).Scan(&taskID); err != nil {
+				t.Fatalf("insert running task: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			})
+
+			if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+				t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if n := pendingTaskCountForAgentIssue(t, issueID, agentID); n != 1 {
+				t.Fatalf("expected one bounded follow-up, got %d", n)
+			}
+			followupTrigger, _, followupCoalesced := taskTriggerOriginatorCoalesced(t, issueID, agentID)
+			covered := append([]string{}, followupCoalesced...)
+			covered = append(covered, followupTrigger)
+			slices.Sort(covered)
+			want := []string{old2}
+			if tc.wantFollowup == 2 {
+				want = []string{old1, old2}
+			}
+			slices.Sort(want)
+			if !slices.Equal(covered, want) {
+				t.Fatalf("follow-up coverage = %v, want %v", covered, want)
+			}
+		})
 	}
 }

@@ -365,6 +365,7 @@
     "trigger_comment": "コメントトリガー",
     "trigger_initial": "初回実行",
     "trigger_handoff_prefix": "引き継ぎ：",
+    "included_comments_other": "{{count}} 件のコメントを含む",
     "status_queued": "待機中",
     "status_dispatched": "開始中",
     "status_waiting_local_directory": "ローカルディレクトリ待機中",

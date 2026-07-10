@@ -28,6 +28,7 @@ import { ThinkingPicker } from "./thinking-picker";
 export function ThinkingPropRow({
   runtimeId,
   runtimeOnline,
+  provider,
   model,
   value,
   canEdit,
@@ -35,6 +36,9 @@ export function ThinkingPropRow({
 }: {
   runtimeId: string | null;
   runtimeOnline: boolean;
+  /** Runtime provider type (e.g. "codex", "claude"). Used to decide whether an
+   *  empty model can safely preview a default model's effort catalog. */
+  provider: string;
   model: string;
   value: string;
   canEdit: boolean;
@@ -46,7 +50,7 @@ export function ThinkingPropRow({
   );
 
   const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model);
+  const entry = pickModelEntry(models, model, provider);
   const levels = entry?.thinking?.supported_levels ?? [];
   if (levels.length === 0 && !value) return null;
 
@@ -65,7 +69,16 @@ export function ThinkingPropRow({
 function pickModelEntry(
   models: RuntimeModel[],
   model: string,
+  provider: string,
 ): RuntimeModel | undefined {
   if (model) return models.find((m) => m.id === model);
+  // Empty model = "follow the runtime's own default". For codex that default
+  // comes from the local config.toml and can be any installed model, so we
+  // must NOT preview the flagged Default entry's effort catalog — gpt-5.6-sol
+  // alone advertises `ultra`, which the actually-configured model may not
+  // support. Fail closed (no preview): the row hides unless a stale level is
+  // persisted, in which case it still renders so the orphan can be cleared.
+  // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
+  if (provider === "codex") return undefined;
   return models.find((m) => m.default) ?? models[0];
 }

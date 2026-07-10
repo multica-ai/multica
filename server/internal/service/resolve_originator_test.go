@@ -113,7 +113,7 @@ func TestBuildRuntimeMCPOverlaySkipsBuilderWhenComposioFlagDisabled(t *testing.T
 // source_task_id=T_A), T_A's task id, and U as pgtype.UUID. T_A's
 // originator_user_id is U so the fanout / quick-create branches can prove the
 // inheritance.
-func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, agentCommentID, taskAID, userID pgtype.UUID) {
+func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, agentCommentID, taskAID, userID, workspaceUUID pgtype.UUID) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -228,6 +228,7 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	agentCommentID = util.MustParseUUID(commentAgentID)
 	taskAID = util.MustParseUUID(taskAIDStr)
 	userID = util.MustParseUUID(userIDStr)
+	workspaceUUID = util.MustParseUUID(workspaceID)
 	return
 }
 
@@ -236,10 +237,10 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 // originator is the comment's own author_id.
 func TestResolveOriginatorFromTriggerComment_MemberAuthored(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	memberCommentID, _, _, userID := seedOriginatorFanout(t, pool)
+	memberCommentID, _, _, userID, workspaceID := seedOriginatorFanout(t, pool)
 	svc := &TaskService{Queries: db.New(pool)}
 
-	got := svc.resolveOriginatorFromTriggerComment(context.Background(), memberCommentID)
+	got := svc.resolveOriginatorFromTriggerComment(context.Background(), workspaceID, memberCommentID)
 	if !got.Valid {
 		t.Fatalf("expected valid originator for member-authored comment, got invalid")
 	}
@@ -256,10 +257,10 @@ func TestResolveOriginatorFromTriggerComment_MemberAuthored(t *testing.T) {
 // parent.originator_user_id, yielding U.
 func TestResolveOriginatorFromTriggerComment_AgentAuthoredInheritsFromParent(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	_, agentCommentID, _, userID := seedOriginatorFanout(t, pool)
+	_, agentCommentID, _, userID, workspaceID := seedOriginatorFanout(t, pool)
 	svc := &TaskService{Queries: db.New(pool)}
 
-	got := svc.resolveOriginatorFromTriggerComment(context.Background(), agentCommentID)
+	got := svc.resolveOriginatorFromTriggerComment(context.Background(), workspaceID, agentCommentID)
 	if !got.Valid {
 		t.Fatalf("expected valid originator inherited from parent task, got invalid")
 	}
@@ -280,7 +281,7 @@ func TestResolveOriginatorFromTriggerComment_AgentAuthoredInheritsFromParent(t *
 // run is delegation-accountable to userID.
 func TestAttributionForIssueTask_SystemCommentFallsThroughToIssueProvenance(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	_, _, parentTaskID, userID, _ := seedOriginatorFanout(t, pool)
 	ctx := context.Background()
 
 	// Plant a system-authored comment on the seed's issue (mirrors the child-done
@@ -305,10 +306,14 @@ func TestAttributionForIssueTask_SystemCommentFallsThroughToIssueProvenance(t *t
 
 	svc := &TaskService{Queries: db.New(pool)}
 	// Parent issue created by an agent on behalf of userID (agent_create origin).
+	// WorkspaceID is set so the workspace-scoped trigger-comment lookup (MUL-4252)
+	// finds the system comment and classifies it (author_type=system) before the
+	// fall-through to issue provenance.
 	issue := db.Issue{
 		CreatorType: "agent",
 		OriginType:  pgtype.Text{String: "agent_create", Valid: true},
 		OriginID:    parentTaskID,
+		WorkspaceID: util.MustParseUUID(workspaceIDStr),
 	}
 
 	got := svc.attributionForIssueTask(ctx, issue, systemCommentID, attribution.SourceDelegation, pgtype.UUID{})
@@ -344,7 +349,7 @@ func TestResolveOriginatorForIssueTask_MemberCreatedNoComment(t *testing.T) {
 // parent quick-create task and must be inherited for downstream dispatch.
 func TestResolveOriginatorForIssueTask_QuickCreateIssueInheritsParentTask(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	_, _, parentTaskID, userID, _ := seedOriginatorFanout(t, pool)
 	svc := &TaskService{Queries: db.New(pool)}
 	issue := db.Issue{
 		CreatorType: "agent",
@@ -369,7 +374,7 @@ func TestResolveOriginatorForIssueTask_QuickCreateIssueInheritsParentTask(t *tes
 // squad-leader runs (and the A2A mentions they emit) keep the originator.
 func TestResolveOriginatorForIssueTask_AgentCreateIssueInheritsParentTask(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	_, _, parentTaskID, userID, _ := seedOriginatorFanout(t, pool)
 	svc := &TaskService{Queries: db.New(pool)}
 	issue := db.Issue{
 		CreatorType: "agent",
@@ -394,7 +399,7 @@ func TestResolveOriginatorForIssueTask_AgentCreateIssueInheritsParentTask(t *tes
 // by a gate that computed a different (empty) originator.
 func TestOriginatorForIssueTask_MatchesResolverForAgentCreate(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
-	_, _, parentTaskID, userID := seedOriginatorFanout(t, pool)
+	_, _, parentTaskID, userID, _ := seedOriginatorFanout(t, pool)
 	svc := &TaskService{Queries: db.New(pool)}
 	issue := db.Issue{
 		CreatorType: "agent",
@@ -542,7 +547,7 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 func TestResolveOriginatorFromTriggerComment_InvalidCommentID(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	svc := &TaskService{Queries: db.New(pool)}
-	got := svc.resolveOriginatorFromTriggerComment(context.Background(), pgtype.UUID{})
+	got := svc.resolveOriginatorFromTriggerComment(context.Background(), pgtype.UUID{}, pgtype.UUID{})
 	if got.Valid {
 		t.Errorf("invalid comment id must yield invalid originator, got %s", util.UUIDToString(got))
 	}
