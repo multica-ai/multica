@@ -68,11 +68,9 @@ func assistantMessageForTask(t *testing.T, taskID string) (id, content string, o
 	return id, content, true
 }
 
-// uploadWithTaskID performs a multipart upload as an agent actor (X-Agent-ID +
-// X-Task-ID pair, which resolveActor validates), passing task_id as the target.
-// actorTaskID is what goes on X-Task-ID (the token's task); formTaskID is the
-// upload's task_id form field. They match in the happy path.
-func uploadWithTaskID(t *testing.T, agentID, actorTaskID, formTaskID string) *httptest.ResponseRecorder {
+// doUpload performs a multipart upload of a task_id form field with the given
+// request headers, and returns the recorder.
+func doUpload(t *testing.T, formTaskID string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -88,17 +86,35 @@ func uploadWithTaskID(t *testing.T, agentID, actorTaskID, formTaskID string) *ht
 
 	req := httptest.NewRequest("POST", "/api/upload-file", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-User-ID", testUserID)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
-	if agentID != "" {
-		req.Header.Set("X-Agent-ID", agentID)
-	}
-	if actorTaskID != "" {
-		req.Header.Set("X-Task-ID", actorTaskID)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
 	testHandler.UploadFile(w, req)
 	return w
+}
+
+// uploadWithTaskID performs a multipart upload as a genuine task-token agent
+// request: it stamps the server-set X-Actor-Source=task_token + X-Task-ID pair
+// exactly as the auth middleware would for a `mat_` token (the boundary the
+// handler trusts). actorTaskID is what goes on X-Task-ID (the token's task);
+// formTaskID is the upload's task_id form field. They match in the happy path.
+// When agentID is empty the caller is a plain member (no task-token headers).
+func uploadWithTaskID(t *testing.T, agentID, actorTaskID, formTaskID string) *httptest.ResponseRecorder {
+	t.Helper()
+	headers := map[string]string{
+		"X-User-ID":      testUserID,
+		"X-Workspace-ID": testWorkspaceID,
+	}
+	if agentID != "" {
+		// Mirror the middleware: a task token stamps the actor source and task.
+		headers["X-Actor-Source"] = "task_token"
+		headers["X-Agent-ID"] = agentID
+	}
+	if actorTaskID != "" {
+		headers["X-Task-ID"] = actorTaskID
+	}
+	return doUpload(t, formTaskID, headers)
 }
 
 // TestUploadFile_TaskScopedChatAttachment covers the write side: an agent
@@ -149,11 +165,31 @@ func TestUploadFile_TaskScopedChatAttachment(t *testing.T) {
 	})
 
 	t.Run("member actor rejected", func(t *testing.T) {
-		// No X-Agent-ID → resolveActor returns member; task_id upload requires
-		// the task's own agent.
+		// A plain member request (no task-token headers) is rejected by the
+		// task-token boundary before any task lookup.
 		w := uploadWithTaskID(t, "", "", taskID)
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("member upload: expected 403, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("forged agent headers without task token rejected", func(t *testing.T) {
+		// The real forgery vector: a normal JWT / mul_ PAT request that the auth
+		// middleware did NOT stamp with X-Actor-Source=task_token, but which
+		// forges a valid X-Agent-ID + X-Task-ID pair (resolveActor's fallback
+		// would otherwise accept it). Even with the form task_id equal to the
+		// forged X-Task-ID, the missing task-token source must make it 403 —
+		// otherwise a member who learns a task ID could inject an attachment
+		// into that task's chat reply.
+		w := doUpload(t, taskID, map[string]string{
+			"X-User-ID":      testUserID,
+			"X-Workspace-ID": testWorkspaceID,
+			"X-Agent-ID":     agentID,
+			"X-Task-ID":      taskID,
+			// deliberately NO X-Actor-Source
+		})
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("forged non-task-token upload: expected 403, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 
@@ -195,6 +231,36 @@ func TestUploadFile_TaskScopedChatAttachment(t *testing.T) {
 			t.Fatalf("bad task_id: expected 400, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+// TestChatAttachment_UnboundOrphanReapedOnSessionDelete locks the cleanup
+// guarantee that lets us keep task_id as a plain (FK-less) transient column: an
+// unbound task-tagged upload (task_id set, chat_message_id NULL — e.g. the turn
+// failed before binding) is reaped when its chat_session is deleted, via
+// attachment.chat_session_id's ON DELETE CASCADE. Cleanup does not depend on the
+// task relationship, so no attachment.task_id foreign key / cascade is needed.
+func TestChatAttachment_UnboundOrphanReapedOnSessionDelete(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	agentID := createHandlerTestAgent(t, "OrphanCleanupAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID := seedRunningChatTask(t, agentID, sessionID)
+	attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
+
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+
+	var exists bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM attachment WHERE id = $1)`, attID).Scan(&exists); err != nil {
+		t.Fatalf("check attachment: %v", err)
+	}
+	if exists {
+		t.Fatal("unbound task-tagged attachment must be reaped when its chat_session is deleted")
+	}
 }
 
 // TestCompleteTask_BindsChatAttachments covers the read/bind side: on chat task
