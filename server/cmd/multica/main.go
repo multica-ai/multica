@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(orchestrateCmd) // CEREBRO-PATCH(cerebro-orchestration): FIR-2564
 	rootCmd.AddCommand(sprintCmd)      // CEREBRO-PATCH(cerebro-sprints-cli): FIR-2718
+	rootCmd.AddCommand(roundCmd)       // CEREBRO-PATCH(cerebro-rounds-cli): FIR-2736
 	rootCmd.AddCommand(wakeupCmd)      // CEREBRO-PATCH(cerebro-wakeup-cli): FIR-3013
 	rootCmd.AddCommand(chatCmd)        // CEREBRO-PATCH(chat-cli): TECH-3183
 	rootCmd.AddCommand(channelCmd)     // CEREBRO-PATCH(fir-125-channel-cli)

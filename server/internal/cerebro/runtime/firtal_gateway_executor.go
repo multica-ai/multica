@@ -215,7 +215,7 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 	metadata, _ := json.Marshal(map[string]any{
 		"managed_by":   "multica-server",
 		"runtime_kind": "cloud",
-		"supports":     []string{"chat", "issue", "autopilot_run_only"},
+		"supports":     []string{"chat", "issue", "autopilot_run_only", "tool_less_batch"},
 	})
 	for _, workspace := range workspaces {
 		workspaceID := workspace.ID
@@ -464,7 +464,8 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		}
 	}
 	var completion GatewayCompletion
-	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID) {
+	hasCallableTools := e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID)
+	if hasCallableTools {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
 		// The no-tools compat path serializes over the OpenAI wire, which
@@ -475,7 +476,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		if cfg.EntryMode != FirtalGatewayEntryModeNative {
 			noToolMessages = e.foldGatewayCompatAttachmentBlocks(messages, meta)
 		}
-		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, noToolMessages, meta)
+		completion, err = e.completeGatewayToolless(runCtx, cfg, task, agent.Model.String, noToolMessages, meta)
 	}
 	if err != nil {
 		e.failTask(parent, task, err.Error(), "agent_error")
@@ -508,6 +509,34 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	if _, err := e.taskSvc.CompleteTask(finalCtx, task.ID, result, "", ""); err != nil {
 		e.logger.Warn("firtal gateway task complete failed", "task_id", taskID, "error", err)
 	}
+}
+
+// completeGatewayToolless uses Anthropic's asynchronous batch transport only
+// for tasks carrying the explicit Round tool-less contract. Capability,
+// authentication, transport, timeout and result failures all return to the
+// existing synchronous path. Once a job was accepted, CompleteBatch attempts
+// cancellation before returning, avoiding an unobserved duplicate request.
+func (e *FirtalGatewayExecutor) completeGatewayToolless(ctx context.Context, cfg FirtalGatewayRuntimeConfig, task db.AgentTaskQueue, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if !gatewayBatchTaskEligible(task, false) {
+		return e.completeGateway(ctx, cfg, model, messages, meta)
+	}
+	batchCtx, cancel := gatewayCallContext(ctx, cfg)
+	defer cancel()
+	client := e.gateway
+	if client == nil {
+		client = NewGatewayClient(cfg, nil)
+	}
+	completion, accepted, batchErr := client.CompleteBatch(batchCtx, model, messages, meta, defaultGatewayBatchPollInterval)
+	if batchErr == nil {
+		completion.PromptInputChars = messagesChars(messages)
+		e.logger.Info("firtal gateway batch completed", "task_id", meta.TaskID, "model", completion.Model)
+		return completion, nil
+	}
+	if ctx.Err() != nil {
+		return GatewayCompletion{}, ctx.Err()
+	}
+	e.logger.Warn("firtal gateway batch fell back to synchronous execution", "task_id", meta.TaskID, "accepted", accepted, "error", batchErr)
+	return e.completeGateway(ctx, cfg, model, messages, meta)
 }
 
 // taskPlan captures everything the gateway needs to fulfil a task: the

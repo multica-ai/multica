@@ -62,6 +62,8 @@ import (
 	cerebrotoolaccess "github.com/multica-ai/multica/server/internal/cerebro/toolaccess"
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
+	// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 controlled inbox rounds.
+	cerebrorounds "github.com/multica-ai/multica/server/internal/cerebro/rounds"
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
 	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
@@ -806,6 +808,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroReminderHandler := cerebroreminder.New(queries, cerebroQueries)
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
 	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus))
+	// CEREBRO-PATCH(cerebro-rounds-routes): server-owned hold/release lifecycle.
+	cerebroRoundsService := cerebrorounds.New(pool, queries, h.TaskService)
+	cerebroRoundsHandler := cerebrorounds.NewHandler(cerebroRoundsService)
+	h.RoundCommentGate = cerebroRoundsService
 
 	r := chi.NewRouter()
 
@@ -1435,6 +1441,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{id}", cerebroWakeupHandler.Get)
 				r.Post("/{id}/cancel", cerebroWakeupHandler.Cancel)
 			})
+
+			// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 round CRUD, membership and starts.
+			r.Route("/api/cerebro/rounds", func(r chi.Router) {
+				r.Get("/", cerebroRoundsHandler.List)
+				r.Post("/", cerebroRoundsHandler.Create)
+				r.Route("/{roundId}", func(r chi.Router) {
+					r.Get("/", cerebroRoundsHandler.Get)
+					r.Patch("/", cerebroRoundsHandler.Update)
+					r.Delete("/", cerebroRoundsHandler.Delete)
+					r.Get("/status", cerebroRoundsHandler.Status)
+					r.Post("/start", cerebroRoundsHandler.Start)
+					r.Post("/members", cerebroRoundsHandler.AddMember)
+					r.Delete("/members/{issueId}", cerebroRoundsHandler.RemoveMember)
+				})
+			})
+			r.Get("/api/cerebro/issues/{issueId}/round", cerebroRoundsHandler.IssueMembership)
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
