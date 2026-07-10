@@ -270,6 +270,12 @@ var codexEffortLabel = map[string]string{
 	"medium":  "Medium",
 	"high":    "High",
 	"xhigh":   "Extra high",
+	// Codex 0.144.1 added these for the gpt-5.6 series (sol/terra advertise
+	// `max`+`ultra`, luna advertises `max`). They must stay in sync with the
+	// server enum in providerThinkingEnums["codex"], or the picker shows a
+	// level that 400s on save. See TestCodexAdvertisedLevelsArePersistable.
+	"max":   "Max",
+	"ultra": "Ultra",
 }
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
@@ -620,6 +626,11 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium":  true,
 		"high":    true,
 		"xhigh":   true,
+		// Added for the gpt-5.6 series (Codex 0.144.1). Keep in lockstep with
+		// codexEffortLabel — the daemon advertises these, so the server must
+		// let users persist them.
+		"max":   true,
+		"ultra": true,
 	},
 	"codebuddy": {
 		"low":    true,
