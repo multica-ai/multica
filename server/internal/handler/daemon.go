@@ -2961,6 +2961,8 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	// Same issue-facing attribution surface as ListTasksByIssue — hydrate names.
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
 }
@@ -2991,7 +2993,11 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
+	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
+	// Keep this issue-scoped surface consistent with the list endpoints so a
+	// cancelled row keeps its resolved "on behalf of" name in the UI.
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
@@ -3013,6 +3019,10 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	// Execution-log rows render the "on behalf of <member>" badge, so this
+	// issue-facing surface must resolve initiator/originator names (departed-safe,
+	// one batch) — otherwise the badge falls back to "someone" on issue detail.
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
 }

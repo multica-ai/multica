@@ -71,10 +71,12 @@ export function AttributionBadge({
     return (
       <Badge
         variant="outline"
-        className={cn("gap-1 font-normal text-warning", className)}
+        className={cn("max-w-40 min-w-0 gap-1 font-normal text-warning", className)}
         title={sourceLabel}
       >
-        {t(($) => $.execution_log.attribution.unattributed)}
+        <span className="min-w-0 truncate">
+          {t(($) => $.execution_log.attribution.unattributed)}
+        </span>
       </Badge>
     );
   }
@@ -84,7 +86,7 @@ export function AttributionBadge({
     <Badge
       variant="outline"
       className={cn(
-        "gap-1 font-normal",
+        "max-w-40 min-w-0 gap-1 font-normal",
         degraded ? "text-warning" : "text-muted-foreground",
         className
       )}
@@ -95,8 +97,11 @@ export function AttributionBadge({
         initials={initialsOf(name)}
         avatarUrl={initiator.avatar_url}
         size={14}
+        className="shrink-0"
       />
-      <span>{t(($) => $.execution_log.attribution.on_behalf_of, { name })}</span>
+      <span className="min-w-0 truncate">
+        {t(($) => $.execution_log.attribution.on_behalf_of, { name })}
+      </span>
     </Badge>
   );
 }
