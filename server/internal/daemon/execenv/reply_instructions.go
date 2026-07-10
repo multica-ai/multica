@@ -239,17 +239,21 @@ func BuildMultiThreadCommentReplyInstructions(issueID string, targets []ThreadRe
 	var cookbook string
 	if runtimeGOOS == "windows" {
 		cookbook = fmt.Sprintf(
-			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use one file per thread and remove each after posting:\n\n"+
-				"    multica issue comment add %s --parent <thread-parent-from-the-list-above> --content-file ./reply-1.md\n"+
-				"    Remove-Item ./reply-1.md\n\n",
-			issueID,
+			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
+				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
+				"    Remove-Item ./reply-1.md\n"+
+				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
+				"    Remove-Item ./reply-2.md\n\n",
+			issueID, issueID,
 		)
 	} else {
 		cookbook = fmt.Sprintf(
-			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use one file per thread and remove each after posting:\n\n"+
-				"    multica issue comment add %s --parent <thread-parent-from-the-list-above> --content-file ./reply-1.md\n"+
-				"    rm ./reply-1.md\n\n",
-			issueID,
+			"For EACH thread above, write that reply's body to its own UTF-8 file with your file-write tool, then post it with `--content-file` (do NOT use inline `--content` or a `--content-stdin` HEREDOC — see ## Comment Formatting above for why). Use a DISTINCT file per thread (never reuse one file) and remove each after posting:\n\n"+
+				"    multica issue comment add %s --parent <thread-1-parent> --content-file ./reply-1.md\n"+
+				"    rm ./reply-1.md\n"+
+				"    multica issue comment add %s --parent <thread-2-parent> --content-file ./reply-2.md\n"+
+				"    rm ./reply-2.md\n\n",
+			issueID, issueID,
 		)
 	}
 
