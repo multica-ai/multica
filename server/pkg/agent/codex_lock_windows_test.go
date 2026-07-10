@@ -4,8 +4,11 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,4 +104,79 @@ func TestAcquireCodexLaunchLock_Cancellation(t *testing.T) {
 
 	// Cleanup goroutine
 	close(released)
+}
+
+// TestCodexLaunchLockHeldUntilFirstProcessExits pins the fix for the PR
+// #5007 review finding that safeUnlock() ran before drainAndWait() on
+// codex.go's initialize-failure path (and in the deferred fallback order),
+// releasing the launch lock while the first task's process was possibly
+// still alive — letting a contending task start a second Codex process (and
+// a second invocation of the native Windows sandbox helper) concurrently
+// with the first one's shutdown, which is exactly what the lock exists to
+// prevent.
+//
+// Task A's fake codex never speaks the JSON-RPC protocol at all, so its
+// initialize call can only fail via its own 300ms timeout — but the fake
+// process itself survives roughly 3 seconds afterward (a ping.exe child
+// orphaned by the .bat's cmd.exe wrapper — Kill() on Windows only
+// terminates the direct cmd.Process handle, matching how a real, slow-to-
+// exit codex process behaves relative to os/exec's cancel-on-timeout
+// handling). That gap — initialize failing fast, the process staying alive
+// much longer — is exactly the window the review flagged.
+//
+// Task B then attempts to launch, bounded by its own short timeout, well
+// after A's initialize has failed but while A's process is still alive. If
+// the lock had already been released, B would launch immediately; with the
+// fix, B's own acquisition attempt must instead time out, proving the lock
+// stayed held until A's process actually exited.
+func TestCodexLaunchLockHeldUntilFirstProcessExits(t *testing.T) {
+	dir := t.TempDir()
+	slowCodexPath := filepath.Join(dir, "codex.bat")
+	writeTestExecutable(t, slowCodexPath, []byte("@echo off\r\nping -n 4 127.0.0.1 >nul\r\n"))
+
+	backendA, err := New("codex", Config{ExecutablePath: slowCodexPath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend (A): %v", err)
+	}
+
+	ctxA, cancelA := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelA()
+	sessionA, err := backendA.Execute(ctxA, "prompt-ignored", ExecOptions{Timeout: 300 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("execute (A): %v", err)
+	}
+	go func() {
+		for range sessionA.Messages {
+		}
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-sessionA.Result:
+		case <-time.After(10 * time.Second):
+		}
+	})
+
+	// Give A's initialize call time to fail via its 300ms timeout — well
+	// before its fake process (alive for ~3s) actually exits.
+	time.Sleep(500 * time.Millisecond)
+
+	fastCodexPath := filepath.Join(dir, "codex-b.bat")
+	writeTestExecutable(t, fastCodexPath, []byte("@echo off\r\n"))
+	backendB, err := New("codex", Config{ExecutablePath: fastCodexPath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new codex backend (B): %v", err)
+	}
+
+	ctxB, cancelB := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelB()
+	_, err = backendB.Execute(ctxB, "prompt-ignored", ExecOptions{Timeout: 600 * time.Millisecond})
+	if err == nil {
+		t.Fatal("expected B's launch to be blocked by A's still-held lock, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "acquire codex launch lock") {
+		t.Fatalf("expected a launch-lock acquisition error, got: %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected the lock wait to fail with context.DeadlineExceeded, got: %v", err)
+	}
 }

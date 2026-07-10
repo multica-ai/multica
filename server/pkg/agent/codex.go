@@ -840,8 +840,17 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
-		defer drainAndWait()
+		// safeUnlock must never run before drainAndWait in the unwind:
+		// releasing the launch lock while the process is still alive lets
+		// a contending task start a second Codex process (and a second
+		// invocation of the native Windows sandbox helper) before this
+		// one has actually exited — exactly what the lock exists to
+		// prevent. Registering drainAndWait last makes it run first
+		// (defers unwind LIFO), so it's the deferred safety net for any
+		// early-return path added later between cmd.Start() and the
+		// explicit safeUnlock() calls below.
 		defer safeUnlock()
+		defer drainAndWait()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -858,14 +867,24 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				"experimentalApi": true,
 			},
 		})
-		safeUnlock()
 		if err != nil {
+			// Hold the launch lock through cleanup: the process may still
+			// be mid-launch of the native sandbox helper when initialize
+			// fails or is cancelled, so releasing the lock before
+			// drainAndWait() has fully reaped it would let a contending
+			// task start a second Codex process concurrently with this
+			// one's shutdown.
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
+			safeUnlock()
 			finalStatus = "failed"
 			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", stderrBuf.Tail())
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
+		// initialize succeeded: the sandbox-helper-invoking startup phase
+		// is done, so it's safe to let the next task's launch proceed
+		// concurrently with the rest of this task's lifetime.
+		safeUnlock()
 		c.notify("initialized")
 
 		// 2. Start a new thread, or resume the prior one for this issue. When

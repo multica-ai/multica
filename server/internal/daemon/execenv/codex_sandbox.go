@@ -86,7 +86,18 @@ func codexSandboxPolicyFor(goos, detectedVersion, codexPath string) codexSandbox
 		}
 
 		if v := getSandboxModeOverride(); v != "" {
-			if v == "danger-full-access" || v == "workspace-write" {
+			// read-only is a genuine Codex SandboxMode value — the most
+			// restrictive of the three — and must be honoured, not treated
+			// as an invalid value. Falling through to the "invalid"
+			// default below would silently grant workspace-write (a more
+			// permissive policy) for an operator override that explicitly
+			// asked for the least permissive one; a rejected/unrecognised
+			// security setting must never result in a more permissive
+			// policy than the one requested. NetworkAccess is only
+			// meaningful under workspace-write (see the struct field doc
+			// and renderMulticaManagedBlock's guard), so it's left false
+			// here — read-only never writes a network_access key.
+			if v == "danger-full-access" || v == "workspace-write" || v == "read-only" {
 				return codexSandboxPolicy{
 					Mode:          v,
 					NetworkAccess: v == "workspace-write",

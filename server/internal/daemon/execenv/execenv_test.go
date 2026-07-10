@@ -2732,6 +2732,56 @@ func TestCodexSandboxPolicyForWindowsOverrides(t *testing.T) {
 	}
 }
 
+// TestCodexSandboxPolicyForWindowsReadOnlyOverride pins the fix for the PR
+// #5007 review finding that MULTICA_CODEX_WINDOWS_SANDBOX_MODE=read-only —
+// a value Codex's SandboxMode genuinely supports, and the *most*
+// restrictive of the three — fell through codexSandboxPolicyFor's "invalid
+// override" branch and got silently replaced with workspace-write, a
+// *more* permissive policy than the operator explicitly requested. A
+// rejected/unrecognised security setting must never result in a more
+// permissive policy than the one asked for.
+func TestCodexSandboxPolicyForWindowsReadOnlyOverride(t *testing.T) {
+	// Cannot use t.Parallel() because we use t.Setenv.
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "codex-windows-sandbox-setup.exe")
+	os.WriteFile(helperPath, []byte("fake"), 0o755)
+	codexPath := filepath.Join(dir, "codex.exe")
+
+	t.Setenv("MULTICA_CODEX_WINDOWS_SANDBOX_MODE", "read-only")
+	p := codexSandboxPolicyFor("windows", "0.121.0", codexPath)
+	if p.Mode != "read-only" {
+		t.Errorf("read-only override: mode = %q, want read-only", p.Mode)
+	}
+	if p.NetworkAccess {
+		t.Error("read-only override: NetworkAccess should be false (unused by read-only, but must not read as granted)")
+	}
+	if !strings.Contains(p.Reason, "override") {
+		t.Errorf("read-only override: expected override in Reason, got %q", p.Reason)
+	}
+
+	// The helper being absent must not change read-only's outcome — unlike
+	// workspace-write, read-only needs no native sandbox helper setup, and
+	// an explicit operator override already bypasses the helper-presence
+	// auto-detection (same as the existing workspace-write-override case
+	// above).
+	pNoHelper := codexSandboxPolicyFor("windows", "0.121.0", "nonexistent-codex-path")
+	if pNoHelper.Mode != "read-only" {
+		t.Errorf("read-only override (no helper): mode = %q, want read-only", pNoHelper.Mode)
+	}
+
+	// renderMulticaManagedBlock must not write a
+	// [sandbox_workspace_write]-style network_access key for read-only —
+	// that sub-key is only meaningful under workspace-write, and Codex
+	// would reject or misinterpret it under read-only.
+	block := renderMulticaManagedBlock(p)
+	if !strings.Contains(block, `sandbox_mode = "read-only"`) {
+		t.Errorf("rendered block missing sandbox_mode = \"read-only\":\n%s", block)
+	}
+	if strings.Contains(block, "network_access") {
+		t.Errorf("rendered block must not include network_access for read-only:\n%s", block)
+	}
+}
+
 func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
