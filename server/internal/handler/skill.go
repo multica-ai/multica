@@ -39,15 +39,17 @@ func sanitizeNullBytes(s string) string {
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Content     string  `json:"content"`
-	Config      any     `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID                   string   `json:"id"`
+	WorkspaceID          string   `json:"workspace_id"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	Content              string   `json:"content"`
+	Config               any      `json:"config"`
+	AvailabilityMode     string   `json:"availability_mode"`
+	AvailabilitySpaceIDs []string `json:"availability_space_ids"`
+	CreatedBy            *string  `json:"created_by"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
@@ -56,14 +58,16 @@ type SkillResponse struct {
 // links (GH multica-ai/multica#2174). Detail endpoints still return the full
 // SkillResponse with content.
 type SkillSummaryResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Config      any     `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID                   string   `json:"id"`
+	WorkspaceID          string   `json:"workspace_id"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	Config               any      `json:"config"`
+	AvailabilityMode     string   `json:"availability_mode"`
+	AvailabilitySpaceIDs []string `json:"availability_space_ids"`
+	CreatedBy            *string  `json:"created_by"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 	// Enabled is only populated for agent-scoped skill responses. Workspace
 	// skill lists describe the skill itself, so they omit assignment state.
 	Enabled *bool `json:"enabled,omitempty"`
@@ -128,19 +132,21 @@ func writeSkillImportDuplicateConflict(w http.ResponseWriter, existing ExistingS
 
 func skillToResponse(s db.Skill) SkillResponse {
 	return SkillResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		Name:        s.Name,
-		Description: s.Description,
-		Content:     s.Content,
-		Config:      decodeSkillConfig(s.Config),
-		CreatedBy:   uuidToPtr(s.CreatedBy),
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:                   uuidToString(s.ID),
+		WorkspaceID:          uuidToString(s.WorkspaceID),
+		Name:                 s.Name,
+		Description:          s.Description,
+		Content:              s.Content,
+		Config:               decodeSkillConfig(s.Config),
+		AvailabilityMode:     s.AvailabilityMode,
+		AvailabilitySpaceIDs: []string{},
+		CreatedBy:            uuidToPtr(s.CreatedBy),
+		CreatedAt:            timestampToString(s.CreatedAt),
+		UpdatedAt:            timestampToString(s.UpdatedAt),
 	}
 }
 
-func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID pgtype.UUID, name string) (ExistingSkillIdentity, bool, error) {
+func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID pgtype.UUID, name, userID string) (ExistingSkillIdentity, bool, error) {
 	skill, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
 		WorkspaceID: workspaceID,
 		Name:        name,
@@ -151,7 +157,11 @@ func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID p
 		}
 		return ExistingSkillIdentity{}, false, err
 	}
-	return existingSkillIdentity(skill, ""), true, nil
+	visible, _ := h.skillVisibleToRequest(ctx, skill, userID)
+	if !visible {
+		return ExistingSkillIdentity{}, true, nil
+	}
+	return existingSkillIdentity(skill, userID), true, nil
 }
 
 func existingSkillIdentity(skill db.Skill, userID string) ExistingSkillIdentity {
@@ -183,18 +193,21 @@ func skillSummaryToResponse(
 	id, workspaceID pgtype.UUID,
 	name, description string,
 	config []byte,
+	availabilityMode string,
 	createdBy pgtype.UUID,
 	createdAt, updatedAt pgtype.Timestamptz,
 ) SkillSummaryResponse {
 	return SkillSummaryResponse{
-		ID:          uuidToString(id),
-		WorkspaceID: uuidToString(workspaceID),
-		Name:        name,
-		Description: description,
-		Config:      decodeSkillConfig(config),
-		CreatedBy:   uuidToPtr(createdBy),
-		CreatedAt:   timestampToString(createdAt),
-		UpdatedAt:   timestampToString(updatedAt),
+		ID:                   uuidToString(id),
+		WorkspaceID:          uuidToString(workspaceID),
+		Name:                 name,
+		Description:          description,
+		Config:               decodeSkillConfig(config),
+		AvailabilityMode:     availabilityMode,
+		AvailabilitySpaceIDs: []string{},
+		CreatedBy:            uuidToPtr(createdBy),
+		CreatedAt:            timestampToString(createdAt),
+		UpdatedAt:            timestampToString(updatedAt),
 	}
 }
 
@@ -212,11 +225,13 @@ func skillFileToResponse(f db.SkillFile) SkillFileResponse {
 // --- Request structs ---
 
 type CreateSkillRequest struct {
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Content     string                   `json:"content"`
-	Config      any                      `json:"config"`
-	Files       []CreateSkillFileRequest `json:"files,omitempty"`
+	Name                 string                   `json:"name"`
+	Description          string                   `json:"description"`
+	Content              string                   `json:"content"`
+	Config               any                      `json:"config"`
+	Files                []CreateSkillFileRequest `json:"files,omitempty"`
+	AvailabilityMode     string                   `json:"availability_mode"`
+	AvailabilitySpaceIDs []string                 `json:"availability_space_ids"`
 }
 
 type CreateSkillFileRequest struct {
@@ -225,11 +240,13 @@ type CreateSkillFileRequest struct {
 }
 
 type UpdateSkillRequest struct {
-	Name        *string                  `json:"name"`
-	Description *string                  `json:"description"`
-	Content     *string                  `json:"content"`
-	Config      any                      `json:"config"`
-	Files       []CreateSkillFileRequest `json:"files,omitempty"`
+	Name                 *string                  `json:"name"`
+	Description          *string                  `json:"description"`
+	Content              *string                  `json:"content"`
+	Config               any                      `json:"config"`
+	Files                []CreateSkillFileRequest `json:"files,omitempty"`
+	AvailabilityMode     *string                  `json:"availability_mode"`
+	AvailabilitySpaceIDs *[]string                `json:"availability_space_ids"`
 }
 
 type SetAgentSkillsRequest struct {
@@ -277,6 +294,11 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusNotFound, "skill not found")
 		return skill, false
 	}
+	visible, _ := h.skillVisibleToRequest(r.Context(), skill, requestUserID(r))
+	if !visible {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return skill, false
+	}
 	return skill, true
 }
 
@@ -285,18 +307,58 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
+	workspaceUUID := parseUUID(workspaceID)
+	userID := requestUserID(r)
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "workspace membership required")
+		return
+	}
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), workspaceUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
 
-	resp := make([]SkillSummaryResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillSummaryToResponse(
+	skillIDs := make([]pgtype.UUID, 0, len(skills))
+	for _, skill := range skills {
+		skillIDs = append(skillIDs, skill.ID)
+	}
+	availabilityBySkill, ok := h.loadAvailabilitySpacesBySkillIDs(r.Context(), skillIDs)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to list skill availability")
+		return
+	}
+	visibleSpaceIDs := map[string]struct{}{}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		visibleSpaceIDs, ok = h.loadActiveVisibleSpaceIDSet(r.Context(), workspaceUUID, parseUUID(userID))
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to list skill availability")
+			return
+		}
+	}
+	resp := make([]SkillSummaryResponse, 0, len(skills))
+	for _, s := range skills {
+		rows := availabilityBySkill[uuidToString(s.ID)]
+		skillView := db.Skill{
+			ID:               s.ID,
+			WorkspaceID:      s.WorkspaceID,
+			CreatedBy:        s.CreatedBy,
+			AvailabilityMode: s.AvailabilityMode,
+		}
+		if !skillVisibleToMember(skillView, rows, visibleSpaceIDs, userID, member.Role) {
+			continue
+		}
+		item := skillSummaryToResponse(
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
-			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+			s.AvailabilityMode, s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		if roleAllowed(member.Role, "owner", "admin") || uuidToString(s.CreatedBy) == userID {
+			applySkillAvailabilityToSummary(&item, rows)
+		} else {
+			applySkillAvailabilityToSummary(&item, filterSkillAvailabilityRows(rows, visibleSpaceIDs))
+		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -339,8 +401,11 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		fileResps[i] = skillFileToResponse(f)
 	}
 
+	resp := skillToResponse(skill)
+	_, rows := h.skillVisibleToRequest(r.Context(), skill, requestUserID(r))
+	applySkillAvailabilityToResponse(&resp, rows)
 	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: resp,
 		Files:         fileResps,
 	})
 }
@@ -375,15 +440,23 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	availability, err := h.parseAndValidateSkillAvailability(
+		r.Context(), workspaceUUID, creatorUUID, req.AvailabilityMode, req.AvailabilitySpaceIDs,
+	)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: workspaceUUID,
-		CreatorID:   creatorUUID,
-		Name:        req.Name,
-		Description: req.Description,
-		Content:     req.Content,
-		Config:      req.Config,
-		Files:       req.Files,
+		WorkspaceID:  workspaceUUID,
+		CreatorID:    creatorUUID,
+		Name:         req.Name,
+		Description:  req.Description,
+		Content:      req.Content,
+		Config:       req.Config,
+		Files:        req.Files,
+		Availability: availability,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -446,6 +519,25 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var availability *resolvedSkillAvailability
+	if req.AvailabilityMode != nil || req.AvailabilitySpaceIDs != nil {
+		if req.AvailabilityMode == nil {
+			writeError(w, http.StatusBadRequest, "availability_mode is required with availability_space_ids")
+			return
+		}
+		rawSpaceIDs := []string{}
+		if req.AvailabilitySpaceIDs != nil {
+			rawSpaceIDs = *req.AvailabilitySpaceIDs
+		}
+		resolved, err := h.parseAndValidateSkillAvailability(
+			r.Context(), skill.WorkspaceID, parseUUID(requestUserID(r)), *req.AvailabilityMode, rawSpaceIDs,
+		)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		availability = &resolved
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -481,6 +573,22 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update skill: "+err.Error())
 		return
+	}
+	if availability != nil {
+		skill, err = qtx.UpdateSkillAvailability(r.Context(), db.UpdateSkillAvailabilityParams{
+			ID:               skill.ID,
+			AvailabilityMode: availability.mode,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update skill availability")
+			return
+		}
+		if err := replaceSkillAvailableSpacesWithQueries(
+			r.Context(), qtx, skill.ID, skill.WorkspaceID, parseUUID(requestUserID(r)), availability.spaceIDs,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update skill availability")
+			return
+		}
 	}
 
 	// If files are provided, replace all files.
@@ -520,8 +628,11 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	skillResp := skillToResponse(skill)
+	rows, _ := h.Queries.ListSkillAvailableSpaces(r.Context(), skill.ID)
+	applySkillAvailabilityToResponse(&skillResp, rows)
 	resp := SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: skillResp,
 		Files:         fileResps,
 	}
 	wsID := h.resolveWorkspaceID(r)
@@ -1856,6 +1967,25 @@ func skillImportOverwriteFailure(err error) (int, string) {
 }
 
 func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Request, strategy string, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID string, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest, existing db.Skill) {
+	visible, _ := h.skillVisibleToRequest(r.Context(), existing, creatorID)
+	if !visible {
+		switch strategy {
+		case importOnConflictRename:
+			resp, err := h.createRenamedImportedSkill(r.Context(), workspaceUUID, creatorUUID, name, imported, config, files)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, SkillImportResult{Status: "failed", Reason: "failed to import with a new name"})
+				return
+			}
+			writeJSON(w, http.StatusCreated, SkillImportResult{Status: "created", Reason: "renamed because the requested name is unavailable", Skill: &resp})
+		case importOnConflictSkip:
+			writeJSON(w, http.StatusOK, SkillImportResult{Status: "skipped", Reason: "the requested Skill name is unavailable"})
+		case importOnConflictOverwrite:
+			writeJSON(w, http.StatusForbidden, SkillImportResult{Status: "failed", Reason: "the requested Skill name is unavailable"})
+		default:
+			writeJSON(w, http.StatusConflict, SkillImportResult{Status: "conflict", Reason: "the requested Skill name is unavailable"})
+		}
+		return
+	}
 	existingInfo := existingSkillIdentity(existing, creatorID)
 	switch strategy {
 	case importOnConflictSkip:
@@ -2032,7 +2162,7 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 					return
 				}
 			}
-			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, name); findErr == nil && found {
+			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, name, creatorID); findErr == nil && found && existing.ID != "" {
 				writeSkillImportDuplicateConflict(w, existing)
 			} else {
 				writeError(w, http.StatusConflict, "a skill with this name already exists")
@@ -2155,15 +2285,64 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]SkillSummaryResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillSummaryToResponse(
-			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
-			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
-		)
-		resp[i].Enabled = &s.Enabled
+	resp, ok := h.visibleAgentSkillSummaries(r.Context(), agent.WorkspaceID, requestUserID(r), skills)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to list skill availability")
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) visibleAgentSkillSummaries(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	userID string,
+	skills []db.ListAgentSkillSummariesRow,
+) ([]SkillSummaryResponse, bool) {
+	member, err := h.getWorkspaceMember(ctx, userID, uuidToString(workspaceID))
+	if err != nil {
+		return nil, false
+	}
+	ids := make([]pgtype.UUID, 0, len(skills))
+	for _, skill := range skills {
+		ids = append(ids, skill.ID)
+	}
+	availabilityBySkill, ok := h.loadAvailabilitySpacesBySkillIDs(ctx, ids)
+	if !ok {
+		return nil, false
+	}
+	visibleSpaceIDs := map[string]struct{}{}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		visibleSpaceIDs, ok = h.loadActiveVisibleSpaceIDSet(ctx, workspaceID, parseUUID(userID))
+		if !ok {
+			return nil, false
+		}
+	}
+	resp := make([]SkillSummaryResponse, 0, len(skills))
+	for _, skill := range skills {
+		rows := availabilityBySkill[uuidToString(skill.ID)]
+		view := db.Skill{
+			ID:               skill.ID,
+			WorkspaceID:      skill.WorkspaceID,
+			CreatedBy:        skill.CreatedBy,
+			AvailabilityMode: skill.AvailabilityMode,
+		}
+		if !skillVisibleToMember(view, rows, visibleSpaceIDs, userID, member.Role) {
+			continue
+		}
+		item := skillSummaryToResponse(
+			skill.ID, skill.WorkspaceID, skill.Name, skill.Description, skill.Config,
+			skill.AvailabilityMode, skill.CreatedBy, skill.CreatedAt, skill.UpdatedAt,
+		)
+		item.Enabled = &skill.Enabled
+		if roleAllowed(member.Role, "owner", "admin") || uuidToString(skill.CreatedBy) == userID {
+			applySkillAvailabilityToSummary(&item, rows)
+		} else {
+			applySkillAvailabilityToSummary(&item, filterSkillAvailabilityRows(rows, visibleSpaceIDs))
+		}
+		resp = append(resp, item)
+	}
+	return resp, true
 }
 
 func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
@@ -2339,10 +2518,16 @@ func (h *Handler) validateAgentSkillIDsInWorkspace(w http.ResponseWriter, r *htt
 			continue
 		}
 		seen[key] = struct{}{}
-		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+		skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
 			ID:          skillID,
 			WorkspaceID: agent.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "skill not found")
+			return false
+		}
+		visible, _ := h.skillVisibleToRequest(r.Context(), skill, requestUserID(r))
+		if !visible {
 			writeError(w, http.StatusNotFound, "skill not found")
 			return false
 		}
@@ -2357,13 +2542,10 @@ func (h *Handler) writeUpdatedAgentSkills(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	resp := make([]SkillSummaryResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillSummaryToResponse(
-			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
-			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
-		)
-		resp[i].Enabled = &s.Enabled
+	resp, ok := h.visibleAgentSkillSummaries(r.Context(), agent.WorkspaceID, requestUserID(r), skills)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to list skill availability")
+		return
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})

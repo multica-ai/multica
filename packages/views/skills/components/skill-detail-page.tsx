@@ -39,6 +39,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes";
+import { spaceListOptions } from "@multica/core/spaces/queries";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -66,6 +67,7 @@ import { CapabilityBanner } from "@multica/ui/components/common/capability-banne
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
+import { SkillAvailabilityPicker } from "./skill-availability-picker";
 import {
   AddToAgentDialog,
   type SkillActionsContext,
@@ -272,6 +274,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { data: runtimes = [], error: runtimesError } = useQuery(
     runtimeListOptions(wsId),
   );
+  const { data: spaces = [], error: spacesError } = useQuery(
+    spaceListOptions(wsId),
+  );
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -305,6 +310,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [showAddToAgents, setShowAddToAgents] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
   const [conflictPending, setConflictPending] = useState(false);
+  const [availabilitySaving, setAvailabilitySaving] = useState(false);
 
   const draftRef = useRef({ name, description, content, files });
   draftRef.current = { name, description, content, files };
@@ -453,6 +459,28 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     }
   };
 
+  const handleAvailabilityChange = async (change: {
+    availability_mode: Skill["availability_mode"];
+    availability_space_ids: string[];
+  }) => {
+    if (!skill || !canEdit) return;
+    setAvailabilitySaving(true);
+    try {
+      const updated = await api.updateSkill(skill.id, change);
+      qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, updated);
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId), exact: true });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.availability.toast_updated));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t(($) => $.availability.toast_failed),
+      );
+      throw error;
+    } finally {
+      setAvailabilitySaving(false);
+    }
+  };
+
   const handleDiscard = () => {
     if (!skill) return;
     seedFromSkill(skill);
@@ -507,7 +535,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   };
 
   const supportingQueryDown =
-    !!agentsError || !!membersError || !!runtimesError;
+    !!agentsError || !!membersError || !!runtimesError || !!spacesError;
 
   if (isLoading) {
     return (
@@ -835,6 +863,19 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
         {/* Sidebar */}
         <aside className="flex w-full shrink-0 flex-col gap-4 border-t bg-muted/20 px-4 py-4 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
+          <div>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {t(($) => $.availability.heading)}
+            </h3>
+            <SkillAvailabilityPicker
+              mode={skill.availability_mode}
+              selectedSpaceIds={skill.availability_space_ids}
+              spaces={spaces}
+              canEdit={canEdit}
+              saving={availabilitySaving}
+              onChange={handleAvailabilityChange}
+            />
+          </div>
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.sidebar.metadata)}

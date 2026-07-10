@@ -1,7 +1,13 @@
 {
   "page": {
     "title": "空间",
+    "description": "浏览你可以访问的空间。加入后参与协作，固定到侧边栏，或关注空间动态。",
     "new_space": "新建空间",
+    "search_placeholder": "搜索空间…",
+    "filter_all": "全部",
+    "filter_joined": "已加入",
+    "filter_open": "公开",
+    "empty_search": "没有符合条件的空间",
     "loading": "正在加载空间...",
     "empty_title": "还没有空间",
     "create_first": "创建第一个空间"
@@ -25,7 +31,12 @@
     "save": "保存",
     "saving": "保存中...",
     "join": "加入",
-    "leave": "离开"
+    "leave": "离开",
+    "pin": "固定",
+    "unpin": "取消固定",
+    "follow": "关注",
+    "unfollow": "取消关注",
+    "open": "打开空间"
   },
   "dialog": {
     "create_title": "创建空间",
@@ -73,6 +84,7 @@
   "toast_archived": "空间已归档",
   "toast_archive_failed": "归档空间失败",
   "toast_save_failed": "保存空间失败",
+  "toast_preference_failed": "更新空间偏好失败",
   "surface": {
     "not_found": "未找到空间"
   },

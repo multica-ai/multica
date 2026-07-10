@@ -53,15 +53,14 @@ export function spaceMembersOptions(wsId: string, spaceId: string) {
 }
 
 export function mySpaceListOptions(wsId: string) {
-  // The sidebar's Spaces section: only spaces the user joined, in their
-  // personal order. Same cache entry as spaceListOptions (per-observer
-  // select), so reorder patches on the base key reflect here instantly.
+  // The Sidebar's Spaces section: formal memberships plus personal pins, in
+  // one preference order. Pinning only changes navigation and never access.
   return queryOptions({
     queryKey: spaceKeys.list(wsId),
     queryFn: () => api.listSpaces(),
     select: (data) =>
       data.spaces
-        .filter((space) => space.is_member && !space.archived_at)
+        .filter((space) => (space.is_member || space.is_pinned) && !space.archived_at)
         .sort((a, b) => a.sort_order - b.sort_order),
   });
 }

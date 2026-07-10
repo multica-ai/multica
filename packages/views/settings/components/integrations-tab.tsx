@@ -31,7 +31,7 @@ export function IntegrationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
-      <SettingsSection title="GitHub">
+      <SettingsSection title={t(($) => $.github.connection_title)}>
         <GitHubTab />
       </SettingsSection>
       <SettingsSection title={t(($) => $.lark.section_title)}>

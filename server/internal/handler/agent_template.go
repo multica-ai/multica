@@ -305,6 +305,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			Name:        ref.CachedName,
 		})
 		if err == nil {
+			visible, _ := h.skillVisibleToRequest(r.Context(), existing, ownerID)
+			if !visible {
+				writeError(w, http.StatusConflict, "a Skill with this name exists but is not available to you")
+				return
+			}
 			preReused[i] = existing
 			slog.Info("agent-template create: pre-reuse hit (skipped fetch)",
 				append(logger.RequestAttrs(r),
@@ -394,6 +399,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			Name:        imp.name,
 		})
 		if err == nil {
+			visible, _ := h.skillVisibleToRequest(r.Context(), existing, ownerID)
+			if !visible {
+				writeError(w, http.StatusConflict, "a Skill with this name exists but is not available to you")
+				return
+			}
 			slog.Info("agent-template create: reusing existing skill (frontmatter-name match, cached_name drifted)",
 				append(logger.RequestAttrs(r),
 					"index", i,
@@ -601,6 +611,12 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		if qerr != nil {
 			slog.Warn("agent-template create: skipping cross-workspace extra_skill_id",
 				append(logger.RequestAttrs(r), "skill_id", raw, "error", qerr)...)
+			continue
+		}
+		visible, _ := h.skillVisibleToRequest(r.Context(), owned, ownerID)
+		if !visible {
+			slog.Warn("agent-template create: skipping unavailable extra_skill_id",
+				append(logger.RequestAttrs(r), "skill_id", raw)...)
 			continue
 		}
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{

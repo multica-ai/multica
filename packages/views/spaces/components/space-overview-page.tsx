@@ -26,6 +26,7 @@ import { PageHeader } from "../../layout/page-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { SpaceIcon } from "./space-icon";
+import { SpacePreferenceActions } from "./space-preference-actions";
 import { useWorkspacePaths } from "@multica/core/paths";
 
 export function SpaceOverviewPage({ spaceKey }: { spaceKey: string }) {
@@ -126,7 +127,8 @@ export function SpaceOverviewPage({ spaceKey }: { spaceKey: string }) {
         {space.archived_at && (
           <Badge variant="outline">{t(($) => $.state.archived)}</Badge>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          {!space.archived_at && <SpacePreferenceActions space={space} />}
           {!space.archived_at && !space.is_member && space.visibility === "open" && (
             <Button
               size="sm"

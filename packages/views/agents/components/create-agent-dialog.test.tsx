@@ -97,6 +97,8 @@ const spaces: Space[] = [
     updated_at: "2026-01-01T00:00:00Z",
     is_member: true,
     member_role: "member",
+    is_pinned: false,
+    is_followed: false,
     sort_order: 1,
   },
   {
@@ -114,6 +116,8 @@ const spaces: Space[] = [
     updated_at: "2026-01-02T00:00:00Z",
     is_member: true,
     member_role: "member",
+    is_pinned: false,
+    is_followed: false,
     sort_order: 2,
   },
 ];

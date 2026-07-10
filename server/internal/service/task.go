@@ -3685,6 +3685,28 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
+	return s.loadAgentSkillsForContext(ctx, agentID, pgtype.UUID{}, false)
+}
+
+// LoadAgentSkillsForTask applies Skill Availability to the concrete run.
+// Workspace-shared Skills are always eligible; Private Skills are usable only
+// by an Agent owned by the Skill creator; Selected-Space Skills require the
+// task's Issue/Autopilot Space to match. Sharing a Skill grants no Space data
+// access — it only decides whether the Skill bundle is mounted for this run.
+func (s *TaskService) LoadAgentSkillsForTask(ctx context.Context, task db.AgentTaskQueue) []AgentSkillData {
+	spaceID := s.taskSpaceID(ctx, task)
+	return s.loadAgentSkillsForContext(ctx, task.AgentID, spaceID, true)
+}
+
+func (s *TaskService) loadAgentSkillsForContext(
+	ctx context.Context,
+	agentID, spaceID pgtype.UUID,
+	enforceAvailability bool,
+) []AgentSkillData {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return nil
+	}
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
 	if err != nil || len(skills) == 0 {
 		return nil
@@ -3692,6 +3714,9 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
+		if enforceAvailability && !s.skillAvailableForTask(ctx, sk, agent, spaceID) {
+			continue
+		}
 		data := AgentSkillData{
 			ID:          util.UUIDToString(sk.ID),
 			Name:        sk.Name,
@@ -3707,10 +3732,64 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 	return result
 }
 
+func (s *TaskService) skillAvailableForTask(
+	ctx context.Context,
+	skill db.Skill,
+	agent db.Agent,
+	spaceID pgtype.UUID,
+) bool {
+	if skill.WorkspaceID != agent.WorkspaceID {
+		return false
+	}
+	switch skill.AvailabilityMode {
+	case "workspace":
+		return true
+	case "private":
+		return skill.CreatedBy.Valid && skill.CreatedBy == agent.OwnerID
+	case "selected_spaces":
+		if !spaceID.Valid {
+			return false
+		}
+		allowed, err := s.Queries.IsSkillAvailableInActiveSpace(ctx, db.IsSkillAvailableInActiveSpaceParams{
+			SkillID:     skill.ID,
+			WorkspaceID: skill.WorkspaceID,
+			SpaceID:     spaceID,
+		})
+		return err == nil && allowed
+	default:
+		return false
+	}
+}
+
+func (s *TaskService) taskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	if task.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+		if err == nil {
+			return issue.SpaceID
+		}
+	}
+	if task.AutopilotRunID.Valid {
+		run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err == nil {
+			autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+			if err == nil {
+				return autopilot.SpaceID
+			}
+		}
+	}
+	return pgtype.UUID{}
+}
+
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
 func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
 	skills := s.LoadAgentSkills(ctx, agentID)
+	skills = append(skills, s.BuiltinSkills()...)
+	return BuildAgentSkillBundles(skills)
+}
+
+func (s *TaskService) LoadAgentSkillBundlesForTask(ctx context.Context, task db.AgentTaskQueue) ([]AgentSkillData, []AgentSkillRefData) {
+	skills := s.LoadAgentSkillsForTask(ctx, task)
 	skills = append(skills, s.BuiltinSkills()...)
 	return BuildAgentSkillBundles(skills)
 }

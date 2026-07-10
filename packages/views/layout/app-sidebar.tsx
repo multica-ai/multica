@@ -37,6 +37,7 @@ import {
   X,
   Zap,
   Users,
+  Compass,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -84,7 +85,7 @@ import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { mySpaceListOptions } from "@multica/core/spaces/queries";
-import { useUpdateSpaceMembership } from "@multica/core/spaces/mutations";
+import { useUpdateSpacePreference } from "@multica/core/spaces/mutations";
 import { useSidebarStore } from "@multica/core/layout/sidebar-store";
 import { SpaceIcon } from "../spaces/components/space-icon";
 import type { Space } from "@multica/core/types";
@@ -582,14 +583,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspaceCollapse = useGroupCollapse("workspace");
   const spacesCollapse = useGroupCollapse("spaces");
 
-  // Spaces section: only spaces the user joined, in their personal order.
+  // Spaces section: spaces the user joined or pinned, in personal order.
   // This order is navigation state; the workspace Default Space is configured
   // independently in Settings.
   const { data: mySpaces = [] } = useQuery({
     ...mySpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const updateSpaceMembership = useUpdateSpaceMembership();
+  const updateSpacePreference = useUpdateSpacePreference();
   // Local presentational copy for drop-animation stability — same trick as
   // the pinned rows below: follow TQ at rest, freeze during a drag so the
   // optimistic cache re-sort can't reorder the DOM while dnd-kit's drop
@@ -616,7 +617,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setSpaceDragActive(false);
   }, []);
   // Fractional reorder (Linear-style): the dragged space takes the midpoint
-  // of its new neighbors, so a drag is a single-row membership update. The
+  // of its new neighbors, so a drag is a single-row preference update. The
   // local array is rearranged first so the dropped row lands exactly where
   // the animation ends.
   const handleSpaceDragEnd = useCallback(
@@ -640,9 +641,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             : next
               ? next.sort_order - 1
               : 1;
-      updateSpaceMembership.mutate({ id: String(active.id), sort_order: sortOrder });
+      updateSpacePreference.mutate({ id: String(active.id), sort_order: sortOrder });
     },
-    [localSpaces, updateSpaceMembership],
+    [localSpaces, updateSpacePreference],
   );
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
@@ -1055,15 +1056,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       (children→next row) — same spacing as SidebarMenu rows
                       everywhere else. */}
                   <SidebarGroupContent className="flex flex-col gap-0.5 pt-0.5">
-                    {mySpaces.length === 0 && (
-                      <button
-                        type="button"
-                        onClick={() => push(p.spaceNew())}
-                        className="flex h-8 cursor-pointer items-center rounded-md px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
-                      >
-                        {t(($) => $.sidebar.spaces_empty)}
-                      </button>
-                    )}
+                    <SidebarMenu className="gap-0.5">
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          isActive={isNavActive(pathname, p.spacesDirectory())}
+                          render={<AppLink href={p.spacesDirectory()} />}
+                          className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        >
+                          <Compass />
+                          <span>{t(($) => $.sidebar.browse_spaces)}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
                     <DndContext sensors={sensors} collisionDetection={closestCenter} measuring={spaceDragMeasuring} onDragStart={handleSpaceDragStart} onDragEnd={handleSpaceDragEnd} onDragCancel={handleSpaceDragCancel}>
                       <SortableContext items={visibleSpaces.map((space) => space.id)} strategy={verticalListSortingStrategy}>
                         {visibleSpaces.map((space) => (

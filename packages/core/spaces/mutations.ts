@@ -5,7 +5,7 @@ import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { spaceKeys } from "./queries";
-import type { CreateSpaceRequest, ListSpacesResponse, UpdateSpaceRequest } from "../types";
+import type { CreateSpaceRequest, ListSpacesResponse, UpdateSpaceRequest, UpdateSpacePreferenceRequest } from "../types";
 
 export function useCreateSpace() {
   const qc = useQueryClient();
@@ -84,6 +84,55 @@ export function useUpdateSpaceMembership() {
   });
 }
 
+export function useUpdateSpacePreference() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & UpdateSpacePreferenceRequest) =>
+      api.updateSpacePreference(id, data),
+    onMutate: async ({ id, ...data }) => {
+      await qc.cancelQueries({ queryKey: spaceKeys.list(wsId) });
+      const prevList = qc.getQueryData<ListSpacesResponse>(spaceKeys.list(wsId));
+      qc.setQueryData<ListSpacesResponse>(spaceKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              spaces: old.spaces.map((space) =>
+                space.id === id ? { ...space, ...data } : space,
+              ),
+            }
+          : old,
+      );
+      return { prevList };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.prevList) qc.setQueryData(spaceKeys.list(wsId), context.prevList);
+    },
+    onSuccess: (preference) => {
+      qc.setQueryData<ListSpacesResponse>(spaceKeys.list(wsId), (old) =>
+        old
+          ? {
+              ...old,
+              spaces: old.spaces.map((space) =>
+                space.id === preference.space_id
+                  ? {
+                      ...space,
+                      is_pinned: preference.is_pinned,
+                      is_followed: preference.is_followed,
+                      sort_order: preference.sort_order,
+                    }
+                  : space,
+              ),
+            }
+          : old,
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+    },
+  });
+}
+
 export function useJoinSpace() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -117,7 +166,7 @@ export function useLeaveSpace() {
               ...old,
               spaces: old.spaces.map((space) =>
                 space.id === id
-                  ? { ...space, is_member: false, member_role: null, sort_order: 0 }
+                  ? { ...space, is_member: false, member_role: null }
                   : space,
               ),
             }

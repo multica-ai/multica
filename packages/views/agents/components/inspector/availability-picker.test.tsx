@@ -29,6 +29,8 @@ function space(id: string, name: string, archived = false): Space {
     updated_at: "2026-01-01T00:00:00Z",
     is_member: true,
     member_role: "member",
+    is_pinned: false,
+    is_followed: false,
     sort_order: 1,
   };
 }

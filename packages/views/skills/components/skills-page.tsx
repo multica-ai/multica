@@ -6,7 +6,9 @@ import {
   AlertTriangle,
   BookOpen,
   Download,
+  Globe2,
   HardDrive,
+  Layers3,
   Lock,
   Pencil,
   Plus,
@@ -235,11 +237,38 @@ function CheckboxCell({
 function NameCell({ row }: { row: SkillRow }) {
   const { t } = useT("skills");
   const { skill, canEdit } = row;
+  const ScopeIcon =
+    skill.availability_mode === "private"
+      ? Lock
+      : skill.availability_mode === "selected_spaces"
+        ? Layers3
+        : Globe2;
+  const scopeLabel =
+    skill.availability_mode === "private"
+      ? t(($) => $.table.scope_private)
+      : skill.availability_mode === "selected_spaces"
+        ? t(($) => $.table.scope_spaces, {
+            count: skill.availability_space_ids.length,
+          })
+        : t(($) => $.table.scope_workspace);
   return (
     <ListGridCell className="gap-1.5">
       <span className="min-w-0 truncate text-sm font-medium">
         {skill.name}
       </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className="inline-flex shrink-0 items-center text-muted-foreground/70"
+              aria-label={scopeLabel}
+            >
+              <ScopeIcon className="size-3" aria-hidden />
+            </span>
+          }
+        />
+        <TooltipContent>{scopeLabel}</TooltipContent>
+      </Tooltip>
       {!canEdit && (
         <Tooltip>
           <TooltipTrigger

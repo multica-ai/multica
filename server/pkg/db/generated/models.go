@@ -837,6 +837,17 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	// Sharing scope only: private, selected_spaces, or workspace. Does not grant data or Integration access.
+	AvailabilityMode string `json:"availability_mode"`
+}
+
+// Selected-Space sharing grants for Skills. A row changes discovery/use scope only and grants no underlying Space access.
+type SkillAvailableSpace struct {
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type SkillFile struct {
@@ -1101,4 +1112,15 @@ type WorkspaceSpaceMember struct {
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	SortOrder   float64            `json:"sort_order"`
+}
+
+type WorkspaceSpacePreference struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	IsPinned    bool               `json:"is_pinned"`
+	IsFollowed  bool               `json:"is_followed"`
+	SortOrder   float64            `json:"sort_order"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }

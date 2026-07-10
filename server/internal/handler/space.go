@@ -29,11 +29,12 @@ type SpaceResponse struct {
 	CreatedBy    *string `json:"created_by"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
-	// Requesting user's membership view: the sidebar shows only joined
-	// spaces, ordered by SortOrder. Default ownership is workspace-level and
-	// independent from this personal navigation order.
+	// Requesting user's independent access and preference view. Membership
+	// grants collaboration; pin/follow/reorder never do.
 	IsMember   bool    `json:"is_member"`
 	MemberRole *string `json:"member_role"`
+	IsPinned   bool    `json:"is_pinned"`
+	IsFollowed bool    `json:"is_followed"`
 	SortOrder  float64 `json:"sort_order"`
 }
 
@@ -150,6 +151,8 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 		resp[i] = spaceToResponse(row.WorkspaceSpace)
 		resp[i].IsMember = row.IsMember
 		resp[i].MemberRole = textToPtr(row.MemberRole)
+		resp[i].IsPinned = row.IsPinned
+		resp[i].IsFollowed = row.IsFollowed
 		resp[i].SortOrder = row.MemberSortOrder
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": resp, "total": len(resp)})
@@ -554,6 +557,19 @@ type UpdateSpaceMemberRoleRequest struct {
 	Role string `json:"role"`
 }
 
+type UpdateSpacePreferenceRequest struct {
+	IsPinned   *bool    `json:"is_pinned"`
+	IsFollowed *bool    `json:"is_followed"`
+	SortOrder  *float64 `json:"sort_order"`
+}
+
+type SpacePreferenceResponse struct {
+	SpaceID    string  `json:"space_id"`
+	IsPinned   bool    `json:"is_pinned"`
+	IsFollowed bool    `json:"is_followed"`
+	SortOrder  float64 `json:"sort_order"`
+}
+
 func (h *Handler) UpdateSpaceMemberRole(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -620,6 +636,122 @@ func (h *Handler) UpdateSpaceMemberRole(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func currentSpacePreference(
+	ctx context.Context,
+	q *db.Queries,
+	workspaceID, spaceID, userID pgtype.UUID,
+) (db.WorkspaceSpacePreference, error) {
+	pref, err := q.GetWorkspaceSpacePreference(ctx, db.GetWorkspaceSpacePreferenceParams{
+		WorkspaceID: workspaceID,
+		SpaceID:     spaceID,
+		UserID:      userID,
+	})
+	if err == nil {
+		return pref, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.WorkspaceSpacePreference{}, err
+	}
+
+	sortOrder, err := q.NextSpacePreferenceSortOrder(ctx, db.NextSpacePreferenceSortOrderParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	})
+	if err != nil {
+		return db.WorkspaceSpacePreference{}, err
+	}
+	if membership, membershipErr := q.GetWorkspaceSpaceMember(ctx, db.GetWorkspaceSpaceMemberParams{
+		SpaceID: spaceID,
+		UserID:  userID,
+	}); membershipErr == nil {
+		sortOrder = membership.SortOrder
+	}
+	return db.WorkspaceSpacePreference{
+		WorkspaceID: workspaceID,
+		SpaceID:     spaceID,
+		UserID:      userID,
+		SortOrder:   sortOrder,
+	}, nil
+}
+
+// UpdateSpacePreference changes personal navigation/notification state only.
+// It never joins the Space and therefore never grants collaboration access.
+func (h *Handler) UpdateSpacePreference(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if !h.requireSpaceView(w, r, wsUUID, spaceID) {
+		return
+	}
+
+	var req UpdateSpacePreferenceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.IsPinned == nil && req.IsFollowed == nil && req.SortOrder == nil {
+		writeError(w, http.StatusBadRequest, "at least one preference field is required")
+		return
+	}
+
+	space, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "space not found")
+		return
+	}
+	if space.ArchivedAt.Valid && ((req.IsPinned != nil && *req.IsPinned) || (req.IsFollowed != nil && *req.IsFollowed)) {
+		writeError(w, http.StatusConflict, "archived spaces cannot be pinned or followed")
+		return
+	}
+
+	userUUID := parseUUID(userID)
+	pref, err := currentSpacePreference(r.Context(), h.Queries, wsUUID, spaceID, userUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load space preferences")
+		return
+	}
+	if req.IsPinned != nil {
+		pref.IsPinned = *req.IsPinned
+	}
+	if req.IsFollowed != nil {
+		pref.IsFollowed = *req.IsFollowed
+	}
+	if req.SortOrder != nil {
+		pref.SortOrder = *req.SortOrder
+	}
+	pref, err = h.Queries.UpsertWorkspaceSpacePreference(r.Context(), db.UpsertWorkspaceSpacePreferenceParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+		UserID:      userUUID,
+		IsPinned:    pref.IsPinned,
+		IsFollowed:  pref.IsFollowed,
+		SortOrder:   pref.SortOrder,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, SpacePreferenceResponse{
+		SpaceID:    uuidToString(pref.SpaceID),
+		IsPinned:   pref.IsPinned,
+		IsFollowed: pref.IsFollowed,
+		SortOrder:  pref.SortOrder,
+	})
+}
+
 // UpdateSpaceMembership updates the caller's own membership row — currently
 // just sort_order, the per-user sidebar position. Fractional: a drag sends
 // the midpoint of the drop slot's neighbors, so single-row updates suffice.
@@ -642,7 +774,14 @@ func (h *Handler) UpdateSpaceMembership(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "sort_order is required")
 		return
 	}
-	m, err := h.Queries.UpdateSpaceMemberSortOrder(r.Context(), db.UpdateSpaceMemberSortOrderParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space order")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	m, err := qtx.UpdateSpaceMemberSortOrder(r.Context(), db.UpdateSpaceMemberSortOrderParams{
 		WorkspaceID: wsUUID,
 		SpaceID:     spaceID,
 		UserID:      parseUUID(userID),
@@ -650,6 +789,26 @@ func (h *Handler) UpdateSpaceMembership(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "you are not a member of this space")
+		return
+	}
+	pref, err := currentSpacePreference(r.Context(), qtx, wsUUID, spaceID, parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space order")
+		return
+	}
+	if _, err := qtx.UpsertWorkspaceSpacePreference(r.Context(), db.UpsertWorkspaceSpacePreferenceParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
+		UserID:      parseUUID(userID),
+		IsPinned:    pref.IsPinned,
+		IsFollowed:  pref.IsFollowed,
+		SortOrder:   m.SortOrder,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space order")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update space order")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -752,18 +911,28 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// withCallerMembership stamps the caller's membership view onto a single-space
-// response so mutations don't clobber is_member/sort_order in the client's
-// list cache (the list endpoint always carries them).
+// withCallerMembership stamps the caller's membership and personal preference
+// view onto a single-Space response so mutations do not clobber Sidebar state.
 func (h *Handler) withCallerMembership(ctx context.Context, resp SpaceResponse, spaceID pgtype.UUID, userID string) SpaceResponse {
+	userUUID := parseUUID(userID)
 	m, err := h.Queries.GetWorkspaceSpaceMember(ctx, db.GetWorkspaceSpaceMemberParams{
 		SpaceID: spaceID,
-		UserID:  parseUUID(userID),
+		UserID:  userUUID,
 	})
 	if err == nil {
 		resp.IsMember = true
 		resp.MemberRole = &m.Role
 		resp.SortOrder = m.SortOrder
+	}
+	pref, err := h.Queries.GetWorkspaceSpacePreference(ctx, db.GetWorkspaceSpacePreferenceParams{
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		SpaceID:     spaceID,
+		UserID:      userUUID,
+	})
+	if err == nil {
+		resp.IsPinned = pref.IsPinned
+		resp.IsFollowed = pref.IsFollowed
+		resp.SortOrder = pref.SortOrder
 	}
 	return resp
 }

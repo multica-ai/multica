@@ -11,6 +11,7 @@ export {
   useUpdateSpace,
   useArchiveSpace,
   useUpdateSpaceMembership,
+  useUpdateSpacePreference,
   useReplaceSpaceMembers,
   useJoinSpace,
   useLeaveSpace,

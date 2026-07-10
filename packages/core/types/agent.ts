@@ -35,6 +35,9 @@ export type AgentAvailabilityMode =
   | "selected_spaces"
   | "workspace";
 
+/** Sharing scope for a Workspace-owned Skill. It grants no data access. */
+export type SkillAvailabilityMode = AgentAvailabilityMode;
+
 /**
  * A single invocation grant on an agent. `target_id` is `null` for the
  * workspace target (the grant covers every workspace member); it carries the
@@ -707,6 +710,8 @@ export interface SkillSummary {
   name: string;
   description: string;
   config: Record<string, unknown>;
+  availability_mode: SkillAvailabilityMode;
+  availability_space_ids: string[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -734,6 +739,8 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+  availability_mode?: SkillAvailabilityMode;
+  availability_space_ids?: string[];
 }
 
 export interface UpdateSkillRequest {
@@ -742,6 +749,8 @@ export interface UpdateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+  availability_mode?: SkillAvailabilityMode;
+  availability_space_ids?: string[];
 }
 
 export interface SetAgentSkillsRequest {

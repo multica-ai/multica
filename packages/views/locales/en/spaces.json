@@ -1,7 +1,13 @@
 {
   "page": {
     "title": "Spaces",
+    "description": "Discover spaces you can access. Join to collaborate, pin for quick access, or follow for updates.",
     "new_space": "New space",
+    "search_placeholder": "Search spaces…",
+    "filter_all": "All",
+    "filter_joined": "Joined",
+    "filter_open": "Open",
+    "empty_search": "No spaces match your search",
     "loading": "Loading spaces...",
     "empty_title": "No spaces yet",
     "create_first": "Create your first space"
@@ -25,7 +31,12 @@
     "save": "Save",
     "saving": "Saving...",
     "join": "Join",
-    "leave": "Leave"
+    "leave": "Leave",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "follow": "Follow",
+    "unfollow": "Unfollow",
+    "open": "Open space"
   },
   "dialog": {
     "create_title": "Create space",
@@ -74,6 +85,7 @@
   "toast_archived": "Space archived",
   "toast_archive_failed": "Failed to archive space",
   "toast_save_failed": "Failed to save space",
+  "toast_preference_failed": "Failed to update space preferences",
   "surface": {
     "not_found": "Space not found"
   },

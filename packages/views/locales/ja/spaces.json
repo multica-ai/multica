@@ -1,7 +1,13 @@
 {
   "page": {
     "title": "Space",
+    "description": "アクセスできる Space を探します。参加して共同作業、ピン留めしてすばやくアクセス、またはフォローして更新を受け取れます。",
     "new_space": "新しい Space",
+    "search_placeholder": "Space を検索…",
+    "filter_all": "すべて",
+    "filter_joined": "参加中",
+    "filter_open": "公開",
+    "empty_search": "条件に一致する Space はありません",
     "loading": "Space を読み込み中...",
     "empty_title": "Space はまだありません",
     "create_first": "最初の Space を作成"
@@ -25,7 +31,12 @@
     "save": "保存",
     "saving": "保存中...",
     "join": "参加",
-    "leave": "退出"
+    "leave": "退出",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "follow": "フォロー",
+    "unfollow": "フォロー解除",
+    "open": "Space を開く"
   },
   "dialog": {
     "create_title": "Space を作成",
@@ -73,6 +84,7 @@
   "toast_archived": "Space をアーカイブしました",
   "toast_archive_failed": "Space をアーカイブできませんでした",
   "toast_save_failed": "Space を保存できませんでした",
+  "toast_preference_failed": "Space の設定を更新できませんでした",
   "surface": {
     "not_found": "Space が見つかりません"
   },

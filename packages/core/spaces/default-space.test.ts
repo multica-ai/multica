@@ -18,6 +18,8 @@ function space(overrides: Partial<Space>): Space {
     updated_at: "2026-01-01T00:00:00Z",
     is_member: false,
     member_role: null,
+    is_pinned: false,
+    is_followed: false,
     sort_order: 0,
     ...overrides,
   };

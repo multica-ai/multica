@@ -48,6 +48,7 @@
       "dismiss": "Dismiss"
     },
     "new_space": "New space",
-    "spaces_empty": "Create your first space"
+    "spaces_empty": "Create your first space",
+    "browse_spaces": "Browse spaces"
   }
 }

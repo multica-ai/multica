@@ -499,12 +499,21 @@ export const SpaceSchema = z.object({
   updated_at: z.string().default(""),
   is_member: z.boolean().default(false),
   member_role: z.enum(["lead", "admin", "member", "guest"]).nullable().default(null),
+  is_pinned: z.boolean().default(false),
+  is_followed: z.boolean().default(false),
   sort_order: z.number().default(0),
 }).loose();
 
 // PATCH /api/spaces/{id}/membership — the caller's own sort position.
 export const SpaceMembershipSchema = z.object({
   space_id: z.string().default(""),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const SpacePreferenceSchema = z.object({
+  space_id: z.string().default(""),
+  is_pinned: z.boolean().default(false),
+  is_followed: z.boolean().default(false),
   sort_order: z.number().default(0),
 }).loose();
 
@@ -553,6 +562,8 @@ export const EMPTY_SPACE: Space = {
   updated_at: "",
   is_member: false,
   member_role: null,
+  is_pinned: false,
+  is_followed: false,
   sort_order: 0,
 };
 

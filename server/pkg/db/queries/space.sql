@@ -136,20 +136,56 @@ WHERE workspace_id = $1
 RETURNING *;
 
 -- name: ListWorkspaceSpacesForUser :many
--- Space list enriched with the requesting user's membership (drives the
--- sidebar Spaces section: only joined spaces, ordered by member sort_order).
+-- Space list enriched with the requesting user's membership and personal
+-- preferences. Clients decide whether to show all discoverable Spaces or the
+-- joined/pinned subset used by the Sidebar.
 SELECT sqlc.embed(wt),
        (m.user_id IS NOT NULL)::boolean AS is_member,
        m.role AS member_role,
-       COALESCE(m.sort_order, 0)::double precision AS member_sort_order
+       COALESCE(pref.is_pinned, false)::boolean AS is_pinned,
+       COALESCE(pref.is_followed, false)::boolean AS is_followed,
+       COALESCE(pref.sort_order, m.sort_order, 0)::double precision AS member_sort_order
 FROM workspace_space wt
 LEFT JOIN workspace_space_member m
     ON m.space_id = wt.id AND m.user_id = $2
+LEFT JOIN workspace_space_preference pref
+    ON pref.space_id = wt.id AND pref.user_id = $2
 JOIN member wm
     ON wm.workspace_id = wt.workspace_id AND wm.user_id = $2
 WHERE wt.workspace_id = $1
   AND (wt.visibility = 'open' OR m.user_id IS NOT NULL OR wm.role IN ('owner', 'admin'))
 ORDER BY wt.archived_at NULLS FIRST, wt.name ASC, wt.created_at ASC;
+
+-- name: GetWorkspaceSpacePreference :one
+SELECT * FROM workspace_space_preference
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND user_id = $3;
+
+-- name: UpsertWorkspaceSpacePreference :one
+INSERT INTO workspace_space_preference (
+    workspace_id, space_id, user_id, is_pinned, is_followed, sort_order
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (space_id, user_id) DO UPDATE SET
+    is_pinned = EXCLUDED.is_pinned,
+    is_followed = EXCLUDED.is_followed,
+    sort_order = EXCLUDED.sort_order,
+    updated_at = now()
+RETURNING *;
+
+-- name: NextSpacePreferenceSortOrder :one
+SELECT (COALESCE(MAX(sort_order), 0) + 1)::double precision
+FROM (
+    SELECT pref.sort_order
+    FROM workspace_space_preference pref
+    WHERE pref.workspace_id = sqlc.arg('workspace_id')
+      AND pref.user_id = sqlc.arg('user_id')
+    UNION ALL
+    SELECT membership.sort_order
+    FROM workspace_space_member membership
+    WHERE membership.workspace_id = sqlc.arg('workspace_id')
+      AND membership.user_id = sqlc.arg('user_id')
+) personal_space_order;
 
 -- name: CanViewWorkspaceSpace :one
 SELECT EXISTS (

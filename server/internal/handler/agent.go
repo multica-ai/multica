@@ -789,17 +789,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
-	skillMap := map[string][]AgentSkillSummary{}
-	for _, row := range skillRows {
-		agentID := uuidToString(row.AgentID)
-		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
-			ID:          uuidToString(row.ID),
-			Name:        row.Name,
-			Description: row.Description,
-			Enabled:     row.Enabled,
-		})
-	}
-
 	// mcp_config still uses the workspace-level always-redact setting and
 	// the per-row owner/admin gate — secrets in MCP server configs follow
 	// the same exposure rules as custom_env used to. custom_env itself is
@@ -839,6 +828,41 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to load visible Spaces")
 			return
 		}
+	}
+	skillIDs := make([]pgtype.UUID, 0, len(skillRows))
+	for _, row := range skillRows {
+		skillIDs = append(skillIDs, row.ID)
+	}
+	skillAvailability, loaded := h.loadAvailabilitySpacesBySkillIDs(r.Context(), skillIDs)
+	if !loaded {
+		writeError(w, http.StatusInternalServerError, "failed to load skill availability")
+		return
+	}
+	skillMap := map[string][]AgentSkillSummary{}
+	for _, row := range skillRows {
+		rows := skillAvailability[uuidToString(row.ID)]
+		if actorType == "member" {
+			skillView := db.Skill{
+				ID:               row.ID,
+				WorkspaceID:      row.WorkspaceID,
+				CreatedBy:        row.CreatedBy,
+				AvailabilityMode: row.AvailabilityMode,
+			}
+			if !skillVisibleToMember(skillView, rows, visibleSpaceIDs, actorID, member.Role) {
+				continue
+			}
+		} else if row.AvailabilityMode != skillAvailabilityWorkspace {
+			// Agent/system inventory reads have no concrete Space or human
+			// principal, so only Workspace-shared Skill names are safe to expose.
+			continue
+		}
+		agentID := uuidToString(row.AgentID)
+		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
+			ID:          uuidToString(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			Enabled:     row.Enabled,
+		})
 	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {

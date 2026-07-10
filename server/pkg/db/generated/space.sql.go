@@ -356,6 +356,35 @@ func (q *Queries) GetWorkspaceSpaceMember(ctx context.Context, arg GetWorkspaceS
 	return i, err
 }
 
+const getWorkspaceSpacePreference = `-- name: GetWorkspaceSpacePreference :one
+SELECT workspace_id, space_id, user_id, is_pinned, is_followed, sort_order, created_at, updated_at FROM workspace_space_preference
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND user_id = $3
+`
+
+type GetWorkspaceSpacePreferenceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetWorkspaceSpacePreference(ctx context.Context, arg GetWorkspaceSpacePreferenceParams) (WorkspaceSpacePreference, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceSpacePreference, arg.WorkspaceID, arg.SpaceID, arg.UserID)
+	var i WorkspaceSpacePreference
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.SpaceID,
+		&i.UserID,
+		&i.IsPinned,
+		&i.IsFollowed,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const incrementSpaceIssueCounter = `-- name: IncrementSpaceIssueCounter :one
 UPDATE workspace_space
 SET issue_counter = issue_counter + 1,
@@ -686,10 +715,14 @@ const listWorkspaceSpacesForUser = `-- name: ListWorkspaceSpacesForUser :many
 SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.icon, wt.issue_counter, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at, wt.is_default, wt.visibility,
        (m.user_id IS NOT NULL)::boolean AS is_member,
        m.role AS member_role,
-       COALESCE(m.sort_order, 0)::double precision AS member_sort_order
+       COALESCE(pref.is_pinned, false)::boolean AS is_pinned,
+       COALESCE(pref.is_followed, false)::boolean AS is_followed,
+       COALESCE(pref.sort_order, m.sort_order, 0)::double precision AS member_sort_order
 FROM workspace_space wt
 LEFT JOIN workspace_space_member m
     ON m.space_id = wt.id AND m.user_id = $2
+LEFT JOIN workspace_space_preference pref
+    ON pref.space_id = wt.id AND pref.user_id = $2
 JOIN member wm
     ON wm.workspace_id = wt.workspace_id AND wm.user_id = $2
 WHERE wt.workspace_id = $1
@@ -706,11 +739,14 @@ type ListWorkspaceSpacesForUserRow struct {
 	WorkspaceSpace  WorkspaceSpace `json:"workspace_space"`
 	IsMember        bool           `json:"is_member"`
 	MemberRole      pgtype.Text    `json:"member_role"`
+	IsPinned        bool           `json:"is_pinned"`
+	IsFollowed      bool           `json:"is_followed"`
 	MemberSortOrder float64        `json:"member_sort_order"`
 }
 
-// Space list enriched with the requesting user's membership (drives the
-// sidebar Spaces section: only joined spaces, ordered by member sort_order).
+// Space list enriched with the requesting user's membership and personal
+// preferences. Clients decide whether to show all discoverable Spaces or the
+// joined/pinned subset used by the Sidebar.
 func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorkspaceSpacesForUserParams) ([]ListWorkspaceSpacesForUserRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceSpacesForUser, arg.WorkspaceID, arg.UserID)
 	if err != nil {
@@ -736,6 +772,8 @@ func (q *Queries) ListWorkspaceSpacesForUser(ctx context.Context, arg ListWorksp
 			&i.WorkspaceSpace.Visibility,
 			&i.IsMember,
 			&i.MemberRole,
+			&i.IsPinned,
+			&i.IsFollowed,
 			&i.MemberSortOrder,
 		); err != nil {
 			return nil, err
@@ -794,6 +832,33 @@ type NextSpaceMemberSortOrderParams struct {
 // Next slot at the end of this user's space list (per-user ordering).
 func (q *Queries) NextSpaceMemberSortOrder(ctx context.Context, arg NextSpaceMemberSortOrderParams) (float64, error) {
 	row := q.db.QueryRow(ctx, nextSpaceMemberSortOrder, arg.WorkspaceID, arg.UserID)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const nextSpacePreferenceSortOrder = `-- name: NextSpacePreferenceSortOrder :one
+SELECT (COALESCE(MAX(sort_order), 0) + 1)::double precision
+FROM (
+    SELECT pref.sort_order
+    FROM workspace_space_preference pref
+    WHERE pref.workspace_id = $1
+      AND pref.user_id = $2
+    UNION ALL
+    SELECT membership.sort_order
+    FROM workspace_space_member membership
+    WHERE membership.workspace_id = $1
+      AND membership.user_id = $2
+) personal_space_order
+`
+
+type NextSpacePreferenceSortOrderParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) NextSpacePreferenceSortOrder(ctx context.Context, arg NextSpacePreferenceSortOrderParams) (float64, error) {
+	row := q.db.QueryRow(ctx, nextSpacePreferenceSortOrder, arg.WorkspaceID, arg.UserID)
 	var column_1 float64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -970,6 +1035,50 @@ func (q *Queries) UpdateWorkspaceSpaceMemberRole(ctx context.Context, arg Update
 		&i.Role,
 		&i.CreatedAt,
 		&i.SortOrder,
+	)
+	return i, err
+}
+
+const upsertWorkspaceSpacePreference = `-- name: UpsertWorkspaceSpacePreference :one
+INSERT INTO workspace_space_preference (
+    workspace_id, space_id, user_id, is_pinned, is_followed, sort_order
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (space_id, user_id) DO UPDATE SET
+    is_pinned = EXCLUDED.is_pinned,
+    is_followed = EXCLUDED.is_followed,
+    sort_order = EXCLUDED.sort_order,
+    updated_at = now()
+RETURNING workspace_id, space_id, user_id, is_pinned, is_followed, sort_order, created_at, updated_at
+`
+
+type UpsertWorkspaceSpacePreferenceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	IsPinned    bool        `json:"is_pinned"`
+	IsFollowed  bool        `json:"is_followed"`
+	SortOrder   float64     `json:"sort_order"`
+}
+
+func (q *Queries) UpsertWorkspaceSpacePreference(ctx context.Context, arg UpsertWorkspaceSpacePreferenceParams) (WorkspaceSpacePreference, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceSpacePreference,
+		arg.WorkspaceID,
+		arg.SpaceID,
+		arg.UserID,
+		arg.IsPinned,
+		arg.IsFollowed,
+		arg.SortOrder,
+	)
+	var i WorkspaceSpacePreference
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.SpaceID,
+		&i.UserID,
+		&i.IsPinned,
+		&i.IsFollowed,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

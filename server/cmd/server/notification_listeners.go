@@ -19,7 +19,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -78,19 +77,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -267,10 +266,11 @@ func notifySubscribers(
 		notifType, severity, title, body, details)
 }
 
-// notifyIssueSubscribers sends inbox notifications to subscribers of
-// subscriberIssueID, but creates inbox items pointing to targetIssueID.
-// This allows querying subscribers from a parent issue while the notification
-// links to the sub-issue where the change actually occurred.
+// notifyIssueSubscribers sends inbox notifications to direct issue
+// subscribers and current followers of the issue's Space, but creates inbox
+// items pointing to targetIssueID. This allows querying recipients from a
+// parent issue while the notification links to the sub-issue where the change
+// actually occurred.
 // Returns the set of member IDs that were notified.
 func notifyIssueSubscribers(
 	ctx context.Context,
@@ -290,9 +290,9 @@ func notifyIssueSubscribers(
 ) map[string]bool {
 	notified := map[string]bool{}
 
-	subs, err := queries.ListIssueSubscribers(ctx, parseUUID(subscriberIssueID))
+	subs, err := queries.ListIssueNotificationRecipients(ctx, parseUUID(subscriberIssueID))
 	if err != nil {
-		slog.Error("failed to list subscribers for notification",
+		slog.Error("failed to list notification recipients",
 			"issue_id", subscriberIssueID, "error", err)
 		return notified
 	}

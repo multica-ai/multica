@@ -16,6 +16,10 @@ export interface Space {
    *  spaces, ordered by sort_order (per-user fractional position). */
   is_member: boolean;
   member_role: "lead" | "admin" | "member" | "guest" | null;
+  /** Personal navigation shortcut; never grants Space access. */
+  is_pinned: boolean;
+  /** Personal notification subscription; never grants Space access. */
+  is_followed: boolean;
   sort_order: number;
 }
 
@@ -44,6 +48,19 @@ export interface ListSpacesResponse {
 export interface SpaceMembership {
   space_id: string;
   sort_order: number;
+}
+
+export interface SpacePreference {
+  space_id: string;
+  is_pinned: boolean;
+  is_followed: boolean;
+  sort_order: number;
+}
+
+export interface UpdateSpacePreferenceRequest {
+  is_pinned?: boolean;
+  is_followed?: boolean;
+  sort_order?: number;
 }
 
 export interface SpaceMemberRoleUpdate {

@@ -48,6 +48,7 @@
       "dismiss": "닫기"
     },
     "new_space": "새 Space",
-    "spaces_empty": "첫 Space 만들기"
+    "spaces_empty": "첫 Space 만들기",
+    "browse_spaces": "Space 찾아보기"
   }
 }

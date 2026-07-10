@@ -8,6 +8,7 @@ import {
   Download,
   HardDrive,
   Loader2,
+  Lock,
   Pencil,
   Plus,
   X as XIcon,
@@ -186,6 +187,11 @@ function ManualForm({
             rows={3}
             className="resize-none"
           />
+        </div>
+
+        <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+          <Lock className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>{t(($) => $.create.manual.sharing_hint)}</span>
         </div>
 
         {error && (

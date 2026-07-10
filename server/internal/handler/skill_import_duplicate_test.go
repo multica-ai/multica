@@ -13,7 +13,7 @@ func TestExistingSkillIdentityByNameReturnsIDAndName(t *testing.T) {
 	name := namePrefix + "-" + t.Name()
 	skillID := insertHandlerTestSkill(t, namePrefix, "# Duplicate import identity")
 
-	existing, ok, err := testHandler.existingSkillIdentityByName(context.Background(), parseUUID(testWorkspaceID), name)
+	existing, ok, err := testHandler.existingSkillIdentityByName(context.Background(), parseUUID(testWorkspaceID), name, testUserID)
 	if err != nil {
 		t.Fatalf("existingSkillIdentityByName: %v", err)
 	}

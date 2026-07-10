@@ -48,6 +48,7 @@
       "dismiss": "閉じる"
     },
     "new_space": "新しい Space",
-    "spaces_empty": "最初の Space を作成"
+    "spaces_empty": "最初の Space を作成",
+    "browse_spaces": "Space を探す"
   }
 }
