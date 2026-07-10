@@ -19,9 +19,17 @@
  *     server back-fills `chat_message_id` on each row when the message
  *     persists (server-side). `MessageComposer` calls `api.uploadFile`
  *     without `{ issueId, commentId }`.
- *   - **Parent owns keyboard**: chat.tsx wraps in KeyboardAvoidingView +
- *     SafeAreaView, so `manageKeyboard={false}` prevents the composer
- *     from double-stacking its own keyboard handling.
+ *   - **Composer owns keyboard + bottom inset**: `chat/[id]` and
+ *     `chat/new` are pushed screens with no tab bar underneath (unlike
+ *     the old single-screen tab root), so the composer's own
+ *     `KeyboardStickyView` + safe-area handling (`manageKeyboard`'s
+ *     default `true`) is what keeps it above the keyboard and clear of
+ *     the bottom gesture bar — `ChatConversationView` no longer wraps
+ *     in its own `KeyboardAvoidingView`.
+ *   - **Always expanded**: chat always shows the full input (never the
+ *     collapsed pill) — `alwaysExpanded` skips the tap-to-expand step
+ *     the comment composer uses, so tapping the input focuses it
+ *     directly.
  *
  * Previously a hand-written 400-LOC twin of inline-comment-composer.tsx;
  * now ~50 LOC plus the StopButton subcomponent.
@@ -118,7 +126,7 @@ export function ChatComposer({
       disabledReason={disabledReason}
       isSending={sending}
       renderStop={() => <StopButton onPress={handleStop} />}
-      manageKeyboard={false}
+      alwaysExpanded
     />
   );
 }

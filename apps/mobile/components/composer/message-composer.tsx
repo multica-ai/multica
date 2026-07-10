@@ -125,11 +125,18 @@ interface Props {
 
   /** When true the composer renders flush at the bottom of its parent
    *  WITHOUT the KeyboardStickyView keyboard-aware lift + safe-area
-   *  inset. Chat's parent owns its own KeyboardAvoidingView and
-   *  bottom-inset handling (chat.tsx), so the composer must not also
-   *  apply them. Comment's parent does NOT handle keyboard, so the
-   *  composer keeps the default `true`. */
+   *  inset — for a parent that already owns keyboard/inset handling
+   *  itself. Both current callers (chat, comment) keep the default
+   *  `true` and let this component manage it. */
   manageKeyboard?: boolean;
+
+  /** Skip the collapsed "pill" resting state — always render the full
+   *  expanded input (text field + attachment/mention toolbar). Chat uses
+   *  this so the composer looks and behaves like a normal always-visible
+   *  message box (tap once to focus and get the keyboard) rather than
+   *  requiring a tap-to-expand step first. Comment keeps the default
+   *  `false` (pill-first, matching its more occasional-use context). */
+  alwaysExpanded?: boolean;
 }
 
 function makeLocalId(): string {
@@ -172,6 +179,7 @@ export function MessageComposer({
   disabled = false,
   disabledReason,
   manageKeyboard = true,
+  alwaysExpanded = false,
 }: Props) {
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
@@ -608,7 +616,7 @@ export function MessageComposer({
     </View>
   );
 
-  const body = expanded ? expandedContent : pillContent;
+  const body = alwaysExpanded || expanded ? expandedContent : pillContent;
 
   // When the parent owns keyboard handling (chat.tsx wraps in
   // KeyboardAvoidingView + SafeAreaView), skip the KeyboardStickyView —

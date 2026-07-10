@@ -12,7 +12,7 @@
  * component only manages the one conversation it's given.
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Alert, KeyboardAvoidingView, Platform, View } from "react-native";
+import { Alert, View } from "react-native";
 import { router, Stack } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -299,10 +299,7 @@ export function ChatConversationView(props: Props) {
         }}
       />
       {availability === "none" ? <NoAgentBanner /> : null}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        className="flex-1"
-      >
+      <View className="flex-1">
         <ChatMessageList
           messages={messages}
           loading={messagesLoading}
@@ -326,7 +323,7 @@ export function ChatConversationView(props: Props) {
           disabled={disabled}
           disabledReason={disabledReason}
         />
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

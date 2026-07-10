@@ -102,50 +102,52 @@ export default function ChatListPage() {
             </Text>
           </View>
         ) : (
-          sessions.map((session) => {
+          sessions.map((session, index) => {
             const archived = session.status === "archived";
             return (
-              <Pressable
-                key={session.id}
-                onPress={() => {
-                  if (!wsSlug) return;
-                  router.push({
-                    pathname: "/[workspace]/chat/[id]",
-                    params: { workspace: wsSlug, id: session.id },
-                  });
-                }}
-                onLongPress={() => confirmDelete(session)}
-                className="flex-row items-center gap-3 px-4 py-3 active:bg-secondary"
-              >
-                <View
-                  className={cn(
-                    "h-2 w-2 rounded-full",
-                    session.has_unread ? "bg-primary" : "bg-transparent",
-                  )}
-                />
-                <ActorAvatar
-                  type="agent"
-                  id={session.agent_id}
-                  size={32}
-                  showPresence
-                />
-                <View className="flex-1">
-                  <Text
+              <View key={session.id}>
+                {index > 0 ? <View className="h-px bg-border ml-4" /> : null}
+                <Pressable
+                  onPress={() => {
+                    if (!wsSlug) return;
+                    router.push({
+                      pathname: "/[workspace]/chat/[id]",
+                      params: { workspace: wsSlug, id: session.id },
+                    });
+                  }}
+                  onLongPress={() => confirmDelete(session)}
+                  className="flex-row items-center gap-3 px-4 py-4 active:bg-secondary"
+                >
+                  <View
                     className={cn(
-                      "text-sm text-foreground",
-                      session.has_unread && "font-semibold",
+                      "h-2 w-2 rounded-full",
+                      session.has_unread ? "bg-primary" : "bg-transparent",
                     )}
-                    numberOfLines={1}
-                  >
-                    {session.title || t("untitled_chat")}
-                  </Text>
-                  {archived ? (
-                    <Text className="text-xs text-muted-foreground mt-0.5">
-                      {t("sessions.archived_label")}
+                  />
+                  <ActorAvatar
+                    type="agent"
+                    id={session.agent_id}
+                    size={40}
+                    showPresence
+                  />
+                  <View className="flex-1">
+                    <Text
+                      className={cn(
+                        "text-sm text-foreground",
+                        session.has_unread && "font-semibold",
+                      )}
+                      numberOfLines={1}
+                    >
+                      {session.title || t("untitled_chat")}
                     </Text>
-                  ) : null}
-                </View>
-              </Pressable>
+                    {archived ? (
+                      <Text className="text-xs text-muted-foreground mt-0.5">
+                        {t("sessions.archived_label")}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              </View>
             );
           })
         )}
