@@ -14,8 +14,8 @@ import { ActorAvatar } from "./actor-avatar";
  * Type distinction is carried by the pill's background + border tint
  * (member=muted, agent=brand, squad=info, @all=warning) and by the avatar
  * shape/icons delegated to {@link ActorAvatar}. The chip is purely visual
- * confirmation — it has no click navigation. Callers wrap it in a hover card
- * and layer hover/focus hints via `className`.
+ * confirmation — it has no click navigation. The chip owns its type-tinted
+ * hover; callers wrap it in a hover card and control focusability.
  *
  * Size budget: must fit within a 14px / 1.625 prose line-box when used inline —
  * hence `py-0.5` + `text-xs` + a 14px avatar (same budget IssueChip proved).
@@ -33,8 +33,9 @@ export interface ActorMentionChipProps {
   /** First-character initials for the avatar (derived by the caller). */
   initials: string;
   avatarUrl?: string | null;
-  /** Extra classes — callers layer hover / focus hints here
-   *  (e.g. `hover:bg-accent` for members in the editor). */
+  /** Extra classes for caller-specific overrides. The chip already applies
+   *  its type-tinted base, hover tint, and `transition-colors`; `focusable`
+   *  adds the focus-visible ring. */
   className?: string;
   /** When true the chip is keyboard-focusable with a focus-visible ring
    *  (editor use). Readonly consumers leave it false (R14). */
@@ -44,27 +45,26 @@ export interface ActorMentionChipProps {
 const BASE_CLASS =
   "actor-mention-chip inline-flex align-middle min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium";
 
+// Base background + border + hover tint, all keyed by type. Hover layers a
+// deeper tint so R12's "background transitions to a slightly deeper tint" is
+// visible; for members the base is `bg-muted`, so the hover tint is
+// `bg-accent` (not `bg-muted`, which would equal the base and show no
+// transition). Both current callers (editor + readonly) want hover, so the
+// chip owns it rather than making each pass a type-keyed lookup.
 const TYPE_STYLES: Record<ActorMentionType, string> = {
-  member: "bg-muted border-border",
-  agent: "bg-brand/10 border-brand/20",
-  squad: "bg-info/10 border-info/20",
-  all: "bg-warning/10 border-warning/20",
+  member: "bg-muted border-border hover:bg-accent transition-colors",
+  agent: "bg-brand/10 border-brand/20 hover:bg-brand/15 transition-colors",
+  squad: "bg-info/10 border-info/20 hover:bg-info/15 transition-colors",
+  all: "bg-warning/10 border-warning/20 hover:bg-warning/15 transition-colors",
 };
 
-/**
- * Per-type hover tint for consumers that opt into hover feedback (the editor
- * and readonly both use it). The chip's base background is the type-tint;
- * this layers a deeper tint on hover so R12's "background transitions to a
- * slightly deeper tint" is visible. For members the base is `bg-muted`, so the
- * hover tint is `bg-accent` (not `bg-muted`, which would equal the base and
- * show no transition).
- */
-export const ACTOR_MENTION_HOVER_CLASS: Record<ActorMentionType, string> = {
-  member: "hover:bg-accent transition-colors",
-  agent: "hover:bg-brand/15 transition-colors",
-  squad: "hover:bg-info/15 transition-colors",
-  all: "hover:bg-warning/15 transition-colors",
-};
+/** Narrows an untyped mention-type string (a Tiptap node attr, or a regex
+ *  capture that also matches `issue`/`project`) to an actor type before
+ *  rendering the chip. Non-actor types fall back to the caller's plain-text
+ *  mention rendering instead of being cast. */
+export function isActorMentionType(v: unknown): v is ActorMentionType {
+  return v === "member" || v === "agent" || v === "squad" || v === "all";
+}
 
 function ariaLabelFor(type: ActorMentionType, label: string): string {
   return type === "all"
