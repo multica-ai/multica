@@ -149,7 +149,6 @@ vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ mod
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
-vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
   workspaceKeys: { myInvitations: () => ["invitations"] },

@@ -76,7 +76,6 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
-import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -394,7 +393,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // Which workspaces have unread, so the switcher dropdown can point at the
   // specific one(s) rather than just the aggregate avatar dot.
   const unreadWsIds = React.useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
-  const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -772,9 +770,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                        )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
