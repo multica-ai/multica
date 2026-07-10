@@ -651,6 +651,306 @@ func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 	}
 }
 
+func TestCreateAgentQueuedTTLZeroStoresSQLNull(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":               "Handler Queued TTL Create Zero",
+		"runtime_id":         handlerTestRuntimeID(t),
+		"queued_ttl_seconds": 0,
+		"custom_env":         map[string]string{},
+		"custom_args":        []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	if created.QueuedTTLSeconds != nil {
+		t.Fatalf("CreateAgent: expected response queued_ttl_seconds to be null, got %v", *created.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, created.ID)
+	if queuedTTL.Valid {
+		t.Fatalf("CreateAgent: expected DB queued_ttl_seconds to be SQL NULL, got %v", queuedTTL.Float64)
+	}
+}
+
+func TestCreateAgentQueuedTTLOmittedStoresSQLNull(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":        "Handler Queued TTL Create Omitted",
+		"runtime_id":  handlerTestRuntimeID(t),
+		"custom_env":  map[string]string{},
+		"custom_args": []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	if created.QueuedTTLSeconds != nil {
+		t.Fatalf("CreateAgent: expected response queued_ttl_seconds to be null, got %v", *created.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, created.ID)
+	if queuedTTL.Valid {
+		t.Fatalf("CreateAgent: expected DB queued_ttl_seconds to be SQL NULL, got %v", queuedTTL.Float64)
+	}
+}
+
+func TestCreateAgentQueuedTTLNullStoresSQLNull(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":               "Handler Queued TTL Create Null",
+		"runtime_id":         handlerTestRuntimeID(t),
+		"queued_ttl_seconds": nil,
+		"custom_env":         map[string]string{},
+		"custom_args":        []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	if created.QueuedTTLSeconds != nil {
+		t.Fatalf("CreateAgent: expected response queued_ttl_seconds to be null, got %v", *created.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, created.ID)
+	if queuedTTL.Valid {
+		t.Fatalf("CreateAgent: expected DB queued_ttl_seconds to be SQL NULL, got %v", queuedTTL.Float64)
+	}
+}
+
+func TestCreateAgentQueuedTTLPositiveStoresOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const queuedTTLSeconds = 5400.0
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":               "Handler Queued TTL Create Positive",
+		"runtime_id":         handlerTestRuntimeID(t),
+		"queued_ttl_seconds": queuedTTLSeconds,
+		"custom_env":         map[string]string{},
+		"custom_args":        []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+	})
+
+	if created.QueuedTTLSeconds == nil {
+		t.Fatal("CreateAgent: expected response queued_ttl_seconds to be populated")
+	}
+	if *created.QueuedTTLSeconds != queuedTTLSeconds {
+		t.Fatalf("CreateAgent: expected response queued_ttl_seconds %v, got %v", queuedTTLSeconds, *created.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, created.ID)
+	if !queuedTTL.Valid {
+		t.Fatal("CreateAgent: expected DB queued_ttl_seconds override to be set")
+	}
+	if queuedTTL.Float64 != queuedTTLSeconds {
+		t.Fatalf("CreateAgent: expected DB queued_ttl_seconds %v, got %v", queuedTTLSeconds, queuedTTL.Float64)
+	}
+}
+
+func TestUpdateAgentQueuedTTLZeroClearsOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const initialQueuedTTLSeconds = 3600.0
+
+	agentID := createHandlerTestAgent(t, "Handler Queued TTL Clear", nil)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET queued_ttl_seconds = $1 WHERE id = $2`, initialQueuedTTLSeconds, agentID); err != nil {
+		t.Fatalf("failed to seed queued_ttl_seconds override: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"queued_ttl_seconds": 0,
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	if updated.QueuedTTLSeconds != nil {
+		t.Fatalf("UpdateAgent: expected response queued_ttl_seconds to be null, got %v", *updated.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, agentID)
+	if queuedTTL.Valid {
+		t.Fatalf("UpdateAgent: expected DB queued_ttl_seconds to be SQL NULL, got %v", queuedTTL.Float64)
+	}
+}
+
+func TestUpdateAgentQueuedTTLNullClearsOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const initialQueuedTTLSeconds = 3600.0
+
+	agentID := createHandlerTestAgent(t, "Handler Queued TTL Clear Null", nil)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET queued_ttl_seconds = $1 WHERE id = $2`, initialQueuedTTLSeconds, agentID); err != nil {
+		t.Fatalf("failed to seed queued_ttl_seconds override: %v", err)
+	}
+	seededQueuedTTL := fetchAgentQueuedTTLSeconds(t, agentID)
+	if !seededQueuedTTL.Valid || seededQueuedTTL.Float64 != initialQueuedTTLSeconds {
+		t.Fatalf("failed to verify seeded queued_ttl_seconds override: got valid=%v value=%v, want %v", seededQueuedTTL.Valid, seededQueuedTTL.Float64, initialQueuedTTLSeconds)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"queued_ttl_seconds": nil,
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	if updated.QueuedTTLSeconds != nil {
+		t.Fatalf("UpdateAgent: expected response queued_ttl_seconds to be null, got %v", *updated.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, agentID)
+	if queuedTTL.Valid {
+		t.Fatalf("UpdateAgent: expected DB queued_ttl_seconds to be SQL NULL, got %v", queuedTTL.Float64)
+	}
+}
+
+func TestUpdateAgentQueuedTTLOmittedPreservesOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const queuedTTLSeconds = 4800.0
+
+	agentID := createHandlerTestAgent(t, "Handler Queued TTL Preserve", nil)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET queued_ttl_seconds = $1 WHERE id = $2`, queuedTTLSeconds, agentID); err != nil {
+		t.Fatalf("failed to seed queued_ttl_seconds override: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"name": "Handler Queued TTL Preserve Updated",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	if updated.QueuedTTLSeconds == nil {
+		t.Fatal("UpdateAgent: expected response queued_ttl_seconds to be preserved")
+	}
+	if *updated.QueuedTTLSeconds != queuedTTLSeconds {
+		t.Fatalf("UpdateAgent: expected response queued_ttl_seconds %v, got %v", queuedTTLSeconds, *updated.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, agentID)
+	if !queuedTTL.Valid {
+		t.Fatal("UpdateAgent: expected DB queued_ttl_seconds override to be preserved")
+	}
+	if queuedTTL.Float64 != queuedTTLSeconds {
+		t.Fatalf("UpdateAgent: expected DB queued_ttl_seconds %v, got %v", queuedTTLSeconds, queuedTTL.Float64)
+	}
+}
+
+func TestUpdateAgentQueuedTTLPositiveStoresOverride(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const queuedTTLSeconds = 7200.0
+
+	agentID := createHandlerTestAgent(t, "Handler Queued TTL Update Positive", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"queued_ttl_seconds": queuedTTLSeconds,
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateAgent: decode response: %v", err)
+	}
+	if updated.QueuedTTLSeconds == nil {
+		t.Fatal("UpdateAgent: expected response queued_ttl_seconds to be populated")
+	}
+	if *updated.QueuedTTLSeconds != queuedTTLSeconds {
+		t.Fatalf("UpdateAgent: expected response queued_ttl_seconds %v, got %v", queuedTTLSeconds, *updated.QueuedTTLSeconds)
+	}
+	queuedTTL := fetchAgentQueuedTTLSeconds(t, agentID)
+	if !queuedTTL.Valid {
+		t.Fatal("UpdateAgent: expected DB queued_ttl_seconds override to be set")
+	}
+	if queuedTTL.Float64 != queuedTTLSeconds {
+		t.Fatalf("UpdateAgent: expected DB queued_ttl_seconds %v, got %v", queuedTTLSeconds, queuedTTL.Float64)
+	}
+}
+
 func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
 	tests := []struct {
 		name     string

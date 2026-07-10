@@ -3968,6 +3968,13 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 			case <-leaseCtx.Done():
 				return
 			case <-ticker.C:
+				// If cancellation and the ticker fire together, prefer shutdown over
+				// issuing one last prepare-lease request after the task already timed out.
+				select {
+				case <-leaseCtx.Done():
+					return
+				default:
+				}
 				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskPrepareLeaseTimeout)
 				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
 				reqCancel()

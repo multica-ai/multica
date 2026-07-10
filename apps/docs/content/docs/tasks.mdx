@@ -33,14 +33,17 @@ graph LR
 
 ## What happens when a task times out
 
-The Multica server scans every 30 seconds. Two kinds of timeout trigger a failure:
+The Multica server scans every 30 seconds. Three kinds of timeout trigger a failure:
 
 | Situation | Timeout |
 |---|---|
+| Still waiting in `queued` | System default, or the agent's own **Queue wait timeout** override |
 | Dispatched but never started (daemon picked it up but didn't launch the AI tool) | **5 minutes** |
 | Running too long | **2.5 hours** |
 
-Both timeouts use failure reason `timeout` and **retry automatically** (next section). For the related runtime-missing check, see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+All three use failure reason `timeout` and **retry automatically** (next section). For the related runtime-missing check, see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+
+The queued timeout is the only one you can tune per agent: in the agent settings, **Queue wait timeout** overrides how long that agent's tasks may wait before a daemon picks them up. Leave it blank or `0` to keep using the system default. Once the task leaves `queued`, this setting no longer matters.
 
 ## Which failures retry automatically, which don't
 

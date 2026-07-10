@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -103,6 +104,18 @@ func TestNewMigrationPrefixesStartAfterLegacyRange(t *testing.T) {
 		}
 		if n <= maxLegacyMigrationPrefix && !isKnownLegacyPrefix(prefix) {
 			t.Errorf("migration prefix %s is in the frozen legacy range 001-%03d: %v; new migrations must start at %03d", prefix, maxLegacyMigrationPrefix, stems, maxLegacyMigrationPrefix+1)
+		}
+	}
+}
+
+func TestMigrationsAvoidUnsupportedIsFiniteOnDoublePrecision(t *testing.T) {
+	for _, file := range migrationFilesForLint(t, "*.sql") {
+		contents, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", file, err)
+		}
+		if strings.Contains(string(contents), "isfinite(") {
+			t.Errorf("migration %s uses isfinite(...), which is not portable for double precision in our Postgres environments", filepath.Base(file))
 		}
 	}
 }

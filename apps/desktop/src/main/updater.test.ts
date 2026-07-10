@@ -203,8 +203,18 @@ describe("setupAutoUpdater", () => {
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();
   });
 
-  it("persists the automatic update preference and stops future background checks", async () => {
+  it("persists the automatic update preference and stops future periodic background checks", async () => {
     setupAutoUpdater(() => null);
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Other tests cover the exact startup-check count. Here we only need to
+    // discard any already-scheduled startup work before verifying that
+    // disabling updates prevents future periodic checks.
+    ctx.checkForUpdates.mockClear();
 
     await expect(
       invokeIpc("updater:set-automatic-updates", false),
@@ -215,7 +225,7 @@ describe("setupAutoUpdater", () => {
       ),
     ).toEqual({ automaticUpdates: false });
 
-    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();
   });
 

@@ -286,6 +286,8 @@ function GrokLogo({ className }: { className: string }) {
 
 // Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
 // brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
+// Like the Antigravity PNG above, different bundlers type this asset import
+// differently. Normalize through unknown so desktop/web typecheck agree.
 const qwenLogoSrc: string = (() => {
   const asset = qwenLogo as unknown;
   return typeof asset === "string" ? asset : (asset as { src: string }).src;

@@ -35,17 +35,18 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RuntimeID     string          `json:"runtime_id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
-	Instructions  string          `json:"instructions"`
-	AvatarURL     *string         `json:"avatar_url"`
-	RuntimeMode   string          `json:"runtime_mode"`
-	RuntimeConfig any             `json:"runtime_config"`
-	CustomArgs    []string        `json:"custom_args"`
-	McpConfig     json.RawMessage `json:"mcp_config"`
+	ID               string          `json:"id"`
+	WorkspaceID      string          `json:"workspace_id"`
+	RuntimeID        string          `json:"runtime_id"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	Instructions     string          `json:"instructions"`
+	AvatarURL        *string         `json:"avatar_url"`
+	QueuedTTLSeconds *float64        `json:"queued_ttl_seconds"`
+	RuntimeMode      string          `json:"runtime_mode"`
+	RuntimeConfig    any             `json:"runtime_config"`
+	CustomArgs       []string        `json:"custom_args"`
+	McpConfig        json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -107,6 +108,14 @@ type AgentResponse struct {
 // handler restores the persisted token instead of overwriting it.
 const runtimeConfigGatewayTokenMask = "***"
 
+func float8ToPtr(v pgtype.Float8) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	value := v.Float64
+	return &value
+}
+
 func agentToResponse(a db.Agent) AgentResponse {
 	var rc any
 	if a.RuntimeConfig != nil {
@@ -163,6 +172,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Description:              a.Description,
 		Instructions:             a.Instructions,
 		AvatarURL:                textToPtr(a.AvatarUrl),
+		QueuedTTLSeconds:         float8ToPtr(a.QueuedTtlSeconds),
 		RuntimeMode:              a.RuntimeMode,
 		RuntimeConfig:            rc,
 		CustomArgs:               customArgs,
@@ -943,6 +953,7 @@ type CreateAgentRequest struct {
 	PermissionMode     *string                    `json:"permission_mode"`
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
+	QueuedTTLSeconds   float64                    `json:"queued_ttl_seconds"`
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
@@ -1115,6 +1126,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		allowlist = nil
 	}
 
+	queuedTTLSeconds := pgtype.Float8{}
+	if rawQueuedTTLSeconds, ok := rawFields["queued_ttl_seconds"]; ok && !bytes.Equal(bytes.TrimSpace(rawQueuedTTLSeconds), []byte("null")) {
+		if req.QueuedTTLSeconds < 0 {
+			writeError(w, http.StatusBadRequest, "queued_ttl_seconds must be 0 or greater")
+			return
+		}
+		if req.QueuedTTLSeconds > 0 {
+			queuedTTLSeconds = pgtype.Float8{Float64: req.QueuedTTLSeconds, Valid: true}
+		}
+	}
+
 	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
 	if !ok {
 		return
@@ -1157,6 +1179,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ComposioToolkitAllowlist: allowlist,
+		QueuedTtlSeconds:         queuedTTLSeconds,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1303,6 +1326,7 @@ type UpdateAgentRequest struct {
 	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             *string                     `json:"status"`
 	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
+	QueuedTTLSeconds   float64                     `json:"queued_ttl_seconds"`
 	Model              *string                     `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
@@ -1798,6 +1822,20 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	rawQueuedTTLSeconds, hasQueuedTTLSeconds := rawFields["queued_ttl_seconds"]
+	shouldClearQueuedTTLSeconds := hasQueuedTTLSeconds && bytes.Equal(bytes.TrimSpace(rawQueuedTTLSeconds), []byte("null"))
+	if hasQueuedTTLSeconds && !shouldClearQueuedTTLSeconds {
+		if req.QueuedTTLSeconds < 0 {
+			writeError(w, http.StatusBadRequest, "queued_ttl_seconds must be 0 or greater")
+			return
+		}
+		if req.QueuedTTLSeconds == 0 {
+			shouldClearQueuedTTLSeconds = true
+		} else {
+			params.QueuedTtlSeconds = pgtype.Float8{Float64: req.QueuedTTLSeconds, Valid: true}
+		}
+	}
+
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -1807,7 +1845,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
-	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
+	// mcp_config, thinking_level, service_tier, and queued_ttl_seconds use
+	// dedicated clear queries.
 	if shouldClearMcpConfig {
 		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
@@ -1837,6 +1876,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
+			return
+		}
+	}
+	if shouldClearQueuedTTLSeconds {
+		updated, err = h.Queries.ClearAgentQueuedTTLSeconds(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent queued_ttl_seconds failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear queued_ttl_seconds: "+err.Error())
 			return
 		}
 	}

@@ -25,6 +25,7 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { WaitTimeoutPicker } from "./inspector/wait-timeout-picker";
 
 interface InspectorProps {
   agent: Agent;
@@ -277,6 +278,16 @@ export function AgentDetailInspector({
               value={agent.max_concurrent_tasks}
               canEdit={canEdit}
               onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_wait_timeout)}
+            size="select-wide"
+          >
+            <WaitTimeoutPicker
+              valueSeconds={agent.queued_ttl_seconds}
+              canEdit={canEdit}
+              onChange={(seconds) => update({ queued_ttl_seconds: seconds })}
             />
           </SettingsRow>
         </SettingsCard>

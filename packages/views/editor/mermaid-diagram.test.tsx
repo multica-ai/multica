@@ -137,11 +137,21 @@ describe("MermaidDiagram theme changes", () => {
       const zoomed = currentScale();
       expect(zoomed).toBeGreaterThan(0.8);
 
+      // Hold the themed re-render open so this assertion no longer depends on the
+      // full suite finishing Mermaid's async work inside Vitest's 5s timeout.
+      let releaseRender!: (value: { svg: string }) => void;
+      mermaidRenderMock.mockImplementationOnce(
+        () =>
+          new Promise<{ svg: string }>((resolve) => {
+            releaseRender = resolve;
+          }),
+      );
+
       // Flip the theme the way the app does; the component observes documentElement
       // and re-renders the diagram with new theme colors.
       await act(async () => {
         document.documentElement.classList.add("dark");
-        // Let the MutationObserver callback and the async re-render settle.
+        // Let the MutationObserver callback enqueue the themed re-render.
         await Promise.resolve();
       });
 
@@ -152,6 +162,13 @@ describe("MermaidDiagram theme changes", () => {
       // The viewer previously unmounted here: the re-render cleared the rendered
       // document to null before the new one arrived, closing the dialog and
       // throwing away the user's zoom and position mid-read.
+      expect(screen.getByRole("application")).toBeInTheDocument();
+      expect(currentScale()).toBeCloseTo(zoomed, 5);
+
+      await act(async () => {
+        releaseRender({ svg: MOCK_SVG });
+      });
+
       expect(screen.getByRole("application")).toBeInTheDocument();
       expect(currentScale()).toBeCloseTo(zoomed, 5);
     },
