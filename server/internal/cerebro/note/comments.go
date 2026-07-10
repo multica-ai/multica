@@ -446,6 +446,12 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 		return errCannotApply("failed to apply suggestion")
 	}
 	h.snapshotVersion(ctx, noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", false)
+
+	// FIR-2810: credit the changed lines to the suggestion's author — accepting
+	// publishes THEIR words, so the line attribution should carry their name.
+	if updated.Body != artifact.Body {
+		h.advanceAndSaveLineAttrs(ctx, noteID, artifact.Body, updated.Body, uuidStr(c.AuthorID))
+	}
 	return nil
 }
 

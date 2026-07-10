@@ -577,6 +577,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance handler.
 	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool, bus)) // CEREBRO-PATCH(agent-office-notif-bus): FIR-1775 — bus drives change-request inbox notifications.
+	h.AgentContextDirectEdit = cerebroAgentOfficeHandler.Svc                                                      // CEREBRO-PATCH(agent-office-direct-edit-wire): FIR-1775 Phase 2 — direct UpdateAgent edits snapshot into version history.
 	cerebroModelRegistryHandler := wireCerebroModelRegistry(cerebroQueries, pool)                                 // CEREBRO-PATCH(cerebro-model-registry-routes): FIR-2698 model registry — startup table load + metrics hook + handler (cerebro_model_registry_routes.go).
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
@@ -1633,6 +1634,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// pending agent-context change requests + review action.
 				r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListPendingChangeRequests)
 				r.Post("/context/change-requests/{crId}/review", cerebroAgentOfficeHandler.ReviewChangeRequest)
+				// CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 —
+				// workspace-wide context lint sweep + repo CLAUDE.md/AGENTS.md drift lint.
+				r.Get("/context/lint", cerebroAgentOfficeHandler.LintWorkspace)
+				r.Post("/context/lint/repo-file", cerebroAgentOfficeHandler.LintRepoFile)
 				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
 				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
 				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill) // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
@@ -1657,6 +1662,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
 					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
 					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
+					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent) // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
@@ -2115,6 +2121,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroSprintsHandler.UpdateSprint)
 				r.Delete("/", cerebroSprintsHandler.DeleteSprint)
 				r.Get("/issues", cerebroSprintsHandler.ListSprintIssues)
+				r.Post("/complete", cerebroSprintsHandler.CompleteSprint) // CEREBRO-PATCH(cerebro-sprints-routes): FIR-2828 end-a-sprint action.
 			})
 			r.Route("/api/cerebro/issues/{issueID}/sprint", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)

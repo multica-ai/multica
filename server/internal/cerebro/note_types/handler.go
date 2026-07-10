@@ -50,6 +50,9 @@ type noteTypeRequest struct {
 	NumberingEnabled *bool           `json:"numbering_enabled"`
 	NextNumber       *int32          `json:"next_number"`
 	AnchorWeekday    json.RawMessage `json:"anchor_weekday,omitempty"`
+	// FIR-2810: when true, notes materialised from this type start with the
+	// "stamp the writer's member code on every line" toggle switched on.
+	AuthorCodes *bool `json:"author_codes"`
 }
 
 type noteTypeResponse struct {
@@ -67,6 +70,7 @@ type noteTypeResponse struct {
 	NumberingEnabled     bool    `json:"numbering_enabled"`
 	NextNumber           int32   `json:"next_number"`
 	AnchorWeekday        *int16  `json:"anchor_weekday"`
+	AuthorCodes          bool    `json:"author_codes"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`
 }
@@ -84,6 +88,7 @@ func toResponse(nt cerebrodb.CerebroNoteType) noteTypeResponse {
 		Enabled:          nt.Enabled,
 		NumberingEnabled: nt.NumberingEnabled,
 		NextNumber:       nt.NextNumber,
+		AuthorCodes:      nt.AuthorCodes,
 		CreatedAt:        tsString(nt.CreatedAt),
 		UpdatedAt:        tsString(nt.UpdatedAt),
 	}
@@ -186,6 +191,10 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	authorCodes := false
+	if req.AuthorCodes != nil {
+		authorCodes = *req.AuthorCodes
+	}
 
 	nt, err := h.Cerebro.CreateCerebroNoteType(r.Context(), cerebrodb.CreateCerebroNoteTypeParams{
 		WorkspaceID:      wsUUID,
@@ -201,6 +210,7 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 		NumberingEnabled: norm.numbering,
 		NextNumber:       norm.nextNumber,
 		AnchorWeekday:    norm.anchorWeekday,
+		AuthorCodes:      authorCodes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create note type failed")
@@ -255,6 +265,10 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	authorCodes := existing.AuthorCodes
+	if req.AuthorCodes != nil {
+		authorCodes = *req.AuthorCodes
+	}
 
 	nt, err := h.Cerebro.UpdateCerebroNoteType(r.Context(), cerebrodb.UpdateCerebroNoteTypeParams{
 		ID:               id,
@@ -269,6 +283,7 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		NumberingEnabled: norm.numbering,
 		NextNumber:       norm.nextNumber,
 		AnchorWeekday:    norm.anchorWeekday,
+		AuthorCodes:      authorCodes,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update note type failed")

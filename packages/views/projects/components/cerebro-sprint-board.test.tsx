@@ -45,6 +45,13 @@ vi.mock("./project-detail", () => ({
   ProjectIssuesSurface: () => <div data-testid="issues-surface" />,
 }));
 
+// CEREBRO-PATCH(sprint-sidebar): FIR-2828 the sidebar is exercised by its own
+// tests — stub it here so this header test doesn't need to mock every hook
+// (useUpdateSprint/useDeleteSprint/CompleteSprintDialog) it pulls in.
+vi.mock("./cerebro-sprint-sidebar", () => ({
+  SprintSidebar: () => <div data-testid="sprint-sidebar" />,
+}));
+
 function makeAdapter(): NavigationAdapter {
   return {
     push: vi.fn(),

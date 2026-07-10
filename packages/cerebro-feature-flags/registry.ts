@@ -236,6 +236,8 @@ export type CerebroFlagKey =
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
+  // FIR-2810: per-line note attribution (see who wrote/edited every line) + the per-note "stamp my member code on each line" toggle.
+  | "cerebro_note_line_authors"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-1673: recover a stalled/half-loaded image on the document page — loading
@@ -622,6 +624,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
+  // FIR-2810: ON by default. Line authors is opt-in per note (a toggle in the
+  // note's ⋯ menu), so the flag only controls whether the toggles exist.
+  cerebro_note_line_authors: true,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -1480,6 +1485,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+  },
+  {
+    key: "cerebro_note_line_authors",
+    label: "Note line authors",
+    group: "workspace",
+    description:
+      "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
   },
   {
     key: "cerebro_skill_folders",

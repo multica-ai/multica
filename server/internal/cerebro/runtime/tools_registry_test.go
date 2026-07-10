@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -23,9 +25,6 @@ func TestMulticaMCPToolMatrixMatchesInventory(t *testing.T) {
 	}
 
 	meta := MulticaMCPToolMatrix()
-	if len(meta) != len(inventory.MCP) {
-		t.Fatalf("tool matrix count = %d, inventory count = %d", len(meta), len(inventory.MCP))
-	}
 	seen := map[string]ToolMeta{}
 	for _, item := range meta {
 		if item.Name == "" {
@@ -42,10 +41,15 @@ func TestMulticaMCPToolMatrixMatchesInventory(t *testing.T) {
 		}
 		seen[item.Name] = item
 	}
+	missing := []string{}
 	for _, item := range inventory.MCP {
 		if _, ok := seen[item.ID]; !ok {
-			t.Fatalf("inventory tool %q missing from tool matrix", item.ID)
+			missing = append(missing, item.ID)
 		}
+	}
+	if len(meta) != len(inventory.MCP) || len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("tool matrix count = %d, inventory count = %d, missing inventory tools = %s", len(meta), len(inventory.MCP), strings.Join(missing, ", "))
 	}
 }
 

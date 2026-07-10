@@ -144,6 +144,20 @@ export function useSetNotePin() {
   });
 }
 
+// FIR-2810: per-note "author codes" toggle — when on, the editor stamps the
+// writer's member code (e.g. "JEH") on every line they write.
+export function useSetNoteAuthorCodes() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, authorCodes }: { id: string; authorCodes: boolean }) =>
+      api.setNoteAuthorCodes(id, authorCodes),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: noteKeys.all(wsId) });
+    },
+  });
+}
+
 // useSetNoteFolder moves a note into a folder (or out of all folders when
 // folderId is null). A note is an artifact under the hood, so this reuses the
 // shared artifact folder-move endpoint; we just invalidate the notes list so

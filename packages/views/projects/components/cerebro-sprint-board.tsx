@@ -24,6 +24,8 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProjectIssuesSurface } from "./project-detail";
+// CEREBRO-PATCH(sprint-sidebar): FIR-2828 wire in the sprint completion sidebar.
+import { SprintSidebar } from "./cerebro-sprint-sidebar";
 // CEREBRO-PATCH(sprint-header-breadcrumb): FIR-2817 reuse the same header chrome as the project page.
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 
@@ -96,18 +98,22 @@ export function SprintBoard({ sprintId }: { sprintId: string }) {
           </div>
         }
       />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <ViewStoreProvider store={sprintViewStore}>
-          {/* key forces a fresh seed when navigating between sprints. */}
-          <ProjectIssuesSurface
-            key={sprintId}
-            projectId={projectId}
-            scope={`project:${projectId}`}
-            filter={projectFilter}
-            initialSprintId={sprintId}
-            lockSprint
-          />
-        </ViewStoreProvider>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <ViewStoreProvider store={sprintViewStore}>
+            {/* key forces a fresh seed when navigating between sprints. */}
+            <ProjectIssuesSurface
+              key={sprintId}
+              projectId={projectId}
+              scope={`project:${projectId}`}
+              filter={projectFilter}
+              initialSprintId={sprintId}
+              lockSprint
+            />
+          </ViewStoreProvider>
+        </div>
+        {/* CEREBRO-PATCH(sprint-sidebar): FIR-2828 wire in the sprint completion sidebar. */}
+        <SprintSidebar workspaceId={wsId} projectId={projectId} sprint={sprint} />
       </div>
     </div>
   );

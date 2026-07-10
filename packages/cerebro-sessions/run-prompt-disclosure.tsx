@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, MessageSquareText } from "lucide-react";
 import type { AgentTask } from "@multica/core/types/agent";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { safeTaskText } from "./task-transcript-safety";
 
 // FIR-1839 point 5: the Agent Runs transcript modal showed the agent's event
 // timeline (thinking / tools / results) but NEVER the initial prompt that kicked
@@ -20,7 +21,7 @@ export function RunPromptDisclosure({ task }: { task: AgentTask }) {
   const enabled = useFeatureFlag("cerebro_comment_chapters");
   const [open, setOpen] = useState(false);
 
-  const prompt = (task.trigger_summary || task.title || "").trim();
+  const prompt = safeTaskText(task.trigger_summary) || safeTaskText(task.title);
   if (!enabled || !prompt) return null;
 
   return (
