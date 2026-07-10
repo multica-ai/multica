@@ -741,8 +741,11 @@ func TestCommentReplyThreadsGrouping(t *testing.T) {
 		if got["thread-A"] != "c3" {
 			t.Errorf("trigger thread parent = %q, want c3 (the trigger comment)", got["thread-A"])
 		}
-		if got["thread-B"] != "thread-B" {
-			t.Errorf("other thread parent = %q, want its root thread-B", got["thread-B"])
+		// The other thread replies under the specific comment that mentioned the
+		// agent (a mid-thread reply), not the thread root — fixes the placement
+		// asymmetry from the first cut.
+		if got["thread-B"] != "c2" {
+			t.Errorf("other thread parent = %q, want c2 (the specific mentioning comment)", got["thread-B"])
 		}
 	})
 
@@ -750,6 +753,30 @@ func TestCommentReplyThreadsGrouping(t *testing.T) {
 		task := Task{TriggerCommentID: "c1", TriggerThreadID: "thread-A"}
 		if targets := commentReplyThreads(task); targets != nil {
 			t.Fatalf("ordinary single-comment run must not fan out; got %+v", targets)
+		}
+	})
+
+	t.Run("non-trigger thread replies under its newest mention, not root", func(t *testing.T) {
+		// Two mid-thread mentions in thread-B (oldest c1, newer c2); the reply
+		// should target the newest specific comment (c2), not the root thread-B.
+		task := Task{
+			TriggerCommentID: "c9",
+			TriggerThreadID:  "thread-A",
+			CoalescedComments: []CoalescedCommentData{
+				{ID: "c1", ThreadID: "thread-B", Content: "older mention", CreatedAt: "2026-07-10T01:00:00Z"},
+				{ID: "c2", ThreadID: "thread-B", Content: "newer mention", CreatedAt: "2026-07-10T02:00:00Z"},
+			},
+		}
+		targets := commentReplyThreads(task)
+		got := map[string]string{}
+		for _, tgt := range targets {
+			got[tgt.ThreadID] = tgt.ParentID
+		}
+		if got["thread-B"] != "c2" {
+			t.Errorf("thread-B parent = %q, want newest mention c2 (not root)", got["thread-B"])
+		}
+		if got["thread-A"] != "c9" {
+			t.Errorf("trigger thread parent = %q, want trigger c9", got["thread-A"])
 		}
 	})
 }
