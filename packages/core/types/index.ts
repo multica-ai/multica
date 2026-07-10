@@ -5,6 +5,7 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentPermissionMode,
+  AgentAvailabilityMode,
   AgentInvocationTarget,
   AgentInvocationTargetInput,
   AgentTask,

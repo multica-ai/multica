@@ -23,6 +23,7 @@ import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 
 interface ReplyInputProps {
   issueId: string;
+  spaceId: string | null;
   parentId: string;
   placeholder?: string;
   avatarType: string;
@@ -43,6 +44,7 @@ interface ReplyInputProps {
 
 function ReplyInput({
   issueId,
+  spaceId,
   parentId,
   placeholder,
   avatarType,
@@ -207,6 +209,7 @@ function ReplyInput({
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}
+            targetSpaceId={spaceId}
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"

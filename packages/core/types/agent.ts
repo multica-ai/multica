@@ -26,6 +26,16 @@ export type AgentVisibility = "workspace" | "private";
 export type AgentPermissionMode = "private" | "public_to";
 
 /**
+ * Product-facing Agent Availability. This controls where an Agent may be
+ * discovered and invoked; it is independent from the Agent's future Work
+ * access to Space data, integrations, and resources.
+ */
+export type AgentAvailabilityMode =
+  | "private"
+  | "selected_spaces"
+  | "workspace";
+
+/**
  * A single invocation grant on an agent. `target_id` is `null` for the
  * workspace target (the grant covers every workspace member); it carries the
  * member / team id for the scoped grants.
@@ -428,6 +438,14 @@ export interface Agent {
    * private agent). See `AgentInvocationTarget`.
    */
   invocation_targets: AgentInvocationTarget[];
+  /**
+   * Product-facing Availability mode. Optional for compatibility with older
+   * self-hosted servers; consumers should derive private/workspace from the
+   * invocation permission when it is absent.
+   */
+  availability_mode?: AgentAvailabilityMode;
+  /** Space IDs used only by `availability_mode === "selected_spaces"`. */
+  availability_space_ids?: string[];
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
@@ -485,6 +503,8 @@ export interface CreateAgentRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  availability_mode?: AgentAvailabilityMode;
+  availability_space_ids?: string[];
   max_concurrent_tasks?: number;
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
@@ -553,6 +573,8 @@ export interface CreateAgentFromTemplateRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  availability_mode?: AgentAvailabilityMode;
+  availability_space_ids?: string[];
   max_concurrent_tasks?: number;
   /** Optional overrides applied to the template before creation. nil/omit
    *  uses the template's own value. */
@@ -631,6 +653,8 @@ export interface UpdateAgentRequest {
   permission_mode?: AgentPermissionMode;
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
+  availability_mode?: AgentAvailabilityMode;
+  availability_space_ids?: string[];
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;

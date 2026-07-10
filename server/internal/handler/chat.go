@@ -77,7 +77,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	// invoke permission (MUL-3963), not the softer view gate. Agent-to-agent
 	// chat sessions are judged by the top-of-chain originator.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID, pgtype.UUID{}) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
@@ -657,27 +657,21 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canInvokeAgent(
+		r.Context(), agent, actorType, actorID,
+		h.invokeOriginatorFromRequest(r, actorType, actorID),
+		workspaceID, pgtype.UUID{},
+	) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
 	if agent.ArchivedAt.Valid {
 		writeError(w, http.StatusConflict, "chat agent is archived")
 		return
 	}
 	if !agent.RuntimeID.Valid {
 		writeError(w, http.StatusConflict, "chat agent has no runtime")
-		return
-	}
-
-	// Re-run the INVOKE gate on every send, not just the softer view gate in
-	// gateChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
-	// admin keep reading a transcript, but sending a message enqueues a run and
-	// must satisfy canInvokeAgent — which has no admin bypass. A session created
-	// while the user could invoke the agent must stop enqueuing work the instant
-	// that permission is revoked (agent flipped private, ownership moved, target
-	// removed from the allow-list), and it must fail BEFORE we persist the user
-	// message / attachments / task. Blocked returns a structured, enumeration-safe
-	// reason so the composer can explain it without leaking private-agent details.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
-		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
 

@@ -50,6 +50,17 @@ type Agent struct {
 	PermissionMode string      `json:"permission_mode"`
 	Kind           string      `json:"kind"`
 	SystemKey      pgtype.Text `json:"system_key"`
+	// Location availability gate. private = owner only in any active Space they can use; selected_spaces = only rows in agent_available_space; workspace = every active Space. Independent of invocation audience and grants no data access.
+	AvailabilityMode string `json:"availability_mode"`
+}
+
+// Selected-Space location grants for agents with availability_mode=selected_spaces. These rows only permit invocation in a Space context; they grant no read/write access to Space data, integrations, or resources.
+type AgentAvailableSpace struct {
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).

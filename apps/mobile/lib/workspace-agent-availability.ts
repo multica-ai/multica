@@ -35,7 +35,7 @@ export function useWorkspaceAgentAvailability(): WorkspaceAgentAvailability {
   const memberRole = members?.find((m) => m.user_id === userId)?.role;
 
   const hasVisibleAgent = (agents ?? []).some(
-    (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+    (a) => !a.archived_at && canAssignAgent(a, userId, memberRole, null),
   );
 
   return hasVisibleAgent ? "available" : "none";

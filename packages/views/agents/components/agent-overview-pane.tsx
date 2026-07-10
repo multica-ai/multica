@@ -6,6 +6,7 @@ import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
+  Space,
 } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -122,6 +123,7 @@ interface AgentOverviewPaneProps {
   owner: MemberWithUser | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
+  spaces: Space[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
   canEdit: boolean;
@@ -142,6 +144,7 @@ export function AgentOverviewPane({
   owner,
   runtimes,
   members,
+  spaces,
   onUpdate,
   currentUserId,
   canEdit,
@@ -434,6 +437,7 @@ export function AgentOverviewPane({
                       runtime={runtime}
                       runtimes={runtimes}
                       members={members}
+                      spaces={spaces}
                       currentUserId={currentUserId ?? null}
                       canEdit={canEdit}
                       onUpdate={onUpdate}

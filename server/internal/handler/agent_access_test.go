@@ -23,8 +23,9 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
 	agent := db.Agent{
-		OwnerID:        util.MustParseUUID(ownerUserID),
-		PermissionMode: "private",
+		OwnerID:          util.MustParseUUID(ownerUserID),
+		PermissionMode:   "private",
+		AvailabilityMode: agentAvailabilityPrivate,
 	}
 
 	cases := []struct {
@@ -42,7 +43,7 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := memberAllowedToViewAgent(agent, nil, tc.userID, tc.role)
+			got := memberAllowedToViewAgent(agent, nil, nil, nil, tc.userID, tc.role)
 			if got != tc.want {
 				t.Fatalf("memberAllowedToViewAgent(userID=%s, role=%s) = %v; want %v",
 					tc.userID, tc.role, got, tc.want)

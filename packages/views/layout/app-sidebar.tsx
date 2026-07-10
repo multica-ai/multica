@@ -127,7 +127,6 @@ type NavKey =
   | "inbox"
   | "chat"
   | "myIssues"
-  | "projects"
   | "autopilots"
   | "agents"
   | "squads"
@@ -161,14 +160,13 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
   { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
-// The workspace-wide issues list left the nav with the space rollout: issues
-// live under their space (Spaces section below) or under My Issues. Space
-// management lives on each space's detail page (the /spaces overview was cut
-// from v1). Autopilots are space-scoped like issues (space_id NOT NULL,
-// their output lands in their space), so they live under each space below —
-// no global entry, same rationale as the removed workspace-wide Issues.
+// The workspace-wide issue and project lists left the nav with the space
+// rollout: both live under their space (Spaces section below), while a user's
+// cross-space work remains available under My Issues. Space management lives
+// on each space's detail page (the /spaces overview was cut from v1).
+// Autopilots are also space-scoped (space_id NOT NULL, their output lands in
+// their space), so they live under each space below.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
 ];

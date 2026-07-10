@@ -104,6 +104,58 @@ export function AgentCreatePanel({
     [members, userId],
   );
 
+  const lastActorType = useQuickCreateStore((s) => s.lastActorType);
+  const lastActorId = useQuickCreateStore((s) => s.lastActorId);
+  const setLastActor = useQuickCreateStore((s) => s.setLastActor);
+  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
+  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
+  const promptDraft = useQuickCreateStore((s) => s.prompt);
+  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
+  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
+  const keepOpen = useQuickCreateStore((s) => s.keepOpen);
+  const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const setLastMode = useCreateModeStore((s) => s.setLastMode);
+
+  // Project selection — defaults to the last project the user picked in this
+  // workspace. `data?.project_id` lets the modal opener seed a one-shot
+  // override (e.g. a future "+ Issue" button on a project page); it does NOT
+  // replace the persisted default.
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    return seed ?? null;
+  });
+  const [spaceId, setSpaceId] = useState<string | null>(
+    (data?.space_id as string | undefined) ?? null,
+  );
+
+  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
+  // opened from the "Add sub issue" entry on an existing issue. We carry it
+  // through (not as an editable form field) so a manual→agent flip preserves
+  // the sub-issue intent; the agent panel never exposes this as a picker.
+  // Identifier is best-effort display context only — the UUID is the
+  // authoritative reference the backend/agent uses for `--parent <uuid>`.
+  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
+  const parentIssueIdentifier =
+    (data?.parent_issue_identifier as string | undefined) ?? undefined;
+
+  // Every Issue belongs to one Space. Parent or Project ownership is
+  // authoritative; standalone creation falls back to the workspace default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const { data: parentIssue } = useQuery({
+    ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  const projectSpaceId = selectedProject?.space_id;
+  const effectiveSpaceId =
+    spaceId ??
+    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId }) ??
+    null;
+
   // Visible = not archived AND assignable by this user. Squads inherit
   // their leader agent's reachability: the backend always routes a squad
   // pick to the leader, so hiding squads whose leader isn't visible keeps
@@ -111,9 +163,11 @@ export function AgentCreatePanel({
   const visibleAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) =>
+          !a.archived_at &&
+          canAssignAgent(a, userId, memberRole, effectiveSpaceId),
       ),
-    [agents, userId, memberRole],
+    [agents, userId, memberRole, effectiveSpaceId],
   );
   const visibleAgentIds = useMemo(
     () => new Set(visibleAgents.map((a) => a.id)),
@@ -126,18 +180,6 @@ export function AgentCreatePanel({
       ),
     [squads, visibleAgentIds],
   );
-
-  const lastActorType = useQuickCreateStore((s) => s.lastActorType);
-  const lastActorId = useQuickCreateStore((s) => s.lastActorId);
-  const setLastActor = useQuickCreateStore((s) => s.setLastActor);
-  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
-  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
-  const promptDraft = useQuickCreateStore((s) => s.prompt);
-  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
-  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
-  const keepOpen = useQuickCreateStore((s) => s.keepOpen);
-  const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
-  const setLastMode = useCreateModeStore((s) => s.setLastMode);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -195,46 +237,6 @@ export function AgentCreatePanel({
     if (actor?.type !== "squad") return undefined;
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
-
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
-  // replace the persisted default.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
-    return seed ?? null;
-  });
-  const [spaceId, setSpaceId] = useState<string | null>(
-    (data?.space_id as string | undefined) ?? null,
-  );
-
-  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
-  // opened from the "Add sub issue" entry on an existing issue. We carry it
-  // through (not as an editable form field) so a manual→agent flip preserves
-  // the sub-issue intent; the agent panel never exposes this as a picker.
-  // Identifier is best-effort display context only — the UUID is the
-  // authoritative reference the backend/agent uses for `--parent <uuid>`.
-  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
-  const parentIssueIdentifier =
-    (data?.parent_issue_identifier as string | undefined) ?? undefined;
-
-  // Every Issue belongs to one Space. Parent or Project ownership is
-  // authoritative; standalone creation falls back to the workspace default.
-  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
-  const { data: parentIssue } = useQuery({
-    ...issueDetailOptions(wsId, parentIssueId ?? ""),
-    enabled: !!parentIssueId,
-  });
-  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === projectId) ?? null,
-    [projects, projectId],
-  );
-  const projectSpaceId = selectedProject?.space_id;
-  const effectiveSpaceId =
-    spaceId ??
-    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId }) ??
-    null;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -528,6 +530,7 @@ export function AgentCreatePanel({
             }}
             onUploadFile={handleUploadFile}
             attachments={pendingAttachments}
+            targetSpaceId={effectiveSpaceId}
             onSubmit={submit}
             debounceMs={150}
           />

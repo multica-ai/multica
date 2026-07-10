@@ -155,7 +155,9 @@ func createInviteeUser(t *testing.T, email string) string {
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO "user" (name, email) VALUES ('Invitee', $1) RETURNING id
+		INSERT INTO "user" (name, email) VALUES ('Invitee', $1)
+		ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id
 	`, email).Scan(&id); err != nil {
 		t.Fatalf("create invitee user: %v", err)
 	}

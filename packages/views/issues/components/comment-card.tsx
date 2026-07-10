@@ -87,6 +87,7 @@ function StickyHeaderShell({
 
 interface CommentCardProps {
   issueId: string;
+  spaceId: string | null;
   entry: TimelineEntry;
   /**
    * Flat list of every nested reply under this thread root, in render order.
@@ -483,6 +484,7 @@ function useEditAttachmentState(
 
 function CommentRow({
   issueId,
+  spaceId,
   entry,
   currentUserId,
   canModerate = false,
@@ -494,6 +496,7 @@ function CommentRow({
   onResolveToggle,
 }: {
   issueId: string;
+  spaceId: string | null;
   entry: TimelineEntry;
   currentUserId?: string;
   canModerate?: boolean;
@@ -635,6 +638,7 @@ function CommentRow({
               onUploadFile={edit.handleUpload}
               debounceMs={100}
               currentIssueId={issueId}
+              targetSpaceId={spaceId}
               attachments={edit.editorAttachments}
             />
           </div>
@@ -708,6 +712,7 @@ function CommentRow({
 
 function CommentCardImpl({
   issueId,
+  spaceId,
   entry,
   replies,
   currentUserId,
@@ -936,6 +941,7 @@ function CommentCardImpl({
                     onUploadFile={edit.handleUpload}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    targetSpaceId={spaceId}
                     attachments={edit.editorAttachments}
                   />
                 </div>
@@ -1029,6 +1035,7 @@ function CommentCardImpl({
                 >
                   <CommentRow
                     issueId={issueId}
+                    spaceId={spaceId}
                     entry={resolutionReply}
                     currentUserId={currentUserId}
                     canModerate={canModerate}
@@ -1068,6 +1075,7 @@ function CommentCardImpl({
                 >
                   <CommentRow
                     issueId={issueId}
+                    spaceId={spaceId}
                     entry={reply}
                     currentUserId={currentUserId}
                     canModerate={canModerate}
@@ -1085,6 +1093,7 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 py-2.5">
                 <ReplyInput
                   issueId={issueId}
+                  spaceId={spaceId}
                   parentId={entry.id}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"

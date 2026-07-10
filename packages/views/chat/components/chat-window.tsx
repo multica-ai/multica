@@ -221,7 +221,7 @@ export function ChatWindow() {
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
   const availableAgents = agents.filter(
-    (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
+    (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole, null),
   );
 
   // The agent bound to the OPEN session, resolved from the full agent list

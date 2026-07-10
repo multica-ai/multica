@@ -436,6 +436,7 @@ export function ChatInput({
             debounceMs={100}
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
+            targetSpaceId={null}
             enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.

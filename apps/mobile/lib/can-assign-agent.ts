@@ -7,9 +7,10 @@
  * `import type` from @multica/core; logic is duplicated to keep mobile
  * independent. Any rule change must be applied here too.
  *
- * Rule (mirrors backend `server/internal/handler/issue.go:1471-1490`):
- *   - Workspace-visibility agents → assignable by any workspace member
- *   - Private agents               → only owner + workspace admins/owners
+ * Availability is a location gate layered on top of the existing invocation
+ * rule. `undefined` preserves the legacy no-location call-site behaviour;
+ * `null` is an explicitly context-free surface (for example Chat), where a
+ * Selected-Spaces Agent is unavailable.
  *
  * Used by the chat agent picker to filter "agents I can talk to" and by
  * NoAgentBanner to detect the all-zero state.
@@ -22,8 +23,18 @@ export function canAssignAgent(
   agent: Agent,
   userId: string | undefined | null,
   memberRole: MemberRoleLike,
+  spaceId?: string | null,
 ): boolean {
   if (!userId) return false;
+
+  if (
+    agent.availability_mode === "selected_spaces" &&
+    spaceId !== undefined &&
+    (spaceId === null ||
+      !(agent.availability_space_ids ?? []).includes(spaceId))
+  ) {
+    return false;
+  }
 
   const role: MemberRoleLike =
     memberRole === "owner" || memberRole === "admin" || memberRole === "member"

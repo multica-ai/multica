@@ -69,6 +69,8 @@ function fakeQc(data: {
       target_type: "workspace" | "member" | "team";
       target_id: string | null;
     }>;
+    availability_mode?: "private" | "selected_spaces" | "workspace";
+    availability_space_ids?: string[];
   }>;
   squads?: Array<{
     id: string;
@@ -414,6 +416,40 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
+  });
+
+  it("filters Agent mentions by the editor's live target Space", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        {
+          id: "a-selected",
+          name: "Aegis",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: "u1",
+          availability_mode: "selected_spaces",
+          availability_space_ids: ["space-eng"],
+        },
+      ],
+    });
+    let targetSpaceId = "space-eng";
+    const config = createMentionSuggestion(qc, {
+      getTargetSpaceId: () => targetSpaceId,
+    });
+
+    expect(
+      (config.items!(itemArgs("a")) as MentionItem[]).some(
+        (item) => item.id === "a-selected",
+      ),
+    ).toBe(true);
+
+    targetSpaceId = "space-design";
+    expect(
+      (config.items!(itemArgs("a")) as MentionItem[]).some(
+        (item) => item.id === "a-selected",
+      ),
+    ).toBe(false);
   });
 
   it("includes cached issues in the synchronous response", () => {

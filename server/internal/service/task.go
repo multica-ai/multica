@@ -965,6 +965,13 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		slog.Debug("task enqueue skipped: agent is not available in issue Space",
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(agent.ID),
+			"space_id", util.UUIDToString(issue.SpaceID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in issue Space")
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1082,6 +1089,13 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		slog.Debug("mention task enqueue skipped: agent is not available in issue Space",
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(agentID),
+			"space_id", util.UUIDToString(issue.SpaceID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in issue Space")
 	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
@@ -1272,6 +1286,30 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if workspaceID != agent.WorkspaceID {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent does not belong to this workspace")
+	}
+	if !MemberCanInvokeAgent(ctx, s.Queries, agent, workspaceID, requesterID) {
+		return db.AgentTaskQueue{}, fmt.Errorf("requester cannot invoke agent")
+	}
+	if spaceID.Valid {
+		if !AgentAvailableInSpace(ctx, s.Queries, agent, workspaceID, spaceID) {
+			return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in target Space")
+		}
+	} else {
+		// A context-free quick-create entry point (for example an external
+		// channel command) must not silently treat Selected Spaces as the
+		// default Space. Private remains owner-only; Workspace is the only
+		// shared mode that is meaningful without a concrete target.
+		switch agent.AvailabilityMode {
+		case "private":
+		case "workspace":
+		case "selected_spaces":
+			return db.AgentTaskQueue{}, fmt.Errorf("selected-Spaces agent requires a target Space")
+		default:
+			return db.AgentTaskQueue{}, fmt.Errorf("agent has an unknown Availability mode")
+		}
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -1380,6 +1418,11 @@ var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 // path returns a task row, not this error.
 var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 
+// ErrChatTaskAgentUnavailable signals that a context-free chat attempted to
+// invoke an agent whose Availability requires a concrete Space, or a private
+// agent on behalf of someone other than its owner.
+var ErrChatTaskAgentUnavailable = errors.New("chat task: agent is unavailable without a target Space")
+
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
 //
@@ -1415,6 +1458,21 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	}
+	if chatSession.WorkspaceID != agent.WorkspaceID {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
+	}
+	if !MemberCanInvokeAgent(ctx, s.Queries, agent, chatSession.WorkspaceID, initiatorUserID) {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
+	}
+	switch agent.AvailabilityMode {
+	case "private":
+	case "workspace":
+		// Context-free chat is defined only for Workspace availability.
+	case "selected_spaces":
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
+	default:
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
 	}
 
 	// The chat sender (initiator) is the direct_human originator and accountable.
@@ -2417,18 +2475,61 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
-	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, runtimeID)
+	tasks, err := s.Queries.ListDueDeferredTasksForRuntime(ctx, runtimeID)
 	if err != nil {
-		return fmt.Errorf("promote due deferred tasks: %w", err)
+		return fmt.Errorf("list due deferred tasks: %w", err)
 	}
 	for _, task := range tasks {
+		originatorUserID := task.OriginatorUserID
+		if !originatorUserID.Valid && task.EscalationForTaskID.Valid {
+			primary, primaryErr := s.Queries.GetAgentTask(ctx, task.EscalationForTaskID)
+			if primaryErr == nil {
+				originatorUserID = primary.OriginatorUserID
+			}
+		}
+
+		agent, agentErr := s.Queries.GetAgent(ctx, task.AgentID)
+		allowed := agentErr == nil &&
+			!agent.ArchivedAt.Valid &&
+			agent.RuntimeID.Valid &&
+			s.issueTaskStillAllowed(ctx, task, agent, originatorUserID)
+		if !allowed {
+			cancelled, cancelErr := s.Queries.CancelDueDeferredTask(ctx, db.CancelDueDeferredTaskParams{
+				TaskID:    task.ID,
+				RuntimeID: runtimeID,
+			})
+			if errors.Is(cancelErr, pgx.ErrNoRows) {
+				continue
+			}
+			if cancelErr != nil {
+				return fmt.Errorf("cancel revoked deferred task %s: %w", util.UUIDToString(task.ID), cancelErr)
+			}
+			slog.Info("deferred fallback task cancelled",
+				"task_id", util.UUIDToString(cancelled.ID),
+				"runtime_id", util.UUIDToString(runtimeID),
+				"agent_id", util.UUIDToString(cancelled.AgentID),
+				"reason", "agent_access_revoked",
+			)
+			continue
+		}
+
+		promoted, promoteErr := s.Queries.PromoteDueDeferredTask(ctx, db.PromoteDueDeferredTaskParams{
+			TaskID:    task.ID,
+			RuntimeID: runtimeID,
+		})
+		if errors.Is(promoteErr, pgx.ErrNoRows) {
+			continue
+		}
+		if promoteErr != nil {
+			return fmt.Errorf("promote due deferred task %s: %w", util.UUIDToString(task.ID), promoteErr)
+		}
 		slog.Info("deferred fallback task promoted",
-			"task_id", util.UUIDToString(task.ID),
+			"task_id", util.UUIDToString(promoted.ID),
 			"runtime_id", util.UUIDToString(runtimeID),
-			"agent_id", util.UUIDToString(task.AgentID),
+			"agent_id", util.UUIDToString(promoted.AgentID),
 		)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-		s.NotifyTaskEnqueued(ctx, task)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, promoted)
+		s.NotifyTaskEnqueued(ctx, promoted)
 	}
 	return nil
 }
@@ -2873,7 +2974,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligible(failureReason, parent) && s.retryStillAllowed(ctx, parent) {
 			wantRetry = true
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
@@ -3065,6 +3166,53 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 
+// retryStillAllowed rechecks the current Availability location before a
+// failed attempt creates a new queued attempt. A retry inherits execution
+// context, but it is still a new run and must not outlive a Space revocation.
+func (s *TaskService) retryStillAllowed(ctx context.Context, parent db.AgentTaskQueue) bool {
+	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
+	if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return false
+	}
+	if parent.IssueID.Valid {
+		return s.issueTaskStillAllowed(ctx, parent, agent, parent.OriginatorUserID)
+	}
+	if parent.ChatSessionID.Valid {
+		session, err := s.Queries.GetChatSession(ctx, parent.ChatSessionID)
+		if err != nil || session.WorkspaceID != agent.WorkspaceID {
+			return false
+		}
+		if !parent.OriginatorUserID.Valid ||
+			!MemberCanInvokeAgent(ctx, s.Queries, agent, session.WorkspaceID, parent.OriginatorUserID) {
+			return false
+		}
+		return agent.AvailabilityMode == "private" || agent.AvailabilityMode == "workspace"
+	}
+	return false
+}
+
+// issueTaskStillAllowed applies the two independent gates every issue-backed
+// task needs at a delayed execution boundary: Availability decides whether the
+// Agent may run in the issue's current Space, while invocation audience decides
+// whether the original human may still invoke it. The owner shortcut inside
+// MemberCanInvokeAgent deliberately keeps a private owner's own task valid.
+func (s *TaskService) issueTaskStillAllowed(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	agent db.Agent,
+	originatorUserID pgtype.UUID,
+) bool {
+	if !task.IssueID.Valid || !originatorUserID.Valid {
+		return false
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return false
+	}
+	return AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) &&
+		MemberCanInvokeAgent(ctx, s.Queries, agent, issue.WorkspaceID, originatorUserID)
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -3098,6 +3246,9 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
 	if !retryEligible(reason, parent) {
+		return nil, nil
+	}
+	if !s.retryStillAllowed(ctx, parent) {
 		return nil, nil
 	}
 

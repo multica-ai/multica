@@ -12,6 +12,7 @@ type Reason =
   | "not_resource_owner"
   | "last_owner"
   | "private_visibility"
+  | "agent_unavailable_in_space"
   | "unknown";
 
 const RESOURCE_NOUN: Record<Resource, string> = {
@@ -83,6 +84,8 @@ function getCopy(reason: Reason, noun: string, ownerName?: string): string {
         return `Personal ${noun} — only ${ownerName} and workspace admins can use this.`;
       }
       return `Personal ${noun} — only the owner and workspace admins can use this.`;
+    case "agent_unavailable_in_space":
+      return `This ${noun} is not available in the current Space.`;
     case "allowed":
     case "unknown":
       return ""; // unreachable; component returned null above

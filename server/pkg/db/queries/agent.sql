@@ -21,13 +21,14 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, availability_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    COALESCE(sqlc.narg('availability_mode'), 'private')
 )
 RETURNING *;
 
@@ -54,6 +55,18 @@ RETURNING *;
 DELETE FROM agent
 WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
 
+-- name: UpdateAgentAvailability :one
+-- Dedicated to the owner-facing Availability control. The handler runs this
+-- together with both relation replacements in one transaction so a mode flip
+-- can never land without its matching invocation audience / selected Spaces.
+UPDATE agent SET
+    availability_mode = $2,
+    permission_mode = $3,
+    visibility = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
 -- for normalising the request payload to either (a) the new slug list — sent
@@ -70,6 +83,7 @@ UPDATE agent SET
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
+    availability_mode = COALESCE(sqlc.narg('availability_mode'), availability_mode),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
@@ -1025,10 +1039,33 @@ SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
 
--- name: PromoteDueDeferredTasksForRuntime :many
+-- name: ListDueDeferredTasksForRuntime :many
+-- Promotion is intentionally split into a read plus per-row CAS. The service
+-- must re-evaluate the latest Agent Availability and invocation audience before
+-- a delayed fallback becomes runnable.
+SELECT * FROM agent_task_queue
+WHERE runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+ORDER BY fire_at ASC, created_at ASC;
+
+-- name: PromoteDueDeferredTask :one
 UPDATE agent_task_queue
 SET status = 'queued'
-WHERE runtime_id = @runtime_id
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+RETURNING *;
+
+-- name: CancelDueDeferredTask :one
+-- A revoked fallback never becomes queued. The same deferred/due CAS used by
+-- promotion prevents a concurrent acknowledgement, reschedule, or promoter
+-- from being overwritten by the cancellation.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
   AND status = 'deferred'
   AND fire_at <= now()
 RETURNING *;

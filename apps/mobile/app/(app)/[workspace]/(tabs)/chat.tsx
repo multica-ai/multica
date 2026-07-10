@@ -149,7 +149,7 @@ export default function ChatTab() {
   const availableAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole, null),
       ),
     [agents, userId, memberRole],
   );

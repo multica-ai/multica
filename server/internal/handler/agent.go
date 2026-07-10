@@ -65,10 +65,14 @@ type AgentResponse struct {
 	// InvocationTargets is the allow-list for a public_to agent. Empty for
 	// private agents. Only populated on the detail / list / create / update
 	// responses that load it; broadcast payloads leave it empty.
-	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
-	Status             string                     `json:"status"`
-	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
+	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets"`
+	// Availability is an independent location gate. It does not grant the
+	// agent access to Space data, integrations, or other resources.
+	AvailabilityMode     string   `json:"availability_mode"`
+	AvailabilitySpaceIDs []string `json:"availability_space_ids"`
+	Status               string   `json:"status"`
+	MaxConcurrentTasks   int32    `json:"max_concurrent_tasks"`
+	Model                string   `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -168,6 +172,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Visibility:               a.Visibility,
 		PermissionMode:           a.PermissionMode,
 		InvocationTargets:        []AgentInvocationTargetDTO{},
+		AvailabilityMode:         a.AvailabilityMode,
+		AvailabilitySpaceIDs:     []string{},
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		Model:                    a.Model.String,
@@ -818,16 +824,43 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
+	availabilityByAgent, ok := h.loadAvailabilitySpacesByAgent(r.Context(), agents)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to load agent Availability")
+		return
+	}
+	visibleSpaceIDs := map[string]struct{}{}
+	if actorType == "member" {
+		var loaded bool
+		visibleSpaceIDs, loaded = h.loadActiveVisibleSpaceIDSet(
+			r.Context(), parseUUID(workspaceID), parseUUID(actorID),
+		)
+		if !loaded {
+			writeError(w, http.StatusInternalServerError, "failed to load visible Spaces")
+			return
+		}
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
-		targets := targetsByAgent[uuidToString(a.ID)]
+		agentID := uuidToString(a.ID)
+		targets := targetsByAgent[agentID]
+		availabilitySpaces := availabilityByAgent[agentID]
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
+			if !memberAllowedToViewAgent(
+				a, targets, availabilitySpaces, visibleSpaceIDs, actorID, member.Role,
+			) {
 				continue
 			}
 		}
 		resp := agentToResponse(a)
 		applyInvocationTargetsToResponse(&resp, targets)
+		responseAvailabilitySpaces := availabilitySpaces
+		if actorType != "member" {
+			responseAvailabilitySpaces = nil
+		} else if !roleAllowed(member.Role, "owner", "admin") && uuidToString(a.OwnerID) != actorID {
+			responseAvailabilitySpaces = filterAgentAvailabilityRows(availabilitySpaces, visibleSpaceIDs)
+		}
+		applyAgentAvailabilityToResponse(&resp, responseAvailabilitySpaces)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
@@ -878,6 +911,23 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(agent)
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
 		return
+	}
+	if actorType != "member" {
+		resp.AvailabilitySpaceIDs = []string{}
+	} else {
+		member, err := h.getWorkspaceMember(r.Context(), actorID, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load workspace member")
+			return
+		}
+		if !roleAllowed(member.Role, "owner", "admin") && uuidToString(agent.OwnerID) != actorID {
+			visibleSpaceIDs, ok := h.loadActiveVisibleSpaceIDSet(r.Context(), agent.WorkspaceID, member.UserID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to load visible Spaces")
+				return
+			}
+			resp.AvailabilitySpaceIDs = filterAvailabilitySpaceIDs(resp.AvailabilitySpaceIDs, visibleSpaceIDs)
+		}
 	}
 	// Use the summary query (no `content` column) — the embedded
 	// AgentSkillSummary only needs id/name/description, and reading large
@@ -933,11 +983,13 @@ type CreateAgentRequest struct {
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
 	// (private -> private, workspace -> public_to+workspace target). On create
 	// only the caller can be the owner, so targets are accepted unconditionally.
-	PermissionMode     *string                    `json:"permission_mode"`
-	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
-	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
-	ThinkingLevel      string                     `json:"thinking_level"`
+	PermissionMode       *string                    `json:"permission_mode"`
+	InvocationTargets    []AgentInvocationTargetDTO `json:"invocation_targets"`
+	AvailabilityMode     *string                    `json:"availability_mode"`
+	AvailabilitySpaceIDs []string                   `json:"availability_space_ids"`
+	MaxConcurrentTasks   int32                      `json:"max_concurrent_tasks"`
+	Model                string                     `json:"model"`
+	ThinkingLevel        string                     `json:"thinking_level"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -1030,6 +1082,47 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if permErr != nil {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
+	}
+	_, hasAvailabilityMode := rawFields["availability_mode"]
+	_, hasAvailabilitySpaces := rawFields["availability_space_ids"]
+	availabilityMode := availabilityModeFromLegacyPermission(perm.mode)
+	if hasAvailabilityMode {
+		if req.AvailabilityMode == nil {
+			writeError(w, http.StatusBadRequest, "availability_mode cannot be null")
+			return
+		}
+		availabilityMode = *req.AvailabilityMode
+	} else if hasAvailabilitySpaces {
+		writeError(w, http.StatusBadRequest, "availability_mode is required with availability_space_ids")
+		return
+	}
+	availabilitySpaceIDs := req.AvailabilitySpaceIDs
+	if !hasAvailabilitySpaces {
+		availabilitySpaceIDs = nil
+	}
+	availability, availabilityErr := h.parseAndValidateAgentAvailability(
+		r.Context(), wsUUID, parseUUID(ownerID), availabilityMode, availabilitySpaceIDs,
+	)
+	if availabilityErr != nil {
+		writeError(w, http.StatusBadRequest, availabilityErr.Error())
+		return
+	}
+	// An explicit Availability choice is authoritative. Private is owner-only;
+	// Selected Spaces and Workspace use the workspace invocation audience, with
+	// the location gate deciding where a run may start. Do not retain any
+	// member/team audience supplied alongside the new fields: those belong to
+	// the legacy API and would leave two competing controls in one request.
+	if hasAvailabilityMode {
+		if availability.mode == agentAvailabilityPrivate {
+			perm.mode = permissionModePrivate
+			perm.targets = nil
+		} else {
+			perm.mode = permissionModePublicTo
+			perm.targets = []targetSpec{{
+				targetType: invocationTargetWorkspace,
+				targetID:   wsUUID,
+			}}
+		}
 	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeUUID,
@@ -1124,7 +1217,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
@@ -1136,6 +1228,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeID:                runtime.ID,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
+		AvailabilityMode:         availability.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(ownerID),
 		CustomEnv:                ce,
@@ -1157,8 +1250,19 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save agent access")
+	if err := replaceInvocationTargetsWithQueries(
+		r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets,
+	); err != nil {
+		slog.Warn("create agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
+		return
+	}
+	if err := replaceAgentAvailableSpacesWithQueries(
+		r.Context(), qtx, created.ID, created.WorkspaceID,
+		parseUUID(ownerID), availability.spaceIDs,
+	); err != nil {
+		slog.Warn("create agent: persist availability Spaces failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
 	for _, skillID := range skillUUIDs {
@@ -1171,7 +1275,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
 	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
@@ -1222,8 +1326,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 // effort: any failure is logged and never blocks the (already-committed) agent
 // creation.
 func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, creatorID, workspaceID string) {
-	if !agent.RuntimeID.Valid {
-		return // no runtime → the agent can't run; skip the welcome
+	if !agent.RuntimeID.Valid || agent.AvailabilityMode == agentAvailabilitySelectedSpaces {
+		// No runtime means the agent cannot run. Selected Spaces has no valid
+		// context-free Chat location, so it must not enqueue an intro run.
+		return
 	}
 	// Create inside a tx that first takes FOR KEY SHARE on the workspace row — the
 	// creator half of the #5219 delete/create protocol, so the intro session cannot
@@ -1286,11 +1392,13 @@ type UpdateAgentRequest struct {
 	// gate is owner/allow-list based and an admin-authored allow-list would
 	// confuse the owner about who can run their agent. permission_mode is
 	// authoritative when present; otherwise legacy visibility is mapped.
-	PermissionMode     *string                     `json:"permission_mode"`
-	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
-	Status             *string                     `json:"status"`
-	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
-	Model              *string                     `json:"model"`
+	PermissionMode       *string                     `json:"permission_mode"`
+	InvocationTargets    *[]AgentInvocationTargetDTO `json:"invocation_targets"`
+	AvailabilityMode     *string                     `json:"availability_mode"`
+	AvailabilitySpaceIDs *[]string                   `json:"availability_space_ids"`
+	Status               *string                     `json:"status"`
+	MaxConcurrentTasks   *int32                      `json:"max_concurrent_tasks"`
+	Model                *string                     `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
 	//   - field present with "" → explicit clear (use runtime default)
@@ -1364,6 +1472,11 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 // broadcast copy.
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
+	// Agent events are workspace-wide today, while selected Private Spaces
+	// have narrower audiences. Never place audience or Space UUID allow-lists
+	// on that broad channel; clients reload through the actor-filtered API.
+	out.InvocationTargets = []AgentInvocationTargetDTO{}
+	out.AvailabilitySpaceIDs = []string{}
 	redactMcpConfig(&out)
 	redactComposioToolkitAllowlist(&out)
 	// Belt-and-suspenders: agentToResponse already masks gateway.token on
@@ -1598,22 +1711,28 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	_, hasTargets := rawFields["invocation_targets"]
 	permissionTouched := hasPermissionMode || hasTargets || req.Visibility != nil
 	replacePermissionTargets := false
+	legacyPermissionChanged := false
 	var resolvedPerm resolvedPermission
 	if permissionTouched {
+		changed, permErr := h.permissionInputChangesAgent(r.Context(), existing, req, hasPermissionMode, hasTargets)
+		if permErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to evaluate invocation permission change")
+			return
+		}
+		actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID))
+		if (actorType == "agent" || isMachineCredentialRequest(r)) && changed {
+			writeError(w, http.StatusForbidden, "agent processes cannot change invocation access")
+			return
+		}
 		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
 		if !isAgentOwner {
-			changed, permErr := h.permissionInputChangesAgent(r.Context(), existing, req, hasPermissionMode, hasTargets)
-			if permErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed to evaluate invocation permission change")
-				return
-			}
 			if changed {
 				writeError(w, http.StatusForbidden, "only the agent owner can change access (permission_mode / invocation_targets)")
 				return
 			}
 			slog.Debug("update agent: non-owner permission fields matched current state; ignored",
 				append(logger.RequestAttrs(r), "agent_id", id)...)
-		} else {
+		} else if changed {
 			var targetsDTO []AgentInvocationTargetDTO
 			if req.InvocationTargets != nil {
 				targetsDTO = *req.InvocationTargets
@@ -1625,9 +1744,74 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			resolvedPerm = perm
 			replacePermissionTargets = true
+			legacyPermissionChanged = true
 			params.PermissionMode = pgtype.Text{String: perm.mode, Valid: true}
 			params.Visibility = pgtype.Text{String: perm.legacyVisibility(), Valid: true}
+		} else {
+			slog.Debug("update agent: owner permission fields matched current state; ignored",
+				append(logger.RequestAttrs(r), "agent_id", id)...)
 		}
+	}
+
+	_, hasAvailabilityMode := rawFields["availability_mode"]
+	_, hasAvailabilitySpaces := rawFields["availability_space_ids"]
+	availabilityTouched := hasAvailabilityMode || hasAvailabilitySpaces
+	if legacyPermissionChanged && !availabilityTouched {
+		// Old clients expressed a single access switch. Preserve that behavior:
+		// a real legacy change maps its location reach to private/workspace. A
+		// no-op echo does not disturb an explicit Selected Spaces choice.
+		params.AvailabilityMode = pgtype.Text{
+			String: availabilityModeFromLegacyPermission(resolvedPerm.mode),
+			Valid:  true,
+		}
+	}
+	var resolvedAvailability resolvedAgentAvailability
+	if availabilityTouched {
+		actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(existing.WorkspaceID))
+		if actorType == "agent" || isMachineCredentialRequest(r) {
+			writeError(w, http.StatusForbidden, "agent processes cannot change Availability")
+			return
+		}
+		if uuidToString(existing.OwnerID) != requestUserID(r) {
+			writeError(w, http.StatusForbidden, "only the agent owner can change Availability")
+			return
+		}
+		mode := existing.AvailabilityMode
+		if hasAvailabilityMode {
+			if req.AvailabilityMode == nil {
+				writeError(w, http.StatusBadRequest, "availability_mode cannot be null")
+				return
+			}
+			mode = *req.AvailabilityMode
+		}
+		var rawSpaceIDs []string
+		if hasAvailabilitySpaces && req.AvailabilitySpaceIDs != nil {
+			rawSpaceIDs = *req.AvailabilitySpaceIDs
+		} else if mode == agentAvailabilitySelectedSpaces {
+			rows, err := h.Queries.ListAgentAvailableSpaces(r.Context(), existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load Agent Availability")
+				return
+			}
+			for _, row := range rows {
+				rawSpaceIDs = append(rawSpaceIDs, uuidToString(row.SpaceID))
+			}
+		}
+		availability, availabilityErr := h.parseAndValidateAgentAvailability(
+			r.Context(), existing.WorkspaceID, existing.OwnerID, mode, rawSpaceIDs,
+		)
+		if availabilityErr != nil {
+			writeError(w, http.StatusBadRequest, availabilityErr.Error())
+			return
+		}
+		resolvedAvailability = availability
+		// Availability is persisted later through one dedicated transaction
+		// that changes the mode, invocation audience, and selected-Space rows
+		// atomically. It is authoritative when both old and new fields arrive.
+		params.AvailabilityMode = pgtype.Text{}
+		params.PermissionMode = pgtype.Text{}
+		params.Visibility = pgtype.Text{}
+		replacePermissionTargets = false
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -1780,10 +1964,65 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
-	if replacePermissionTargets {
+	if replacePermissionTargets && !availabilityTouched {
 		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
+			return
+		}
+		if legacyPermissionChanged {
+			if err := h.replaceAgentAvailableSpaces(
+				r.Context(), updated.ID, updated.WorkspaceID,
+				parseUUID(requestUserID(r)), nil,
+			); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update Agent Availability")
+				return
+			}
+		}
+	}
+	if availabilityTouched {
+		tx, txErr := h.TxStarter.Begin(r.Context())
+		if txErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update Agent Availability")
+			return
+		}
+		qtx := h.Queries.WithTx(tx)
+		permissionMode := permissionModePrivate
+		legacyVisibility := "private"
+		if resolvedAvailability.mode != agentAvailabilityPrivate {
+			permissionMode = permissionModePublicTo
+			legacyVisibility = "workspace"
+		}
+		updated, txErr = qtx.UpdateAgentAvailability(r.Context(), db.UpdateAgentAvailabilityParams{
+			ID:               updated.ID,
+			AvailabilityMode: resolvedAvailability.mode,
+			PermissionMode:   permissionMode,
+			Visibility:       legacyVisibility,
+		})
+		if txErr == nil {
+			txErr = qtx.DeleteAgentInvocationTargets(r.Context(), updated.ID)
+		}
+		if txErr == nil && resolvedAvailability.mode != agentAvailabilityPrivate {
+			txErr = qtx.CreateAgentInvocationTarget(r.Context(), db.CreateAgentInvocationTargetParams{
+				AgentID:    updated.ID,
+				TargetType: invocationTargetWorkspace,
+				TargetID:   updated.WorkspaceID,
+				CreatedBy:  parseUUID(requestUserID(r)),
+			})
+		}
+		if txErr == nil {
+			txErr = replaceAgentAvailableSpacesWithQueries(
+				r.Context(), qtx, updated.ID, updated.WorkspaceID,
+				parseUUID(requestUserID(r)), resolvedAvailability.spaceIDs,
+			)
+		}
+		if txErr == nil {
+			txErr = tx.Commit(r.Context())
+		} else {
+			_ = tx.Rollback(r.Context())
+		}
+		if txErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update Agent Availability")
 			return
 		}
 	}

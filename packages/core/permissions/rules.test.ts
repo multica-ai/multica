@@ -159,6 +159,44 @@ describe("canAssignAgentToIssue", () => {
     ).toBe(true);
   });
 
+  it("enforces Selected Spaces before the owner shortcut", () => {
+    const a = makeAgent({
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+      availability_mode: "selected_spaces",
+      availability_space_ids: ["space-eng"],
+      owner_id: ALICE,
+    });
+    expect(
+      canAssignAgentToIssue(
+        a,
+        { userId: ALICE, role: "member" },
+        "space-eng",
+      ).allowed,
+    ).toBe(true);
+    const denied = canAssignAgentToIssue(
+      a,
+      { userId: ALICE, role: "member" },
+      "space-design",
+    );
+    expect(denied.allowed).toBe(false);
+    expect(denied.reason).toBe("agent_unavailable_in_space");
+  });
+
+  it("denies Selected Spaces in an explicitly context-free surface", () => {
+    const a = makeAgent({
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+      availability_mode: "selected_spaces",
+      availability_space_ids: ["space-eng"],
+      owner_id: ALICE,
+    });
+    expect(
+      canAssignAgentToIssue(a, { userId: ALICE, role: "member" }, null)
+        .allowed,
+    ).toBe(false);
+  });
+
   it("denies non-members from assigning a public_to-workspace agent", () => {
     const a = makeAgent({
       visibility: "workspace",

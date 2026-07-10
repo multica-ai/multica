@@ -35,9 +35,14 @@ func insertCommentForScopeTest(t *testing.T, ctx context.Context, issueID, works
 // with a hand-written row. Returns the created task id.
 func enqueueIssueTaskWithTrigger(t *testing.T, ctx context.Context, agentID, issueID, triggerCommentID string) string {
 	t.Helper()
+	var spaceID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT space_id FROM issue WHERE id = $1`, issueID).Scan(&spaceID); err != nil {
+		t.Fatalf("load issue Space: %v", err)
+	}
 	task, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, db.Issue{
 		ID:           parseUUID(issueID),
 		WorkspaceID:  parseUUID(testWorkspaceID),
+		SpaceID:      spaceID,
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:   parseUUID(agentID),
 		CreatorType:  "member",

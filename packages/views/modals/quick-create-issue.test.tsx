@@ -12,6 +12,7 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockCanAssignAgent = vi.hoisted(() => vi.fn(() => true));
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -122,7 +123,7 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
 }));
 
 vi.mock("../issues/components/pickers/assignee-picker", () => ({
-  canAssignAgent: () => true,
+  canAssignAgent: mockCanAssignAgent,
 }));
 
 vi.mock("../common/actor-avatar", () => ({
@@ -301,6 +302,8 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
+    mockCanAssignAgent.mockReset();
+    mockCanAssignAgent.mockReturnValue(true);
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockUploadWithToast.mockResolvedValue({
       id: "019ec09d-6222-722b-bdfa-427b105d80be",
@@ -332,6 +335,22 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("filters quick-create actors against the concrete target Space", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { space_id: "space-eng" },
+    });
+
+    expect(mockCanAssignAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "agent-1" }),
+      "user-1",
+      "admin",
+      "space-eng",
+    );
   });
 
   it("writes prompt changes back to the draft store and clears them after submit", async () => {

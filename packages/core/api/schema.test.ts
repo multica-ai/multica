@@ -399,6 +399,34 @@ describe("ApiClient schema fallback", () => {
       expect(resp.imported_skill_ids).toEqual([]);
       expect(resp.reused_skill_ids).toEqual([]);
     });
+
+    it("parses Agent Availability and fails unknown modes closed", async () => {
+      stubFetchJson({
+        agent: {
+          id: "agent-1",
+          availability_mode: "selected_spaces",
+          availability_space_ids: ["space-1"],
+        },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const selected = await client.createAgentFromTemplate({
+        template_slug: "x",
+        name: "X",
+        runtime_id: "rt-1",
+      });
+      expect(selected.agent.availability_mode).toBe("selected_spaces");
+      expect(selected.agent.availability_space_ids).toEqual(["space-1"]);
+
+      stubFetchJson({
+        agent: { id: "agent-2", availability_mode: "future_mode" },
+      });
+      const unknown = await client.createAgentFromTemplate({
+        template_slug: "x",
+        name: "X",
+        runtime_id: "rt-1",
+      });
+      expect(unknown.agent.availability_mode).toBe("private");
+    });
   });
 });
 

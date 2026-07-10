@@ -30,13 +30,14 @@ export function canAssignAgent(
   agent: Agent,
   userId: string | undefined,
   memberRole: string | undefined,
+  spaceId?: string | null,
 ): boolean {
   return canAssignAgentToIssue(agent, {
     userId: userId ?? null,
     role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
       ? memberRole
       : null,
-  }).allowed;
+  }, spaceId).allowed;
 }
 
 interface AssigneePickerProps {
@@ -55,6 +56,8 @@ interface AssigneePickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** The concrete Issue/Create target Space used for Agent Availability. */
+  spaceId?: string | null;
 }
 
 /**
@@ -96,6 +99,7 @@ function AssigneePickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  spaceId,
 }: AssigneePickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -215,7 +219,7 @@ function AssigneePickerImpl({
                 memberRole === "member"
                   ? memberRole
                   : null,
-            });
+            }, spaceId);
             const allowed = decision.allowed;
             return (
               <PickerItem

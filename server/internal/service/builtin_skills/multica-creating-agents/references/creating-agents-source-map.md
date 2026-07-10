@@ -51,6 +51,11 @@ only.
 | `maxAgentDescriptionLength = 255` | 31 | Cap is 255 **Unicode code points** (comment: counted via `utf8.RuneCountInString`, matches Postgres `char_length`) |
 | `AgentResponse` omits plaintext `custom_env` | 33–53 | Exposes only `has_custom_env` (52) and `custom_env_key_count` (53); comment cites MUL-2600 |
 | `CreateAgentRequest` fields | 565–585 | `description`, `instructions`, `runtime_config`, `custom_env`, `custom_args`, `model`, `thinking_level` (plus name/avatar/visibility/mcp_config/max_concurrent_tasks) |
+| Availability request/response fields | `AgentResponse`, `CreateAgentRequest`, `UpdateAgentRequest` | `availability_mode` + `availability_space_ids` are returned and accepted independently from legacy invocation audience fields |
+| Availability validation | `agent_availability.go:parseAndValidateAgentAvailability` | Validates the three modes; selected Spaces must be non-empty, active, in-workspace, and visible to the Agent owner |
+| Explicit Availability mapping | `CreateAgent`, `UpdateAgent` Availability blocks | Explicit new fields authoritatively map private/shared audience and replace selected-Space rows; update writes mode + audience + rows in one transaction |
+| Legacy update compatibility | `UpdateAgent` permission block | A real legacy access change maps Availability to private/workspace; a no-op echo preserves explicit Selected Spaces |
+| Create atomicity | `CreateAgent` transaction around row + invocation targets + available Spaces | A 201 cannot expose a partially created shared/selected Agent |
 | `name` required | 623–625 | 400 "name is required" |
 | `description` ≤ 255 code points | 627–629 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
 | `runtime_id` required | 631–633 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
@@ -65,6 +70,17 @@ only.
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
+
+## Availability persistence and run gates
+
+| Contract | Source | Behavior |
+|---|---|---|
+| Persisted mode and selected-Space relation | `migrations/169_agent_space_availability.up.sql` | Adds constrained `agent.availability_mode` plus workspace-consistent `agent_available_space`; legacy public agents backfill to workspace and private agents stay private |
+| Relation replacement | `pkg/db/queries/agent_availability.sql` | Deletes only stale rows and upserts the desired set inside the caller transaction |
+| Handler invocation location gate | `internal/handler/agent_availability.go:agentLocationAllowsInvocation` | Private owner/Space visibility, exact Selected Space match, or active Workspace Space; Selected fails without context |
+| Service structural Issue gate | `internal/service/agent_availability.go:AgentAvailableInSpace` | Rechecks location for continuations and non-HTTP Issue paths before enqueue |
+| Member audience gate | `internal/service/agent_availability.go:MemberCanInvokeAgent` | Preserves owner/private and workspace/member/team target semantics for channel Chat, quick create, and service-level Issue creation |
+| Autopilot dispatch recheck | `internal/service/autopilot.go:canCreatorInvokeAgent` | Revalidates active target Space, same workspace, Availability, and invocation audience at dispatch time |
 
 ## Runtime model/thinking discovery — `server/pkg/agent/{models,thinking}.go`
 

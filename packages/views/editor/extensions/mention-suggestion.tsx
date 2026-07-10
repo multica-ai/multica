@@ -528,6 +528,12 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  /**
+   * Live Space context for issue-scoped editors. `null` means the surface is
+   * explicitly context-free; `undefined` preserves legacy behavior for
+   * editors that do not own an Issue/Create target.
+   */
+  getTargetSpaceId?: () => string | null | undefined;
 }
 
 export function createMentionSuggestion(
@@ -563,6 +569,7 @@ export function createMentionSuggestion(
     const userId = useAuthStore.getState().user?.id ?? null;
     const myRole =
       members.find((m) => m.user_id === userId)?.role ?? null;
+    const targetSpaceId = options.getTargetSpaceId?.();
 
     const q = query.toLowerCase();
 
@@ -584,7 +591,11 @@ export function createMentionSuggestion(
         (a) =>
           !a.archived_at &&
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
-          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+          canAssignAgentToIssue(
+            a,
+            { userId, role: myRole },
+            targetSpaceId,
+          ).allowed,
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 

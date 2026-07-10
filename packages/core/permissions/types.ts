@@ -27,6 +27,7 @@ export type DecisionReason =
   | "not_resource_owner"
   | "last_owner"
   | "private_visibility"
+  | "agent_unavailable_in_space"
   | "unknown";
 
 export interface Decision {

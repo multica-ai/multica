@@ -599,6 +599,11 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   >,
   permission_mode: z.enum(["private", "public_to"]).catch("private"),
   invocation_targets: z.array(AgentInvocationTargetSchema).default([]),
+  availability_mode: z
+    .enum(["private", "selected_spaces", "workspace"])
+    .optional()
+    .catch("private"),
+  availability_space_ids: z.array(z.string()).optional().catch([]),
   status: z.string().catch("active") as unknown as z.ZodType<Agent["status"]>,
   max_concurrent_tasks: z.number().default(1),
   model: z.string().default(""),

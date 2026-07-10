@@ -660,6 +660,7 @@ export function ManualCreatePanel({
                 onUploadFile={handleUpload}
                 debounceMs={500}
                 attachments={draftAttachments}
+                targetSpaceId={effectiveSpaceId ?? null}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
@@ -690,6 +691,7 @@ export function ManualCreatePanel({
               <AssigneePicker
                 assigneeType={assigneeType ?? null}
                 assigneeId={assigneeId ?? null}
+                spaceId={effectiveSpaceId ?? null}
                 onUpdate={(u) => updateAssignee(
                   u.assignee_type ?? undefined,
                   u.assignee_id ?? undefined,

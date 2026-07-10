@@ -153,6 +153,12 @@ var ErrSpaceArchived = errors.New("space is archived")
 // different Spaces. Parent relationships never cross Space boundaries.
 var ErrParentSpaceMismatch = errors.New("parent and child issues must share a space")
 
+// ErrAssigneeUnavailable signals that a member-authored service create tried
+// to assign an Agent (or Squad leader) the creator cannot invoke in the final
+// resolved Space. It is checked before insert so non-HTTP entry points cannot
+// persist an assignment the equivalent HTTP request would reject.
+var ErrAssigneeUnavailable = errors.New("assignee agent is not available to the issue creator in this Space")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -236,6 +242,33 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, err
 	}
 	spaceID = space.ID
+	if p.CreatorType == "member" && p.AssigneeType.Valid && p.AssigneeID.Valid {
+		var assigneeAgent db.Agent
+		switch p.AssigneeType.String {
+		case "agent":
+			assigneeAgent, err = qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          p.AssigneeID,
+				WorkspaceID: p.WorkspaceID,
+			})
+		case "squad":
+			var squad db.Squad
+			squad, err = qtx.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          p.AssigneeID,
+				WorkspaceID: p.WorkspaceID,
+			})
+			if err == nil {
+				assigneeAgent, err = qtx.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+					ID:          squad.LeaderID,
+					WorkspaceID: p.WorkspaceID,
+				})
+			}
+		}
+		if (p.AssigneeType.String == "agent" || p.AssigneeType.String == "squad") &&
+			(err != nil || !MemberCanInvokeAgent(ctx, qtx, assigneeAgent, p.WorkspaceID, p.CreatorID) ||
+				!AgentAvailableInSpace(ctx, qtx, assigneeAgent, p.WorkspaceID, spaceID)) {
+			return IssueCreateResult{}, ErrAssigneeUnavailable
+		}
+	}
 
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, spaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {

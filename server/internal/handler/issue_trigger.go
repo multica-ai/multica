@@ -17,13 +17,16 @@ import (
 const maxPreviewTriggerIssues = 500
 
 // issueTriggerWriteProbe builds the probe the write paths feed to
-// WillEnqueueRun. The private-agent gate is already enforced at the HTTP
-// boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
-// (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
-// allow-all. The self-loop check needs the request's X-Task-ID header.
-func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issue db.Issue) service.IssueTriggerProbe {
+// WillEnqueueRun. It must evaluate invocation again even when the assignee did
+// not change: promoting a pre-assigned backlog Issue starts a fresh run, and a
+// historical assignment is not a permanent grant after audience or Space
+// Availability changes. The self-loop check needs X-Task-ID from the request.
+func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID, workspaceID string, issue db.Issue) service.IssueTriggerProbe {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
-		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
+		CanAccessAgent: func(agent db.Agent) bool {
+			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID, issue.SpaceID)
+		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
@@ -38,7 +41,7 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
-			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID, issue.SpaceID)
 		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)

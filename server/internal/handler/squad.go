@@ -137,7 +137,10 @@ func (h *Handler) memberCanWireAgent(ctx context.Context, member db.Member, agen
 		return true
 	}
 	uid := uuidToString(member.UserID)
-	return h.canInvokeAgent(ctx, agent, "member", uid, uid, workspaceID)
+	// Squads are still workspace-scoped in the current schema. Without a
+	// concrete Space context, a Selected Spaces agent must fail closed here;
+	// Phase 3 Squad single-Space ownership will pass its Space explicitly.
+	return h.canInvokeAgent(ctx, agent, "member", uid, uid, workspaceID, pgtype.UUID{})
 }
 
 // loadSquadInWorkspace loads a squad scoped to the current workspace.
@@ -1056,7 +1059,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 	} else {
 		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
-	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID)) {
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID), issue.SpaceID) {
 		return false
 	}
 

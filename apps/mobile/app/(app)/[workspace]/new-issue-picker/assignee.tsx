@@ -11,6 +11,7 @@ import { useNativeSearchBar } from "@/lib/use-native-search-bar";
 
 export default function NewIssueAssigneePickerRoute() {
   const assignee = useNewIssueDraftStore((s) => s.assignee);
+  const project = useNewIssueDraftStore((s) => s.project);
   const setAssignee = useNewIssueDraftStore((s) => s.setAssignee);
   const query = useNativeSearchBar("Search people", { autoFocus: true });
 
@@ -18,6 +19,7 @@ export default function NewIssueAssigneePickerRoute() {
     <AssigneePickerBody
       value={assignee}
       query={query}
+      spaceId={project?.space_id ?? null}
       onChange={(next) => {
         setAssignee(next);
         router.back();

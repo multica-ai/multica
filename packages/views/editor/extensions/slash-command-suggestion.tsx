@@ -174,7 +174,9 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
   const availableAgents = agents.filter(
     (a) =>
       !a.archived_at &&
-      canAssignAgentToIssue(a, { userId, role: memberRole }).allowed,
+      // Skill commands belong to global Agent Chat, which has no Issue Space
+      // target. Selected-Spaces Agents therefore cannot be invoked here.
+      canAssignAgentToIssue(a, { userId, role: memberRole }, null).allowed,
   );
   const activeAgent =
     availableAgents.find((a) => a.id === selectedAgentId) ??
