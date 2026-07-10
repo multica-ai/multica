@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -367,14 +368,30 @@ func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	const profile = "restart-authtest"
-	port := healthPortForProfile(profile)
 
 	// Fake running daemon on the profile's health port. Any shutdown attempt
-	// (HTTP /shutdown; the PID in /health is our own so a kill-fallback would
-	// be visible too) means restart touched the daemon before checking auth.
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	// means restart touched the daemon before checking auth.
+	stopped := fakeRunningDaemon(t, profile)
+
+	err := runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "multica login --profile restart-authtest") {
+		t.Fatalf("runDaemonRestart() = %v, want not-logged-in error with login hint", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down before the auth check")
+	default:
+	}
+}
+
+// fakeRunningDaemon serves a fake healthy daemon on the given profile's health
+// port and reports any /shutdown request on the returned channel. The PID in
+// /health is our own so a kill-fallback would be visible as a test crash too.
+func fakeRunningDaemon(t *testing.T, profile string) <-chan struct{} {
+	t.Helper()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", healthPortForProfile(profile)))
 	if err != nil {
-		t.Skipf("health port %d unavailable: %v", port, err)
+		t.Skipf("health port for profile %s unavailable: %v", profile, err)
 	}
 	stopped := make(chan struct{}, 1)
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -389,22 +406,89 @@ func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
 		}
 	})}
 	go srv.Serve(ln)
-	defer srv.Close()
+	t.Cleanup(func() { srv.Close() })
+	return stopped
+}
 
+func newRestartTestCmd(t *testing.T, profile string) *cobra.Command {
+	t.Helper()
 	cmd := &cobra.Command{Use: "restart"}
 	cmd.Flags().Bool("foreground", false, "")
 	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
 	if err := cmd.Flags().Set("profile", profile); err != nil {
 		t.Fatalf("set profile flag: %v", err)
 	}
+	return cmd
+}
 
-	err = runDaemonRestart(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "multica login --profile restart-authtest") {
-		t.Fatalf("runDaemonRestart() = %v, want not-logged-in error with login hint", err)
+// TestDaemonRestartRejectedTokenFailsBeforeStopping pins the restart safety
+// guarantee beyond the empty-token case: a stored token that the server
+// rejects with 401 (expired or revoked) must abort the restart BEFORE the
+// running daemon is stopped. Otherwise restart kills the working daemon and
+// the replacement child dies in preflight, leaving no daemon at all (#5165).
+func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	const profile = "restart-401test"
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer api.Close()
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_revoked", ServerURL: api.URL}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	stopped := fakeRunningDaemon(t, profile)
+
+	err := runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "rejected your login token") {
+		t.Fatalf("runDaemonRestart() = %v, want token-rejected error", err)
+	}
+	if !strings.Contains(err.Error(), "multica login --profile restart-401test") {
+		t.Fatalf("runDaemonRestart() = %v, want profile login hint", err)
 	}
 	select {
 	case <-stopped:
-		t.Fatal("restart asked the running daemon to shut down before the auth check")
+		t.Fatal("restart asked the running daemon to shut down despite a rejected token")
+	default:
+	}
+}
+
+// TestDaemonRestartUnreachableServerFailsBeforeStopping pins the other half of
+// the restart preflight: when the configured server cannot be reached at all,
+// restart must abort before stopping the running daemon, because the
+// replacement child would die in preflight against the same dead server.
+func TestDaemonRestartUnreachableServerFailsBeforeStopping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	const profile = "restart-unreachable-test"
+
+	// Grab a port that is guaranteed closed: listen, record, close.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	deadURL := "http://" + ln.Addr().String()
+	ln.Close()
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake", ServerURL: deadURL}, profile); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+
+	stopped := fakeRunningDaemon(t, profile)
+
+	err = runDaemonRestart(newRestartTestCmd(t, profile), nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot reach the Multica server") {
+		t.Fatalf("runDaemonRestart() = %v, want server-unreachable error", err)
+	}
+	select {
+	case <-stopped:
+		t.Fatal("restart asked the running daemon to shut down despite an unreachable server")
 	default:
 	}
 }
