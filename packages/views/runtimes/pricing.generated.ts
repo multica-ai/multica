@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-09
+// Snapshot: 2026-07-10
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -110,6 +110,10 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gpt-5.4-pro": { input: 30, output: 180, cacheRead: 30, cacheWrite: 30 },
   "gpt-5.5": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
   "gpt-5.5-pro": { input: 30, output: 180, cacheRead: 30, cacheWrite: 30 },
+  "gpt-5.6": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+  "gpt-5.6-luna": { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
+  "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+  "gpt-5.6-terra": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
   "gpt-image-2": { input: 5, output: 30, cacheRead: 1.25, cacheWrite: 5 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
   "grok-4.20-0309-reasoning": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
