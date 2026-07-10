@@ -97,6 +97,21 @@ func TestCerebroToolsBriefGroupsAndOrders(t *testing.T) {
 	}
 }
 
+func TestCerebroToolsBriefRendersConnectionInstructionsOnce(t *testing.T) {
+	entries := []ToolBriefEntry{
+		{Family: "Connections", Name: "company-brain / search", Description: "Search knowledge", Verdict: "allow", Connection: "company-brain", Instructions: "Search Company Brain before answering questions about company knowledge."},
+		{Family: "Connections", Name: "company-brain / write", Description: "Write knowledge", Verdict: "allow", Connection: "company-brain", Instructions: "Search Company Brain before answering questions about company knowledge."},
+	}
+	out := cerebroToolsBrief(entries)
+	want := "Search Company Brain before answering questions about company knowledge."
+	if strings.Count(out, want) != 1 {
+		t.Fatalf("expected connection instructions exactly once, got:\n%s", out)
+	}
+	if !strings.Contains(out, "**Connection instructions**") || !strings.Contains(out, "**company-brain**") {
+		t.Fatalf("expected labeled connection instructions, got:\n%s", out)
+	}
+}
+
 func TestCerebroToolsBriefIsStable(t *testing.T) {
 	entries := []ToolBriefEntry{
 		{Family: "Connections", Name: "b-conn / z_tool", Description: "z", Verdict: "allow"},

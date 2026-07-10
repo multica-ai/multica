@@ -31,6 +31,7 @@ type Connection struct {
 	WorkspaceID         string               `json:"workspace_id"`
 	Name                string               `json:"name"`
 	DisplayName         string               `json:"display_name"`
+	Instructions        string               `json:"instructions"`
 	Type                string               `json:"type"`
 	URL                 string               `json:"url"`
 	Internal            bool                 `json:"internal"`
@@ -185,6 +186,7 @@ type CreateParams struct {
 	WorkspaceID         pgtype.UUID
 	Name                string
 	DisplayName         string
+	Instructions        string
 	Type                string
 	URL                 string
 	Internal            bool
@@ -199,6 +201,7 @@ type UpdateParams struct {
 	ID                  pgtype.UUID
 	WorkspaceID         pgtype.UUID
 	DisplayName         string
+	Instructions        string
 	URL                 string
 	Internal            bool
 	AuthConfig          AuthConfig
@@ -225,7 +228,7 @@ func New(pool *pgxpool.Pool) *Store {
 func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
 		FROM workspace_connection
 		WHERE workspace_id = $1
 		ORDER BY created_at ASC
@@ -242,7 +245,7 @@ func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection
 func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND enabled = true
 		ORDER BY created_at ASC
@@ -258,7 +261,7 @@ func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Con
 func (s *Store) Get(ctx context.Context, id, workspaceID pgtype.UUID) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
 		FROM workspace_connection
 		WHERE id = $1 AND workspace_id = $2
 	`, id, workspaceID)
@@ -292,11 +295,11 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Connection, error) 
 	}
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO workspace_connection
-		  (workspace_id, name, display_name, type, url, internal, auth_config, endpoint_permissions, scopable_args, default_access)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		  (workspace_id, name, display_name, type, url, internal, auth_config, endpoint_permissions, scopable_args, default_access, instructions)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
-	`, p.WorkspaceID, p.Name, p.DisplayName, p.Type, p.URL, p.Internal, authJSON, epJSON, saJSON, defaultAccess)
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
+	`, p.WorkspaceID, p.Name, p.DisplayName, p.Type, p.URL, p.Internal, authJSON, epJSON, saJSON, defaultAccess, strings.TrimSpace(p.Instructions))
 	c, err := scanRow(row)
 	if err != nil && strings.Contains(err.Error(), "workspace_connection_name_unique") {
 		return Connection{}, ErrDuplicateName
@@ -326,11 +329,11 @@ func (s *Store) Update(ctx context.Context, p UpdateParams) (Connection, error) 
 		UPDATE workspace_connection
 		   SET display_name = $3, url = $4, internal = $5,
 		       auth_config = $6, endpoint_permissions = $7, enabled = $8,
-		       scopable_args = $9, default_access = $10, updated_at = now()
+		       scopable_args = $9, default_access = $10, instructions = $11, updated_at = now()
 		 WHERE id = $1 AND workspace_id = $2
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
-	`, p.ID, p.WorkspaceID, p.DisplayName, p.URL, p.Internal, authJSON, epJSON, p.Enabled, saJSON, defaultAccess)
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
+	`, p.ID, p.WorkspaceID, p.DisplayName, p.URL, p.Internal, authJSON, epJSON, p.Enabled, saJSON, defaultAccess, strings.TrimSpace(p.Instructions))
 	c, err := scanRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Connection{}, ErrNotFound
@@ -461,7 +464,7 @@ func MCPServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
 func (s *Store) GetEnabledByName(ctx context.Context, workspaceID pgtype.UUID, name string) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args, default_access, instructions
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND name = $2 AND enabled = true
 	`, workspaceID, name)
@@ -517,11 +520,11 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		internal, enabled           bool
 		authRaw, epRaw, toolsRaw    []byte
 		scopableArgsRaw             []byte
-		defaultAccess               string
+		defaultAccess, instructions string
 		createdAt, updatedAt        pgtype.Timestamptz
 	)
 	if err := scan(&id, &wsID, &name, &displayName, &typ, &url, &internal,
-		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw, &scopableArgsRaw, &defaultAccess); err != nil {
+		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw, &scopableArgsRaw, &defaultAccess, &instructions); err != nil {
 		return Connection{}, fmt.Errorf("connections: scan: %w", err)
 	}
 	var auth AuthConfig
@@ -546,6 +549,7 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		WorkspaceID:         util.UUIDToString(wsID),
 		Name:                name,
 		DisplayName:         displayName,
+		Instructions:        instructions,
 		Type:                typ,
 		URL:                 url,
 		Internal:            internal,
@@ -558,6 +562,27 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		CreatedAt:           createdAt.Time,
 		UpdatedAt:           updatedAt.Time,
 	}, nil
+}
+
+// ConnectionInstructionsForBrief returns instructions only for the already
+// permission-filtered connection names supplied by the claim path.
+func (s *Store) ConnectionInstructionsForBrief(ctx context.Context, workspaceID pgtype.UUID, names []string) map[string]string {
+	out := map[string]string{}
+	if len(names) == 0 {
+		return out
+	}
+	rows, err := s.pool.Query(ctx, `SELECT name, instructions FROM workspace_connection WHERE workspace_id = $1 AND enabled = true AND name = ANY($2) AND instructions <> ''`, workspaceID, names)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, instructions string
+		if rows.Scan(&name, &instructions) == nil {
+			out[name] = instructions
+		}
+	}
+	return out
 }
 
 // marshalScopableArgs serializes the scopable-args declaration for storage,

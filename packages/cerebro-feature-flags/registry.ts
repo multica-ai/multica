@@ -227,6 +227,8 @@ export type CerebroFlagKey =
   | "cerebro_session_context_hairline"
   // FIR-1839: the "CLI runs" tab (the local Claude Code / CLI work-sessions list, formerly the "Sessions" tab). OFF by default — hidden unless a workspace opts in.
   | "cerebro_cli_runs_tab"
+  // FIR-2827: sidebar "Subscribers" section on regular issues — subscribers split by type (Members / Agents) with the add/remove popover, replacing the avatar stack next to the Activity header.
+  | "cerebro_issue_sidebar_subscribers"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
   | "cerebro_issue_date_times"
   // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
@@ -609,6 +611,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1839: OFF by default — the "CLI runs" tab (local CLI work-sessions) is
   // hidden unless a workspace opts in.
   cerebro_cli_runs_tab: false,
+  // FIR-2827: ON by default — subscribers listed in the issue sidebar, split by
+  // type. Off falls back to the avatar stack next to the Activity header.
+  cerebro_issue_sidebar_subscribers: true,
   // FIR-1597: OFF by default. Hides the time-of-day control next to the
   // start/due date pickers. The sweeper still treats a no-time date as before.
   cerebro_issue_date_times: false,
@@ -1438,6 +1443,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
+  },
+  {
+    key: "cerebro_issue_sidebar_subscribers",
+    label: "Sidebar subscribers",
+    group: "workspace",
+    description:
+      "List an issue's subscribers in the sidebar, split by type (Members / Agents), with the same add/remove popover the chat Participants section uses. Every subscriber is a potential wake target, so the per-type split answers \"who can this issue dispatch to?\" at a glance. Off falls back to the avatar stack next to the Activity header. ON by default. FIR-2827.",
   },
   {
     key: "cerebro_recurring_issues",
