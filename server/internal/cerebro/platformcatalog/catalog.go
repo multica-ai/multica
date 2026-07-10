@@ -349,6 +349,8 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
 			"PUT /api/notes/{id}/visibility",
+			// FIR-2810: per-note toggle for per-line author-code stamping.
+			"PUT /api/notes/{id}/author-codes",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
 			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
@@ -1215,6 +1217,7 @@ var excluded = map[string]string{
 	"POST /api/agents/backfill-avatars":              "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
+	"POST /api/agents/context/lint/repo-file":        "read-only — drift lint of a repo CLAUDE.md/AGENTS.md's content posted in the body (FIR-1775 Phase 3); pure analysis, changes no state",
 	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 
