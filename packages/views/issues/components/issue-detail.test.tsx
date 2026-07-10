@@ -806,6 +806,10 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByText("Details")).toBeInTheDocument();
     });
 
+    // CEREBRO-PATCH(issue-sidebar-reorder): FIR-2827 — Details starts collapsed;
+    // expand it before asserting its rows.
+    fireEvent.click(screen.getByText("Details"));
+
     expect(screen.getByText("Created by")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     expect(screen.getByText("Updated")).toBeInTheDocument();

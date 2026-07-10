@@ -23,8 +23,22 @@ import { allIssueAttachments } from "@multica/cerebro-attachments/core/standalon
 import { formatBytes } from "@multica/cerebro-attachments/core/format-bytes";
 import { attachmentDocType, DOC_TYPE_STYLES } from "@multica/cerebro-ui";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useTimeAgo } from "@multica/views/i18n";
 import { useAttachmentActions } from "../use-attachment-actions";
+
+// FIR-2827 — rows show the absolute date + time ("Jul 8, 2026, 08:31"), not a
+// relative "12h ago": files are referenced later ("the screenshot from
+// Tuesday"), where relative stamps go stale and force hovering per row.
+function formatDateTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 // Newest first — a stable, dependency-free sort so the list reads like a
 // timeline without introducing interactive sorter state (see the UI rules:
@@ -134,7 +148,6 @@ export function AttachmentsTab({
   className?: string;
 }) {
   const { getActorName } = useActorName();
-  const timeAgo = useTimeAgo();
   const { openViewer, downloadFile } = useAttachmentActions();
 
   const files = allIssueAttachments(attachments, commentAttachments)
@@ -163,7 +176,7 @@ export function AttachmentsTab({
               key={a.id}
               attachment={a}
               uploaderName={getActorName(a.uploader_type, a.uploader_id)}
-              when={a.created_at ? timeAgo(a.created_at) : ""}
+              when={a.created_at ? formatDateTime(a.created_at) : ""}
               onOpen={viewable ? () => openViewer(a.id, a.filename) : undefined}
               onDownload={a.download_url ? () => downloadFile(a.id) : undefined}
             />
