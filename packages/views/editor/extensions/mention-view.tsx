@@ -23,23 +23,12 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
 import { ProjectChip } from "../../projects/components/project-chip";
-import { ActorMentionChip } from "@multica/ui/components/common/actor-mention-chip";
+import {
+  ActorMentionChip,
+  ACTOR_MENTION_HOVER_CLASS,
+} from "@multica/ui/components/common/actor-mention-chip";
 import { MentionHoverCard } from "@multica/ui/components/common/mention-hover-card";
 import type { ActorMentionType } from "@multica/ui/components/common/actor-mention-chip";
-
-/**
- * Hover tint layered on the chip in the editor (per-type). The chip's own
- * background is the type-tint; these classes add a deeper tint on hover so
- * R12's "background transitions to a slightly deeper tint" is visible. For
- * members the base is `bg-muted`, so `hover:bg-accent` is the deeper tint
- * (not `hover:bg-muted`, which would be a no-op).
- */
-const EDITOR_HOVER_CLASS: Record<ActorMentionType, string> = {
-  member: "hover:bg-accent transition-colors",
-  agent: "hover:bg-brand/15 transition-colors",
-  squad: "hover:bg-info/15 transition-colors",
-  all: "hover:bg-warning/15 transition-colors",
-};
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -71,7 +60,7 @@ export function MentionView({ node }: NodeViewProps) {
           type={actorType}
           label={name}
           initials={initials}
-          className={EDITOR_HOVER_CLASS[actorType]}
+          className={ACTOR_MENTION_HOVER_CLASS[actorType]}
           focusable
         />
       </MentionHoverCard>
