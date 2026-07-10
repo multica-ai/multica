@@ -55,6 +55,7 @@ apps/web/test-results/
 .context
 .agent_context/
 .multica/
+.worktrees/
 
 # local settings
 .claude/
