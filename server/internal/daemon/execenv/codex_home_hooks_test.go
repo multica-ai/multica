@@ -227,3 +227,54 @@ func TestPrepareCodexHomeHookTrustCoexistsWithManagedBlocks(t *testing.T) {
 	check(t, "first")
 	check(t, "reuse")
 }
+
+// Design ② (scoped fail-loud): when the shared hooks.json exists but exposing it
+// into the per-task home fails, prepare must return an error (abort task prep)
+// rather than silently start a Codex session without the user's hook — the
+// "false success" the fix eliminates.
+func TestPrepareCodexHomeFailsLoudWhenSharedHooksExposureFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("read-only-dir permission injection does not hold for root")
+	}
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "hooks.json"), []byte(`{"hooks":true}`), 0o644); err != nil {
+		t.Fatalf("write shared hooks.json: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	// Pre-create the per-task codex-home read-only so symlinking hooks.json into
+	// it fails with EACCES. MkdirAll no-ops on an existing dir, keeping 0o500.
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := os.Mkdir(codexHome, 0o500); err != nil {
+		t.Fatalf("mkdir read-only codex-home: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(codexHome, 0o755) }) // allow TempDir cleanup
+
+	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, discardLogger())
+	if err == nil {
+		t.Fatal("expected fail-loud error when shared hooks.json exists but exposure fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "hooks.json") && !strings.Contains(err.Error(), "optional file") {
+		t.Fatalf("error should reference the hooks exposure failure, got: %v", err)
+	}
+}
+
+// Design ① regression guard: codexHooksSourceID must be a pure lexical join and
+// must NOT resolve symlinks. Codex keys hook trust by the normalized (not
+// canonicalized) per-task path; resolving would turn a matching trust key into a
+// guaranteed mismatch (silent untrust). A later filepath.EvalSymlinks slipped in
+// here would break the whole feature — this test locks that down.
+func TestCodexHooksSourceIDIsLexicalNotSymlinkResolved(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "codex-home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	got := codexHooksSourceID(link)
+	if want := filepath.Join(link, "hooks.json"); got != want {
+		t.Fatalf("codexHooksSourceID must be a lexical join, got %q want %q", got, want)
+	}
+	if resolved := filepath.Join(real, "hooks.json"); got == resolved {
+		t.Fatalf("codexHooksSourceID must not resolve symlinks; got resolved path %q", got)
+	}
+}

@@ -95,11 +95,22 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// Expose optional shared directories (hooks/) only when the source is a
 	// valid directory; otherwise clear stale per-task residue. See
 	// ensureExistingDirSymlink.
+	//
+	// Scoped fail-loud (design ②): if the shared source is intended (present,
+	// or its state can't be verified) but we fail to expose it, abort task prep
+	// with an error rather than start a Codex session that silently lacks the
+	// user's hooks — a "false success" the user must never get. If the shared
+	// source is provably absent, an error here is only a best-effort stale
+	// cleanup failure; log it, but do NOT block the task over an absent
+	// optional feature.
 	for _, name := range codexOptionalSymlinkedDirs {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureExistingDirSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home optional dir symlink failed", "dir", name, "error", err)
+			if sharedResourceIntended(src) {
+				return fmt.Errorf("expose codex optional dir %q into per-task home: %w", name, err)
+			}
+			logger.Warn("execenv: codex-home optional dir stale cleanup failed (shared absent)", "dir", name, "error", err)
 		}
 	}
 
@@ -114,12 +125,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 
 	// Expose optional shared files (hooks.json) only when the source is a
 	// valid regular file; otherwise clear stale per-task residue. See
-	// ensureOptionalFileSymlink.
+	// ensureOptionalFileSymlink. Same scoped fail-loud rule as the optional
+	// dirs above (design ②).
 	for _, name := range codexOptionalSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureOptionalFileSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home optional file symlink failed", "file", name, "error", err)
+			if sharedResourceIntended(src) {
+				return fmt.Errorf("expose codex optional file %q into per-task home: %w", name, err)
+			}
+			logger.Warn("execenv: codex-home optional file stale cleanup failed (shared absent)", "file", name, "error", err)
 		}
 	}
 
@@ -187,14 +202,28 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// for the shared ~/.codex/hooks.json must be re-keyed onto that per-task
 	// source ID. Running this last means it reads the final config and cannot
 	// be clobbered by, nor clobber, the managed blocks above.
+	//
+	// The shared/task hooks.json paths are derived via codexHooksSourceID so
+	// the re-keyed trust block's source id is byte-identical to what Codex
+	// itself computes (design ①).
+	sharedHooksPath := codexHooksSourceID(sharedHome)
 	hookTrustResult, err := syncCodexHookTrustStateWithResult(
 		filepath.Join(sharedHome, "config.toml"),
 		filepath.Join(codexHome, "config.toml"),
-		filepath.Join(sharedHome, "hooks.json"),
-		filepath.Join(codexHome, "hooks.json"),
+		sharedHooksPath,
+		codexHooksSourceID(codexHome),
 	)
 	if err != nil {
-		logger.Warn("execenv: codex-home hook trust sync failed", "error", err)
+		// Scoped fail-loud (design ②): if the user actually has a shared
+		// hooks.json, failing to re-key its trust onto the per-task path means
+		// Codex would silently treat the inherited hook as untrusted and skip
+		// it — a "false success". Abort task prep. If the shared hooks.json is
+		// absent, this call only clears stale mapped blocks; a failure there is
+		// best-effort cleanup, so log it without blocking the task.
+		if sharedResourceIntended(sharedHooksPath) {
+			return fmt.Errorf("mirror codex hook trust state onto per-task home: %w", err)
+		}
+		logger.Warn("execenv: codex-home hook trust stale cleanup failed (shared absent)", "error", err)
 	} else {
 		// Log paths and counts only — never hook contents, tokens, or secrets.
 		logger.Info("execenv: codex-home hook trust sync",
@@ -206,6 +235,41 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	}
 
 	return nil
+}
+
+// sharedResourceIntended reports whether a shared optional resource at path was
+// meant to be exposed into the per-task home. It is true when the path exists
+// (any kind), and also true when its state cannot be determined (a non-ENOENT
+// stat error → fail-closed: we must not silently skip a resource we cannot
+// verify is absent). It is false only when the path is provably absent
+// (ENOENT). Used to scope the hooks fail-loud in prepareCodexHomeWithOpts.
+func sharedResourceIntended(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
+// codexHooksSourceID returns the absolute hooks.json path that Codex uses as the
+// *source id* when keying hook trust state for a hooks.json living directly
+// under a Codex home (codexHome/hooks.json). It must be byte-identical to what
+// Codex itself computes, or a re-keyed trust block will never be found and the
+// inherited hook is silently treated as untrusted.
+//
+// Codex derives that id as AbsolutePathBuf::from_absolute_path(CODEX_HOME/hooks.json)
+// then source_path.display().to_string() (openai/codex
+// codex-rs/hooks/src/engine/discovery.rs + codex-rs/utils/absolute-path).
+// AbsolutePathBuf is *lexically normalized* (`.` / `..` / redundant separators
+// collapsed) but NOT canonicalized: it does not resolve symlinks. filepath.Join
+// applies the same lexical normalization (via filepath.Clean) and likewise does
+// not resolve symlinks, so it mirrors that semantics.
+//
+// CRITICAL — do NOT filepath.EvalSymlinks / otherwise resolve this path. The
+// per-task hooks.json is itself a symlink into the shared ~/.codex/hooks.json;
+// resolving it yields the shared path, which is NOT what Codex keys on, turning
+// a currently-matching key into a guaranteed mismatch (silent untrust). The
+// real-environment test (hook actually executes) is what confirms the key
+// matches; keep this a pure lexical join.
+func codexHooksSourceID(codexHome string) string {
+	return filepath.Join(codexHome, "hooks.json")
 }
 
 // resolveSharedCodexHome returns the path to the user's shared Codex home.
