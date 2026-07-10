@@ -1703,6 +1703,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
+
+			// Cross-agent workdir fallback: if no (agent, issue) prior yielded a
+			// workdir, inherit the most recent workdir for this issue on the same
+			// runtime even if a different agent produced it. The conversation
+			// session is intentionally NOT inherited across agents (kept
+			// agent-scoped above) — only the file artifacts are shared so a
+			// verification/review agent can continue from what the producing
+			// agent left on disk. See #3933.
+			if resp.PriorWorkDir == "" {
+				if issueWork, err := h.Queries.GetLastIssueWorkDir(r.Context(), db.GetLastIssueWorkDirParams{
+					IssueID:   task.IssueID,
+					RuntimeID: task.RuntimeID,
+				}); err == nil && issueWork.WorkDir.Valid {
+					resp.PriorWorkDir = issueWork.WorkDir.String
+				}
+			}
 		}
 	}
 

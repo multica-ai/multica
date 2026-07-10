@@ -2105,6 +2105,53 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 	return i, err
 }
 
+const getLastIssueWorkDir = `-- name: GetLastIssueWorkDir :one
+SELECT work_dir, runtime_id FROM agent_task_queue
+WHERE issue_id = $1 AND runtime_id = $2
+  AND work_dir IS NOT NULL
+  AND (
+    status = 'completed'
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
+  )
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLastIssueWorkDirParams struct {
+	IssueID   pgtype.UUID `json:"issue_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+type GetLastIssueWorkDirRow struct {
+	WorkDir   pgtype.Text `json:"work_dir"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// GetLastIssueWorkDir returns the most recent usable work directory for an
+// issue on a given runtime, independent of which agent produced it. It is the
+// cross-agent fallback for workdir continuity: when a verification/review
+// agent takes over an issue from a producing agent (same issue, same runtime,
+// different agent_id), it should reuse the producer's work directory (file
+// artifacts) even though the conversation session must NOT be inherited across
+// agents.
+//
+// Unlike GetLastTaskSession, this lookup intentionally drops the agent_id
+// filter and does not require session_id to be non-null: a task that produced
+// files but whose session was poisoned/empty still has a valid work_dir worth
+// continuing from. The same poisoned-terminal and Anthropic-400 guards apply
+// so a bad run's workdir is not silently inherited. runtime_id must match to
+// avoid reusing a workdir path produced on a different machine.
+func (q *Queries) GetLastIssueWorkDir(ctx context.Context, arg GetLastIssueWorkDirParams) (GetLastIssueWorkDirRow, error) {
+	row := q.db.QueryRow(ctx, getLastIssueWorkDir, arg.IssueID, arg.RuntimeID)
+	var i GetLastIssueWorkDirRow
+	err := row.Scan(&i.WorkDir, &i.RuntimeID)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2

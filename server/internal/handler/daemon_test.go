@@ -3136,6 +3136,88 @@ func createRuntimeGuardRuntime(t *testing.T, ctx context.Context, provider strin
 	return runtimeID
 }
 
+// TestClaimTask_IssueCrossAgentWorkDirInherited pins the cross-agent workdir
+// fallback added for #3933: when a verification/review agent takes over an
+// issue from a producing agent (same issue, same runtime, different agent_id),
+// it must inherit the producer's work directory (file artifacts) — but the
+// conversation session must NOT cross agents. Before the fix, PriorWorkDir was
+// empty because GetLastTaskSession keys on (agent_id, issue_id) and the
+// verifier had no prior task of its own.
+func TestClaimTask_IssueCrossAgentWorkDirInherited(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	producerAgentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	// A second agent sharing the same runtime — the verification/review agent.
+	var verifierAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks
+		)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		RETURNING id
+	`, testWorkspaceID, "Cross-Agent Verifier "+t.Name(), runtimeID).Scan(&verifierAgentID); err != nil {
+		t.Fatalf("setup: create verifier agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, verifierAgentID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cross-agent-workdir fixture', 'in_progress', 'none', $2, 'member', 81210, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// The producer completed a task on this runtime, leaving a workdir and a
+	// poison-free session that is agent-scoped (it must NOT be inherited by the
+	// verifier).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			started_at, completed_at, session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'producer-session', '/tmp/producer-workdir')
+	`, producerAgentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create producer task: %v", err)
+	}
+
+	// The verifier has a fresh queued task for the same issue on the same runtime.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, verifierAgentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create verifier task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+
+	// #3933: the verifier inherits the producer's workdir (file artifacts)...
+	if task.PriorWorkDir != "/tmp/producer-workdir" {
+		t.Fatalf("cross-agent workdir lost: expected PriorWorkDir='/tmp/producer-workdir', got %q", task.PriorWorkDir)
+	}
+	// ...but the conversation session is NOT inherited across agents.
+	if task.PriorSessionID != "" {
+		t.Fatalf("cross-agent session must NOT inherit, got PriorSessionID=%q", task.PriorSessionID)
+	}
+
+	// Cleanup the claimed task so it doesn't leak into other tests.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, issueID); err != nil {
+		t.Fatalf("cleanup: complete claimed task: %v", err)
+	}
+}
+
 func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
