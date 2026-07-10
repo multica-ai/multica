@@ -523,15 +523,19 @@ const RuntimeUsageByHourSchema = z.object({
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
 // ---------------------------------------------------------------------------
-// Task cancellation (`POST /api/tasks/:id/cancel`)
-//
-// This response is consumed directly by chat recovery. The embedded task
-// object stays loose so daemon/runtime fields can drift, but the optional
-// `cancelled_chat_message` payload must be well-formed before the UI deletes
-// a message from cache or restores text into the input.
+// Agent task responses. The base object stays loose so daemon/runtime fields
+// can drift while task-list consumers still validate the fields they render.
 // ---------------------------------------------------------------------------
 
-const AgentTaskResponseSchema = z.object({
+const OptionalStringArraySchema = z.preprocess(
+  (value) =>
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+      ? value
+      : undefined,
+  z.array(z.string()).optional(),
+);
+
+export const AgentTaskSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
@@ -550,6 +554,11 @@ const AgentTaskResponseSchema = z.object({
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
+  // Coverage is additive display metadata. A mixed-version or partially
+  // upgraded server must not make one malformed optional field erase the
+  // entire execution log, so degrade that field to "absent" independently.
+  coalesced_comment_ids: OptionalStringArraySchema,
+  delivered_comment_ids: OptionalStringArraySchema,
   trigger_summary: z.string().optional(),
   handoff_note: z.string().optional(),
   kind: z.string().optional(),
@@ -557,6 +566,11 @@ const AgentTaskResponseSchema = z.object({
   relative_work_dir: z.string().optional(),
 }).loose();
 
+export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+// Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
+// chat recovery. Its optional message payload must be well-formed before the
+// UI deletes a message from cache or restores text into the input.
 const CancelledChatMessageSchema = z.object({
   chat_session_id: z.string(),
   message_id: z.string(),
@@ -567,7 +581,7 @@ const CancelledChatMessageSchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
 }).loose();
 
-export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
+export const CancelTaskResponseSchema = AgentTaskSchema.extend({
   cancelled_chat_message: CancelledChatMessageSchema.nullish()
     .transform((value) => value ?? undefined),
 }).loose();

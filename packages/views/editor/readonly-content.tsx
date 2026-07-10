@@ -38,10 +38,11 @@ import type { Attachment } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
-import { isAllowedFileCardHref } from "@multica/ui/markdown";
+import { isAllowedFileCardHref, isIssueIdentifier } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -154,6 +155,18 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
   );
 }
 
+/**
+ * Autolinked bare identifier (e.g. `MUL-123`) routed through
+ * `mention://issue/<identifier>` by the readonly preprocessor. Resolves to a
+ * real issue in the current workspace; renders a navigable mention on a hit,
+ * plain text on a miss / while loading / cross-workspace.
+ */
+function AutolinkedIssueMentionLink({ identifier }: { identifier: string }) {
+  const issue = useResolveIssueIdentifier(identifier);
+  if (!issue) return <>{identifier}</>;
+  return <IssueMentionLink issueId={issue.id} label={identifier} />;
+}
+
 function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
   const { push, openInNewTab } = useNavigation();
   const p = useWorkspacePaths();
@@ -247,6 +260,11 @@ function ReadonlyLink({
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
+      // A bare identifier (from the autolink preprocessor) is carried as the id
+      // segment; a real mention carries a UUID. Dispatch on the id shape.
+      if (isIssueIdentifier(match[2])) {
+        return <AutolinkedIssueMentionLink identifier={match[2]} />;
+      }
       const label =
         typeof children === "string"
           ? children
@@ -433,7 +451,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   attachments,
 }: ReadonlyContentProps) {
   const processed = useMemo(
-    () => highlightToHtml(preprocessMarkdown(content)),
+    () =>
+      highlightToHtml(
+        preprocessMarkdown(content, { autolinkIssueIdentifiers: true }),
+      ),
     [content],
   );
   const wrapperRef = useRef<HTMLDivElement>(null);

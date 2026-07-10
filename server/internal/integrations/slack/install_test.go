@@ -41,15 +41,45 @@ type fakeInstallQueries struct {
 	existing *db.ChannelInstallation
 	// appIDTaken makes UpsertChannelInstallation report a unique-constraint
 	// violation on the (channel_type, app_id) routing index — i.e. the pasted app
-	// is already connected to another agent / workspace.
+	// is already connected to a LIVE owner (the reclaim has run by then).
 	appIDTaken   bool
 	upsertParams db.UpsertChannelInstallationParams
 	upsertCalled bool
 	rowID        pgtype.UUID
+
+	// reclaimedID, when set, is returned by ReclaimDeadChannelInstallationByAppID
+	// to model a dead prior owner having been cleared; otherwise it reports
+	// pgx.ErrNoRows (nothing was dead). reclaimCalled records that the install
+	// path ran the reclaim before upserting.
+	reclaimedID   *pgtype.UUID
+	reclaimCalled bool
+	// ownerWorkspaceID / ownerArchived / ownerMissing drive the live-owner lookup
+	// that classifies an appIDTaken conflict into the right sentinel.
+	ownerWorkspaceID pgtype.UUID
+	ownerArchived    bool
+	ownerMissing     bool
 }
 
 // WithTx returns the same fake — the fake tx is a no-op token.
 func (f *fakeInstallQueries) WithTx(_ pgx.Tx) installQueries { return f }
+
+func (f *fakeInstallQueries) ReclaimDeadChannelInstallationByAppID(_ context.Context, _ db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error) {
+	f.reclaimCalled = true
+	if f.reclaimedID != nil {
+		return *f.reclaimedID, nil
+	}
+	return pgtype.UUID{}, pgx.ErrNoRows
+}
+
+func (f *fakeInstallQueries) GetChannelInstallationOwnerByAppID(_ context.Context, _ db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error) {
+	if f.ownerMissing {
+		return db.GetChannelInstallationOwnerByAppIDRow{}, pgx.ErrNoRows
+	}
+	return db.GetChannelInstallationOwnerByAppIDRow{
+		WorkspaceID:     f.ownerWorkspaceID,
+		AgentArchivedAt: pgtype.Timestamptz{Valid: f.ownerArchived},
+	}, nil
+}
 
 func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
 	f.upsertCalled = true

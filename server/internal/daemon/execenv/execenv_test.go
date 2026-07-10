@@ -352,7 +352,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
-		"default ref: `release/v2`",
+		"[--ref <branch-or-sha>]",
 		"https://github.com/org/frontend",
 	} {
 		if !strings.Contains(s, want) {
@@ -4043,10 +4043,11 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 	t.Parallel()
 
-	// Discovery lines in Available Commands → Core must appear in EVERY
-	// runtime config, regardless of trigger type. These are the single
-	// discovery point for the CLI when an agent decides to read or write
-	// metadata outside the numbered workflow.
+	// Discovery lines in Available Commands → Core appear in every runtime
+	// config except quick-create (whose minimal Available Commands lists
+	// only `issue create`). These are the single discovery point for the
+	// CLI when an agent decides to read or write metadata outside the
+	// numbered workflow.
 	coreDiscoveryLines := []string{
 		"multica issue metadata list <issue-id>",
 		"multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
@@ -4199,10 +4200,15 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			}
 			s := string(data)
 
-			// Global Core discovery lines apply everywhere.
-			for _, want := range coreDiscoveryLines {
-				if !strings.Contains(s, want) {
-					t.Errorf("Available Commands → Core missing %q\n---\n%s", want, s)
+			// Global Core discovery lines apply everywhere EXCEPT
+			// quick-create, whose minimal Available Commands
+			// intentionally advertises only `issue create` — the hard
+			// guardrails forbid every other CLI call for that kind.
+			if tc.ctx.QuickCreatePrompt == "" {
+				for _, want := range coreDiscoveryLines {
+					if !strings.Contains(s, want) {
+						t.Errorf("Available Commands → Core missing %q\n---\n%s", want, s)
+					}
 				}
 			}
 

@@ -990,9 +990,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if len(ack.PendingLocalSkillImports) > 0 {
 		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
 	}
-	if ack.FeatureFlags != nil {
-		resp["feature_flags"] = ack.FeatureFlags
-	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1106,9 +1103,6 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	ack := &protocol.DaemonHeartbeatAckPayload{
 		RuntimeID: runtimeID,
 		Status:    "ok",
-	}
-	if h.DaemonFeatureFlags != nil {
-		ack.FeatureFlags = h.DaemonFeatureFlags.EvaluateForRuntime(ctx, rt)
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
@@ -1362,6 +1356,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
+	supportsCoalescedComments := requestHasDaemonCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	authMs = time.Since(start).Milliseconds()
 
 	claimStart := time.Now()
@@ -1379,12 +1374,64 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome = "no_task"
 		return
 	}
+	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
+		// A legacy edit/delete race can leave a plan whose trigger FK was
+		// cleared while its user-scoped MCP overlay still belongs to the deleted
+		// author. Never dispatch it as a generic assignment: that prompt reads
+		// issue history and would still expose the stale user's capabilities.
+		// Cancel the stale row and replay every survivor through normal routing,
+		// which recomputes originator and connected-app context.
+		if !task.IssueID.Valid {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "comment task has no issue")
+			return
+		}
+		issue, loadErr := h.Queries.GetIssue(r.Context(), task.IssueID)
+		if loadErr != nil {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
+			return
+		}
+		if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
+			outcome = "error_workspace"
+			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+				slog.Error("task claim: cancel stale cross-workspace task failed",
+					"task_id", uuidToString(task.ID), "error", cancelErr)
+			}
+			writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
+			return
+		}
+		cancelled, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID)
+		if cancelErr != nil {
+			outcome = "error_stale_comment_plan"
+			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
+			return
+		}
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
+		outcome = "repaired_stale_comment_plan"
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
 
 	outcome = "claimed"
 	buildStart = time.Now()
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
+	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
+	// comment input. Comment tasks replace this with the ids actually embedded
+	// in the capability-aware response built below.
+	deliveredCommentIDs := []pgtype.UUID{}
+	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+	requeueFailedClaim := func(reason string) {
+		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
+			slog.Error("task claim: failed to requeue after finalization error",
+				"task_id", uuidToString(task.ID),
+				"reason", reason,
+				"error", err,
+			)
+		}
+	}
 	composioMCPEnabled := h.composioMCPAppsEnabled(r.Context())
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
@@ -1606,14 +1653,76 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Load every planned input as one chronological, de-duplicated set.
+		// The trigger is included here so the delivery receipt can only contain
+		// comments whose body we successfully embedded. Missing/deleted rows are
+		// intentionally absent and remain eligible for reconciliation. A stable
+		// payload budget always keeps the primary trigger, then admits an oldest-
+		// first prefix of additional comments; overflow is reconciled later.
+		// Workspace-scoped load (MUL-4252) so a foreign comment UUID resolves to
+		// "missing" instead of leaking another tenant's text into the prompt.
+		plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+		if task.TriggerCommentID.Valid {
+			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
+		}
+		loadedComments := h.buildCoalescedCommentData(r.Context(), runtime.WorkspaceID, plannedCommentIDs)
+		triggerCommentID := uuidToString(task.TriggerCommentID)
+		var deliveredComments []CoalescedCommentData
+		triggerLoaded := false
+		for _, comment := range loadedComments {
+			if comment.ID == triggerCommentID {
+				triggerLoaded = true
+				break
+			}
+		}
+		if task.TriggerCommentID.Valid && triggerLoaded {
+			deliveredComments = selectCommentDelivery(
+				loadedComments,
+				triggerCommentID,
+				!supportsCoalescedComments,
+				maxClaimCommentPayloadBytes,
+			)
+		}
+		// If the persisted trigger body cannot be loaded, fail closed on comment
+		// coverage for this claim. The trigger snapshot CAS below also rejects a
+		// concurrent edit/delete that changes the FK after this read.
+		deliveredCommentIDs = commentDataIDs(deliveredComments)
+		// taskToResponse exposes the enqueue plan to UI task-list callers. A
+		// daemon claim must instead advertise only the structured ids actually
+		// present in this payload, especially when the delivery budget truncates.
+		resp.CoalescedCommentIDs = nil
+		for _, comment := range deliveredComments {
+			if comment.ID == triggerCommentID {
+				// Populate the actual payload from the same successful read that
+				// earned the receipt. The richer GetComment lookup below resolves
+				// initiator ids and count hints, but a transient second-read failure
+				// must never acknowledge a body that was not embedded.
+				resp.TriggerCommentContent = comment.Content
+				resp.TriggerThreadID = comment.ThreadID
+				resp.TriggerAuthorType = comment.AuthorType
+				resp.TriggerAuthorName = comment.AuthorName
+				continue
+			}
+			resp.CoalescedCommentIDs = append(resp.CoalescedCommentIDs, comment.ID)
+			resp.CoalescedComments = append(resp.CoalescedComments, comment)
+		}
+
 		// Fetch the triggering comment content so the daemon can embed it
 		// directly in the agent prompt (prevents the agent from ignoring comments
 		// when stale output files exist in a reused workdir). Also surface the
 		// comment author's kind and display name so the agent knows whether it
 		// was triggered by a human or by another agent — a signal used by the
 		// harness instructions to avoid mention loops between agents.
-		if task.TriggerCommentID.Valid {
-			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
+		effectiveTriggerUUID := task.TriggerCommentID
+		if effectiveTriggerUUID.Valid {
+			// Scope by the runtime's workspace so a task row carrying a foreign
+			// comment UUID can never pull another workspace's comment text into
+			// this agent's prompt. The task's issue workspace is asserted equal
+			// to runtime.WorkspaceID below, so this is the right tenant (MUL-4252).
+			if comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+				ID:          effectiveTriggerUUID,
+				WorkspaceID: runtime.WorkspaceID,
+			}); err == nil {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
@@ -1663,7 +1772,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					IssueID: comment.IssueID,
 				}); err == nil && startedAt.Valid {
 					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
-						AnchorID:    task.TriggerCommentID,
+						AnchorID:    effectiveTriggerUUID,
 						IssueID:     comment.IssueID,
 						WorkspaceID: comment.WorkspaceID,
 						Since:       startedAt,
@@ -1674,6 +1783,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+
+		if !supportsCoalescedComments {
+			// Legacy daemons ignore the structured coalesced fields. Fold every
+			// successfully loaded comment into the one trigger field they already
+			// understand, then hide the structured fields to avoid duplicate prompt
+			// sections in intermediate daemons that understand them but do not yet
+			// advertise the capability.
+			if len(resp.CoalescedComments) > 0 || (resp.TriggerCommentContent == "" && len(deliveredComments) > 0) {
+				resp.TriggerCommentContent = formatLegacyCommentBundle(deliveredComments)
+			}
+			resp.CoalescedCommentIDs = nil
+			resp.CoalescedComments = nil
+		} else if resp.TriggerCommentContent == "" && len(deliveredComments) > 0 {
+			// A deleted newest trigger must not suppress the structured earlier
+			// comments: buildCommentPrompt renders them inside its trigger-content
+			// branch. The missing id itself is not acknowledged in the receipt.
+			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
@@ -2054,24 +2181,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome = "error_token"
 		slog.Error("task claim: failed to generate agent task token",
 			"task_id", uuidToString(task.ID), "error", terr)
+		requeueFailedClaim("token_generation")
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
-	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}); terr != nil {
-		outcome = "error_token"
-		slog.Error("task claim: failed to persist agent task token",
-			"task_id", uuidToString(task.ID), "error", terr)
-		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+	}, deliveredCommentIDs, commentBackedTask)
+	if ferr != nil {
+		outcome = "error_claim_finalize"
+		slog.Error("task claim: failed to finalize token and comment delivery receipt",
+			"task_id", uuidToString(task.ID), "error", ferr)
+		// FinalizeTaskClaim is transactional, so its newly generated token is
+		// rolled back with the receipt. Never delete by task here: a stale
+		// reclaim can race the original daemon starting, and broad revocation
+		// would invalidate that already-authorized execution.
+		requeueFailedClaim("token_and_delivery_receipt")
+		writeError(w, http.StatusInternalServerError, "failed to finalize task claim")
 		return
 	}
 	resp.AuthToken = tokenStr
+	task.DeliveredCommentIds = receipt
+	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
@@ -2362,6 +2498,14 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
 
+	// MUL-4195: guarantee at-least-once processing. If a member posted a
+	// deliberate comment while this run was executing (or one was merged into
+	// it after its context was built), schedule a single follow-up so the
+	// input is never silently dropped. Loop-safe: member-authored only, capped
+	// by the existing per-(issue, agent) dedup, and terminating because the
+	// triggering comment always predates the follow-up run's started_at.
+	h.reconcileCommentsOnCompletion(r.Context(), task)
+
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
 	// cascaded on agent_task deletion, but eagerly deleting it on
@@ -2416,6 +2560,401 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 		taskContext.Provider,
 		durationMS,
 	))
+}
+
+// reconcileCommentsOnCompletion closes the at-least-once gap for member
+// comments a completing run did NOT deliver (MUL-4195).
+//
+// The merge path (mergeCommentIntoPendingTask) folds a comment into a task only
+// while it is still PRE-CLAIM (queued/deferred). Those planned ids are not
+// proof of delivery: older daemons ignore structured coalesced fields, and a
+// referenced comment can be deleted before claim. Claim therefore records the
+// ids it actually embedded in delivered_comment_ids. Anything posted during
+// this run's lifetime that is NOT in that receipt must earn a follow-up.
+//
+// Anchor = created_at + delivered-set exclusion, NOT a dispatch/start timestamp
+// (MUL-4195 review round-3 must-fix). A timestamp anchor cannot tell a
+// delivered comment from an undelivered one, and there is a race it structurally
+// misses: a comment created while the task was still queued, but whose merge
+// lost the race to the daemon claiming the task (queued→dispatched) — the merge
+// then finds no pre-claim row (ErrNoRows), the enqueue path defers to reconcile,
+// yet the comment's created_at is BEFORE dispatched_at, so a dispatched_at
+// anchor would skip it and it would vanish. Anchoring on the task's own
+// created_at reaches back over the whole run, and excluding the delivered set
+// is what prevents re-firing comments the run actually received. Together
+// they catch the pre-dispatch merge-race comment, the
+// dispatch→start comment, and the during-run comment, while never double-firing
+// a delivered one.
+//
+// Scope + loop safety:
+//   - MEMBER comments qualify as before, with their full routing. AGENT comments
+//     now also qualify, but ONLY through an explicit @agent/@squad mention
+//     (keepExplicitMentionTriggers). Every non-mention agent route — the
+//     assigned-squad-leader fallback, thread-parent / conversation continuation
+//     — is intentionally excluded, so a plain agent reply / acknowledgement
+//     earns no follow-up here regardless of issue assignment. That is the
+//     anti-loop boundary the old member-only filter protected.
+//     This closes MUL-4304: an explicit agent→agent @mention that landed while
+//     the target already had a DISPATCHED task is dropped by the create-time
+//     enqueue path — merge only folds a comment into a QUEUED task, so a
+//     dispatched target hits the merge-miss + active-task `continue` and is
+//     deferred here — and was then never replayed because agent comments were
+//     excluded. (A target with only a RUNNING/queued task does not hit that
+//     drop: queued merges in, running-only takes the normal fresh-enqueue path.)
+//   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
+//     an `@other-agent` comment is left to that agent's own creation-time
+//     trigger, so a completion never re-wakes an unrelated agent.
+//   - Every undelivered qualifying comment is replayed through the normal
+//     enqueue path in chronological order, so they coalesce into a SINGLE
+//     follow-up task (the first enqueues it, the rest merge in). Bounded to one
+//     run, and terminating: the follow-up's own created_at is later than all of
+//     these comments and its delivered set will contain them, so its completion
+//     finds nothing to re-schedule.
+func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
+	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
+		return
+	}
+	plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
+	if task.TriggerCommentID.Valid {
+		plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
+	}
+	comments, err := h.Queries.ListReconcilableCommentsForIssueSince(ctx, db.ListReconcilableCommentsForIssueSinceParams{
+		IssueID:           task.IssueID,
+		Since:             task.CreatedAt,
+		PlannedCommentIds: plannedCommentIDs,
+	})
+	if err != nil {
+		slog.Warn("reconcile comments on completion: list comments failed",
+			"issue_id", uuidToString(task.IssueID), "task_id", uuidToString(task.ID), "error", err)
+		return
+	}
+	if len(comments) == 0 {
+		return
+	}
+	// The delivered set is the claim-time receipt, not the enqueue-time plan.
+	// Legacy tasks backfill only the primary trigger, deliberately replaying
+	// coalesced inputs that their daemon may have ignored.
+	delivered := make(map[string]struct{}, len(task.DeliveredCommentIds))
+	for _, id := range task.DeliveredCommentIds {
+		if id.Valid {
+			delivered[uuidToString(id)] = struct{}{}
+		}
+	}
+	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("reconcile comments on completion: load issue failed",
+			"issue_id", uuidToString(task.IssueID), "error", err)
+		return
+	}
+	agentID := uuidToString(task.AgentID)
+	scheduled := 0
+	for i := range comments {
+		c := comments[i]
+		if _, ok := delivered[uuidToString(c.ID)]; ok {
+			// Already delivered to this run (trigger or pre-claim coalesced).
+			continue
+		}
+		if isNoteComment(c.Content) {
+			continue
+		}
+		var parentComment *db.Comment
+		if c.ParentID.Valid {
+			// Scope to the issue's workspace; a comment's parent is always in the
+			// same workspace, so this only fails closed against a stray foreign
+			// UUID rather than changing behavior (MUL-4252).
+			if parent, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+				ID:          c.ParentID,
+				WorkspaceID: issue.WorkspaceID,
+			}); err == nil {
+				parentComment = &parent
+			}
+		}
+		// Compute what this comment would trigger, then keep ONLY the agent
+		// that just completed — never the full fan-out (that would re-wake
+		// unrelated `@other-agent` targets).
+		//
+		// The comment is routed under its OWN author_type. A member is its own
+		// originator. For an agent author, the originator is the human at the
+		// top of that agent's trigger chain (resolved from the comment's source
+		// task); canInvokeAgent judges an agent→agent (A2A) mention by that
+		// originator, not the immediate agent principal (MUL-3963).
+		actorType := c.AuthorType
+		actorID := uuidToString(c.AuthorID)
+		originatorUserID := actorID
+		if actorType != "member" {
+			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
+		}
+		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+			ExcludeTriggerCommentID: c.ID,
+			OriginatorUserID:        originatorUserID,
+		})
+		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
+		// computeCommentAgentTriggers can also return the assigned-squad-leader
+		// fallback (Source = issue-assignee) for a plain worker-agent reply on a
+		// squad-assigned issue; that conversational routing is intentionally NOT
+		// replayed here. Restricting to the explicit-mention sources keeps the
+		// invariant unconditional — a plain agent reply / acknowledgement earns
+		// no follow-up regardless of issue assignment — which is the anti-loop
+		// boundary the old member-only filter protected (MUL-4304). Member
+		// comments are unaffected: they keep their full routing.
+		if actorType != "member" {
+			triggers = keepExplicitMentionTriggers(triggers)
+		}
+		scoped := make([]commentAgentTrigger, 0, 1)
+		for _, trigger := range triggers {
+			if uuidToString(trigger.Agent.ID) == agentID {
+				scoped = append(scoped, trigger)
+			}
+		}
+		if len(scoped) == 0 {
+			continue
+		}
+		// The first qualifying comment enqueues the follow-up task; later ones
+		// find it AlreadyPending and merge in, so all undelivered comments end
+		// up covered by a single bounded run.
+		h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)
+		scheduled++
+	}
+	if scheduled > 0 {
+		slog.Info("reconcile comments on completion: scheduled follow-up",
+			"issue_id", uuidToString(task.IssueID),
+			"completed_task_id", uuidToString(task.ID),
+			"agent_id", agentID,
+			"undelivered_comments", scheduled)
+	}
+}
+
+// keepExplicitMentionTriggers filters a computed trigger set down to the ones
+// produced by an EXPLICIT @agent / @squad mention (MUL-4304). It is applied to
+// agent-authored comments during completion reconcile so that only a
+// deliberately-targeted mention earns a replay — the assigned-squad-leader
+// fallback, thread-parent / conversation continuation, and issue-assignee
+// routing (all non-mention sources) are intentionally excluded, so a plain
+// agent reply or acknowledgement never earns a follow-up here. Member comments
+// are never passed through this filter; they keep their full routing.
+func keepExplicitMentionTriggers(triggers []commentAgentTrigger) []commentAgentTrigger {
+	if len(triggers) == 0 {
+		return triggers
+	}
+	filtered := make([]commentAgentTrigger, 0, len(triggers))
+	for _, trigger := range triggers {
+		switch trigger.Source {
+		case commentTriggerSourceMentionAgent, commentTriggerSourceMentionSquadLeader:
+			filtered = append(filtered, trigger)
+		}
+	}
+	return filtered
+}
+
+// buildCoalescedCommentData loads the full detail of each comment that was
+// folded into a not-yet-started run (MUL-4195) so the claim response can embed
+// them and the prompt can address each without assuming they share the
+// triggering thread (review should-fix #3). Thread id follows the same rule as
+// the triggering comment (parent id when the comment is a reply, else the
+// comment's own id). Missing comments (deleted / wrong workspace) are skipped
+// rather than failing the claim. The set is bounded by how many comments a user
+// fires before a run starts, so the per-comment lookups stay cheap.
+func (h *Handler) buildCoalescedCommentData(ctx context.Context, workspaceID pgtype.UUID, ids []pgtype.UUID) []CoalescedCommentData {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]CoalescedCommentData, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		idString := uuidToString(id)
+		if _, ok := seen[idString]; ok {
+			continue
+		}
+		seen[idString] = struct{}{}
+		// Workspace-scoped so a foreign comment UUID resolves to "missing"
+		// (skipped) instead of leaking another tenant's text into the prompt
+		// (MUL-4252). Matches this function's documented skip-on-missing rule.
+		comment, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			continue
+		}
+		data := CoalescedCommentData{
+			ID:         uuidToString(comment.ID),
+			ThreadID:   uuidToString(comment.ID),
+			AuthorType: comment.AuthorType,
+			Content:    comment.Content,
+			CreatedAt:  timestampToString(comment.CreatedAt),
+		}
+		if comment.ParentID.Valid {
+			data.ThreadID = uuidToString(comment.ParentID)
+		}
+		if comment.AuthorID.Valid {
+			switch comment.AuthorType {
+			case "agent":
+				if a, err := h.Queries.GetAgent(ctx, comment.AuthorID); err == nil {
+					data.AuthorName = a.Name
+				}
+			case "member":
+				if u, err := h.Queries.GetUser(ctx, comment.AuthorID); err == nil {
+					data.AuthorName = u.Name
+				}
+			}
+		}
+		out = append(out, data)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, out[i].CreatedAt)
+		right, rightErr := time.Parse(time.RFC3339Nano, out[j].CreatedAt)
+		if leftErr == nil && rightErr == nil && !left.Equal(right) {
+			return left.Before(right)
+		}
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt < out[j].CreatedAt
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func commentDataIDs(comments []CoalescedCommentData) []pgtype.UUID {
+	if len(comments) == 0 {
+		return []pgtype.UUID{}
+	}
+	ids := make([]pgtype.UUID, 0, len(comments))
+	for _, comment := range comments {
+		ids = append(ids, parseUUID(comment.ID))
+	}
+	return ids
+}
+
+const maxClaimCommentPayloadBytes = 512 << 10 // 512 KiB of comment input per claim
+
+// selectCommentDelivery applies a deterministic budget to comment input. The
+// primary trigger is mandatory when it still exists, even when that single
+// comment exceeds the budget; one comment must never become unclaimable. Extra
+// comments are admitted as an oldest-first prefix, so overflow remains a stable
+// suffix for completion reconciliation and cannot starve across retries.
+func selectCommentDelivery(comments []CoalescedCommentData, triggerID string, legacy bool, limit int) []CoalescedCommentData {
+	if len(comments) == 0 {
+		return nil
+	}
+	mandatoryID := triggerID
+	mandatoryFound := false
+	for _, comment := range comments {
+		if comment.ID == mandatoryID {
+			mandatoryFound = true
+			break
+		}
+	}
+	if !mandatoryFound {
+		// The planned trigger may have been deleted. Keep the newest available
+		// comment so the claim still makes progress and reconcile can pick up the
+		// remainder.
+		mandatoryID = comments[len(comments)-1].ID
+	}
+
+	selected := map[string]struct{}{mandatoryID: {}}
+	used := commentDeliveryBaseSize(legacy) + commentDeliveryEntrySize(commentByID(comments, mandatoryID), legacy)
+	for _, comment := range comments {
+		if comment.ID == mandatoryID {
+			continue
+		}
+		cost := commentDeliveryEntrySize(comment, legacy)
+		if limit > 0 && used+cost > limit {
+			break
+		}
+		selected[comment.ID] = struct{}{}
+		used += cost
+	}
+
+	out := make([]CoalescedCommentData, 0, len(selected))
+	for _, comment := range comments {
+		if _, ok := selected[comment.ID]; ok {
+			out = append(out, comment)
+		}
+	}
+	return out
+}
+
+func commentByID(comments []CoalescedCommentData, id string) CoalescedCommentData {
+	for _, comment := range comments {
+		if comment.ID == id {
+			return comment
+		}
+	}
+	return CoalescedCommentData{}
+}
+
+func commentDeliveryBaseSize(legacy bool) int {
+	if legacy {
+		return escapedJSONStringContentSize(legacyCommentBundleHeader)
+	}
+	return 2 // JSON array brackets
+}
+
+func commentDeliveryEntrySize(comment CoalescedCommentData, legacy bool) int {
+	if legacy {
+		return escapedJSONStringContentSize(formatLegacyCommentEntry(comment))
+	}
+	encoded, err := json.Marshal(comment)
+	if err != nil {
+		return maxClaimCommentPayloadBytes + 1
+	}
+	return len(encoded) + 1 // comma between JSON array entries
+}
+
+func escapedJSONStringContentSize(value string) int {
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) < 2 {
+		return maxClaimCommentPayloadBytes + 1
+	}
+	// json.Marshal adds the surrounding string quotes. The remaining bytes
+	// match the escaping cost paid when the legacy bundle is nested in the
+	// claim response.
+	return len(encoded) - 2
+}
+
+const legacyCommentBundleHeader = "This run covers multiple distinct issue comments. Address every comment below in chronological order; do not treat this bundle as one rewritten comment.\n"
+
+// formatLegacyCommentBundle carries every planned comment through the one
+// field understood by daemons that predate coalesced-comments-v1. Delimiters,
+// ids and thread ids keep distinct instructions attributable and fetchable.
+func formatLegacyCommentBundle(comments []CoalescedCommentData) string {
+	if len(comments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(legacyCommentBundleHeader)
+	for _, comment := range comments {
+		b.WriteString(formatLegacyCommentEntry(comment))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatLegacyCommentEntry(comment CoalescedCommentData) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n--- comment %s", comment.ID)
+	if comment.ThreadID != "" {
+		fmt.Fprintf(&b, " [thread %s]", comment.ThreadID)
+	}
+	if comment.AuthorType != "" || comment.AuthorName != "" {
+		fmt.Fprintf(&b, " [author %s", comment.AuthorType)
+		if comment.AuthorName != "" {
+			fmt.Fprintf(&b, ": %s", comment.AuthorName)
+		}
+		b.WriteString("]")
+	}
+	if comment.CreatedAt != "" {
+		fmt.Fprintf(&b, " [created %s]", comment.CreatedAt)
+	}
+	b.WriteString(" ---\n")
+	b.WriteString(comment.Content)
+	fmt.Fprintf(&b, "\n--- end comment %s ---\n", comment.ID)
+	return b.String()
 }
 
 // ReportTaskUsage stores per-task token usage. Called independently of

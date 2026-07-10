@@ -82,7 +82,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
           name={member.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-          size={40}
+          size="xl"
           className="rounded-full"
         />
         <div className="min-w-0 flex-1">
@@ -140,9 +140,9 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
             <ActorAvatar
               actorType="agent"
               actorId={a.id}
-              size={20}
+              size="sm"
               showStatusDot
-              className="mt-0.5 shrink-0 rounded-md"
+              className="mt-0.5 shrink-0"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{a.name}</div>

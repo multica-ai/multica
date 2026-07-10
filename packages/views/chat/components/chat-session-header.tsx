@@ -105,7 +105,7 @@ export function ChatSessionHeader({
   return (
     <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
       {agent ? (
-        <ActorAvatar actorType="agent" actorId={agent.id} size={30} enableHoverCard showStatusDot />
+        <ActorAvatar actorType="agent" actorId={agent.id} size="lg" enableHoverCard showStatusDot />
       ) : (
         <span className="size-[30px] shrink-0" />
       )}

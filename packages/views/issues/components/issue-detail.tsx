@@ -149,7 +149,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size="md" />
                     <span className="truncate flex-1">{m.name}</span>
                   </CommandItem>
                 );
@@ -168,7 +168,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size="md" showStatusDot />
                     <span className="truncate flex-1">{a.name}</span>
                   </CommandItem>
                 );
@@ -531,7 +531,7 @@ function ActivityBlock({
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
-          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="sm" />;
         }
 
         return (
@@ -663,7 +663,7 @@ function SubIssueRow({ child }: { child: Issue }) {
             <ActorAvatar
               actorType={child.assignee_type}
               actorId={child.assignee_id}
-              size={20}
+              size="sm"
               className="shrink-0"
             />
           ) : (
@@ -1623,7 +1623,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </button>
         {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           <PropRow label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
+            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_created)}>
@@ -2121,7 +2121,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             key={`${sub.user_type}-${sub.user_id}`}
                             actorType={sub.user_type}
                             actorId={sub.user_id}
-                            size={24}
+                            size="md"
                             enableHoverCard
                           />
                         ))}

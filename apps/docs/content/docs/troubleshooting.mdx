@@ -279,9 +279,12 @@ netstat -ano | findstr :8080    # Windows
 | Component | Location | Command |
 |---|---|---|
 | **Daemon** | `~/.multica/daemon.log` (background mode) or foreground stdout | `multica daemon logs -f --lines 100` |
+| **Daemon (crashes)** | `~/.multica/daemon.err.log` | Open directly — panics / early-startup errors land here |
 | **Server (Docker)** | Container stdout | `docker logs -f <container>` |
 | **Server (systemd)** | journal | `journalctl -u multica-server -f` |
 | **Frontend (dev)** | Terminal running `pnpm dev` | Read directly |
 | **Frontend (browser)** | DevTools → Console | Press `F12` |
 
-For more detailed daemon logs, move it from background to foreground: `multica daemon stop && multica daemon start --foreground`.
+In background mode `daemon.log` is size-rotated (20MB × 5 gzip backups by default; tune with `MULTICA_DAEMON_LOG_MAX_SIZE_MB` / `_MAX_BACKUPS` / `_MAX_AGE_DAYS`), so it stays small enough to open. Go runtime panics and pre-logger errors go to the separate, bounded `daemon.err.log`.
+
+For more detailed daemon logs, move it from background to foreground: `multica daemon stop && multica daemon start --foreground`. Running in the foreground streams logs live to your terminal instead of the rotated file.

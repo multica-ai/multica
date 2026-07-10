@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2, Save, LogOut } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Save, LogOut } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -28,8 +28,6 @@ import {
 } from "@multica/core/workspace/queries";
 import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
@@ -37,6 +35,7 @@ import {
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";
@@ -198,28 +197,6 @@ export function WorkspaceTab() {
     void performSave(false);
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const { upload, uploading } = useFileUpload(api);
-
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!workspace) return;
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Reset input so the same file can be re-selected
-    e.target.value = "";
-    try {
-      const result = await upload(file);
-      if (!result) return;
-      const updated = await api.updateWorkspace(workspace.id, { avatar_url: result.link });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      toast.success(t(($) => $.workspace.toast_logo_updated));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.toast_logo_failed));
-    }
-  };
-
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
@@ -263,8 +240,6 @@ export function WorkspaceTab() {
 
   if (!workspace) return null;
 
-  const logoUrl = resolvePublicFileUrl(workspace.avatar_url);
-
   return (
     <div className="space-y-8">
       {/* Workspace settings */}
@@ -274,40 +249,23 @@ export function WorkspaceTab() {
         <Card>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-4">
-              <button
-                type="button"
-                className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || !canManageWorkspace}
-                aria-label={t(($) => $.workspace.change_logo_aria)}
-              >
-                {logoUrl ? (
-                  <img
-                    src={logoUrl}
-                    alt={workspace.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-muted-foreground">
-                    {workspace.name.charAt(0).toUpperCase()}
-                  </span>
-                )}
-                {canManageWorkspace && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                    {uploading ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-white" />
-                    ) : (
-                      <Camera className="h-5 w-5 text-white" />
-                    )}
-                  </div>
-                )}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={handleLogoUpload}
+              <AvatarUploadControl
+                variant="workspace"
+                value={workspace.avatar_url ?? null}
+                name={workspace.name}
+                size={64}
+                disabled={!canManageWorkspace}
+                ariaLabel={t(($) => $.workspace.change_logo_aria)}
+                onUploaded={async (url) => {
+                  const updated = await api.updateWorkspace(workspace.id, {
+                    avatar_url: url,
+                  });
+                  qc.setQueryData(
+                    workspaceKeys.list(),
+                    (old: Workspace[] | undefined) =>
+                      old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+                  );
+                }}
               />
               <div className="text-xs text-muted-foreground">
                 {t(($) => $.workspace.click_logo_hint)}

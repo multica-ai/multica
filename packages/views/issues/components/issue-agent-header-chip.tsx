@@ -145,7 +145,7 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
         >
           <AgentAvatarStack
             agentIds={agentIds}
-            size={18}
+            size="sm"
             max={3}
             opacity={anyRunning ? "full" : "half"}
           />

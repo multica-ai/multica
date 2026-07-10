@@ -33,22 +33,26 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Resolve the seeded runtime + agent for this workspace, then bump the
-	// runtime metadata to a CLI version that clears MinQuickCreateCLIVersion.
-	// The seed runtime uses metadata '{}'::jsonb which would otherwise trip
-	// the daemon-version gate before we ever reach the parent_issue_id check.
+	// Resolve the agent this request targets, then bump the CLI version on the
+	// runtime BOUND TO that agent — that is the runtime the version gate checks
+	// (the handler uses agent.RuntimeID). Picking an arbitrary `LIMIT 1`
+	// agent_runtime is wrong when the shared test workspace holds more than one
+	// runtime (other handler tests register their own): the LIMIT 1 row need
+	// not be the agent's runtime, so the agent's real runtime stays on the
+	// seed's empty '{}' metadata and trips the daemon-version gate before we
+	// ever reach the parent_issue_id check.
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&runtimeID); err != nil {
-		t.Fatalf("fetch runtime: %v", err)
-	}
 	if err := testPool.QueryRow(ctx,
 		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE id = $1`,
+		agentID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch agent runtime: %v", err)
 	}
 	if _, err := testPool.Exec(ctx,
 		`UPDATE agent_runtime SET metadata = jsonb_build_object('cli_version', $1::text) WHERE id = $2`,

@@ -28,6 +28,94 @@ type taskContextMarkerFile struct {
 	IssueID   string `json:"issue_id,omitempty"`
 }
 
+// EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
+// {workspacesRoot}/.multica/daemon_task_context.json.
+//
+// The per-workdir marker only protects `multica` invocations whose cwd is
+// inside the workdir, because the CLI discovers markers by walking *up* from
+// cwd. A sandboxed subprocess that lost every MULTICA_* env var and escaped
+// to the workdir's parent directory sits above that marker, finds no daemon
+// signal, and would fall back to the user's config PAT — a confirmed
+// impersonation path. Every directory under workspacesRoot is daemon-owned,
+// so a marker at the root puts the entire tree back under the fail-closed
+// guard without touching any directory a user works in.
+//
+// A pre-existing marker owned by the daemon is left untouched, so the shared,
+// node-wide file is not rewritten on every task start. A truncated or otherwise
+// unparseable file — the signature of a torn os.WriteFile from a daemon killed
+// mid-write — is reclaimed and rewritten, so a crash can never brick the guard
+// for the whole node; only a *parseable* marker owned by something else is
+// treated as genuinely foreign and refused. The (re)write is atomic
+// (temp file + rename): a concurrent CLI walking up from an escaped cwd sees
+// either the old bytes or the complete new file, never a half-written marker it
+// would misread as "no signal" and fall open on.
+func EnsureWorkspacesRootMarker(workspacesRoot string) error {
+	if strings.TrimSpace(workspacesRoot) == "" {
+		return errors.New("execenv: workspaces root is required")
+	}
+	path := filepath.Join(workspacesRoot, TaskContextMarkerRelPath)
+	if existing, err := os.ReadFile(path); err == nil {
+		var marker taskContextMarkerFile
+		if json.Unmarshal(existing, &marker) == nil {
+			if marker.ManagedBy == TaskContextMarkerManagedBy {
+				return nil
+			}
+			// Parseable but owned by something else: never clobber it.
+			return fmt.Errorf("foreign file at workspaces root marker path %s; refusing to overwrite", path)
+		}
+		// Unparseable content is almost certainly a torn write of our own
+		// marker; fall through to reclaim it below.
+	} else if !os.IsNotExist(err) {
+		// A real read error (e.g. a directory at the path) is not a signal we
+		// can safely overwrite; surface it. Callers degrade non-fatally.
+		return fmt.Errorf("read workspaces root marker %s: %w", path, err)
+	}
+	payload := taskContextMarkerFile{ManagedBy: TaskContextMarkerManagedBy}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal workspaces root marker: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create workspaces root marker dir: %w", err)
+	}
+	if err := writeWorkspacesRootMarkerAtomic(path, data); err != nil {
+		return fmt.Errorf("write workspaces root marker: %w", err)
+	}
+	return nil
+}
+
+// writeWorkspacesRootMarkerAtomic writes data to path via a same-directory temp
+// file plus a rename, so a concurrent reader observes either the old file or the
+// complete new one — never a partial write. Mirrors the daemon-id / CLI-config
+// write idiom (see writeDaemonIDFile). Perm is 0644 because the CLI's upward
+// walk must be able to read the marker from a subprocess that may run under a
+// different uid; the payload is non-secret.
+func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".daemon_task_context-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp workspaces root marker: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp workspaces root marker: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp workspaces root marker: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp workspaces root marker: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename workspaces root marker: %w", err)
+	}
+	return nil
+}
+
 // writeContextFiles renders and writes .agent_context/issue_context.md and
 // skills into the appropriate provider-native location.
 //

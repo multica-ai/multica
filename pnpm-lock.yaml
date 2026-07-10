@@ -1077,6 +1077,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.3(react@19.2.3)
+      react-easy-crop:
+        specifier: ^6.2.0
+        version: 6.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react-i18next:
         specifier: 'catalog:'
         version: 17.0.6(i18next@26.0.8(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
@@ -8407,6 +8410,9 @@ packages:
     resolution: {integrity: sha512-DlL+XwOy3NxAQ8xuC0okPgK46iuVNAK01YN7RueYBqqFeGsBjV9XmCAzAdgt+667bCl5kPh9EqKKDwnaPG1I7A==}
     engines: {node: '>=10'}
 
+  normalize-wheel@1.0.1:
+    resolution: {integrity: sha512-1OnlAPZ3zgrk8B91HyRj+eVv+kS5u+Z0SCsak6Xil/kmgEia50ga7zfkumayonZrImffAxPU/5WcyGhzetHNPA==}
+
   npm-package-arg@11.0.3:
     resolution: {integrity: sha512-sHGJy8sOC1YraBywpzQlIKBE4pBbGbiF95U6Auspzyem956E0+FtDtsx1ZxlOJkQCZ1AFXAY/yuvtFYrOxF+Bw==}
     engines: {node: ^16.14.0 || >=18.0.0}
@@ -8995,6 +9001,12 @@ packages:
     resolution: {integrity: sha512-yELu4WmLPw5Mr/lmeEpox5rw3RETacE++JgHqQzd2dg+YbJuat3jH4ingc+WPZhxaoFzdv9y33G+F7Nl5O0GBg==}
     peerDependencies:
       react: ^19.2.3
+
+  react-easy-crop@6.2.0:
+    resolution: {integrity: sha512-8CEes7M8UkNoRPaz/krm70xMTbpar07crz/OrPSJwdGopV6lPcqdEmamDYTXgsqukb/1e2fbFd9/mROi8Qkp+A==}
+    peerDependencies:
+      react: '>=16.4.0'
+      react-dom: '>=16.4.0'
 
   react-fast-compare@3.2.2:
     resolution: {integrity: sha512-nsO+KSNgo1SbJqJEYRE9ERzo7YtYbou/OqjSQKxV7jcKox7+usiUVZOAC+XnDOABXggQTno0Y1CpVnuWEc1boQ==}
@@ -19685,6 +19697,8 @@ snapshots:
 
   normalize-url@6.1.0: {}
 
+  normalize-wheel@1.0.1: {}
+
   npm-package-arg@11.0.3:
     dependencies:
       hosted-git-info: 7.0.2
@@ -20348,6 +20362,12 @@ snapshots:
     dependencies:
       react: 19.2.3
       scheduler: 0.27.0
+
+  react-easy-crop@6.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+    dependencies:
+      normalize-wheel: 1.0.1
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
 
   react-fast-compare@3.2.2: {}
 

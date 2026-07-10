@@ -136,3 +136,45 @@ describe("preprocessLinks — bare filenames are not auto-linked as URLs", () =>
     );
   });
 });
+
+// Trailing markdown emphasis / strikethrough delimiters that linkify-it counts
+// as URL characters must be dropped from the URL, so the closing `**` of
+// `**url**` stays as emphasis instead of being swallowed into the href — that
+// swallow was the MUL-4242 render bug. Mirrors GFM's own autolink trailing trim.
+describe("preprocessLinks — trailing markdown delimiter is not part of the URL", () => {
+  it("keeps the closing ** outside a bold-wrapped bare URL", () => {
+    expect(preprocessLinks("**https://example.com/x**")).toBe(
+      "**[https://example.com/x](https://example.com/x)**",
+    );
+  });
+
+  it("handles the original bug shape (bold + fullwidth colon)", () => {
+    expect(preprocessLinks("**PR：https://example.com/x**")).toBe(
+      "**PR：[https://example.com/x](https://example.com/x)**",
+    );
+  });
+
+  it("keeps ** outside when a CJK punctuation immediately follows (variant B)", () => {
+    expect(preprocessLinks("**https://example.com/x**（MUL-4277）")).toBe(
+      "**[https://example.com/x](https://example.com/x)**（MUL-4277）",
+    );
+  });
+
+  it("keeps the closing * outside an italic-wrapped bare URL", () => {
+    expect(preprocessLinks("*https://example.com/x*")).toBe(
+      "*[https://example.com/x](https://example.com/x)*",
+    );
+  });
+
+  it("strips a trailing * that really ends a URL — documented tradeoff, matches GFM", () => {
+    expect(preprocessLinks("see https://example.com/glob/* here")).toBe(
+      "see [https://example.com/glob/](https://example.com/glob/)* here",
+    );
+  });
+
+  it("keeps a * in the middle of a URL", () => {
+    expect(preprocessLinks("https://example.com/a*b/c")).toBe(
+      "[https://example.com/a*b/c](https://example.com/a*b/c)",
+    );
+  });
+});

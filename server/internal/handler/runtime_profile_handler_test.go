@@ -71,6 +71,32 @@ func TestDeleteRuntimeProfile_ArchivedAgentCascade(t *testing.T) {
 		t.Fatalf("archive agent: %v", err)
 	}
 
+	// Give the archived agent a channel installation (+ a dependent binding).
+	// channel_* has no FK to agent (MUL-3515 §4), so this DeleteRuntimeProfile
+	// teardown entry point must sweep it explicitly — otherwise the bot's app_id
+	// slot stays occupied after the agent is hard-deleted, and the bot can never
+	// rebind anywhere (#4810). This pins that sweep on the profile-delete path.
+	const rpApp = "cli_rp_cascade"
+	const rpChat = "cc000000-0000-4000-8000-0000000000f7"
+	_, _ = testPool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
+	_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
+	var rpInstallID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
+RETURNING id`, testWorkspaceID, agentID, rpApp, testUserID).Scan(&rpInstallID); err != nil {
+		t.Fatalf("seed channel installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
+		t.Fatalf("seed chat-session binding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
+	})
+
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
 	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
@@ -98,6 +124,20 @@ func TestDeleteRuntimeProfile_ArchivedAgentCascade(t *testing.T) {
 	}
 	if agentRows != 0 {
 		t.Fatalf("expected archived agent hard-deleted by cascade, found %d", agentRows)
+	}
+
+	var instRows, bindingRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE id = $1`, rpInstallID).Scan(&instRows); err != nil {
+		t.Fatalf("count channel installation: %v", err)
+	}
+	if instRows != 0 {
+		t.Fatalf("archived agent's channel installation not swept on runtime-profile delete: %d rows (its bot's app_id slot stays occupied, #4810)", instRows)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, rpInstallID).Scan(&bindingRows); err != nil {
+		t.Fatalf("count channel chat-session binding: %v", err)
+	}
+	if bindingRows != 0 {
+		t.Fatalf("channel chat-session binding not swept: %d dangling rows", bindingRows)
 	}
 }
 

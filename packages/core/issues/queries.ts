@@ -8,7 +8,7 @@ import type {
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
-import { BOARD_STATUSES } from "./config";
+import { ALL_STATUSES } from "./config";
 
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
@@ -57,6 +57,9 @@ export const issueKeys = {
     [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
+  identifier: (wsId: string, identifier: string) =>
+    [...issueKeys.all(wsId), "identifier", identifier] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
   /** Prefix for invalidating all batched-children queries in a workspace. */
@@ -131,8 +134,14 @@ export type AssigneeGroupedIssuesFilter = Omit<
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
 
-/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+/**
+ * Statuses fetched and paginated into the list/board cache — every lifecycle
+ * status, `cancelled` included. `cancelled` is a first-class default status
+ * (MUL-4290), so it lives in the cache and renders like any other column;
+ * there is no separate "visible board" subset. This constant governs
+ * fetch/cache membership.
+ */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
@@ -401,6 +410,37 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+  });
+}
+
+/**
+ * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
+ *
+ * Backs the Linear-style autolink: the backend `q` search matches an
+ * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
+ * both hit number 123), so the exact `identifier === value` filter here is
+ * what enforces the workspace prefix. A non-existent or wrong-prefix
+ * identifier resolves to `null` and renders as plain text.
+ *
+ * Server state → TanStack Query; the key includes `wsId` and the identifier,
+ * so identical identifiers across the app share one request. Caller gates
+ * `enabled` (identifier shape + workspace prefix).
+ */
+export function issueIdentifierOptions(wsId: string, identifier: string) {
+  return queryOptions({
+    queryKey: issueKeys.identifier(wsId, identifier),
+    queryFn: async ({ signal }) => {
+      const res = await api.searchIssues({
+        q: identifier,
+        limit: 10,
+        include_closed: true,
+        signal,
+      });
+      return res.issues.find((i) => i.identifier === identifier) ?? null;
+    },
+    // Identifier→issue mapping is effectively immutable; avoid refetch churn
+    // when the same key renders across many comments/messages.
+    staleTime: 5 * 60_000,
   });
 }
 
