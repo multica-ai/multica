@@ -618,9 +618,11 @@ export function MessageComposer({
 
   const body = alwaysExpanded || expanded ? expandedContent : pillContent;
 
-  // When the parent owns keyboard handling (chat.tsx wraps in
-  // KeyboardAvoidingView + SafeAreaView), skip the KeyboardStickyView —
-  // double-stacking causes the composer to jump twice on keyboard show.
+  // When a parent already owns keyboard handling itself, skip the
+  // KeyboardStickyView — double-stacking causes the composer to jump
+  // twice on keyboard show. No current caller passes manageKeyboard=false
+  // (both chat and comment let this component manage it), but the escape
+  // hatch stays for a future parent that needs it.
   if (!manageKeyboard) return body;
 
   return (
