@@ -3022,6 +3022,120 @@ func TestWebhook_CheckSuite_FansOutToBoundWorkspaces(t *testing.T) {
 	assertRecorded("B", prB.ID)
 }
 
+// TestWebhook_CheckSuite_OutOfOrderFansOutToBoundWorkspaces covers the most
+// error-prone multi-workspace path: a check_suite that arrives BEFORE the PR is
+// mirrored. Each bound workspace must stash its own pending row, and when the PR
+// event fans out, each workspace must drain its own pending row and record the
+// suite — one workspace's stash/drain must not stand in for another's.
+func TestWebhook_CheckSuite_OutOfOrderFansOutToBoundWorkspaces(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "fanout-cs-ooo-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	const repo = "fanout-ooo-repo"
+	const prNumber int32 = 4345
+	const installationID int64 = 778899103
+	const suiteID int64 = 90019002
+	head := "ooosha7654321"
+
+	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ooo-ws-a")
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ooo-ws-b")
+	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: "fanout-ooo-ws-a", Slug: "fanout-ooo-ws-a", IssuePrefix: "OOA",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace A: %v", err)
+	}
+	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: "fanout-ooo-ws-b", Slug: "fanout-ooo-ws-b", IssuePrefix: "OOB",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace B: %v", err)
+	}
+
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: wsA.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation A: %v", err)
+	}
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID: wsB.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation B: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1)`, repo)
+		testPool.Exec(ctx, `DELETE FROM github_pending_check_suite WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
+	})
+
+	pendingCount := func(wsID any) int {
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM github_pending_check_suite WHERE workspace_id = $1 AND repo_owner = 'acme' AND repo_name = $2 AND pr_number = $3 AND suite_id = $4`,
+			wsID, repo, prNumber, suiteID).Scan(&n); err != nil {
+			t.Fatalf("count pending: %v", err)
+		}
+		return n
+	}
+	suiteCount := func(prID any) int {
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM github_pull_request_check_suite WHERE pr_id = $1 AND suite_id = $2`,
+			prID, suiteID).Scan(&n); err != nil {
+			t.Fatalf("count suites: %v", err)
+		}
+		return n
+	}
+
+	// 1. check_suite arrives BEFORE any PR mirror: each bound workspace stashes
+	//    its own pending row.
+	fireCheckSuiteWebhook(t, secret, installationID, repo, []int32{prNumber}, suiteID, 7200, head, "failure", "2026-05-02T00:00:00Z")
+	if got := pendingCount(wsA.ID); got != 1 {
+		t.Fatalf("workspace A: expected 1 pending check_suite, got %d", got)
+	}
+	if got := pendingCount(wsB.ID); got != 1 {
+		t.Fatalf("workspace B: expected 1 pending check_suite, got %d", got)
+	}
+
+	// 2. The PR arrives and fans out: each workspace drains its own pending row
+	//    and records the suite against its own PR mirror.
+	firePullRequestWebhookWithHead(t, secret, "OOX-1", installationID, repo, prNumber, "opened", head, "")
+
+	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+	})
+	if err != nil {
+		t.Fatalf("workspace A: expected PR mirrored: %v", err)
+	}
+	prB, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsB.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+	})
+	if err != nil {
+		t.Fatalf("workspace B: expected PR mirrored: %v", err)
+	}
+	if got := suiteCount(prA.ID); got != 1 {
+		t.Fatalf("workspace A: expected 1 recorded check_suite after drain, got %d", got)
+	}
+	if got := suiteCount(prB.ID); got != 1 {
+		t.Fatalf("workspace B: expected 1 recorded check_suite after drain, got %d", got)
+	}
+	if got := pendingCount(wsA.ID); got != 0 {
+		t.Fatalf("workspace A: expected pending drained to 0, got %d", got)
+	}
+	if got := pendingCount(wsB.ID); got != 0 {
+		t.Fatalf("workspace B: expected pending drained to 0, got %d", got)
+	}
+}
+
 // TestSecondWorkspaceBindDoesNotUnbindFirst is the #4823 regression: binding
 // the same GitHub App installation in a second workspace must NOT overwrite the
 // first workspace's binding. Both bindings coexist, and re-binding an existing

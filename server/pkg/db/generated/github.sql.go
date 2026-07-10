@@ -386,8 +386,8 @@ ORDER BY created_at ASC, id ASC
 `
 
 // One installation_id can be bound to several workspaces; webhook routing lists
-// every binding and picks the target workspace via the repos registry. Ordered
-// so the oldest binding is the deterministic routing fallback (insts[0]).
+// every binding and fans the event out to each bound workspace. Ordered oldest
+// first so processing is deterministic and replay-stable.
 func (q *Queries) ListGitHubInstallationsByInstallationID(ctx context.Context, installationID int64) ([]GithubInstallation, error) {
 	rows, err := q.db.Query(ctx, listGitHubInstallationsByInstallationID, installationID)
 	if err != nil {
