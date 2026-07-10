@@ -2330,102 +2330,18 @@ func TestHermesHardensWindowsBrowserMcpConfig(t *testing.T) {
 	}
 }
 
-// TestHermesMcpSidecarSurvivesUntilProcessExits pins the fix for the PR
-// #5178 review finding that context.AfterFunc(runCtx, cleanup) deletes the
-// playwright launchOptions sidecar the instant runCtx is cancelled — which,
-// on a timeout, happens before the hermes process (and whatever MCP
-// subprocess it may still be mid-launch of) has actually finished exiting.
-// cleanup must instead run only after cmd.Wait() returns.
-//
-// The fake hermes process here never answers session/prompt, so the
-// backend's 150ms timeout fires and cancels runCtx well before the process
-// itself exits: it only exits 300ms after its stdin is closed (EOF),
-// simulating a child that's still shutting down when cancellation starts.
-// If cleanup were still tied to context cancellation, the sidecar would be
-// gone by the time this test checks partway through that 300ms window.
-func TestHermesMcpSidecarSurvivesUntilProcessExits(t *testing.T) {
-	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
-	withBrowserMcpTestHost(t, "windows", map[string]string{
-		"ProgramFiles(x86)": `C:\Program Files (x86)`,
-	}, map[string]bool{edgePath: true})
-
-	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
-	fakePath := filepath.Join(t.TempDir(), "hermes")
-	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> '`+recordPath+`'
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
-      ;;
-    *'"method":"session/new"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new"}}\n' "$id"
-      ;;
-    *'"method":"session/prompt"'*)
-      ;;
-  esac
-done
-sleep 2
-`))
-
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new hermes backend: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Timeout: 500 * time.Millisecond,
-		McpConfig: json.RawMessage(`{"mcpServers":{
-			"playwright":{"command":"npx","args":["@playwright/mcp@latest"]}
-		}}`),
-	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	// Past the 500ms timeout (so runCtx is cancelled) but well before the
-	// fake process's 2s post-EOF sleep finishes (so it hasn't exited
-	// yet) — this is exactly the window a premature AfterFunc-based
-	// cleanup would have already fired in. Margins are wide (500ms /
-	// 1.5s / 2s) so this stays reliable under -race plus full-suite CPU
-	// contention, where every step here is measurably slower than in
-	// isolation.
-	time.Sleep(1500 * time.Millisecond)
-	frame := findRecordedFrame(t, recordPath, "session/new")
-	params := frame["params"].(map[string]any)
-	servers := params["mcpServers"].([]any)
-	entry := servers[0].(map[string]any)
-	args := entry["args"].([]any)
-	configIndex := -1
-	for i, a := range args {
-		if a == "--config" {
-			configIndex = i
-		}
-	}
-	if configIndex < 0 || configIndex+1 >= len(args) {
-		t.Fatalf("hardened playwright args missing --config: %v", args)
-	}
-	sidecarPath := args[configIndex+1].(string)
-	if _, statErr := os.Stat(sidecarPath); statErr != nil {
-		t.Fatalf("sidecar %q was removed before the process finished exiting (premature cleanup): %v", sidecarPath, statErr)
-	}
-
-	select {
-	case <-session.Result:
-	case <-time.After(30 * time.Second):
-		t.Fatal("timeout waiting for result")
-	}
-	// Give the completion goroutine's deferred cleanup a moment to run
-	// after cmd.Wait() returns.
-	time.Sleep(500 * time.Millisecond)
-	if _, statErr := os.Stat(sidecarPath); !os.IsNotExist(statErr) {
-		t.Fatalf("sidecar %q was not cleaned up after the process exited: err=%v", sidecarPath, statErr)
-	}
-}
+// A dedicated wall-clock timing test for the hermes/kiro/kimi/qoder/traecli
+// ownership-transfer fix was tried and removed: none of those backends
+// override cmd.Cancel, so Go's default exec.CommandContext behaviour sends
+// an uncatchable kill (SIGKILL on Unix, TerminateProcess on Windows) the
+// instant runCtx is done. That leaves too small and too platform-dependent
+// a window to race against reliably — CI (ubuntu-latest, -race) flaked
+// because the fake process there dies before it ever reaches a deliberate
+// post-EOF delay, unlike this dev machine's .bat-shim test fixture, which
+// orphans the underlying script and made the same test pass for the wrong
+// reason. The fix itself (cleanup only runs once the completion goroutine's
+// control flow reaches past cmd.Wait(), by construction) doesn't need a
+// timing race to be correct — see TestOpencodeBackendMcpSidecarSurvivesGrace
+// in opencode_test.go for a deterministic version of this regression,
+// scoped to the one backend (OpenCode) with a real, controllable grace
+// window (opencodeTerminateGraceNanos).

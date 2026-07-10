@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1191,4 +1192,120 @@ func equalStringSlice(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestOpencodeBackendMcpSidecarSurvivesGrace pins the fix for the PR #5178
+// review finding that context.AfterFunc(runCtx, cleanup) deletes the
+// playwright launchOptions sidecar the instant runCtx is cancelled, rather
+// than once the process has actually exited. OpenCode is the one backend
+// where that gap has a real, deliberately-engineered window to test
+// against: cmd.Cancel is overridden to drive a graceful
+// SIGTERM→grace→SIGKILL sequence (see opencodeTerminateGrace) instead of
+// Go's default immediate kill-on-cancel.
+//
+// The fake process here traps and ignores SIGTERM, so it's guaranteed to
+// survive the whole grace window and only die on the follow-up SIGKILL —
+// unlike a wall-clock race against a process that might already be dead,
+// this is deterministic: the process cannot exit before SIGKILL fires.
+//
+// Skipped on Windows: signalProcessGroup there calls Kill() unconditionally
+// regardless of signal (see proc_windows.go), collapsing SIGTERM to an
+// immediate kill with no observable grace window.
+func TestOpencodeBackendMcpSidecarSurvivesGrace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows collapses SIGTERM to an immediate kill (see signalProcessGroup) — no observable grace window to test here")
+	}
+
+	withBrowserMcpTestHost(t, "windows", nil, nil)
+
+	oldGrace := opencodeTerminateGraceNanos.Load()
+	opencodeTerminateGraceNanos.Store(int64(600 * time.Millisecond))
+	t.Cleanup(func() { opencodeTerminateGraceNanos.Store(oldGrace) })
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+trap '' TERM
+if [ -n "$OPENCODE_CAPTURE_FILE" ]; then
+  printenv OPENCODE_CONFIG_CONTENT > "$OPENCODE_CAPTURE_FILE" 2>/dev/null || true
+fi
+printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
+sleep 5
+`))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"OPENCODE_CAPTURE_FILE": captureFile},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 200 * time.Millisecond,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"playwright":{"command":"npx","args":["@playwright/mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	var captured []byte
+	for i := 0; i < 50; i++ {
+		captured, err = os.ReadFile(captureFile)
+		if err == nil && len(captured) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(captured) == 0 {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT was never captured")
+	}
+	var cfg struct {
+		MCP map[string]struct {
+			Command []string `json:"command"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(captured, &cfg); err != nil {
+		t.Fatalf("parse captured OPENCODE_CONFIG_CONTENT: %v\n%s", err, captured)
+	}
+	command := cfg.MCP["playwright"].Command
+	configIndex := -1
+	for i, a := range command {
+		if a == "--config" {
+			configIndex = i
+		}
+	}
+	if configIndex < 0 || configIndex+1 >= len(command) {
+		t.Fatalf("hardened playwright command missing --config: %v", command)
+	}
+	sidecarPath := command[configIndex+1]
+
+	// Past the 200ms timeout (so runCtx is cancelled and SIGTERM is sent)
+	// but well inside the 600ms grace window — the fake process traps and
+	// ignores SIGTERM, so it's guaranteed to still be alive here. This is
+	// exactly the window a premature cleanup would already have fired in.
+	time.Sleep(350 * time.Millisecond)
+	if _, statErr := os.Stat(sidecarPath); statErr != nil {
+		t.Fatalf("sidecar %q was removed before the process finished exiting (premature cleanup): %v", sidecarPath, statErr)
+	}
+
+	select {
+	case <-session.Result:
+	case <-time.After(30 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, statErr := os.Stat(sidecarPath); !os.IsNotExist(statErr) {
+		t.Fatalf("sidecar %q was not cleaned up after the process exited: err=%v", sidecarPath, statErr)
+	}
 }
