@@ -115,6 +115,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverTraecliModels(ctx, executablePath)
 		})
+	case "grok":
+		// xAI Grok Build CLI is ACP-native via `grok agent stdio`; the model
+		// catalog is returned from session/new when the user is authenticated.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -363,6 +369,19 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
+	})
+}
+
+// discoverGrokModels spins up a throwaway `grok agent --always-approve stdio`
+// process and parses the model catalog Grok Build returns from session/new.
+// Requires an authenticated Grok CLI; on failure the caller falls back to
+// manual entry.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "grok",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-grok-discovery-",
+		acpArgs:      []string{"agent", "--always-approve", "stdio"},
 	})
 }
 

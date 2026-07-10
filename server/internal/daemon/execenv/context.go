@@ -373,6 +373,12 @@ func skillsDirPath(workDir, provider string) string {
 		// in the workdir (global skills live in ~/.traecli/skills). See
 		// https://docs.trae.cn/cli_skills
 		return filepath.Join(workDir, ".traecli", "skills")
+	case "grok":
+		// Grok Build primarily loads user skills from ~/.grok/skills; project
+		// skill bundles are written under .agents/skills/ for visibility and
+		// shared layout with other agent runtimes. Multica also injects the
+		// task brief via AGENTS.md (natively read by Grok).
+		return filepath.Join(workDir, ".agents", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's

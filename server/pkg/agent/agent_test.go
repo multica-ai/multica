@@ -175,7 +175,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder", "traecli",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder", "traecli", "grok",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
