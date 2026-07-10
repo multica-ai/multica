@@ -461,7 +461,7 @@ func init() {
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
+	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -539,7 +539,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
-	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
+	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -960,6 +960,32 @@ func isHTTPURL(path string) bool {
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
 }
 
+// ensureAttachmentWithinWorkdir applies the same workdir containment guard as
+// --description-file / --content-file (MUL-4252) to a local --attachment path.
+// An agent that writes a chart/report to a machine-shared path like /tmp and
+// then attaches it could otherwise pick up another run's — possibly another
+// workspace's — stale file (the image version of the /tmp/desc.md leak). URL
+// values are filtered by the caller and never reach here. --allow-external-file
+// overrides, mirroring the text-flag escape hatch.
+func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--attachment path %q resolves outside the current working directory; "+
+				"attach files generated inside the task workdir rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be attached by mistake. "+
+				"Pass --allow-external-file to override.",
+			filePath)
+	}
+	return nil
+}
+
 func appendUniqueStrings(dst []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(dst)+len(values))
 	out := make([]string, 0, len(dst)+len(values))
@@ -1117,6 +1143,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		if isHTTPURL(filePath) {
 			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
 			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return err
 		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
@@ -1905,6 +1934,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		if isHTTPURL(filePath) {
 			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
 			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return err
 		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {

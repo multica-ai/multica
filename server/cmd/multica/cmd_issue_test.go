@@ -299,6 +299,58 @@ func TestResolveTextFlag(t *testing.T) {
 	})
 }
 
+// TestEnsureAttachmentWithinWorkdir covers the MUL-4252 guardrail extended to
+// --attachment: a local attachment path outside the task workdir is rejected
+// (so an agent can't attach another run's stale /tmp file), with the same
+// --allow-external-file escape hatch as the text flags.
+func TestEnsureAttachmentWithinWorkdir(t *testing.T) {
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{Use: "test"}
+		c.Flags().Bool("allow-external-file", false, "")
+		return c
+	}
+
+	t.Run("attachment inside the working directory is accepted", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("chart.png", []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		if err := ensureAttachmentWithinWorkdir(newCmd(), "chart.png"); err != nil {
+			t.Fatalf("expected in-workdir attachment to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("attachment outside the working directory is rejected", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "stale.png"
+		if err := os.WriteFile(path, []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		err := ensureAttachmentWithinWorkdir(newCmd(), path)
+		if err == nil {
+			t.Fatalf("expected rejection for attachment outside the working directory")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") {
+			t.Errorf("error should point at --allow-external-file, got %v", err)
+		}
+	})
+
+	t.Run("--allow-external-file permits an attachment outside the working directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		path := outside + string(os.PathSeparator) + "external.png"
+		if err := os.WriteFile(path, []byte("png"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newCmd()
+		_ = c.Flags().Set("allow-external-file", "true")
+		if err := ensureAttachmentWithinWorkdir(c, path); err != nil {
+			t.Fatalf("expected override to permit external attachment, got %v", err)
+		}
+	})
+}
+
 func newIssueCreateTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "create"}
 	cmd.Flags().String("title", "", "")
