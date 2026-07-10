@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { skillDisplayName } from "@multica/core/skills";
 import {
   deriveRuntimeHealth,
   type RuntimeHealth,
@@ -120,7 +121,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         <RuntimeRow agent={agent} runtime={runtime} />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
-          <SkillsRow skills={agent.skills.map((s) => s.name)} />
+          <SkillsRow skills={agent.skills.map((s) => skillDisplayName(s))} />
         )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>

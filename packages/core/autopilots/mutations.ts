@@ -96,8 +96,11 @@ export function useTriggerAutopilot() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (id: string) => api.triggerAutopilot(id),
-    onSettled: (_data, _err, id) => {
+    mutationFn: ({ id, timezone }: { id: string; timezone?: string }) =>
+      api.triggerAutopilot(id, timezone ? { timezone } : undefined),
+    onSettled: (_data, _err, vars) => {
+      const id = vars?.id;
+      if (!id) return;
       qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, id) });
       qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, id) });
     },

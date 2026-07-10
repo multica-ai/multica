@@ -1112,6 +1112,68 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}
 }
 
+func TestTriggerAutopilotUsesRequestTimezoneForIssueDescription(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot manual timezone %d", time.Now().UnixNano())
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	}()
+
+	agentID := createHandlerTestAgent(t, "manual-timezone-agent", []byte(`[]`))
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Manual timezone autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"timezone": "Asia/Shanghai",
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode autopilot run: %v", err)
+	}
+	if run.IssueID == nil {
+		t.Fatal("run issue_id is nil, want created issue")
+	}
+
+	var description string
+	if err := testPool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, *run.IssueID).Scan(&description); err != nil {
+		t.Fatalf("load created issue description: %v", err)
+	}
+	if !strings.Contains(description, "Autopilot run triggered at") {
+		t.Fatalf("description missing trigger note: %q", description)
+	}
+	if !strings.Contains(description, "Asia/Shanghai") {
+		t.Fatalf("manual trigger description should use request timezone, got: %q", description)
+	}
+	if strings.Contains(description, " UTC.") {
+		t.Fatalf("manual trigger description must not fall back to UTC when request timezone is valid: %q", description)
+	}
+}
+
 func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	ctx := context.Background()
 	title := fmt.Sprintf("Scheduled autopilot duplicate issue %d", time.Now().UnixNano())
@@ -3892,6 +3954,52 @@ func TestCreateSkillSkipsSkillMdFile(t *testing.T) {
 		if strings.EqualFold(p, "SKILL.md") {
 			t.Fatalf("SKILL.md should not be stored in skill_file")
 		}
+	}
+}
+
+func TestCreateSkillStoresDisplayName(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database available")
+	}
+
+	// Create with a UTF-8 display name; name stays the ASCII slug identity.
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", CreateSkillRequest{
+		Name:        "test-skill-display-name",
+		DisplayName: "代码审查",
+	})
+	rec := httptest.NewRecorder()
+	testHandler.CreateSkill(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create skill: expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp SkillResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+	if resp.Name != "test-skill-display-name" {
+		t.Fatalf("expected name test-skill-display-name, got %q", resp.Name)
+	}
+	if resp.DisplayName != "代码审查" {
+		t.Fatalf("expected display_name 代码审查, got %q", resp.DisplayName)
+	}
+
+	// An empty-string pointer clears display_name (COALESCE treats it as set).
+	updateReq := newRequest(http.MethodPut, "/api/skills/"+resp.ID, UpdateSkillRequest{
+		DisplayName: strPtr(""),
+	})
+	updateReq = withURLParam(updateReq, "id", resp.ID)
+	updateRec := httptest.NewRecorder()
+	testHandler.UpdateSkill(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update skill: expected 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updated SkillResponse
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal update response: %v", err)
+	}
+	if updated.DisplayName != "" {
+		t.Fatalf("expected display_name cleared to empty, got %q", updated.DisplayName)
 	}
 }
 

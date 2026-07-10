@@ -265,7 +265,11 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: () => <button type="button">Upload file</button>,
+  FileUploadButton: ({ multiple }: { multiple?: boolean }) => (
+    <button type="button" data-multiple={multiple ? "true" : "false"}>
+      Upload file
+    </button>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -396,6 +400,15 @@ describe("AgentCreatePanel", () => {
         attachment_ids: ["019ec09d-6222-722b-bdfa-427b105d80be"],
       });
     });
+  });
+
+  it("allows selecting multiple attachments from the agent create footer", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute(
+      "data-multiple",
+      "true",
+    );
   });
 
   // Picking a squad routes the submission through `squad_id` (not

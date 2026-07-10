@@ -304,7 +304,7 @@ function machineTitle(
   if (first.runtime_mode === "cloud") {
     return `${capitalize(first.provider)} cloud`;
   }
-  return first.daemon_id ? shortDaemonId(first.daemon_id) : "Unknown machine";
+  return first.daemon_id ?? "Unknown machine";
 }
 
 function machineSubtitle({
@@ -320,7 +320,7 @@ function machineSubtitle({
 }): string | null {
   const compact = compactDeviceInfo(deviceInfo, title);
   if (compact) return compact;
-  if (daemonId) return `daemon ${shortDaemonId(daemonId)}`;
+  if (daemonId) return `daemon ${daemonId}`;
   return mode === "cloud" ? "Cloud worker" : null;
 }
 
@@ -378,10 +378,6 @@ function commonCliVersion(runtimes: AgentRuntime[]): string | null {
     }
   }
   return versions.size === 1 ? Array.from(versions)[0] ?? null : null;
-}
-
-function shortDaemonId(daemonId: string): string {
-  return daemonId.length > 12 ? `${daemonId.slice(0, 8)}...` : daemonId;
 }
 
 function capitalize(value: string): string {

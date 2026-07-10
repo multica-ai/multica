@@ -17,6 +17,7 @@ import type { Agent, SkillSummary } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { skillDisplayName } from "@multica/core/skills";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -459,11 +460,11 @@ export function DeleteSkillsDialog({
             {single
               ? single.agents.length > 0
                 ? t(($) => $.detail.delete_dialog.description_with_agents, {
-                    name: single.skill.name,
+                    name: skillDisplayName(single.skill),
                     count: single.agents.length,
                   })
                 : t(($) => $.detail.delete_dialog.description_no_agents, {
-                    name: single.skill.name,
+                    name: skillDisplayName(single.skill),
                   })
               : t(($) => $.actions.delete_dialog_desc, { count })}
           </DialogDescription>

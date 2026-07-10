@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createChatStore, newSessionDraftKey } from "./store";
 import type { StorageAdapter } from "../types";
 import type { Attachment } from "../types";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 
 function memStorage(): StorageAdapter {
   const m = new Map<string, string>();
@@ -14,6 +15,10 @@ function memStorage(): StorageAdapter {
       m.delete(k);
     },
   };
+}
+
+function flushMicrotasks() {
+  return new Promise<void>((resolve) => queueMicrotask(resolve));
 }
 
 function makeAttachment(id: string): Attachment {
@@ -71,6 +76,7 @@ describe("chat store — draft attachments", () => {
   let store: ReturnType<typeof createChatStore>;
 
   beforeEach(() => {
+    setCurrentWorkspace(null, null);
     store = createChatStore({ storage: memStorage() });
   });
 
@@ -93,6 +99,102 @@ describe("chat store — draft attachments", () => {
 
     expect(store.getState().inputDrafts["draft-1"]).toBeUndefined();
     expect(store.getState().inputDraftAttachments["draft-1"]).toBeUndefined();
+  });
+});
+
+describe("chat store — workspace rehydration", () => {
+  beforeEach(() => {
+    setCurrentWorkspace(null, null);
+  });
+
+  it("ignores legacy bare active session storage before a workspace slug exists", async () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:activeSessionId", "stale-session");
+    const store = createChatStore({ storage });
+
+    expect(store.getState().activeSessionId).toBeNull();
+
+    setCurrentWorkspace("new-workspace", "ws_new");
+    await flushMicrotasks();
+
+    expect(store.getState().activeSessionId).toBeNull();
+  });
+
+  it("keeps the active chat session scoped to the current workspace", async () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+    store.getState().setActiveSession("session-acme");
+
+    setCurrentWorkspace("beta", "ws_beta");
+    await flushMicrotasks();
+
+    expect(store.getState().activeSessionId).toBeNull();
+
+    store.getState().setActiveSession("session-beta");
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+    expect(store.getState().activeSessionId).toBe("session-acme");
+
+    setCurrentWorkspace("beta", "ws_beta");
+    await flushMicrotasks();
+    expect(store.getState().activeSessionId).toBe("session-beta");
+  });
+
+  it("restores expanded chat state after the workspace slug becomes available", async () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:expanded:acme", "true");
+    const store = createChatStore({ storage });
+
+    expect(store.getState().isExpanded).toBe(false);
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+
+    expect(store.getState().isExpanded).toBe(true);
+  });
+
+  it("clears expanded chat state when switching to a workspace without it", async () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:expanded:acme", "true");
+    const store = createChatStore({ storage });
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+    expect(store.getState().isExpanded).toBe(true);
+
+    setCurrentWorkspace("beta", "ws_beta");
+    await flushMicrotasks();
+
+    expect(store.getState().isExpanded).toBe(false);
+  });
+
+  // Note: open/closed state is intentionally GLOBAL in Chat V2 (upstream
+  // design), so it deliberately carries across workspaces — no per-workspace
+  // open test here. Session/agent/drafts above remain workspace-scoped.
+
+  it("restores chat size per workspace when switching workspaces", async () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+    store.getState().setChatSize(720, 640);
+
+    setCurrentWorkspace("beta", "ws_beta");
+    await flushMicrotasks();
+    expect(store.getState().chatWidth).toBe(380);
+    expect(store.getState().chatHeight).toBe(600);
+
+    store.getState().setChatSize(420, 520);
+
+    setCurrentWorkspace("acme", "ws_acme");
+    await flushMicrotasks();
+    expect(store.getState().chatWidth).toBe(720);
+    expect(store.getState().chatHeight).toBe(640);
   });
 });
 

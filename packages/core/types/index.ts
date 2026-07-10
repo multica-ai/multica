@@ -153,6 +153,7 @@ export type {
   WebhookEventFilter,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
+  TriggerAutopilotRequest,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,

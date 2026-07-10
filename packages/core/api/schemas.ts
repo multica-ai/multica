@@ -21,6 +21,8 @@ import type {
   SearchIssuesResponse,
   SearchProjectsResponse,
   Squad,
+  Skill,
+  SkillSummary,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -717,6 +719,58 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+// --- Skills ---
+// Skills previously round-tripped through bare `fetch<T>` with no schema, which
+// violated the CLAUDE.md API-compat rule and let a drifted field white-screen
+// the skills page. These schemas add the defensive parse; every field defaults
+// so an older/malformed response still renders. `display_name` (UTF-8 display
+// label, e.g. Chinese) defaults to "" and the UI falls back to `name`.
+const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+const SkillSummarySchemaBase = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  display_name: z.string().default(""),
+  description: z.string().default(""),
+  config: z.record(z.string(), z.unknown()).default({}),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const SkillSummarySchema = SkillSummarySchemaBase;
+
+export const SkillSummaryListSchema = z.array(SkillSummarySchemaBase);
+
+export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
+
+export const SkillSchema = SkillSummarySchemaBase.extend({
+  content: z.string().default(""),
+  files: z.array(SkillFileSchema).default([]),
+}).loose();
+
+export const EMPTY_SKILL: Skill = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  display_name: "",
+  description: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  content: "",
+  files: [],
 };
 
 // Squad list responses carry lightweight membership previews used by hover

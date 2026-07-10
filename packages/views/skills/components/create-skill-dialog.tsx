@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Download,
+  FolderOpen,
   HardDrive,
   Loader2,
   Pencil,
@@ -39,11 +40,12 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
+import { LocalDirectorySkillImportPanel } from "./local-directory-skill-import-panel";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 import { useT } from "../../i18n";
 import { isNameConflictError } from "../lib/utils";
 
-type Method = "chooser" | "manual" | "url" | "runtime";
+type Method = "chooser" | "manual" | "url" | "local_directory" | "runtime";
 
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
@@ -64,10 +66,11 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const methods: {
     key: Method;
     icon: typeof Plus;
-    titleKey: "manual" | "url" | "runtime";
+    titleKey: "manual" | "url" | "local_directory" | "runtime";
   }[] = [
     { key: "manual", icon: Plus, titleKey: "manual" },
     { key: "url", icon: Download, titleKey: "url" },
+    { key: "local_directory", icon: FolderOpen, titleKey: "local_directory" },
     { key: "runtime", icon: HardDrive, titleKey: "runtime" },
   ];
   return (
@@ -112,6 +115,7 @@ function ManualForm({
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -126,6 +130,7 @@ function ManualForm({
     try {
       const skill = await api.createSkill({
         name: trimmed,
+        display_name: displayName.trim() || undefined,
         description: description.trim(),
       });
       seedAfterCreate(qc, wsId, skill);
@@ -167,6 +172,24 @@ function ManualForm({
           />
           <p className="text-xs text-muted-foreground">
             {t(($) => $.create.manual.name_hint)}
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label
+            htmlFor="create-skill-display-name"
+            className="text-xs text-muted-foreground"
+          >
+            {t(($) => $.create.manual.display_name_label)}
+          </Label>
+          <Input
+            id="create-skill-display-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder={t(($) => $.create.manual.display_name_placeholder)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.create.manual.display_name_hint)}
           </p>
         </div>
 
@@ -439,7 +462,7 @@ export function CreateSkillDialog({
     onClose();
   };
 
-  const wide = method === "runtime";
+  const wide = method === "runtime" || method === "local_directory";
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -511,6 +534,12 @@ export function CreateSkillDialog({
           <UrlForm
             onCreated={handleCreated}
             onCancel={() => setMethod("chooser")}
+          />
+        )}
+        {method === "local_directory" && (
+          <LocalDirectorySkillImportPanel
+            onImported={handleCreated}
+            onBulkDone={onClose}
           />
         )}
         {method === "runtime" && (

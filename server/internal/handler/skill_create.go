@@ -15,6 +15,7 @@ type skillCreateInput struct {
 	WorkspaceID pgtype.UUID
 	CreatorID   pgtype.UUID
 	Name        string
+	DisplayName string
 	Description string
 	Content     string
 	Config      any
@@ -38,6 +39,7 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 	skill, err := qtx.CreateSkill(ctx, db.CreateSkillParams{
 		WorkspaceID: input.WorkspaceID,
 		Name:        sanitizeNullBytes(input.Name),
+		DisplayName: sanitizeNullBytes(input.DisplayName),
 		Description: sanitizeNullBytes(input.Description),
 		Content:     sanitizeNullBytes(input.Content),
 		Config:      config,
@@ -112,10 +114,14 @@ type skillOverwriteInput struct {
 	// different skill than the one the conflict dialog showed the user. The
 	// caller passes the sanitized effective import name.
 	ExpectedName string
-	Description  string
-	Content      string
-	Config       any
-	Files        []CreateSkillFileRequest
+	// DisplayName, when non-nil, refreshes the target's display name alongside
+	// Description/Content; nil keeps the existing value (COALESCE). Treated like
+	// Description, never like Name (Name is preserved to avoid unique churn).
+	DisplayName *string
+	Description string
+	Content     string
+	Config      any
+	Files       []CreateSkillFileRequest
 }
 
 // overwriteSkillWithFiles re-imports a bundle onto an existing skill in a single
@@ -171,12 +177,16 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 	// Name is intentionally left unset (COALESCE keeps the existing name): the
 	// overwrite targets the same-name skill, so preserving it avoids any
 	// unique-name churn.
-	skill, err := qtx.UpdateSkill(ctx, db.UpdateSkillParams{
+	params := db.UpdateSkillParams{
 		ID:          existing.ID,
 		Description: pgtype.Text{String: sanitizeNullBytes(input.Description), Valid: true},
 		Content:     pgtype.Text{String: sanitizeNullBytes(input.Content), Valid: true},
 		Config:      config,
-	})
+	}
+	if input.DisplayName != nil {
+		params.DisplayName = pgtype.Text{String: sanitizeNullBytes(*input.DisplayName), Valid: true}
+	}
+	skill, err := qtx.UpdateSkill(ctx, params)
 	if err != nil {
 		// A committed concurrent DELETE can land between the read above and this
 		// UPDATE (READ COMMITTED), so UpdateSkill matches 0 rows. Classify it as

@@ -790,7 +790,7 @@ function MachineDetail({
   }
   if (machine.subtitle) {
     metaParts.push(
-      <span key="subtitle" className="truncate font-mono">
+      <span key="subtitle" className="break-all font-mono">
         {machine.subtitle}
       </span>,
     );

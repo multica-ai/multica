@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   BookOpen,
   Download,
+  FolderOpen,
   HardDrive,
   Lock,
   Pencil,
@@ -31,6 +32,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { skillDisplayName } from "@multica/core/skills";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
@@ -252,7 +254,7 @@ function NameCell({ row }: { row: SkillRow }) {
   return (
     <ListGridCell className="gap-1.5">
       <span className="min-w-0 truncate text-sm font-medium">
-        {skill.name}
+        {skillDisplayName(skill)}
       </span>
       {!canEdit && (
         <Tooltip>
@@ -351,6 +353,9 @@ function SourceCell({
             provider: origin.provider,
           })
         : t(($) => $.table.source_runtime_unknown);
+  } else if (origin.type === "local_directory") {
+    icon = <FolderOpen className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_local_directory);
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;
     label = t(($) => $.table.source_clawhub);
@@ -680,7 +685,10 @@ export default function SkillsPage() {
   const rows = useMemo<SkillRow[]>(() => {
     const q = search.trim().toLowerCase();
     const filtered = allRows.filter((row) => {
-      if (q && !row.skill.name.toLowerCase().includes(q)) return false;
+      if (q) {
+        const hay = (row.skill.name + " " + (row.skill.display_name ?? "")).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       if (filters.usage.length > 0) {
         const usage = row.agents.length > 0 ? "used" : "unused";
         if (!filters.usage.includes(usage)) return false;

@@ -86,7 +86,8 @@ archive path (below); a JSON body keeps the URL flow. Both converge on the share
 | Behavior | File:line |
 |---|---|
 | `SkillWithFilesResponse` = embedded `SkillResponse` + `Files []SkillFileResponse` | `server/internal/handler/skill.go:99-102` |
-| `SkillResponse` fields (`id, workspace_id, name, description, content, config, created_by, created_at, updated_at`) | `server/internal/handler/skill.go:41-51` |
+| `SkillResponse` fields (`id, workspace_id, name, display_name, description, content, config, created_by, created_at, updated_at`) | `server/internal/handler/skill.go:41-52` |
+| `display_name` added to `skill` (migration 127); optional/`""`, UI-only, falls back to `name` | `server/internal/handler/skill.go` (`SkillResponse`), `server/migrations/127_skill_display_name.up.sql` |
 | `SkillFileResponse` fields | `server/internal/handler/skill.go:80-87` |
 | `createSkillWithFilesInTx` returns `SkillWithFilesResponse{SkillResponse, Files}` | `server/internal/handler/skill_create.go:66-69` |
 | `config.origin` set on import | `server/internal/handler/skill.go:1947` |

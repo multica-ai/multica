@@ -341,6 +341,13 @@ type CreateAutopilotTriggerRequest struct {
 	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
+type TriggerAutopilotRequest struct {
+	// Timezone is the caller's viewing timezone for user-facing manual-run
+	// text. Manual runs have no schedule trigger, so they cannot inherit
+	// autopilot_trigger.timezone the way scheduled runs do.
+	Timezone *string `json:"timezone"`
+}
+
 // SetSigningSecretRequest is the body shape for PUT
 // /api/autopilots/{id}/triggers/{triggerId}/signing-secret. Lives in its own
 // type so the secret never appears alongside other fields on the trigger
@@ -1788,7 +1795,25 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	var req TriggerAutopilotRequest
+	if r.Body != nil && r.Body != http.NoBody {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	triggerTimezone := ""
+	if req.Timezone != nil {
+		triggerTimezone = strings.TrimSpace(*req.Timezone)
+		if triggerTimezone != "" {
+			if err := service.ValidateTimezone(triggerTimezone); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+
+	run, err := h.AutopilotService.DispatchAutopilotWithTimezone(r.Context(), autopilot, pgtype.UUID{}, "manual", nil, triggerTimezone)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return

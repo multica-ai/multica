@@ -639,6 +639,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
+			DisplayName: row.DisplayName,
 			Description: row.Description,
 		})
 	}
@@ -1630,6 +1631,7 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 		out[i] = AgentSkillSummary{
 			ID:          uuidToString(s.ID),
 			Name:        s.Name,
+			DisplayName: s.DisplayName,
 			Description: s.Description,
 		}
 	}

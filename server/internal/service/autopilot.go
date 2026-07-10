@@ -71,7 +71,22 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, "")
+}
+
+// DispatchAutopilotWithTimezone dispatches an on-demand run whose caller knows
+// the timezone that should be used for user-facing run text. Scheduled runs
+// should keep using DispatchAutopilotForPlan so trigger.timezone remains the
+// scheduling source of truth.
+func (s *AutopilotService) DispatchAutopilotWithTimezone(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	triggerTimezone string,
+) (*db.AutopilotRun, error) {
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, strings.TrimSpace(triggerTimezone))
 }
 
 // DispatchAutopilotForPlan is the entry point for scheduled triggers that
@@ -155,7 +170,7 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS)
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, "")
 }
 
 // isAutopilotRunComplete decides whether an existing autopilot_run row
@@ -204,6 +219,7 @@ func (s *AutopilotService) dispatchAutopilot(
 	source string,
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
+	triggerTimezoneOverride string,
 ) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
@@ -231,7 +247,10 @@ func (s *AutopilotService) dispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+		triggerTimezone := strings.TrimSpace(triggerTimezoneOverride)
+		if triggerTimezone == "" {
+			triggerTimezone = s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+		}
 		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil

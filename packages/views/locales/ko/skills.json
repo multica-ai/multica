@@ -48,6 +48,7 @@
     "source_runtime_named": "{{name}}에서 가져옴",
     "source_runtime_provider": "{{provider}} 런타임에서 가져옴",
     "source_runtime_unknown": "런타임에서 가져옴",
+    "source_local_directory": "로컬 디렉터리에서 가져옴",
     "source_clawhub": "ClawHub에서 가져옴",
     "source_skills_sh": "Skills.sh에서 가져옴",
     "source_github": "GitHub에서 가져옴"
@@ -101,12 +102,15 @@
     "delete_file": "파일 삭제",
     "name_aria": "스킬 이름",
     "name_placeholder": "skill-name",
+    "display_name_aria": "스킬 표시 이름",
+    "display_name_placeholder": "표시 이름(선택)",
     "description_label": "설명",
     "description_placeholder": "에이전트가 이 스킬을 언제 써야 하는지 한 문장으로 설명하세요...",
     "subline": {
       "origin_runtime_named": "로컬 런타임 · {{name}}",
       "origin_runtime_provider": "로컬 런타임 · {{provider}}",
       "origin_runtime_unknown": "로컬 런타임",
+      "origin_local_directory": "로컬 디렉터리",
       "origin_clawhub": "가져옴 · ClawHub",
       "origin_skills_sh": "가져옴 · Skills.sh",
       "origin_github": "가져옴 · GitHub",
@@ -141,6 +145,7 @@
     },
     "origin_card": {
       "imported_runtime": "로컬 런타임에서 가져옴",
+      "imported_local_directory": "로컬 디렉터리에서 가져옴",
       "imported_clawhub": "ClawHub에서 가져옴",
       "imported_skills_sh": "Skills.sh에서 가져옴",
       "imported_github": "GitHub에서 가져옴",
@@ -195,6 +200,10 @@
         "title": "URL에서 가져오기",
         "desc": "공개된 스킬을 URL로 가져옵니다. 파일은 서버에서 가져옵니다."
       },
+      "local_directory": {
+        "title": "로컬 디렉터리에서 가져오기",
+        "desc": "skills 디렉터리를 선택하고 하나 이상의 SKILL.md 번들을 가져옵니다."
+      },
       "runtime": {
         "title": "런타임에서 복사",
         "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
@@ -205,6 +214,8 @@
       "manual_desc": "빈 SKILL.md에서 시작해 직접 지침을 작성합니다.",
       "url_title": "URL에서 가져오기",
       "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
+      "local_directory_title": "로컬 디렉터리에서 가져오기",
+      "local_directory_desc": "디스크의 skills 폴더를 선택하고 선택한 번들을 가져옵니다.",
       "runtime_title": "런타임에서 복사",
       "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
     },
@@ -212,6 +223,9 @@
       "name_label": "이름",
       "name_placeholder": "예: review-helper",
       "name_hint": "워크스페이스 안에서 고유해야 합니다.",
+      "display_name_label": "표시 이름",
+      "display_name_placeholder": "예: 코드 리뷰 도우미",
+      "display_name_hint": "선택 사항. UI에만 표시되며 스킬 디렉터리 이름은 변경되지 않습니다.",
       "description_label": "설명",
       "description_placeholder": "이 스킬을 에이전트에 언제 할당해야 하는지 한 문장으로 적어 주세요.",
       "name_conflict_hint": " 다른 이름으로 다시 제출하세요.",
@@ -234,6 +248,18 @@
       "cancel": "취소",
       "toast_imported": "스킬을 가져왔습니다"
     }
+  },
+  "local_directory_import": {
+    "choose_button": "디렉터리 선택",
+    "choose_again": "다른 디렉터리 선택",
+    "loading": "디렉터리를 읽는 중...",
+    "load_failed": "로컬 디렉터리를 읽지 못했습니다",
+    "empty_title": "skills 디렉터리 선택",
+    "empty_hint": "SKILL.md 파일이 있는 하나 이상의 스킬 디렉터리가 포함된 폴더를 선택하세요.",
+    "no_skills_hint": "이 디렉터리에서 SKILL.md 파일을 찾지 못했습니다.",
+    "toast_imported_one": "스킬 {{count}}개를 가져왔습니다",
+    "toast_imported_other": "스킬 {{count}}개를 가져왔습니다",
+    "toast_import_failed": "스킬 가져오기에 실패했습니다"
   },
   "runtime_import": {
     "runtime_label": "런타임",

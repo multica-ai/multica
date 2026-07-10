@@ -306,6 +306,46 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listSkills", () => {
+    it("falls back to [] when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const skills = await client.listSkills();
+      expect(skills).toEqual([]);
+    });
+
+    it("defaults display_name to '' when the field is missing (pre-127 server)", async () => {
+      // Older servers omit display_name; the skills page must still render and
+      // fall back to `name` via skillDisplayName.
+      stubFetchJson([{ id: "s1", workspace_id: "ws", name: "review-helper", description: "" }]);
+      const client = new ApiClient("https://api.example.test");
+      const skills = await client.listSkills();
+      expect(skills).toHaveLength(1);
+      expect(skills[0]?.name).toBe("review-helper");
+      expect(skills[0]?.display_name).toBe("");
+    });
+
+    it("preserves a UTF-8 display_name from a current server", async () => {
+      stubFetchJson([
+        { id: "s1", workspace_id: "ws", name: "review-helper", display_name: "代码审查", description: "" },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const skills = await client.listSkills();
+      expect(skills[0]?.display_name).toBe("代码审查");
+    });
+  });
+
+  describe("getSkill", () => {
+    it("falls back to a minimal skill record when the body is malformed", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      const skill = await client.getSkill("s1");
+      expect(skill.id).toBe("");
+      expect(skill.display_name).toBe("");
+      expect(skill.files).toEqual([]);
+    });
+  });
+
   describe("listAutopilotDeliveries", () => {
     it("falls back to an empty list when the body is null", async () => {
       stubFetchJson(null);

@@ -114,6 +114,8 @@ the relevant fields:
 
 - `status` and `reason` when present.
 - `skill.id` / `skill.name` / `skill.description`.
+- `skill.display_name` (optional, UTF-8, UI-only label e.g. Chinese; treat as
+  possibly absent or `""` on older servers and fall back to `skill.name`).
 - `skill.config.origin` (provenance: which source the skill was imported from —
   set only when the source supplied an origin, so treat it as possibly absent).
 - `skill.files` / files count.

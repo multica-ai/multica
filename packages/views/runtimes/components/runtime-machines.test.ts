@@ -133,6 +133,23 @@ describe("runtime machine grouping", () => {
     expect(subtitle).toMatch(/^daemon /);
   });
 
+  it("shows the full daemon id in the machine subtitle", () => {
+    const daemonId = "019edddc-1111-4222-9333-abcdef123456";
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-claude",
+          daemon_id: daemonId,
+          name: "Claude",
+          device_info: "claude 1.0.0",
+        }),
+      ],
+      { now: NOW, localDaemonId: daemonId },
+    );
+
+    expect(machines[0]?.subtitle).toBe(`daemon ${daemonId}`);
+  });
+
   it("synthesizes a placeholder local machine when ensureLocalMachine is set and no runtime matches", () => {
     // Reproduces the "Start button disappears after stopping the daemon"
     // bug: the daemon is stopped (localDaemonId is null) and the server

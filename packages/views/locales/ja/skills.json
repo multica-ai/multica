@@ -48,6 +48,7 @@
     "source_runtime_named": "{{name}} から",
     "source_runtime_provider": "{{provider}} ランタイムから",
     "source_runtime_unknown": "ランタイムから",
+    "source_local_directory": "ローカルディレクトリから",
     "source_clawhub": "ClawHub から",
     "source_skills_sh": "Skills.sh から",
     "source_github": "GitHub から"
@@ -101,12 +102,15 @@
     "delete_file": "ファイルを削除",
     "name_aria": "スキル名",
     "name_placeholder": "skill-name",
+    "display_name_aria": "スキル表示名",
+    "display_name_placeholder": "表示名（任意）",
     "description_label": "説明",
     "description_placeholder": "エージェントがこのスキルをいつ使うべきかを 1 文で説明してください…",
     "subline": {
       "origin_runtime_named": "ローカルランタイム · {{name}}",
       "origin_runtime_provider": "ローカルランタイム · {{provider}}",
       "origin_runtime_unknown": "ローカルランタイム",
+      "origin_local_directory": "ローカルディレクトリ",
       "origin_clawhub": "インポート済み · ClawHub",
       "origin_skills_sh": "インポート済み · Skills.sh",
       "origin_github": "インポート済み · GitHub",
@@ -141,6 +145,7 @@
     },
     "origin_card": {
       "imported_runtime": "ローカルランタイムからインポート",
+      "imported_local_directory": "ローカルディレクトリからインポート",
       "imported_clawhub": "ClawHub からインポート",
       "imported_skills_sh": "Skills.sh からインポート",
       "imported_github": "GitHub からインポート",
@@ -195,6 +200,10 @@
         "title": "URL からインポート",
         "desc": "公開済みのスキルを URL で取得します。ファイルはサーバー側で取得されます。"
       },
+      "local_directory": {
+        "title": "ローカルディレクトリからインポート",
+        "desc": "skills ディレクトリを選択し、1 つ以上の SKILL.md バンドルをインポートします。"
+      },
       "runtime": {
         "title": "ランタイムからコピー",
         "desc": "ローカルランタイムをスキャンし、ディスク上のスキルの 1 つをこのワークスペースに昇格します。"
@@ -205,6 +214,8 @@
       "manual_desc": "空の SKILL.md から始めて、独自の指示を記述します。",
       "url_title": "URL からインポート",
       "url_desc": "ClawHub または Skills.sh の公開スキルを取得します。",
+      "local_directory_title": "ローカルディレクトリからインポート",
+      "local_directory_desc": "ディスク上の skills フォルダーを選択し、選んだバンドルをインポートします。",
       "runtime_title": "ランタイムからコピー",
       "runtime_desc": "ローカルランタイムにすでにインストールされているスキルを昇格します。"
     },
@@ -212,6 +223,9 @@
       "name_label": "名前",
       "name_placeholder": "例: review-helper",
       "name_hint": "ワークスペース内で一意である必要があります。",
+      "display_name_label": "表示名",
+      "display_name_placeholder": "例: コードレビューヘルパー",
+      "display_name_hint": "任意。UIでのみ表示され、スキルのディレクトリ名は変更されません。",
       "description_label": "説明",
       "description_placeholder": "このスキルをエージェントにいつ割り当てるべきかを 1 文で書いてください。",
       "name_conflict_hint": " 別の名前で再度送信してください。",
@@ -234,6 +248,18 @@
       "cancel": "キャンセル",
       "toast_imported": "スキルをインポートしました"
     }
+  },
+  "local_directory_import": {
+    "choose_button": "ディレクトリを選択",
+    "choose_again": "別のディレクトリを選択",
+    "loading": "ディレクトリを読み込み中...",
+    "load_failed": "ローカルディレクトリを読み込めませんでした",
+    "empty_title": "skills ディレクトリを選択",
+    "empty_hint": "SKILL.md ファイルを含む 1 つ以上のスキルディレクトリが入ったフォルダーを選択してください。",
+    "no_skills_hint": "このディレクトリに SKILL.md ファイルは見つかりませんでした。",
+    "toast_imported_one": "{{count}} 件のスキルをインポートしました",
+    "toast_imported_other": "{{count}} 件のスキルをインポートしました",
+    "toast_import_failed": "スキルのインポートに失敗しました"
   },
   "runtime_import": {
     "runtime_label": "ランタイム",
