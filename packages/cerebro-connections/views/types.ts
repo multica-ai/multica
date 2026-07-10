@@ -54,6 +54,7 @@ export interface Connection {
   workspace_id: string;
   name: string;
   display_name: string;
+  instructions: string;
   type: ConnectionType;
   url: string;
   internal: boolean;
@@ -70,6 +71,7 @@ export interface Connection {
 export interface CreateConnectionInput {
   name: string;
   display_name: string;
+  instructions: string;
   type: ConnectionType;
   url: string;
   internal: boolean;
@@ -81,6 +83,7 @@ export interface CreateConnectionInput {
 
 export interface UpdateConnectionInput {
   display_name: string;
+  instructions: string;
   url: string;
   internal: boolean;
   auth_config: AuthConfig;

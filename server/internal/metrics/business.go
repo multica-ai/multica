@@ -1,5 +1,7 @@
 package metrics
 
+// CEREBRO-PATCH(failure-router): FIR-2751 records the action selected for each canonical task failure.
+
 import (
 	"sync"
 
@@ -15,16 +17,17 @@ type activeTaskLabels struct {
 }
 
 type BusinessMetrics struct {
-	taskEnqueued     *prometheus.CounterVec
-	taskDispatched   *prometheus.CounterVec
-	taskStarted      *prometheus.CounterVec
-	taskTerminal     *prometheus.CounterVec
-	taskFailed       *prometheus.CounterVec
-	taskQueueWait    *prometheus.HistogramVec
-	taskRunSeconds   *prometheus.HistogramVec
-	taskTotalSeconds *prometheus.HistogramVec
-	taskInProgress   *prometheus.GaugeVec
-	taskIterations   *prometheus.HistogramVec
+	taskEnqueued        *prometheus.CounterVec
+	taskDispatched      *prometheus.CounterVec
+	taskStarted         *prometheus.CounterVec
+	taskTerminal        *prometheus.CounterVec
+	taskFailed          *prometheus.CounterVec
+	taskFailureDecision *prometheus.CounterVec
+	taskQueueWait       *prometheus.HistogramVec
+	taskRunSeconds      *prometheus.HistogramVec
+	taskTotalSeconds    *prometheus.HistogramVec
+	taskInProgress      *prometheus.GaugeVec
+	taskIterations      *prometheus.HistogramVec
 
 	llmTokens         *prometheus.CounterVec
 	llmCostUSD        *prometheus.CounterVec
@@ -75,6 +78,12 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "failed_total",
 			Help:      "Total failed agent tasks by canonical failure reason.",
 		}, metricLabels("multica_agent_task_failed_total")),
+		taskFailureDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task",
+			Name:      "failure_decision_total",
+			Help:      "Total task failure routing decisions by canonical reason and action.",
+		}, metricLabels("multica_agent_task_failure_decision_total")),
 		taskQueueWait: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "multica",
 			Subsystem: "agent_task",
@@ -159,6 +168,7 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.taskStarted,
 		m.taskTerminal,
 		m.taskFailed,
+		m.taskFailureDecision,
 		m.taskQueueWait,
 		m.taskRunSeconds,
 		m.taskTotalSeconds,
@@ -234,6 +244,13 @@ func (m *BusinessMetrics) RecordTaskFailed(source, runtimeMode, failureReason st
 		NormalizeRuntimeMode(runtimeMode),
 		NormalizeFailureReason(failureReason),
 	).Inc()
+}
+
+func (m *BusinessMetrics) RecordTaskFailureDecision(failureReason, action string) {
+	if m == nil {
+		return
+	}
+	m.taskFailureDecision.WithLabelValues(NormalizeFailureReason(failureReason), action).Inc()
 }
 
 func (m *BusinessMetrics) RecordTaskQueuedExpired(source, runtimeMode string) {

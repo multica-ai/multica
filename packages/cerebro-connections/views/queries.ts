@@ -56,6 +56,7 @@ export const ConnectionSchema = z
     workspace_id: z.string(),
     name: z.string(),
     display_name: z.string(),
+    instructions: z.string().default(""),
     type: z.string(),
     url: z.string(),
     internal: z.boolean().default(false),
@@ -98,6 +99,7 @@ const EMPTY_CONNECTION_STUB = (wsId: string): Connection => ({
   workspace_id: wsId,
   name: "",
   display_name: "",
+  instructions: "",
   type: "mcp_http",
   url: "",
   internal: false,
@@ -290,6 +292,7 @@ export function useToggleConnection(wsId: string) {
     mutationFn: async ({ conn, enabled }: { conn: Connection; enabled: boolean }): Promise<Connection> => {
       const input: UpdateConnectionInput = {
         display_name: conn.display_name,
+        instructions: conn.instructions,
         url: conn.url,
         internal: conn.internal,
         auth_config: conn.auth_config,

@@ -1,5 +1,7 @@
 package metrics
 
+// CEREBRO-PATCH(failure-router): FIR-2751 verifies the routing-decision counter.
+
 import (
 	"strconv"
 	"testing"
@@ -65,6 +67,16 @@ func TestBusinessMetricsFailureReasonUsesCanonicalClassifier(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsFailureDecisionCounter(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordTaskFailureDecision(taskfailure.ReasonAgentContextOverflow.String(), "retry")
+
+	if got := testutil.ToFloat64(m.taskFailureDecision.WithLabelValues(taskfailure.ReasonAgentContextOverflow.String(), "retry")); got != 1 {
+		t.Fatalf("failure decision counter = %v, want 1", got)
+	}
+}
+
 func TestBusinessMetricsLLMPricingAndUnpricedTokens(t *testing.T) {
 	m := NewBusinessMetrics()
 
@@ -105,6 +117,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordTaskStarted("issue", "local", "codex")
 	m.RecordTaskTerminal("task-1", "issue", "local", "completed", 2, 3, 1)
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())
+	m.RecordTaskFailureDecision(taskfailure.ReasonTimeout.String(), "retry")
 	m.RecordTaskQueuedExpired("issue", "local")
 	m.RecordTaskLeaseExpired("issue")
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1)

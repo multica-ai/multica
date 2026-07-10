@@ -34,17 +34,13 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
   if (isAdminLike(ctx.role)) return ALLOW;
-  // CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 — owner can manage own private agent.
-  if (
-    agent.visibility === "private" &&
-    agent.owner_id !== null &&
-    agent.owner_id === ctx.userId
-  ) {
+  // CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 + FIR-1416 — owner can manage own agent (any visibility).
+  if (agent.owner_id !== null && agent.owner_id === ctx.userId) {
     return ALLOW;
   }
   return deny(
     "not_admin_role",
-    "Only workspace owners/admins or the personal agent owner can edit agents.",
+    "Only workspace owners/admins or the agent owner can edit agents.",
   );
 }
 

@@ -610,6 +610,13 @@
       "default": false
     },
     {
+      "key": "cerebro_issue_sidebar_subscribers",
+      "label": "Sidebar subscribers",
+      "description": "List an issue's subscribers in the sidebar, split by type (Members / Agents), with the same add/remove popover the chat Participants section uses. Every subscriber is a potential wake target, so the per-type split answers \"who can this issue dispatch to?\" at a glance. Off falls back to the avatar stack next to the Activity header. ON by default. FIR-2827.",
+      "group": "workspace",
+      "default": true
+    },
+    {
       "key": "cerebro_recurring_issues",
       "label": "Recurring issues",
       "description": "Let users mark an individual issue as recurring (frequency, on-status-change trigger, create-new-task, recur-forever, update-status-to, sync-to-due-date). When the issue reaches its trigger status, a sweeper spawns the next occurrence with a fresh due date and the same data (assignee, text, labels, attachments) and chains the rule onto the new issue. TECH-3064.",
