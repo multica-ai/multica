@@ -2144,6 +2144,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroSprintsHandler.UpdateRecurringTask)
 				r.Delete("/", cerebroSprintsHandler.DeleteRecurringTask)
 			})
+			r.Get("/api/cerebro/sprints", cerebroSprintsHandler.ListWorkspaceSprints) // CEREBRO-PATCH(cerebro-sprints-routes): FIR-2500 workspace-wide sprint list for the CLI.
 			r.Route("/api/cerebro/sprints/{sprintID}", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.GetSprint)
 				r.Put("/", cerebroSprintsHandler.UpdateSprint)

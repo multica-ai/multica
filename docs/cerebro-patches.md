@@ -1463,3 +1463,4 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `issue-sidebar-reorder` | packages/views/issues/components/issue-detail.tsx | section order | FIR-2827 — Dependencies, Details, and Metadata move to the bottom. |
 | `issue-sidebar-references` | packages/views/issues/components/issue-detail.tsx | slot moved | FIR-2827 — issue references render in the sidebar above pull requests. |
 | `runs-tab-merged` | packages/views/issues/components/issue-detail.tsx | tabs merged | FIR-2827 — Agent Runs and CLI runs share one Runs tab. |
+| `sprint-cli-real-model` | server/cmd/multica/cerebro_sprint.go and server/internal/cerebro/sprints | CLI and API wiring | FIR-2500 — the sprint CLI uses the real workspace sprint model instead of treating sprints as sub-projects. |
