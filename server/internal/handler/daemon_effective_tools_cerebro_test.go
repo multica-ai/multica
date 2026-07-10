@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -137,5 +138,29 @@ func TestCerebroEffectiveToolsForBriefBadAgentID(t *testing.T) {
 	// sanity: util.ParseUUID rejects the bad id
 	if _, err := util.ParseUUID("not-a-uuid"); err == nil {
 		t.Fatalf("expected ParseUUID to reject bad id")
+	}
+}
+
+type fakeConnectionInstructions struct{ values map[string]string }
+
+func (f fakeConnectionInstructions) ConnectionInstructionsForBrief(_ context.Context, _ pgtype.UUID, names []string) map[string]string {
+	got := map[string]string{}
+	for _, name := range names {
+		if v := f.values[name]; v != "" {
+			got[name] = v
+		}
+	}
+	return got
+}
+
+func TestCerebroEffectiveToolsForBriefAddsInstructionsOnlyForExposedConnections(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	h := &Handler{
+		runtimeToolAccess:           fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{exposedToolView("search", "mcp", "company-brain", "Search", "allow", true)}},
+		ConnectionInstructionsBrief: fakeConnectionInstructions{values: map[string]string{"company-brain": "Search before answering.", "hidden": "Never include me."}},
+	}
+	got := h.cerebroEffectiveToolsForBrief(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", "")
+	if len(got) != 1 || got[0].Instructions != "Search before answering." || got[0].Connection != "company-brain" {
+		t.Fatalf("unexpected tools: %#v", got)
 	}
 }

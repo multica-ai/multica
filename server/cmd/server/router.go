@@ -595,6 +595,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connection-tool-resolver-brief-flip): FIR-2441 the Flip (slice 1) — the claim brief now resolves through the unified ConnectionToolResolver (api half via the reused APIConnectionResolver), behind the same default-off cerebro_api_connection_tools flag; reversible (flag off ⇒ identical nil result).
 	cerebroConnToolResolver := cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil, nil)
 	h.APIConnectionBrief = cerebroConnToolResolver
+	h.ConnectionInstructionsBrief = cerebroConnectionsHandler.Store                       // CEREBRO-PATCH(connection-instructions-brief): FIR-2760 permission-scoped connection guidance.
 	h.MemoryAutoRecall = &cerebroruntime.CerebroMemoryAutoRecall{Cerebro: cerebroQueries} // CEREBRO-PATCH(memory-autorecall-wire): FIR-1794 layer 3 — auto-recall seam for daemon claims
 	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools handler for the Multica MCP server; FIR-2441 the Flip (slice 3) — the local handler now resolves through the unified ConnectionToolResolver (api half), the same resolver the brief (slice 1) and cloud executor (slice 2) use, behind the same default-off cerebro_api_connection_tools flag.
 	cerebroConnectionToolsHandler := cerebroconnectiontools.NewHandler(cerebroconnectiontools.NewQueriesAgentResolver(queries), cerebroConnToolResolver)
