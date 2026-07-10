@@ -7,6 +7,6 @@
 ALTER TABLE attachment
   ADD COLUMN task_id UUID REFERENCES agent_task_queue(id) ON DELETE SET NULL;
 
-CREATE INDEX idx_attachment_task
-  ON attachment(task_id)
-  WHERE task_id IS NOT NULL;
+-- The task_id lookup index is built CONCURRENTLY in the next migration.
+-- CREATE INDEX CONCURRENTLY cannot share a transaction or multi-command
+-- string with the ADD COLUMN above (see 138_issue_title_trgm_index).

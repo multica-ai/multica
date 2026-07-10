@@ -168,6 +168,19 @@ func TestUploadFile_TaskScopedChatAttachment(t *testing.T) {
 		}
 	})
 
+	t.Run("same agent's other chat task rejected", func(t *testing.T) {
+		// X-Task-ID is this run's own task, but the form targets a DIFFERENT
+		// chat task of the SAME agent (another session, possibly another user).
+		// Without pinning the form task_id to the token's bound X-Task-ID this
+		// is a cross-session attachment-injection vector.
+		otherSession := createHandlerTestChatSession(t, agentID)
+		otherChatTask := seedRunningChatTask(t, agentID, otherSession)
+		w := uploadWithTaskID(t, agentID, taskID, otherChatTask)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("cross-task upload: expected 403, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
 	t.Run("non-chat task rejected", func(t *testing.T) {
 		issueTask := createHandlerTestTaskForAgent(t, agentID) // no chat_session_id
 		w := uploadWithTaskID(t, agentID, issueTask, issueTask)

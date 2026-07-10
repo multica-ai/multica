@@ -439,11 +439,22 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		// task_id upload: an agent producing an image/file for its chat reply.
 		// The row is tagged with the producing task and its chat session so
 		// CompleteTask can bind it to the assistant message it synthesizes.
-		// Gate: caller must be the task's agent, the task must live in this
-		// workspace, and it must be a chat task (has a chat_session_id).
+		// Gate: the form task_id must equal the task this request's token is
+		// bound to, the caller must be that task's agent, and it must be a chat
+		// task (has a chat_session_id).
 		if taskID := r.FormValue("task_id"); taskID != "" {
 			taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
 			if !ok {
+				return
+			}
+			// Pin to the run's own task. The auth middleware sets X-Task-ID from
+			// the task-scoped `mat_` token authoritatively (the agent process
+			// can't forge or strip it), so a run authorized for task A cannot tag
+			// an attachment onto task B — even another chat task of the same
+			// agent, whose session may belong to a different user.
+			boundTaskID := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+			if boundTaskID == "" || !strings.EqualFold(boundTaskID, strings.TrimSpace(taskID)) {
+				writeError(w, http.StatusForbidden, "task_id must match the request's task token")
 				return
 			}
 			task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
