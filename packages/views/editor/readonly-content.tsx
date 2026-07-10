@@ -44,7 +44,7 @@ import {
   ActorMentionChip,
   isActorMentionType,
 } from "@multica/ui/components/common/actor-mention-chip";
-import { MentionHoverCard } from "@multica/ui/components/common/mention-hover-card";
+import { MentionHoverCard } from "./mention-hover-card";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref, isIssueIdentifier } from "@multica/ui/markdown";
@@ -304,7 +304,7 @@ function ReadonlyLink({
       const label = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
       const initials = label.charAt(0);
       return (
-        <MentionHoverCard type={match[1]} id={match[2]} name={label} initials={initials}>
+        <MentionHoverCard type={match[1]} id={match[2]}>
           <ActorMentionChip type={match[1]} label={label} initials={initials} />
         </MentionHoverCard>
       );
