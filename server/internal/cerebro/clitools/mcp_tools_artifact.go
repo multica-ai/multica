@@ -418,6 +418,41 @@ Pass exactly one of project_id or issue_id, or neither (workspace scope). Only t
 	})
 
 	// -----------------------------------------------------------------------
+	// suggest_artifact_folder (FIR-2697 part 2)
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name:        "suggest_artifact_folder",
+		Description: "PROPOSE an existing folder for a document/note instead of moving it yourself. The artifact does NOT move — a person sees the proposal in the editor and accepts or rejects it. Use this when you think a document belongs in one of the team's existing folders; use set_artifact_folder only for a folder you own or created. The proposed folder must be in the same tree as the artifact (a note into a note folder, a document into a document folder).",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"id", "folder_id"},
+			"properties": map[string]any{
+				"id":        map[string]any{"type": "string", "description": "Artifact ID to propose a folder for."},
+				"folder_id": map[string]any{"type": "string", "description": "The existing folder you propose the artifact should live in."},
+				"reason":    map[string]any{"type": "string", "description": "Optional short rationale shown to the person deciding."},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		folderID, err := requireString(args, "folder_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		req := map[string]any{"folder_id": folderID}
+		if v := optString(args, "reason"); v != "" {
+			req["reason"] = v
+		}
+		var result map[string]any
+		if err := client.PostJSON(ctx, "/api/artifacts/"+id+"/folder-suggestion", req, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// -----------------------------------------------------------------------
 	// list_artifact_folders
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{

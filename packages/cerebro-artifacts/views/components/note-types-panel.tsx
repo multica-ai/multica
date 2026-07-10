@@ -15,7 +15,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -35,42 +34,42 @@ import type {
   RecurrenceMode,
 } from "@multica/cerebro-artifacts/core";
 
-const DEFAULT_TEMPLATE = `## Business Review – {{måned}} {{år}}
+const DEFAULT_TEMPLATE = `## Business Review - {{måned}} {{år}}
 
-### Tal
-- Omsætning vs. budget:
+### Numbers
+- Revenue vs. budget:
 - EBITDA:
-- Trafik / konvertering:
+- Traffic / conversion:
 
-### Hvad gik godt
+### What went well
 
-### Hvad gik skidt
+### What went poorly
 
-### Beslutninger & næste skridt
+### Decisions & next steps
 - [ ]
 `;
 
 const MODE_LABELS: Record<RecurrenceMode, string> = {
-  running_doc: "Fortløbende dokument",
-  new_note: "Ny note pr. periode",
+  running_doc: "Running document",
+  new_note: "New note each period",
 };
 
-// Short unit labels; the "Hver N <unit>" sentence is composed in the editor.
+// Short unit labels; the "Every N <unit>" sentence is composed in the editor.
 const CADENCE_LABELS: Record<CadenceUnit, string> = {
-  manual: "Manuel",
-  day: "Dag",
-  week: "Uge",
-  month: "Måned",
-  quarter: "Kvartal",
+  manual: "Manual",
+  day: "Day",
+  week: "Week",
+  month: "Month",
+  quarter: "Quarter",
 };
 
-// Plural unit words used in the list badge, e.g. "Hver 2. uge".
+// Plural unit words used in the list badge, e.g. "Every 2 weeks".
 const CADENCE_BADGE: Record<CadenceUnit, string> = {
-  manual: "Manuel",
-  day: "dag",
-  week: "uge",
-  month: "måned",
-  quarter: "kvartal",
+  manual: "Manual",
+  day: "day",
+  week: "week",
+  month: "month",
+  quarter: "quarter",
 };
 
 const WEEKDAY_LABELS: Record<number, string> = {
@@ -89,13 +88,13 @@ const WEEKDAY_OPTIONS = Object.entries(WEEKDAY_LABELS).map(([value, label]) => (
 }));
 
 function cadenceBadge(unit: CadenceUnit, count: number, anchorWeekday?: number | null): string {
-  if (unit === "manual") return "Manuel";
+  if (unit === "manual") return "Manual";
   if (unit === "week" && anchorWeekday) {
     const interval = count <= 1 ? "week" : `${count} weeks`;
     return `Every ${interval} on ${WEEKDAY_LABELS[anchorWeekday] ?? "selected weekday"}`;
   }
-  if (count <= 1) return `Hver ${CADENCE_BADGE[unit]}`;
-  return `Hver ${count}. ${CADENCE_BADGE[unit]}`;
+  if (count <= 1) return `Every ${CADENCE_BADGE[unit]}`;
+  return `Every ${count} ${CADENCE_BADGE[unit]}s`;
 }
 
 function cadenceHelperText(
@@ -103,12 +102,12 @@ function cadenceHelperText(
   count: number,
   anchorWeekday?: number | null,
 ): string {
-  if (unit === "manual") return "Kører kun når du trykker “Start ny”.";
+  if (unit === "manual") return "Runs only when you click “Run now”.";
   const badge = cadenceBadge(unit, count, anchorWeekday);
   if (unit === "week" && anchorWeekday) {
     return `Runs automatically ${badge.charAt(0).toLowerCase()}${badge.slice(1)}.`;
   }
-  return `Kører automatisk ${badge.toLowerCase()}.`;
+  return `Runs automatically ${badge.toLowerCase()}.`;
 }
 
 interface DraftState {
@@ -124,6 +123,7 @@ interface DraftState {
   numbering_enabled: boolean;
   next_number: number;
   anchor_weekday: number | null;
+  author_codes: boolean;
 }
 
 function emptyDraft(): DraftState {
@@ -140,6 +140,7 @@ function emptyDraft(): DraftState {
     numbering_enabled: false,
     next_number: 1,
     anchor_weekday: null,
+    author_codes: false,
   };
 }
 
@@ -157,6 +158,7 @@ function draftFrom(nt: NoteType): DraftState {
     numbering_enabled: nt.numbering_enabled,
     next_number: nt.next_number,
     anchor_weekday: nt.anchor_weekday,
+    author_codes: nt.author_codes,
   };
 }
 
@@ -165,7 +167,7 @@ const NO_ANCHOR_WEEKDAY = "__creation_day__";
 
 /**
  * Admin panel for note types (TECH-3511). Lists the workspace's note types and
- * lets an admin create / edit / delete one and run it on demand ("Start ny nu").
+ * lets an admin create / edit / delete one and run it on demand ("Run now").
  * Designed to render inside a Sheet from the Documents file manager.
  *
  * onOpenNote (FIR-1460): when the panel is hosted by the Notes surface itself,
@@ -191,7 +193,7 @@ export function NoteTypesPanel({
 
   const [draft, setDraft] = React.useState<DraftState | null>(null);
 
-  // "Start ny": materialise the note type now, tell the user what happened, and
+  // "Run now": materialise the note type now, tell the user what happened, and
   // open the note. A materialised note type is a Notes-feature note (kind='note'
   // registered via UpsertNote, see note_types/apply.go) — so it opens on the
   // Notes surface, not in the Documents file manager (TECH-3780). created=false
@@ -202,13 +204,13 @@ export function NoteTypesPanel({
       try {
         const result = await run.mutateAsync(id);
         if (!result || !result.artifact_id) {
-          toast.error("Kunne ikke starte noten. Prøv igen.");
+          toast.error("Could not start the note. Try again.");
           return;
         }
         toast.success(
           result.created
-            ? "Ny note oprettet."
-            : "Findes allerede for denne periode — åbner den.",
+            ? "New note created."
+            : "Already exists for this period - opening it.",
         );
         // FIR-1460: when hosted on the Notes surface, select the note in place
         // (a route push to the page we're already on doesn't re-open it).
@@ -221,7 +223,7 @@ export function NoteTypesPanel({
           );
         }
       } catch {
-        toast.error("Kunne ikke starte noten. Prøv igen.");
+        toast.error("Could not start the note. Try again.");
       }
     },
     [run, router, wsPaths, onOpenNote],
@@ -246,6 +248,7 @@ export function NoteTypesPanel({
       numbering_enabled: draft.numbering_enabled,
       next_number: Math.max(1, draft.next_number),
       anchor_weekday: draft.cadence_unit === "week" ? draft.anchor_weekday : null,
+      author_codes: draft.author_codes,
     };
     if (draft.id) {
       await update.mutateAsync({ id: draft.id, data: payload });
@@ -265,25 +268,25 @@ export function NoteTypesPanel({
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
-            <ArrowLeft className="mr-1 size-4" /> Tilbage
+            <ArrowLeft className="mr-1 size-4" /> Back
           </Button>
           <h3 className="text-sm font-semibold">
-            {draft.id ? "Rediger note type" : "Ny note type"}
+            {draft.id ? "Edit note type" : "New note type"}
           </h3>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="nt-name">Navn</Label>
+          <Label htmlFor="nt-name">Name</Label>
           <Input
             id="nt-name"
             value={draft.name}
-            placeholder="Fx Månedlig Business Review"
+            placeholder="E.g. Monthly Business Review"
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="nt-template">Skabelon (indsættes hver gang)</Label>
+          <Label htmlFor="nt-template">Template (inserted every time)</Label>
           <Textarea
             id="nt-template"
             value={draft.template_body}
@@ -297,7 +300,7 @@ export function NoteTypesPanel({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label>Hvordan gentages den?</Label>
+          <Label>How does it repeat?</Label>
           <Select
             value={draft.recurrence_mode}
             onValueChange={(v) =>
@@ -305,7 +308,7 @@ export function NoteTypesPanel({
             }
           >
             <SelectTrigger>
-              <SelectValue />
+              <span>{MODE_LABELS[draft.recurrence_mode]}</span>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="running_doc">{MODE_LABELS.running_doc}</SelectItem>
@@ -314,15 +317,15 @@ export function NoteTypesPanel({
           </Select>
           <p className="text-xs text-muted-foreground">
             {draft.recurrence_mode === "running_doc"
-              ? "Ny skabelon lægges øverst i ét og samme dokument."
-              : "Der oprettes en ny note i mappen hver periode."}
+              ? "A new template is added at the top of the same document."
+              : "A new note is created in the folder each period."}
           </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label>Hyppighed</Label>
+          <Label>Frequency</Label>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Hver</span>
+            <span className="text-sm text-muted-foreground">Every</span>
             <Input
               type="number"
               min={1}
@@ -348,7 +351,7 @@ export function NoteTypesPanel({
               }}
             >
               <SelectTrigger className="flex-1">
-                <SelectValue />
+                <span>{CADENCE_LABELS[draft.cadence_unit]}</span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="manual">{CADENCE_LABELS.manual}</SelectItem>
@@ -404,7 +407,7 @@ export function NoteTypesPanel({
 
         <div className="grid grid-cols-1 gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label>Mappe</Label>
+            <Label>Folder</Label>
             <Select
               value={draft.target_folder_id ?? NO_FOLDER}
               onValueChange={(v) =>
@@ -415,10 +418,10 @@ export function NoteTypesPanel({
               }
             >
               <SelectTrigger>
-                <SelectValue placeholder="Ingen mappe" />
+                <span>{draft.target_folder_id ? folderName(draft.target_folder_id) : "None"}</span>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NO_FOLDER}>Ingen mappe</SelectItem>
+                <SelectItem value={NO_FOLDER}>None</SelectItem>
                 {(folders ?? []).map((f) => (
                   <SelectItem key={f.id} value={f.id}>
                     {f.name}
@@ -431,9 +434,9 @@ export function NoteTypesPanel({
 
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <div>
-            <div className="text-sm font-medium">Aktiv</div>
+            <div className="text-sm font-medium">Active</div>
             <div className="text-xs text-muted-foreground">
-              Slået fra: kører ikke automatisk.
+              Off: does not run automatically.
             </div>
           </div>
           <Switch
@@ -445,9 +448,9 @@ export function NoteTypesPanel({
         <div className="flex flex-col gap-2 rounded-md border px-3 py-2">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium">Nummerér automatisk</div>
+              <div className="text-sm font-medium">Auto-number</div>
               <div className="text-xs text-muted-foreground">
-                Hver ny note får et løbenummer (#1, #2, #3 …).
+                Each new note gets a sequential number (#1, #2, #3 ...).
               </div>
             </div>
             <Switch
@@ -458,7 +461,7 @@ export function NoteTypesPanel({
           {draft.numbering_enabled && (
             <div className="flex items-center gap-2">
               <Label htmlFor="nt-next-number" className="text-xs">
-                Næste nummer
+                Next number
               </Label>
               <Input
                 id="nt-next-number"
@@ -480,15 +483,31 @@ export function NoteTypesPanel({
           )}
         </div>
 
+        {/* FIR-2810: notes materialised from this type start with author codes
+            on — every line a person writes is stamped with their member code. */}
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <div>
+            <div className="text-sm font-medium">Author codes</div>
+            <div className="text-xs text-muted-foreground">
+              New notes stamp each writer's member code (e.g. JEH) on every
+              line they write.
+            </div>
+          </div>
+          <Switch
+            checked={draft.author_codes}
+            onCheckedChange={(c) => setDraft({ ...draft, author_codes: c })}
+          />
+        </div>
+
         <div className="flex items-center justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={() => setDraft(null)} disabled={isSaving}>
-            Annuller
+            Cancel
           </Button>
           <Button
             onClick={handleSave}
             disabled={isSaving || draft.name.trim().length === 0}
           >
-            {isSaving ? "Gemmer…" : "Gem note type"}
+            {isSaving ? "Saving..." : "Save note type"}
           </Button>
         </div>
       </div>
@@ -502,22 +521,22 @@ export function NoteTypesPanel({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Skabeloner til fx business reviews — deles af hele workspacet.
+          Templates for business reviews and recurring notes, shared by the whole workspace.
         </p>
         <Button size="sm" onClick={() => setDraft(emptyDraft())}>
-          <Plus className="mr-1 size-4" /> Ny note type
+          <Plus className="mr-1 size-4" /> New note type
         </Button>
       </div>
 
       {isLoading && (
-        <p className="py-8 text-center text-sm text-muted-foreground">Indlæser…</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">Loading...</p>
       )}
 
       {!isLoading && (noteTypes ?? []).length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-md border border-dashed py-10 text-center">
           <FileText className="size-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            Ingen note typer endnu. Opret den første.
+            No note types yet. Create the first one.
           </p>
         </div>
       )}
@@ -532,7 +551,7 @@ export function NoteTypesPanel({
               <span className="truncate text-sm font-medium">{nt.name}</span>
               {!nt.enabled && (
                 <Badge variant="outline" className="text-[10px]">
-                  inaktiv
+                  inactive
                 </Badge>
               )}
             </div>
@@ -545,7 +564,7 @@ export function NoteTypesPanel({
               </Badge>
               {nt.numbering_enabled && (
                 <Badge variant="outline" className="text-[10px] font-normal">
-                  Nummereret
+                  Numbered
                 </Badge>
               )}
               {folderName(nt.target_folder_id) && (
@@ -559,17 +578,17 @@ export function NoteTypesPanel({
             <Button
               variant="ghost"
               size="sm"
-              title="Start ny nu"
+              title="Run now"
               onClick={() => handleRun(nt.id)}
               disabled={run.isPending}
             >
               <Play className="size-4 sm:mr-1" />
-              <span className="hidden sm:inline">Start ny</span>
+              <span className="hidden sm:inline">Run now</span>
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              title="Rediger"
+              title="Edit"
               onClick={() => setDraft(draftFrom(nt))}
             >
               <Pencil className="size-4" />
@@ -577,7 +596,7 @@ export function NoteTypesPanel({
             <Button
               variant="ghost"
               size="sm"
-              title="Slet"
+              title="Delete"
               className="text-destructive hover:text-destructive"
               onClick={() => remove.mutate(nt.id)}
               disabled={remove.isPending}

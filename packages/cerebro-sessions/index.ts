@@ -14,3 +14,4 @@ export * from "./session-timeline-chart";
 export * from "./use-sessions";
 export * from "./run-log-line";
 export * from "./run-prompt-disclosure";
+export * from "./task-transcript-safety";

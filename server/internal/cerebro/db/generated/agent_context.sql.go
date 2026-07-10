@@ -91,6 +91,57 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 	return i, err
 }
 
+const bumpAgentContextVersion = `-- name: BumpAgentContextVersion :one
+UPDATE agent SET
+    context_version = $2,
+    updated_at      = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+`
+
+type BumpAgentContextVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	ContextVersion string      `json:"context_version"`
+}
+
+// BumpAgentContextVersion advances only the version pointer. The direct-edit
+// path has already written the new field values through the generic agent
+// update; unlike ApplyAgentContextSnapshot nothing else may be rewritten here.
+func (q *Queries) BumpAgentContextVersion(ctx context.Context, arg BumpAgentContextVersionParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, bumpAgentContextVersion, arg.ID, arg.ContextVersion)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.PersonaSandbox,
+		&i.SurfaceVisibility,
+		&i.ContextOwnerID,
+		&i.ContextApproverIds,
+		&i.ContextVersion,
+	)
+	return i, err
+}
+
 const createAgentChangeRequest = `-- name: CreateAgentChangeRequest :one
 INSERT INTO agent_change_request (
     agent_id, title, description, base_version, proposed_version,
@@ -368,6 +419,46 @@ func (q *Queries) GetAgentContextVersion(ctx context.Context, arg GetAgentContex
 	return i, err
 }
 
+const getLatestAgentContextVersion = `-- name: GetLatestAgentContextVersion :one
+SELECT id, agent_id, version, snapshot, description, created_by, created_at FROM agent_context_version
+WHERE agent_id = $1
+ORDER BY created_at DESC, version DESC
+LIMIT 1
+`
+
+// GetLatestAgentContextVersion returns the most recent snapshot row for the
+// agent. The direct-edit recorder compares against it to skip edits that did
+// not change any versioned field, and to keep the version pointer monotonic
+// if it ever drifted behind the history.
+func (q *Queries) GetLatestAgentContextVersion(ctx context.Context, agentID pgtype.UUID) (AgentContextVersion, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentContextVersion, agentID)
+	var i AgentContextVersion
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.Version,
+		&i.Snapshot,
+		&i.Description,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceReposForContextLint = `-- name: GetWorkspaceReposForContextLint :one
+SELECT repos FROM workspace
+WHERE id = $1
+`
+
+// GetWorkspaceReposForContextLint returns the workspace-level repos JSONB
+// (array of {url, description}) used to resolve repo links in instructions.
+func (q *Queries) GetWorkspaceReposForContextLint(ctx context.Context, id pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceReposForContextLint, id)
+	var repos []byte
+	err := row.Scan(&repos)
+	return repos, err
+}
+
 const insertAgentSkillForContext = `-- name: InsertAgentSkillForContext :exec
 INSERT INTO agent_skill (agent_id, skill_id)
 VALUES ($1, $2)
@@ -493,6 +584,101 @@ func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtyp
 	return items, nil
 }
 
+const listAgentSkillsForContextLint = `-- name: ListAgentSkillsForContextLint :many
+
+SELECT s.id, s.name, s.content
+FROM agent_skill ask
+JOIN skill s ON s.id = ask.skill_id
+WHERE ask.agent_id = $1
+ORDER BY s.name
+`
+
+type ListAgentSkillsForContextLintRow struct {
+	ID      pgtype.UUID `json:"id"`
+	Name    string      `json:"name"`
+	Content string      `json:"content"`
+}
+
+// --- Context lint (FIR-1775 Phase 3) ---
+// ListAgentSkillsForContextLint returns the skills currently bound to the
+// agent with their content, so the lint can detect rules duplicated between
+// the instructions and a bound skill (or between two bound skills).
+func (q *Queries) ListAgentSkillsForContextLint(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillsForContextLintRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillsForContextLint, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentSkillsForContextLintRow{}
+	for rows.Next() {
+		var i ListAgentSkillsForContextLintRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsForContextLint = `-- name: ListAgentsForContextLint :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY name
+`
+
+// ListAgentsForContextLint returns the non-archived agents of a workspace for
+// the workspace-wide lint sweep and for the repo-file drift lint's harness set.
+func (q *Queries) ListAgentsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.PersonaSandbox,
+			&i.SurfaceVisibility,
+			&i.ContextOwnerID,
+			&i.ContextApproverIds,
+			&i.ContextVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingAgentChangeRequestsByWorkspace = `-- name: ListPendingAgentChangeRequestsByWorkspace :many
 SELECT cr.id, cr.agent_id, cr.title, cr.description, cr.base_version, cr.proposed_version, cr.proposed_snapshot, cr.status, cr.proposed_by, cr.reviewed_by, cr.reviewed_at, cr.review_comment, cr.work_session_id, cr.created_at, cr.updated_at
 FROM agent_change_request cr
@@ -527,6 +713,68 @@ func (q *Queries) ListPendingAgentChangeRequestsByWorkspace(ctx context.Context,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceGithubRepoRefsForContextLint = `-- name: ListWorkspaceGithubRepoRefsForContextLint :many
+SELECT resource_ref FROM project_resource
+WHERE workspace_id = $1 AND resource_type = 'github_repo'
+`
+
+// ListWorkspaceGithubRepoRefsForContextLint returns the project-bound
+// github_repo resource refs ({url: ...}) of a workspace; together with the
+// workspace repos these form the known-repo set for the stale-link check.
+func (q *Queries) ListWorkspaceGithubRepoRefsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceGithubRepoRefsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var resource_ref []byte
+		if err := rows.Scan(&resource_ref); err != nil {
+			return nil, err
+		}
+		items = append(items, resource_ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceSkillsForContextLint = `-- name: ListWorkspaceSkillsForContextLint :many
+SELECT id, name, content FROM skill
+WHERE workspace_id = $1
+ORDER BY name
+`
+
+type ListWorkspaceSkillsForContextLintRow struct {
+	ID      pgtype.UUID `json:"id"`
+	Name    string      `json:"name"`
+	Content string      `json:"content"`
+}
+
+// ListWorkspaceSkillsForContextLint returns every skill in the workspace so
+// skill-name references in instructions can be resolved (dead vs unbound).
+func (q *Queries) ListWorkspaceSkillsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceSkillsForContextLintRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceSkillsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceSkillsForContextLintRow{}
+	for rows.Next() {
+		var i ListWorkspaceSkillsForContextLintRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Content); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -255,8 +255,8 @@ func TestWave3VersionCoalescing(t *testing.T) {
 	noteID := makeNote(t, ctx, "V", "v1")
 
 	// Two quick edits by the SAME author coalesce into one version.
-	w3H.snapshotVersion(ctx, noteID, w3UserA, "V", "v1-edit", "edit", "", true)
-	w3H.snapshotVersion(ctx, noteID, w3UserA, "V", "v1-edit-more", "edit", "", true)
+	w3H.snapshotVersion(ctx, noteID, w3UserA, "member", "V", "v1-edit", "edit", "", true)
+	w3H.snapshotVersion(ctx, noteID, w3UserA, "member", "V", "v1-edit-more", "edit", "", true)
 	vers, _ := w3H.Cerebro.ListNoteVersions(ctx, noteID)
 	if len(vers) != 1 {
 		t.Fatalf("same-author burst = %d versions, want 1 (coalesced)", len(vers))
@@ -266,14 +266,14 @@ func TestWave3VersionCoalescing(t *testing.T) {
 	}
 
 	// An edit by a DIFFERENT author starts a new version entry.
-	w3H.snapshotVersion(ctx, noteID, w3UserB, "V", "v2-by-b", "edit", "", true)
+	w3H.snapshotVersion(ctx, noteID, w3UserB, "member", "V", "v2-by-b", "edit", "", true)
 	vers, _ = w3H.Cerebro.ListNoteVersions(ctx, noteID)
 	if len(vers) != 2 {
 		t.Fatalf("after different-author edit = %d versions, want 2", len(vers))
 	}
 
 	// A manual save is always its own row, never coalesced.
-	w3H.snapshotVersion(ctx, noteID, w3UserB, "V", "v2-by-b", "manual", "checkpoint", false)
+	w3H.snapshotVersion(ctx, noteID, w3UserB, "member", "V", "v2-by-b", "manual", "checkpoint", false)
 	vers, _ = w3H.Cerebro.ListNoteVersions(ctx, noteID)
 	if len(vers) != 3 {
 		t.Fatalf("after manual save = %d versions, want 3", len(vers))

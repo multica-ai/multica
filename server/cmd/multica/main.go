@@ -74,6 +74,8 @@ func init() {
 	channelCmd.GroupID = groupCore     // CEREBRO-PATCH(fir-125-channel-cli)
 	noteCmd.GroupID = groupCore        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
 	workflowCmd.GroupID = groupCore    // CEREBRO-PATCH(cerebro-workflow-cli): FIR-2283 followup — discover Issue workflow recipe IDs
+	connectionCmd.GroupID = groupCore  // CEREBRO-PATCH(cerebro-connections-cli): FIR-2835 connection registry CLI
+	featureCmd.GroupID = groupCore     // CEREBRO-PATCH(cerebro-feature-cli): FIR-3009 list cerebro feature flags
 
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
@@ -88,11 +90,14 @@ func init() {
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(orchestrateCmd) // CEREBRO-PATCH(cerebro-orchestration): FIR-2564
 	rootCmd.AddCommand(sprintCmd)      // CEREBRO-PATCH(cerebro-sprints-cli): FIR-2718
+	rootCmd.AddCommand(roundCmd)       // CEREBRO-PATCH(cerebro-rounds-cli): FIR-2736
 	rootCmd.AddCommand(wakeupCmd)      // CEREBRO-PATCH(cerebro-wakeup-cli): FIR-3013
 	rootCmd.AddCommand(chatCmd)        // CEREBRO-PATCH(chat-cli): TECH-3183
 	rootCmd.AddCommand(channelCmd)     // CEREBRO-PATCH(fir-125-channel-cli)
 	rootCmd.AddCommand(noteCmd)        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
 	rootCmd.AddCommand(workflowCmd)    // CEREBRO-PATCH(cerebro-workflow-cli): FIR-2283 followup — discover Issue workflow recipe IDs
+	rootCmd.AddCommand(connectionCmd)  // CEREBRO-PATCH(cerebro-connections-cli): FIR-2835 connection registry CLI
+	rootCmd.AddCommand(featureCmd)     // CEREBRO-PATCH(cerebro-feature-cli): FIR-3009 list cerebro feature flags
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

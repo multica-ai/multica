@@ -44,6 +44,12 @@ const NOTE_FLAGS: { key: CerebroFlagKey; label: string; description: string }[] 
       description:
         "Reusable note templates that recur on a schedule (e.g. a weekly business review).",
     },
+    {
+      key: "cerebro_note_line_authors",
+      label: "Line authors",
+      description:
+        "See who wrote and who last edited every line (the 'Line authors' toggle in a note's ⋯ menu), and stamp each writer's member code (e.g. JEH) on lines they write (the 'Author codes' toggle — also available on recurring notes).",
+    },
   ];
 
 export function NotesSettingsTab() {

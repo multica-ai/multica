@@ -25,6 +25,10 @@
       "gate": "agent_context_manage"
     },
     {
+      "id": "POST /api/agents/context/lint/repo-file",
+      "exempt": "read-only analysis — the POST only submits repo-file content to be linted against the harness; nothing is written"
+    },
+    {
       "id": "PUT /api/agents/{id}/context/ownership",
       "gate": "agent_context_manage"
     },
@@ -101,6 +105,30 @@
       "gate": "self_only"
     },
     {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/members/{issueId}",
+      "gate": "self_only"
+    },
+    {
+      "id": "PATCH /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/members",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/start",
+      "gate": "self_only"
+    },
+    {
       "id": "DELETE /api/cerebro/saved-filters/{id}",
       "gate": "workspace_member"
     },
@@ -131,6 +159,10 @@
     {
       "id": "DELETE /api/cerebro/sprints/{sprintID}/",
       "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
+    },
+    {
+      "id": "POST /api/cerebro/sprints/{sprintID}/complete",
+      "gate": "via:POST /api/cerebro/sprints/{sprintID}/complete"
     },
     {
       "id": "DELETE /api/cerebro/status-models/default",
@@ -505,6 +537,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/artifact-folder-suggestions/{id}/accept",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/artifact-folder-suggestions/{id}/reject",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/artifact-folders/",
       "gate": "workspace_member"
     },
@@ -514,6 +554,10 @@
     },
     {
       "id": "POST /api/artifacts/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/artifacts/{id}/folder-suggestion",
       "gate": "workspace_member"
     },
     {
@@ -1533,6 +1577,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/notes/{id}/author-codes",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/notes/{id}/comments/{commentId}",
       "gate": "workspace_member"
     },
@@ -1735,6 +1783,10 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff, no mutation"
     },
     {
+      "id": "agent_context_lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent_context_propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
     },
@@ -1779,8 +1831,32 @@
       "gate": "via:POST /api/artifact-folders/"
     },
     {
+      "id": "create_connection",
+      "gate": "via:POST /api/workspaces/{id}/connections"
+    },
+    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
+    },
+    {
+      "id": "delete_connection",
+      "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_connection",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "list_connections",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "test_connection",
+      "gate": "via:POST /api/workspaces/{id}/connections/test"
+    },
+    {
+      "id": "update_connection",
+      "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
     },
     {
       "id": "create_issue",
@@ -1943,12 +2019,20 @@
       "gate": "via:PUT /api/artifacts/{id}/folder"
     },
     {
+      "id": "suggest_artifact_folder",
+      "gate": "via:POST /api/artifacts/{id}/folder-suggestion"
+    },
+    {
       "id": "set_group_capability",
       "gate": "via:POST /api/groups/{id}/capabilities"
     },
     {
       "id": "skill_audit",
       "exempt": "read-only — GET /api/skills/audit, no mutation"
+    },
+    {
+      "id": "skill_diff",
+      "exempt": "read-only — renders a diff from GET /api/skills/{id}/versions, no mutation"
     },
     {
       "id": "skill_fork",
@@ -1999,6 +2083,14 @@
       "gate": "via:POST /api/skills/change-requests/{crId}/review"
     },
     {
+      "id": "skill_set_ownership",
+      "gate": "via:PUT /api/skills/{id}/ownership"
+    },
+    {
+      "id": "skill_update",
+      "gate": "via:PUT /api/skills/{id}"
+    },
+    {
       "id": "update_artifact",
       "gate": "via:PUT /api/artifacts/{id}"
     },
@@ -2041,12 +2133,24 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff"
     },
     {
+      "id": "agent context lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/[{id}/]context/lint and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent context ownership",
       "gate": "via:PUT /api/agents/{id}/context/ownership"
     },
     {
       "id": "agent context propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
+    },
+    {
+      "id": "agent context region-sync",
+      "exempt": "local-only — rewrites the sealed Agent Office managed region in a repo CLAUDE.md/AGENTS.md on the caller's own disk (FIR-1775 §10); no API call, and the result is still gated by PR review + scripts/validate-agent-office-region.sh in CI"
+    },
+    {
+      "id": "agent context region-verify",
+      "exempt": "read-only, local-only — parses a repo CLAUDE.md/AGENTS.md on the caller's own disk and checks the managed-region seal (FIR-1775 §10); no API call, nothing is written"
     },
     {
       "id": "agent context review",
@@ -2233,6 +2337,30 @@
       "exempt": "local-only — reads CLI config file on disk"
     },
     {
+      "id": "connection create",
+      "gate": "via:POST /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "connection delete",
+      "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "connection get",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "connection list",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "connection test",
+      "gate": "via:POST /api/workspaces/{id}/connections/test"
+    },
+    {
+      "id": "connection update",
+      "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
+    },
+    {
       "id": "daemon disk-usage",
       "exempt": "local-only — inspects daemon workdir on disk"
     },
@@ -2275,6 +2403,14 @@
     {
       "id": "document update",
       "gate": "via:PUT /api/artifacts/{id}"
+    },
+    {
+      "id": "feature get",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
+    },
+    {
+      "id": "feature list",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
     },
     {
       "id": "group agent add",
@@ -2863,6 +2999,30 @@
     {
       "id": "squad update",
       "gate": "via:PUT /api/squads/{id}/"
+    },
+    {
+      "id": "round add",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/members"
+    },
+    {
+      "id": "round create",
+      "gate": "via:POST /api/cerebro/rounds/"
+    },
+    {
+      "id": "round list",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds"
+    },
+    {
+      "id": "round remove",
+      "gate": "via:DELETE /api/cerebro/rounds/{roundId}/members/{issueId}"
+    },
+    {
+      "id": "round start",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/start"
+    },
+    {
+      "id": "round status",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds/{roundId}/status"
     },
     {
       "id": "tool-policy explain",

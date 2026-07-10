@@ -232,6 +232,9 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
 		}
 	}
+	if task.RoundRelevanceCheck { // CEREBRO-PATCH(inbox-rounds): require a fresh relevance decision when held Round work is released (FIR-2736).
+		b.WriteString("This task was released as part of an inbox Round. First decide whether the triggering comment still requires action in the issue's current state. If it is no longer relevant, exit without posting a reply. If it is still relevant, complete the requested work and reply in the original thread.\n\n")
+	}
 	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
 		b.WriteString(nudge)
 	}

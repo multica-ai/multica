@@ -890,6 +890,181 @@ func TestResolveTaskModelPriority(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(daemon-run-task-override-tests): lock task-level model/thinking overrides in daemon CLI args.
+func TestRunTaskPassesTaskModelOverrideToCLI(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "claude")
+	argsPath := filepath.Join(dir, "args.txt")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > " + shellQuote(argsPath) + "\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-model-override\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-model-override\",\"result\":\"done\"}'\n"
+	writeDaemonTestExecutable(t, fakePath, []byte(script))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/start"), strings.HasSuffix(r.URL.Path, "/progress"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg: Config{
+			ServerBaseURL:  srv.URL,
+			WorkspacesRoot: t.TempDir(),
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakePath, Model: "entry-model"},
+			},
+		},
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:     make(map[string]int),
+		cancelPollInterval: time.Hour,
+	}
+
+	result, err := d.runTask(context.Background(), Task{
+		ID:            "task-model-override",
+		AgentID:       "agent-1",
+		RuntimeID:     "rt-1",
+		WorkspaceID:   "ws-1",
+		IssueID:       "issue-1",
+		AuthToken:     "mat_test",
+		ModelOverride: "task-model",
+		Agent: &AgentData{
+			Name:  "test-agent",
+			Model: "agent-model",
+		},
+	}, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("runTask returned error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake claude args: %v", err)
+	}
+	args := strings.Fields(string(argsBytes))
+	if !containsAdjacent(args, "--model", "task-model") {
+		t.Fatalf("expected task model override to reach CLI args, got %v", args)
+	}
+	if containsAdjacent(args, "--model", "agent-model") {
+		t.Fatalf("agent model leaked past task override: %v", args)
+	}
+}
+
+func TestRunTaskPassesTaskThinkingOverrideToCLI(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "claude")
+	argsPath := filepath.Join(dir, "thinking-args.txt")
+	script := "#!/bin/sh\n" +
+		"case \" $* \" in\n" +
+		"  *' --help '*) printf '%s\\n' 'Usage: claude [options]'; printf '%s\\n' '  --model <model>     Model to use'; printf '%s\\n' '  --effort <level>    Effort level for the current session (low, medium, high, xhigh, max)'; exit 0 ;;\n" +
+		"esac\n" +
+		"printf '%s\\n' \"$@\" > " + shellQuote(argsPath) + "\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-thinking-override\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-thinking-override\",\"result\":\"done\"}'\n"
+	writeDaemonTestExecutable(t, fakePath, []byte(script))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/start"), strings.HasSuffix(r.URL.Path, "/progress"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg: Config{
+			ServerBaseURL:  srv.URL,
+			WorkspacesRoot: t.TempDir(),
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakePath},
+			},
+		},
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:     make(map[string]int),
+		cancelPollInterval: time.Hour,
+	}
+
+	result, err := d.runTask(context.Background(), Task{
+		ID:               "task-thinking-override",
+		AgentID:          "agent-1",
+		RuntimeID:        "rt-1",
+		WorkspaceID:      "ws-1",
+		IssueID:          "issue-1",
+		AuthToken:        "mat_test",
+		ThinkingOverride: "xhigh",
+		Agent: &AgentData{
+			Name:          "test-agent",
+			Model:         "claude-opus-4-7",
+			ThinkingLevel: "high",
+		},
+	}, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("runTask returned error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	argsBytes, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake claude args: %v", err)
+	}
+	args := strings.Fields(string(argsBytes))
+	if !containsAdjacent(args, "--effort", "xhigh") {
+		t.Fatalf("expected task thinking override to reach CLI args, got %v", args)
+	}
+	if containsAdjacent(args, "--effort", "high") {
+		t.Fatalf("agent thinking level leaked past task override: %v", args)
+	}
+}
+
+func writeDaemonTestExecutable(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o755); err != nil {
+		t.Fatalf("write test executable: %v", err)
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+func containsAdjacent(haystack []string, a, b string) bool {
+	for i := 0; i+1 < len(haystack); i++ {
+		if haystack[i] == a && haystack[i+1] == b {
+			return true
+		}
+	}
+	return false
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {

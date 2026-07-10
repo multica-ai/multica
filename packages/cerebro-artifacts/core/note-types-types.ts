@@ -21,6 +21,9 @@ export interface NoteType {
   numbering_enabled: boolean;
   next_number: number;
   anchor_weekday: number | null;
+  // FIR-2810: notes materialised from this type start with the "stamp the
+  // writer's member code on every line" toggle switched on.
+  author_codes: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +40,7 @@ export interface NoteTypeWriteInput {
   numbering_enabled?: boolean;
   next_number?: number;
   anchor_weekday?: number | null;
+  author_codes?: boolean;
 }
 
 export interface NoteTypeRunResult {

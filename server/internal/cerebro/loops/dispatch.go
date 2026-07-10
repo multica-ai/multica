@@ -29,11 +29,13 @@ import (
 
 // CheckDispatch is one check the engine asks a runtime to run.
 type CheckDispatch struct {
-	AgentID string   // worker agent whose runtime runs the check
-	IssueID string   // issue the loop is building
-	Gate    string   // stable per-gate key (the workflow id)
-	Round   int32    // loop round the check belongs to
-	Argv    []string // the check command, argv form (never a shell string)
+	AgentID       string   // worker agent whose runtime runs the check
+	IssueID       string   // issue the loop is building
+	Gate          string   // stable per-gate key (the workflow id)
+	Round         int32    // loop round the check belongs to
+	Argv          []string // the check command, argv form (never a shell string)
+	Model         string
+	ThinkingLevel string
 }
 
 // CheckDispatcher sends a single enqueued check out to a runtime. It is the
@@ -82,24 +84,28 @@ type HumanDispatch struct {
 
 // JudgeDispatch is one judge check the engine asks a judge agent to score.
 type JudgeDispatch struct {
-	AgentID   string // judge agent whose runtime scores the check
-	IssueID   string // issue the loop is building
-	Gate      string // stable per-gate key (the workflow id)
-	Round     int32  // loop round the check belongs to
-	CheckID   string // the verification id from loop.yaml, echoed back on report
-	Rubric    string // what the judge scores the delivered work against
-	SkillName string // the skill dispatched to run the judgment
+	AgentID       string // judge agent whose runtime scores the check
+	IssueID       string // issue the loop is building
+	Gate          string // stable per-gate key (the workflow id)
+	Round         int32  // loop round the check belongs to
+	CheckID       string // the verification id from loop.yaml, echoed back on report
+	Rubric        string // what the judge scores the delivered work against
+	SkillName     string // the skill dispatched to run the judgment
+	Model         string
+	ThinkingLevel string
 }
 
 // RevisionDispatch is one round's worth of failed checks the engine asks the
 // worker agent to fix by re-running its build skill.
 type RevisionDispatch struct {
-	AgentID   string         // worker agent whose runtime re-runs the build
-	IssueID   string         // issue the loop is building
-	Gate      string         // stable per-gate key (the workflow id)
-	Round     int32          // the new round this revision starts
-	SkillName string         // the skill to re-dispatch (Compile sets the build skill)
-	Failures  []CheckOutcome // the outcomes that triggered this revision
+	AgentID       string // worker agent whose runtime re-runs the build
+	IssueID       string // issue the loop is building
+	Gate          string // stable per-gate key (the workflow id)
+	Round         int32  // the new round this revision starts
+	SkillName     string // the skill to re-dispatch (Compile sets the build skill)
+	Model         string
+	ThinkingLevel string
+	Failures      []CheckOutcome // the outcomes that triggered this revision
 	// PhaseLabel names the build phase this dispatch belongs to (e.g. "Build 2")
 	// for a multi-phase loop (FIR-2283 followup point 6). When set, this is a
 	// fresh next-phase build (not a fix-what-failed revision) — it is stamped
@@ -115,6 +121,8 @@ type RevisionDispatch struct {
 type DispatchQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
+	SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error
 	// Issue-bound phase dispatch (Tine live-test fix): a next-phase build run
 	// is enqueued ON the loop's issue behind a visible kickoff comment, not as
 	// a detached quick_create task. Both are satisfied by upstream db.Queries.
@@ -191,13 +199,17 @@ func (t *TaskDispatcher) DispatchCheck(ctx context.Context, d CheckDispatch) err
 		return fmt.Errorf("dispatch check: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	task, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
 		RuntimeID: agent.RuntimeID,
 		Priority:  0,
 		Context:   contextJSON,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch check: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch check"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -295,7 +307,7 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		return fmt.Errorf("dispatch revision: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	task, err := t.queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
 		RuntimeID:         agent.RuntimeID,
 		IssueID:           issue.ID,
@@ -305,8 +317,12 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		TriggerSummary:    pgtype.Text{String: name + " — " + d.SkillName, Valid: true},
 		Title:             pgtype.Text{String: name + ": " + issue.Title, Valid: true},
 		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch revision: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch revision"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -354,13 +370,17 @@ func (t *TaskDispatcher) DispatchJudge(ctx context.Context, d JudgeDispatch) err
 		return fmt.Errorf("dispatch judge: marshal context: %w", err)
 	}
 
-	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	task, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
 		RuntimeID: agent.RuntimeID,
 		Priority:  0,
 		Context:   contextJSON,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("dispatch judge: enqueue task: %w", err)
+	}
+	if err := t.applyTaskOverrides(ctx, task.ID, d.Model, d.ThinkingLevel, "dispatch judge"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -429,6 +449,28 @@ func (t *TaskDispatcher) DispatchHuman(ctx context.Context, d HumanDispatch) err
 		Context:   contextJSON,
 	}); err != nil {
 		return fmt.Errorf("dispatch human: enqueue task: %w", err)
+	}
+	return nil
+}
+
+func (t *TaskDispatcher) applyTaskOverrides(ctx context.Context, taskID pgtype.UUID, model, thinking, label string) error {
+	model = strings.TrimSpace(model)
+	thinking = strings.TrimSpace(thinking)
+	if model != "" {
+		if err := t.queries.SetAgentTaskModelOverride(ctx, db.SetAgentTaskModelOverrideParams{
+			ID:            taskID,
+			ModelOverride: model,
+		}); err != nil {
+			return fmt.Errorf("%s: set model override: %w", label, err)
+		}
+	}
+	if thinking != "" {
+		if err := t.queries.SetAgentTaskThinkingOverride(ctx, db.SetAgentTaskThinkingOverrideParams{
+			ID:               taskID,
+			ThinkingOverride: thinking,
+		}); err != nil {
+			return fmt.Errorf("%s: set thinking override: %w", label, err)
+		}
 	}
 	return nil
 }

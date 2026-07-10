@@ -84,6 +84,12 @@ func (h *Handler) SendAgentChatMessage(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
 	}
 
+	// CEREBRO-PATCH(attachment-folder): FIR-2697 part 4 — an agent-authored
+	// document attached via a `mention://artifact/<id>` token in this reply must
+	// always have a folder. Best-effort, non-fatal; logic in
+	// artifact_attachment_folder_cerebro.go.
+	h.ensureAttachedArtifactsFiled(r, workspaceID, req.Content)
+
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatMessage, workspaceID, "agent", actorID, resolvedSessionID, protocol.ChatMessagePayload{
 		ChatSessionID: resolvedSessionID,

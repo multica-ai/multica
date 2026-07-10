@@ -107,6 +107,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.
 	registerSkillGovernanceTools(srv, client)
+	// FIR-1775 §5: skill_diff / skill_update / skill_set_ownership close the CLI-only governance gaps.
+	registerSkillGovernanceGapTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-office-tools): FIR-1775 agent context versioning + governance MCP tools.
 	registerAgentOfficeTools(srv, client)
 	// CEREBRO-PATCH(mcp-skill-metadata-tools): TECH-3077 skill metadata filtering and audit tools.
@@ -122,6 +124,9 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	// CEREBRO-PATCH(mcp-connection-tools): FIR-2273 api-type workspace connection endpoints
 	// (feature-flagged + default-deny per agent), dispatched server-side via Multica.
 	registerConnectionTools(srv, client)
+	// CEREBRO-PATCH(cerebro-connections-admin-mcp): FIR-2835 connection registry CRUD tools
+	// (create/list/get/update/delete/test connections), gated on manage_connections.
+	registerCerebroConnectionAdminTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues

@@ -25,6 +25,14 @@ export {
   folderVisibility,
 } from "./folder-access";
 export {
+  folderSuggestionKeys,
+  folderSuggestionForArtifactOptions,
+  folderSuggestionListOptions,
+  useFolderSuggestionForArtifact,
+  useAcceptFolderSuggestion,
+  useRejectFolderSuggestion,
+} from "./folder-suggestions";
+export {
   noteTypeKeys,
   noteTypesOptions,
   useNoteTypes,

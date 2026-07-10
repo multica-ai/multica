@@ -64,7 +64,10 @@ export function entryIsUnread(entry: DynInboxEntry): boolean {
     case "chat":
       return entry.session.has_unread === true;
     case "channel":
-      return (entry.channel.unread_count ?? 0) > 0;
+      // FIR-2010 — smart-unread bolds the row on has_unread_activity while
+      // unread_count stays mention-only; count both as unread so the Unread
+      // filter matches the row rendering.
+      return (entry.channel.unread_count ?? 0) > 0 || entry.channel.has_unread_activity === true;
     default:
       return false;
   }

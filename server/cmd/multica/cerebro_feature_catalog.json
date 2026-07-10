@@ -1,0 +1,935 @@
+{
+  "groups": [
+    {
+      "key": "permissions",
+      "label": "Permissions & approvals",
+      "description": "What agents are allowed to do, who has to sign off, and how access is granted."
+    },
+    {
+      "key": "agents",
+      "label": "Agents & runtimes",
+      "description": "How agents run on machines — sandbox, pausing, accounts, and setup."
+    },
+    {
+      "key": "workspace",
+      "label": "Workspace & pages",
+      "description": "Top-level surfaces and navigation across the workspace."
+    },
+    {
+      "key": "issues",
+      "label": "Issues & comments",
+      "description": "Affordances when working inside an issue or composing a new one."
+    },
+    {
+      "key": "inbox",
+      "label": "Inbox & notifications",
+      "description": "How the inbox is organised and how you get notified."
+    },
+    {
+      "key": "dm_channel",
+      "label": "DM & Channel",
+      "description": "Direct messages and channels: who can create them, how unread counts behave, threads, typing, and search."
+    },
+    {
+      "key": "voice",
+      "label": "Voice",
+      "description": "Speech features (dictation, read-aloud). Require the cerebro-inference container."
+    },
+    {
+      "key": "onboarding",
+      "label": "Onboarding",
+      "description": "What new members see the first time they join the workspace."
+    }
+  ],
+  "flags": [
+    {
+      "key": "cerebro_agent_page_redesign",
+      "label": "Agent page redesign (preview)",
+      "description": "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_model_registry",
+      "label": "Model registry",
+      "description": "Add a Model registry tab under Settings: view and propose changes to model prices, context windows, and display labels. Changes go through the same propose → review → approve flow as Agent Context, so a bad edit never lands without a second pair of eyes.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_credentials_per_actor",
+      "label": "Credentials per actor",
+      "description": "Add credentials as a permission type in the permissions interface: tick a vault box (one credential = one Agent Vault box) for an agent, person, or group to grant access to exactly that box — like a tool grant. Least-privilege; access is denied until a box is ticked.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_folder_access",
+      "label": "Folder access control",
+      "description": "Let folder owners set who can see a note or document folder — Only you, Selected colleagues, or Whole team. The choice locks the whole folder and its contents.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_folder_action_guard",
+      "label": "Protect my folders",
+      "description": "When on, only you and workspace admins can delete, rename, or move folders you own. Other people's folders are unaffected until they turn this on too.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_collections",
+      "label": "Collections",
+      "description": "Open the Settings → Collections surface and the per-folder access editor (Valgt her / Arvet): grant a folder to groups, members, the whole workspace, agents, or runtimes, with a viewer/editor/full access role. Grants cascade to sub-folders.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_channels",
+      "label": "Channels",
+      "description": "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_chat_message_cost",
+      "label": "Per-reply chat cost",
+      "description": "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_comment_cost",
+      "label": "Per-comment issue & channel cost",
+      "description": "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_artifact_references",
+      "label": "Artifact references in comments",
+      "description": "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_attachment_folder",
+      "label": "Attached documents show their folder",
+      "description": "FIR-2697 part 4. When an agent-authored document/note is attached to a chat message or issue comment (via a `mention://artifact/<id>` token), guarantee it has a folder: a folder-less one is filed into the same automatic Agent Runs structure (part 3). The white artifact card then shows and links to that folder. Only agent documents are affected — raw file uploads have no document behind them. Needs `Artifact references in comments` on to render the card; pairs with `Automatic Agent Runs folders`. Off leaves attaching unchanged.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_attachment_chips",
+      "label": "Unified attachment cards",
+      "description": "Show attachments in one consistent format everywhere: images render as a real thumbnail (not a file box), and documents render as fixed-size colour-coded cards by type (PDF red, Excel green, Word blue, PowerPoint orange, archive amber, code violet). Same card in the composer while you type and in the posted thread, and identical across issue comments & descriptions, chat, DM, and channels. Every card is clickable (preview or download) and keyboard-focusable. Off falls back to the legacy grey single-icon row.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_image_gallery",
+      "label": "Image gallery lightbox",
+      "description": "Clicking an image attachment under a comment opens a full-screen gallery above the thread instead of routing to a single image on its own page in a new tab. The gallery pages through all the images in that message with prev/next arrows, keyboard arrows, a tap-able thumbnail strip, and a \"3 / 5\" counter, and each image zooms (wheel on desktop, pinch on mobile). Works on desktop and mobile. Off restores the legacy per-image new-tab viewer.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_attachments_tab",
+      "label": "Attachments tab",
+      "description": "Move an issue's standalone attachments off the top of the page into a dedicated \"Attachments\" tab next to Comments / Agent Runs / CLI runs. Inside the tab each file is a row: a small preview (image thumbnail or type-coloured icon), the filename and type, its size, and who uploaded it when, with open/download actions on hover. The top of the issue shows only a one-line hint with the file count. Off keeps attachments inline at the top of the issue (the unified chip grid).",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_composer_image_tray",
+      "label": "Numbered image tray in composers and fields",
+      "description": "Images you add (drag-and-drop, paste, or the attach button) collect as numbered thumbnails above the field instead of being inserted inline in the text. Each thumbnail shows its number (so you can tell the agent \"look at image 2\"), opens a full preview on click, and can be removed. Works in chat, issue comments, channels, and DMs (embed inline + appended on send), and in issue descriptions, notes, and documents (the numbered row is saved with the text and shown again on reopen). Off = images insert inline where the cursor is.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_web_push",
+      "label": "Web Push notifications",
+      "description": "Enable browser/PWA push notifications for new inbox items, comments, and mentions.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_browser_push_prompt",
+      "label": "Browser push prompt",
+      "description": "Show a dismissible banner in the browser inviting the user to turn on push notifications (asks for permission, links to notification settings). Only appears in a browser, never in the desktop app.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_dashboard",
+      "label": "Cerebro dashboard",
+      "description": "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_row_actions",
+      "label": "Inbox row actions",
+      "description": "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_channel_row_actions",
+      "label": "Channel row actions",
+      "description": "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_channel_message_search",
+      "label": "Search in conversation",
+      "description": "Add a search icon to every channel and DM header. Opens a search bar that highlights matching messages, dims the rest, and lets you step between results with the up/down arrows or Enter/Shift+Enter — Esc closes it. Searches the currently loaded message history of the open conversation.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_global_message_search",
+      "label": "Messages in global search",
+      "description": "Include channel and DM messages in the global Cmd+K search. Matches from any conversation you take part in show up in a \"Messages\" group with a snippet, the conversation name, and the sender — so you can find an old link or note without opening each conversation. Access-scoped: you only see messages from your own conversations.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_unified_search",
+      "label": "Unified global search",
+      "description": "Replace fixed global-search type sections with one ranked Top results list and filter chips for All, Issues, Notes, Projects, Chats, and Messages. Default off until the ranking feel is QA'd.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_typing_indicators",
+      "label": "Typing indicators",
+      "description": "Show a Slack-style \"is typing…\" line inside a channel or direct-message conversation when another person is composing a reply, and surface when an agent is generating its response. The other person's composer sends a lightweight typing ping (throttled); the indicator clears after a few seconds of silence.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_chat_row_actions",
+      "label": "Chat row actions",
+      "description": "Give agent chat sessions the same inbox row menu as notifications and channels: a 3-dot menu (and mobile swipe) to mark read, rename, convert to issue, archive, unarchive, and delete a chat — so an archived chat can be reopened and continued.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_action_grouping",
+      "label": "Inbox group by action",
+      "description": "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_parent_grouping",
+      "label": "Inbox group by parent issue",
+      "description": "Add a \"Group by → Parent issue\" option to the inbox that clusters every message about sub-issues of the same parent into one group, so related items are seen together. Items with no parent land in a \"No parent issue\" group. Works as a primary or secondary grouping from the inbox's Group by menu.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_dynamic",
+      "label": "Dynamic inbox",
+      "description": "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_inbox_rounds",
+      "label": "Inbox rounds",
+      "description": "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_note_inbox_pane",
+      "label": "Open notes in inbox pane",
+      "description": "Clicking a note in the inbox Notes box opens it in the same detail pane that messages use — read and edit it without leaving the inbox — with an \"Åbn fuldt\" button to jump to the full Notes surface. Off reverts to opening notes on the full Notes page. Requires Notes.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_slack_block",
+      "label": "Inbox Slack-block",
+      "description": "Add a Slack-style block to the dynamic inbox: a list of people with live online dots, your direct messages and channels, and a \"is typing…\" indicator — open a conversation right inside the inbox. Offered in the dynamic inbox's \"Add section\" menu when on. Requires the Dynamic inbox.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_inbox_secretary",
+      "label": "Inbox Secretary",
+      "description": "Add a focused Secretary block to the dynamic inbox. Users pick a batch size, let the app choose unread/oldest messages or select rows manually, then work through that small list in the existing message detail view. Default off until QA signs off.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_inbox_favorites",
+      "label": "Inbox favorites",
+      "description": "Star a conversation in the dynamic inbox to make it a favorite and float it to the top of the \"All messages\" box, in its own Favorites section. Each row's avatar turns into a star on hover so you can toggle it in place. The top Favorites section can be switched off per box (favorites then stay in their normal position but can still be starred), and a standalone Favorites block can be added from the \"Add section\" menu. Favorites are saved per user and follow you across devices. Requires the Dynamic inbox.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_reminders",
+      "label": "Reminders",
+      "description": "The reminder system — a \"Remind me\" action on messages, comments and issues that lands in your inbox (and re-opens the source) when it fires. Off turns reminders off entirely. While on, use the settings below to show the standalone Reminders page and to keep reminders out of \"All messages\".",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_wakeup_running",
+      "label": "Inbox wakeup → Running",
+      "description": "When an issue has a pending agent wakeup, show it in the inbox's \"Running\" action group and mark its row with a clock (the approximate next-run time) instead of the live agent pip. Off hides the clock and keeps wakeup-only issues out of Running.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_pinned_filter",
+      "label": "Inbox pinned filter",
+      "description": "Add a \"Pinned\" option to the inbox view dropdown that shows only items tied to something you pinned — the item's own issue, that issue's parent, or its project, plus pinned channels and DMs. Off removes the option from the dropdown.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_inbox_archive_to_list",
+      "label": "Archive returns to the inbox",
+      "description": "When you archive the message you're reading, go back to the inbox list instead of automatically opening the next message. Off (default) keeps auto-advancing to the next message. Applies to archiving from the row menu, swipe, the `e` shortcut, and the open message's toolbar.",
+      "group": "inbox",
+      "default": false
+    },
+    {
+      "key": "cerebro_voice_dictation_enabled",
+      "label": "Dictation",
+      "description": "Push-to-talk Whisper dictation (hviske-v3) in chat input and other text fields. Requires the cerebro-inference container.",
+      "group": "voice",
+      "default": false
+    },
+    {
+      "key": "cerebro_voice_output_enabled",
+      "label": "Voice output",
+      "description": "Read assistant replies aloud in Danish via plapre-nano. Per-message read button + global voice mode.",
+      "group": "voice",
+      "default": false
+    },
+    {
+      "key": "cerebro_groups_enabled",
+      "label": "Groups",
+      "description": "Enable workspace groups: named collections of members used by Cerebro features such as scoped resources.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_memory",
+      "label": "Agent & member memory",
+      "description": "Master switch for Cognee-backed memory (private + company + repo). Off by default; an admin turns it on for the workspace. Even when on, using memory still requires the create_memory permission, and private (member/agent) memory must be enabled per agent by each user for themselves. Company memory is readable by all agents once the switch is on.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_runtime_pause",
+      "label": "Runtime pause / resume",
+      "description": "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_interface_columns",
+      "label": "Configurable list columns",
+      "description": "Choose which columns show on the Runtimes and Agents pages via a column picker (remembered per workspace on this device). Adds an Account column to Runtimes and Account + Thinking level columns to Agents, plus a search box on Agents and full-field search on Runtimes.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_tasks",
+      "label": "Tasks page",
+      "description": "Enable the cross-agent tasks page at /:workspace/tasks (full task list with filters and pagination).",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_browser",
+      "label": "Personal browser tab",
+      "description": "Enable a Multica-owned browser that opens as a tab in the desktop app (like an issue), where you log into sites once and the logins persist across restarts. Desktop-only; the native browser pane is created only when the tab is opened. A later phase lets an agent drive this same browser.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_pin_input",
+      "label": "Pin issue input",
+      "description": "Enable a pin toggle on issue comment and reply inputs that keeps the active input stuck to the bottom of the viewport while scrolling. Issue pages only — channels and DMs are unaffected.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_workflows",
+      "label": "Workflow engine",
+      "description": "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_workflow_step_model_override",
+      "label": "Workflow step model override",
+      "description": "Let Issue workflow steps choose a model and thinking level per Plan, Build, build phase, and AI review condition. Empty values use the selected agent's default.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_skill_mention",
+      "label": "Skill mentions",
+      "description": "Enable the /skill trigger in editor inputs. Selecting a skill from the popover inserts a reference link to the skill detail page — no side effect, no skill execution.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_tool_policy",
+      "label": "Unified tool permissions",
+      "description": "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_runtime_tool_grant_ui",
+      "label": "Tool access grants (groups & people)",
+      "description": "Show the grant editor on the runtime page even when the unified tool-policy table is on: attach a group or a person to a specific tool so that runtime exposes it to them. This is the grant layer (an allow-list of who a tool is opened for) — the layer that silently gave a user zero tools when no UI could set it (FIR-426 / Saga). Reads GET and writes POST/DELETE /api/runtimes/{id}/tools/{tool}/groups|users. Default OFF.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_simple_tool_policy",
+      "label": "Simple tool permissions",
+      "description": "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_test_as_user",
+      "label": "Test as user",
+      "description": "Show the 'Test as user' entry in the profile menu: pick a user + an agent and see how every tool resolves for that combination — the same answer as the tool-policy explain CLI, with the user's real groups resolved automatically. The feature is locked behind the tools:test-as-user permission (default Allow for the workspace owner only), so turning this flag on exposes nothing to members who lack the permission. FIR-1771.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_web_fetch_policy",
+      "label": "Web fetch URL policy",
+      "description": "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_platform_capabilities",
+      "label": "Platform actions in permissions",
+      "description": "Add the Multica platform actions to the tool-policy table alongside reported runtime tools: create/edit/delete issues, comments, sub-issues, autopilots, artifacts, and the management of agents, runtimes, groups, grants, and projects. Each becomes a settable Allow/Ask/Deny row on every layer (workspace › runtime › agent › group › user). Actions governed elsewhere (membership ACL, daemon token, webhook secret) are listed but marked as managed externally. Catalog is code-owned (server platformcatalog package, traceable to permguard/inventory.json). FIR-2594 phase 1.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_approvals",
+      "label": "Approval inbox",
+      "description": "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_move_comment_to_subissue",
+      "label": "Move comment thread to sub-issue",
+      "description": "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_move_comment_to_thread",
+      "label": "Move comments to a new thread",
+      "description": "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_agent_passes",
+      "label": "Agent passes admin",
+      "description": "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_skill_ownership",
+      "label": "Skill ownership & change requests",
+      "description": "Surface ownership, approvers, version history, change-request review (approve/reject with diff), and forking on the skill detail page. Owner / approvers / workspace admins can manage; everyone else can open a change request. Off hides the governance panel and the fork action. JEH-216.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_skill_learning",
+      "label": "Skill self-learning",
+      "description": "Let agent runs record observations and have a background sweeper (every 6h) turn repeated patterns (>=10 runs, >=70% consistency) into additive skill change requests automatically. Proposals only add suggestions — never rewrite — and wait as pending change requests for the skill owner to approve or reject via the normal governance flow. Off keeps observation recording and the proposal engine inert for this workspace. TECH-3077.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_references",
+      "label": "Issue references",
+      "description": "Show the references section on issue detail — link GitHub PRs and other external objects to an issue, with live updates and a registry-driven 'add reference' dialog. JEH-838b.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_agent_avatar",
+      "label": "AI agent avatar generation",
+      "description": "Show a 'Generate AI avatar' button in the agent creation dialog. Uses the Firtal Data Registry AI Gateway with a Scandinavian-appearance prompt. Requires FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_private_agent_requests",
+      "label": "Private agent run requests",
+      "description": "Show private agents you don't own as visible-but-locked in the agent list and @-picker (name + description only). Tagging one no longer silently drops — it sends a run-request to the agent's owner, who can run it from their inbox. The owner stays in control; server-side foreign-trigger blocking is unchanged. FIR-2385.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_agent_surface_visibility",
+      "label": "Agent surface visibility",
+      "description": "Let an agent's owner hide a personal agent from non-owner members on specific discovery surfaces — agent lists & assignee picker, @-mention autocomplete, chat picker, channel pickers — or all of them at once ('Skjult'). The agent still appears on public issues it already participates in. Owner + workspace admins always see it. Off makes every agent visible everywhere (legacy). TECH-3670.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_date_reminders",
+      "label": "Start / due date reminders",
+      "description": "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_agent_trigger_permissions",
+      "label": "Agent-start permissions",
+      "description": "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_image_reload",
+      "label": "Reload stalled images",
+      "description": "On a document page showing an image, recover when the image stops mid-load: a loading indicator while it fetches, up to two automatic retries on failure, and a manual \"Reload image\" button so you can try again without reloading the whole page. Off restores the plain image with no retry. FIR-1673.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_comment_reminders",
+      "label": "Comment reminders",
+      "description": "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_comment_target_guard",
+      "label": "Require a recipient on agent comments",
+      "description": "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_comment_target_guard_wakeup_exempt",
+      "label": "Exempt agents with a scheduled wakeup",
+      "description": "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_firtal_welcome",
+      "label": "Firtal-branded welcome page",
+      "description": "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
+      "group": "onboarding",
+      "default": true
+    },
+    {
+      "key": "cerebro_disable_onboarding",
+      "label": "Disable upstream onboarding",
+      "description": "Turn off Multica's generic onboarding (questionnaire + 'create workspace') on the fork. Invited members who already have a workspace go straight in; anyone without a workspace lands on the create-workspace page, which always shows a Log out / switch-account button (and a 'no workspace' notice when workspace creation is disabled). This closes the desktop trap where a user signed into the wrong Google account had only 'Create workspace' and no way out. Off restores the upstream onboarding flow. FIR-252.",
+      "group": "onboarding",
+      "default": true
+    },
+    {
+      "key": "cerebro_duplicate_check_on_create",
+      "label": "Find similar at create",
+      "description": "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_google_identity",
+      "label": "Google Workspace identity",
+      "description": "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_workspace_logo",
+      "label": "Workspace logo",
+      "description": "Let owners/admins upload a workspace logo in Settings → General. The logo replaces the letter tile in the sidebar, switcher and breadcrumbs, the browser-tab favicon on web, and the dock/window icon in the desktop app. Off hides the uploader and keeps the default icons. FIR-2580.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_sprints",
+      "label": "Project sprints",
+      "description": "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_comment_chapters",
+      "label": "Comment sessions",
+      "description": "Wrap an issue's comment timeline in named sessions with a status chip, a Start fresh action, and a Handoff brief. OFF — the phase-1 model was unsound: comments were never linked to a session, so sessions rendered empty and the actions did nothing. Being rebuilt around threads=sessions (FIR-1741). Off renders the plain flat comment timeline. FIR-1704. (Internal key kept as cerebro_comment_chapters so existing overrides keep working.)",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_session_activity_fold",
+      "label": "Session activity fold",
+      "description": "Within each session, collapse all activity events (status changes, task started/failed/completed, linked PRs, attachments) into a single foldable \"Activity\" section so comments stay prominent. No effect unless Comment sessions is on. FIR-1769 (P2).",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_session_context_hairline",
+      "label": "Session context hairline",
+      "description": "A whisper-subtle context-window hairline on the active session that warms as the session grows, plus a single \"almost full → Start fresh\" nudge. The fill is an approximate estimate of the session's content size against a 200k window — not exact per-run usage. No effect unless Comment sessions is on. FIR-1769 (P3).",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_cli_runs_tab",
+      "label": "CLI runs tab",
+      "description": "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_recurring_issues",
+      "label": "Recurring issues",
+      "description": "Let users mark an individual issue as recurring (frequency, on-status-change trigger, create-new-task, recur-forever, update-status-to, sync-to-due-date). When the issue reaches its trigger status, a sweeper spawns the next occurrence with a fresh due date and the same data (assignee, text, labels, attachments) and chains the rule onto the new issue. TECH-3064.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_issue_date_times",
+      "label": "Start/due time of day",
+      "description": "Add an optional time-of-day next to an issue's Start date and Due date, plus an opt-in switch to auto-start the assigned agent on that date+time. Auto-start is off by default and requires a time chosen in the same control; a workspace default (below) sets the starting point for new issues. A due time with auto-start off still fires the due reminder at that moment. Leaving a time empty keeps the date behaving exactly as before. Off hides the controls. FIR-1597.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_saved_filters",
+      "label": "Saved filters",
+      "description": "Let users save the current issue filter as a named, personal filter and recall it with one click from the Filter menu — across the Issues list, My Issues, project view and member/agent panels. Personal filters only for now; sharing with colleagues/groups/the whole team and the group permission for who may create shared filters land in later phases. Off hides the Saved filters section and the Save action. FIR-1659.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_date_filter_v2",
+      "label": "Date filter v2 (reference-aligned)",
+      "description": "Replace the My Issues date filter with the reference-aligned builder: each condition is a Field / Operator / Value row with a searchable value list — Today/Yesterday/Tomorrow, calendar This/Last/Next week, month, quarter and year, Overdue, Today & earlier, Later than today, dynamic Last/Next N days/weeks/months/years, exact On / Before / After / Range, and Is set / Is not set. Off keeps the previous stacked date submenu. FIR-1812.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_capability_drift_watcher",
+      "label": "Capability drift watcher",
+      "description": "Periodically scan each agent for capability drift — a tool it actually used (observed access) that its declared policy does not allow (blocked or unmapped). When drift is found, alert the workspace owners/admins in their inbox with the agent and the offending tools. Read-only and off by default; turn it on to get proactive alerts instead of only seeing drift on the Capabilities tab. TECH-3738 Bid C.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_note_scoped_mentions",
+      "label": "Scoped note mentions",
+      "description": "Inside a note, the @mention picker only offers people the note is shared with (and their agents), instead of the whole workspace. Prevents tagging a colleague who cannot open the note. FIR-2595.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_channel_mention_members_only",
+      "label": "Mentions respect membership",
+      "description": "A Channels setting: in a channel or group, @mentioning someone who is not a participant no longer silently notifies them. The author is prompted to add them to the channel first (Cancel / Send without / Add & send), mirroring the note give-access prompt. Only takes effect where Channels is on; direct messages are unchanged. FIR-2680.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_note_types",
+      "label": "Note types",
+      "description": "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_note_line_authors",
+      "label": "Note line authors",
+      "description": "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_skill_folders",
+      "label": "Skill folders",
+      "description": "Organise skills into folders (with sub-folders) on the Skills page. A folder sidebar lets you create, rename and delete folders and file skills into them; off hides the sidebar and shows the flat list. FIR-1412.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_autopilot_folders",
+      "label": "Autopilot folders",
+      "description": "Organise autopilots into folders (with sub-folders) on the Autopilots page. A folder sidebar lets you create, rename and delete folders and file autopilots into them; off hides the sidebar and shows the flat list. FIR-1412.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_pdf_inline_render",
+      "label": "Inline PDF rendering",
+      "description": "Render uploaded PDFs in Documents and the attachment viewer using the browser's native PDF view (scroll, zoom, search) instead of dumping the extracted text. Off restores the extracted-text view. FIR-2661.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_projects",
+      "label": "Projects sidebar entry",
+      "description": "Show the collapsible Projects entry in the workspace sidebar (project list, nested tree, and the 'New Project' shortcut). Off hides the entry entirely — projects can still be reached via direct URL and the Projects page. TECH-2880.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_channel_create_restricted",
+      "label": "Restrict who can create channels",
+      "description": "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
+      "group": "dm_channel",
+      "default": false
+    },
+    {
+      "key": "cerebro_firtal_registry_allowlist_ui",
+      "label": "firtal_registry allowlist UI",
+      "description": "Show Konfigurer on the agent Tools tab for firtal_registry so admins can pick which data sources the agent may access. TECH-2925.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_quick_create_version_autoswitch",
+      "label": "Auto-switch to manual on stale agent CLI",
+      "description": "In the \"Create with agent\" modal, when the picked agent's daemon runs a multica CLI below the quick-create minimum, automatically switch to manual create (carrying the typed prompt, project, and parent over) instead of leaving the user on a warning banner with Create disabled. Off restores the warning-only behaviour. FIR-33.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_interactive_terminal",
+      "label": "Interactive terminal",
+      "description": "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_inbox_thread_split",
+      "label": "Split channel threads into their own inbox rows",
+      "description": "On a channel or DM, when someone replies inside a thread, surface that thread as its own inbox row (deep-linking into the thread) instead of folding the reply into the single channel row where it is easy to miss. Only threads with unread replies get a row. FIR-1854.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_dm_reply_threads",
+      "label": "Agent tag in a DM opens a thread, not a channel",
+      "description": "On a 1:1 DM, tagging an agent (or member) replies in a thread inside the DM instead of permanently converting the whole DM into a multi-party channel. The DM stays a DM; the mentioned agent is still triggered and answers in the thread. FIR-2010.",
+      "group": "dm_channel",
+      "default": false
+    },
+    {
+      "key": "cerebro_channel_unread_smart",
+      "label": "DM & channel unread (DM counts all, channel only on @mention)",
+      "description": "Make unread behave like Slack/Teams for chat. A DM badge keeps counting every message and marks read on open. A channel badge only turns red when you are @mentioned — other channel activity shows as a bold dot instead of a red count — and a channel is marked read when you scroll past its messages, not just on open. Thread replies keep their own unread. FIR-2010.",
+      "group": "dm_channel",
+      "default": false
+    },
+    {
+      "key": "cerebro_child_done_notify_parent",
+      "label": "Notify parent when sub-issue is done",
+      "description": "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to done. Off silences the notification for the effective flag scope. TECH-3006.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_child_in_review_notify_parent",
+      "label": "Notify parent when sub-issue is in review",
+      "description": "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to in_review. Off silences the notification for the effective flag scope. TECH-3006.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_child_blocked_notify_parent",
+      "label": "Notify parent when sub-issue is blocked",
+      "description": "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to blocked. Off silences the notification for the effective flag scope. TECH-3006.",
+      "group": "inbox",
+      "default": true
+    },
+    {
+      "key": "cerebro_sub_issue_no_owner_mention",
+      "label": "Block on-behalf-of user @mention on sub-issues",
+      "description": "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_sub_issue_require_agent_tag",
+      "label": "Require parent-agent tag on sub-issues",
+      "description": "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_sub_issue_no_split_session",
+      "label": "Block split-session across parent and sub-issue",
+      "description": "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+      "group": "issues",
+      "default": false
+    },
+    {
+      "key": "cerebro_display_currency",
+      "label": "Display currency",
+      "description": "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_connections",
+      "label": "Workspace connections",
+      "description": "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_api_connection_tools",
+      "label": "API connection tools for agents",
+      "description": "Expose an api-type Workspace connection's endpoints as tools agents can call. Calls are dispatched server-side, so credentials stay on the backend and never reach the agent. Off by default because it opens external endpoints to agents; turn on per workspace to let agents use connections like the Infisical secrets API. Requires the connection's tool-policy to also allow the agent. FIR-2273.",
+      "group": "agents",
+      "default": false
+    },
+    {
+      "key": "cerebro_agent_vault",
+      "label": "Agent Vault secret brokering",
+      "description": "Broker per-agent access to secrets via Infisical Agent Vault over the internal path: the backend swaps a placeholder for the real credential on the way out, so an agent uses a secret without ever holding it. An admin-controlled table sets which key-boxes each agent may reach. TECH-3196.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_comment_drafts",
+      "label": "Save unsent messages as drafts",
+      "description": "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_workspace_copy",
+      "label": "Workspace copy console",
+      "description": "Add a \"Workspace copy\" tab to Settings (owners/admins only) for merging one workspace into another: pick a target workspace, then copy individual issues, channels, projects, agents, chats, or autopilots into it. Copies are non-destructive — the source workspace is never changed. Off hides the tab. TECH-3582.",
+      "group": "workspace",
+      "default": false
+    },
+    {
+      "key": "cerebro_chat_recent_list",
+      "label": "Recent chats on new-chat screen",
+      "description": "Show the 3 most recent chat sessions at the top of the inbox new-chat screen, with a \"See earlier\" expander to scroll through and resume older conversations in place. Off keeps the plain empty state.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
+      "key": "cerebro_approval_gate",
+      "label": "Tool approval enforcement",
+      "description": "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_registry_access_hint",
+      "label": "Registry access summary in prompt",
+      "description": "When on, each agent with the firtal_registry tool gets a line in its system prompt stating how many Data Registry data sources it is permitted to query (derived from its own allowlist), so the model knows the tool IS its data access instead of guessing it has no database. Off keeps the plain tool list. Defaults on. FIR-1914.",
+      "group": "permissions",
+      "default": true
+    },
+    {
+      "key": "cerebro_wakeup_time",
+      "label": "Wakeup: time-based",
+      "description": "Let agents schedule a time-based wakeup (fire at a specific moment) so they re-enter an issue later. Off blocks new time wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_wakeup_issue_status",
+      "label": "Wakeup: on issue status",
+      "description": "Let agents schedule a wakeup that fires when a watched issue reaches a chosen status. Off blocks new status wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_wakeup_github_ci",
+      "label": "Wakeup: on GitHub CI",
+      "description": "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_wakeup_loop_guard",
+      "label": "Wakeup: loop guard",
+      "description": "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without a human replying, the next wakeup is rejected and the agent is told to post a status or question instead. A human comment resets the count. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-2679.",
+      "group": "agents",
+      "default": true
+    },
+    {
+      "key": "cerebro_wakeup_bar",
+      "label": "Scheduled wakeup banner",
+      "description": "Show a prominent orange banner at the top of an issue when it has a pending agent wakeup, mirroring the running-agent banner: a live countdown for time-based wakeups, the watched status for status wakeups, and a CI label for GitHub-CI wakeups, each with a cancel button. Multiple pending wakeups fold into one expandable banner. Off keeps the wakeups visible only in the sidebar list. FIR-1521.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_activity_wakeup_dot",
+      "label": "Scheduled wakeup dot on lists & boards",
+      "description": "Show a small orange clock dot on issue list rows and board cards when the issue has a pending agent wakeup, stacked next to the running-agent indicator so a row can show both at once. Click the dot to expand a list of every scheduled run with a live countdown and a cancel button. Off keeps lists and boards showing only the running-agent indicator. FIR-1521.",
+      "group": "issues",
+      "default": true
+    },
+    {
+      "key": "cerebro_local_tool_policy",
+      "label": "Tool enforcement on local runtimes",
+      "description": "Extend the per-tool Allow / Ask / Block policy to agents running on LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini), which otherwise bypass the gateway gate entirely. When on, the daemon resolves each tool call through the SAME tool-policy chain and approval inbox as the gateway. Off by default — turning it on starts in observe-only mode (see 'Enforce on local runtimes'). No restart needed. TECH-3173.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_local_tool_policy_enforce",
+      "label": "Enforce on local runtimes (else observe-only)",
+      "description": "Only matters when 'Tool enforcement on local runtimes' is on. Off = observe-only dry run: the daemon resolves every tool call and logs what an enforce WOULD block, but allows everything through (safe to watch before committing). On = enforce: Allow proceeds, Block stops, Ask routes to the approval inbox and blocks until a human decides. Default off so you can watch the would-block stream first. TECH-3173.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_policy_cel",
+      "label": "Expression conditions on rules (CEL)",
+      "description": "Let a per-tool rule carry a CEL expression as its WHEN condition, for genuine dynamics that the structured terms (host allowlist, action list) can't express — for example 'only during business hours'. Off by default: only the structured conditions apply, and a rule that carries an expression stays inert (it fails closed, never silently allows). On wires the expression evaluator into both the gateway and local-runtime gates. No restart needed. FIR-1609.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_credential_chain_grant",
+      "label": "Grant credentials from the tool-policy chain",
+      "description": "Let an explicit Allow rule in the unified per-tool policy GRANT access to a credential, instead of only ever tightening it. This makes the one policy chain the place to grant secret access, so the old separate grant store can eventually be retired. Off by default and fail-safe: with no explicit rule a credential stays deny-by-default exactly as today, so turning it off can never widen who can reveal a secret. Only flip on once existing grants have been migrated onto the chain 1:1. FIR-1609 Phase 7.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_member_override",
+      "label": "Member overrides group on the tool-policy gate",
+      "description": "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
+      "group": "permissions",
+      "default": false
+    }
+  ]
+}

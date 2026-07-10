@@ -94,6 +94,7 @@ import type {
   Attachment,
   Artifact,
   ArtifactFolder,
+  ArtifactFolderSuggestion,
   ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,
@@ -4156,6 +4157,47 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — an agent proposes an
+  // existing folder for a document/note; a person accepts before it moves.
+  async getArtifactFolderSuggestion(
+    artifactId: string,
+  ): Promise<{ suggestion: ArtifactFolderSuggestion | null }> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`);
+  }
+
+  async createArtifactFolderSuggestion(
+    artifactId: string,
+    data: { folder_id: string; reason?: string },
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listArtifactFolderSuggestions(
+    surface?: string,
+  ): Promise<ArtifactFolderSuggestion[]> {
+    const qs = surface ? `?surface=${encodeURIComponent(surface)}` : "";
+    return this.fetch(`/api/artifact-folder-suggestions${qs}`);
+  }
+
+  async acceptArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/accept`, {
+      method: "POST",
+    });
+  }
+
+  async rejectArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/reject`, {
+      method: "POST",
+    });
+  }
+
   // Artifact folders
   // CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter so
   // notes and documents list separate folder trees.
@@ -4545,6 +4587,15 @@ export class ApiClient {
     return this.fetch<T>(`/api/notes/${id}/pin`, {
       method: "PUT",
       body: JSON.stringify({ pinned }),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-note-author-codes): FIR-2810 — per-note toggle that
+  // stamps the writer's member code (e.g. "JEH") on every line they write.
+  async setNoteAuthorCodes<T = unknown>(id: string, authorCodes: boolean): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/author-codes`, {
+      method: "PUT",
+      body: JSON.stringify({ author_codes: authorCodes }),
     });
   }
 

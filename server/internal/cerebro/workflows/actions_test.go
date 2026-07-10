@@ -29,11 +29,13 @@ type fakeIssueActions struct {
 	IssueTaskQueued      db.CreateAgentTaskParams
 	IssueTaskQueuedCount int
 	IssueTaskQueueErr    error
-	TaskQueueErr     error
-	CreatedComment   db.CreateCommentParams
-	CreateCommentErr error
-	ParentIssue      db.Issue
-	GetIssueErr      error
+	ModelOverride        db.SetAgentTaskModelOverrideParams
+	ThinkingOverride     db.SetAgentTaskThinkingOverrideParams
+	TaskQueueErr         error
+	CreatedComment       db.CreateCommentParams
+	CreateCommentErr     error
+	ParentIssue          db.Issue
+	GetIssueErr          error
 
 	// Phase-2 ext (JEH-1114, route_by_domain).
 	Labels        []db.IssueLabel
@@ -113,6 +115,14 @@ func (f *fakeIssueActions) CreateQuickCreateTask(_ context.Context, p db.CreateQ
 		return db.AgentTaskQueue{}, f.TaskQueueErr
 	}
 	return db.AgentTaskQueue{ID: mustUUID("33333333-3333-3333-3333-333333333333")}, nil
+}
+func (f *fakeIssueActions) SetAgentTaskModelOverride(_ context.Context, p db.SetAgentTaskModelOverrideParams) error {
+	f.ModelOverride = p
+	return nil
+}
+func (f *fakeIssueActions) SetAgentTaskThinkingOverride(_ context.Context, p db.SetAgentTaskThinkingOverrideParams) error {
+	f.ThinkingOverride = p
+	return nil
 }
 func (f *fakeIssueActions) ListLabels(_ context.Context, _ pgtype.UUID) ([]db.IssueLabel, error) {
 	if f.ListLabelsErr != nil {
@@ -252,9 +262,11 @@ func TestActionRunSkill_HappyPath(t *testing.T) {
 	}
 	svc := newServiceWithFake(fake)
 	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{
-		SkillName:  skillName,
-		AgentID:    "ffffffff-ffff-ffff-ffff-ffffffffffff",
-		SkillInput: map[string]any{"query": "active campaigns"},
+		SkillName:     skillName,
+		AgentID:       "ffffffff-ffff-ffff-ffff-ffffffffffff",
+		Model:         "build-model",
+		ThinkingLevel: "low",
+		SkillInput:    map[string]any{"query": "active campaigns"},
 	})
 
 	if err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent()); err != nil {
@@ -278,6 +290,12 @@ func TestActionRunSkill_HappyPath(t *testing.T) {
 	}
 	if ctx["workflow_skill_name"] != skillName {
 		t.Errorf("context.workflow_skill_name = %v, want %q", ctx["workflow_skill_name"], skillName)
+	}
+	if fake.ModelOverride.ModelOverride != "build-model" {
+		t.Fatalf("model override = %q, want build-model", fake.ModelOverride.ModelOverride)
+	}
+	if fake.ThinkingOverride.ThinkingOverride != "low" {
+		t.Fatalf("thinking override = %q, want low", fake.ThinkingOverride.ThinkingOverride)
 	}
 }
 

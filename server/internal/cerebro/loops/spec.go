@@ -76,8 +76,10 @@ type Verification struct {
 	// itself. Empty AssigneeType on a judge check falls back to the spec-wide
 	// judge params (CompileParams.JudgeAgentID) so an older spec without
 	// per-check assignees still dispatches.
-	AssigneeType string `yaml:"assignee_type,omitempty" json:"assignee_type,omitempty"`
-	AssigneeID   string `yaml:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+	AssigneeType  string `yaml:"assignee_type,omitempty" json:"assignee_type,omitempty"`
+	AssigneeID    string `yaml:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+	Model         string `yaml:"model,omitempty" json:"model,omitempty"`
+	ThinkingLevel string `yaml:"thinking_level,omitempty" json:"thinking_level,omitempty"`
 }
 
 // Caps are the termination guards. All are required and must be positive — a
@@ -144,7 +146,9 @@ type BuildPhase struct {
 	BuildSkill string `yaml:"build_skill" json:"build_skill"`
 	// BuildAgentID pins the phase's build agent; empty falls back to the
 	// recipe-wide build agent (CompileParams.AgentID).
-	BuildAgentID string `yaml:"build_agent_id,omitempty" json:"build_agent_id,omitempty"`
+	BuildAgentID  string `yaml:"build_agent_id,omitempty" json:"build_agent_id,omitempty"`
+	Model         string `yaml:"model,omitempty" json:"model,omitempty"`
+	ThinkingLevel string `yaml:"thinking_level,omitempty" json:"thinking_level,omitempty"`
 	// Goal is an optional free-text instruction for this phase's build.
 	Goal string `yaml:"goal,omitempty" json:"goal,omitempty"`
 	// Verification is this phase's delivery gate. Same rules as the top-level

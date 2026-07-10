@@ -163,6 +163,7 @@ type AgentTaskQueue struct {
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
 	Title                 pgtype.Text        `json:"title"`
 	ModelOverride         pgtype.Text        `json:"model_override"`
+	ThinkingOverride      pgtype.Text        `json:"thinking_override"`
 }
 
 type AgentToolGrant struct {
@@ -836,6 +837,7 @@ type CerebroNote struct {
 	LockedBy        pgtype.UUID        `json:"locked_by"`
 	LockedAt        pgtype.Timestamptz `json:"locked_at"`
 	LockHeartbeatAt pgtype.Timestamptz `json:"lock_heartbeat_at"`
+	AuthorCodes     bool               `json:"author_codes"`
 }
 
 type CerebroNoteComment struct {
@@ -901,6 +903,14 @@ type CerebroNoteType struct {
 	NumberingEnabled     bool               `json:"numbering_enabled"`
 	NextNumber           int32              `json:"next_number"`
 	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
+	AuthorCodes          bool               `json:"author_codes"`
+}
+
+type CerebroNoteLineAttr struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	BaseBody   string             `json:"base_body"`
+	Attrs      []byte             `json:"attrs"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroNoteVersion struct {

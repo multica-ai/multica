@@ -364,4 +364,3 @@ func buildInboundEventID(token, timestamp string, body []byte) string {
 func writeWebhookError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
-

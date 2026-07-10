@@ -1200,6 +1200,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// CEREBRO-PATCH(comment-cost-link): FIR-39 pin agent comment to its task.
 	h.linkCommentToTaskIfAgent(r, comment.ID, issue.ID, issue.WorkspaceID, authorType)
 
+	// CEREBRO-PATCH(attachment-folder): FIR-2697 part 4 — an agent-authored
+	// document attached via a `mention://artifact/<id>` token in this comment
+	// must always have a folder. Best-effort, non-fatal; logic lives in
+	// artifact_attachment_folder_cerebro.go.
+	h.ensureAttachedArtifactsFiled(r, uuidToString(issue.WorkspaceID), req.Content)
+
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
@@ -1231,6 +1237,19 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if isNoteComment(comment.Content) {
 		writeJSON(w, http.StatusCreated, resp)
 		return
+	}
+
+	// CEREBRO-PATCH(cerebro-rounds): a human reply on a round issue is durable,
+	// but intentionally does not enter any agent trigger path until the whole
+	// round is started manually or by its schedule.
+	if h.RoundCommentGate != nil && authorType == "member" {
+		held, holdErr := h.RoundCommentGate.HoldComment(r.Context(), issue.WorkspaceID, issue.ID, comment.ID, authorType, authorID, comment.Content)
+		if holdErr != nil {
+			slog.Warn("round comment hold failed", "issue_id", issueID, "error", holdErr)
+		} else if held {
+			writeJSON(w, http.StatusCreated, resp)
+			return
+		}
 	}
 
 	// CEREBRO-PATCH(task-delegation-context): comment/mention task starts must

@@ -585,7 +585,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		notificationProtocol: "unknown",
 		onMessage: func(msg Message) {
 			logCodexAgentMessage(b.cfg.Logger, msg)
-			if msg.Type == MessageText {
+			if msg.Type == MessageText && msg.Final { // CEREBRO-PATCH(codex-final-output-only): raw Codex progress text must not become Result.Output fallback comments.
 				outputMu.Lock()
 				output.WriteString(msg.Content)
 				outputMu.Unlock()
@@ -1397,7 +1397,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	case "agent_message":
 		text, _ := msg["message"].(string)
 		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text})
+			c.onMessage(Message{Type: MessageText, Content: text, Final: true})
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -1608,10 +1608,10 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
-		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text})
-		}
 		phase, _ := item["phase"].(string)
+		if text != "" && c.onMessage != nil {
+			c.onMessage(Message{Type: MessageText, Content: text, Final: phase == "final_answer"}) // CEREBRO-PATCH(codex-final-output-only): only final_answer text contributes to Result.Output.
+		}
 		if phase == "final_answer" && c.turnStarted {
 			if c.onTurnDone != nil {
 				c.onTurnDone(false)

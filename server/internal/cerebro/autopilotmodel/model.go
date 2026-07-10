@@ -89,6 +89,19 @@ func SetOnTask(ctx context.Context, q *db.Queries, taskID pgtype.UUID, model str
 	})
 }
 
+// SetThinkingOnTask persists the per-task thinking override on an
+// agent_task_queue row. Empty thinking is a no-op so the agent profile remains
+// the default.
+func SetThinkingOnTask(ctx context.Context, q *db.Queries, taskID pgtype.UUID, thinking string) error {
+	if thinking == "" {
+		return nil
+	}
+	return q.SetAgentTaskThinkingOverride(ctx, db.SetAgentTaskThinkingOverrideParams{
+		ID:               taskID,
+		ThinkingOverride: thinking,
+	})
+}
+
 // Resolve returns the model the daemon should pass to the agent CLI. Resolution
 // order is task.model_override → agent.model → "" (lets the CLI pick its own
 // default). The daemon's env-var fallback (MULTICA_<PROVIDER>_MODEL) layers
