@@ -9,6 +9,7 @@ export interface ModelRegistryEntry {
   label: string;
   provider: string;
   context_window: number;
+  cache_ttl_seconds?: number;
   input_usd_per_mtok: number;
   output_usd_per_mtok: number;
   cache_read_usd_per_mtok: number;
