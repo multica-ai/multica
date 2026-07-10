@@ -791,8 +791,8 @@ var catalog = []Capability{
 		Key:           "manage_project_sprints",
 		Title:         "Manage project sprints",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
-		DescriptionZh: "创建、编辑、删除并分配项目冲刺与周期性冲刺任务。",
+		Description:   "Create, edit, complete, delete, and assign project sprints and recurring sprint tasks.",
+		DescriptionZh: "创建、编辑、完成、删除并分配项目冲刺与周期性冲刺任务。",
 		Ops: []string{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
@@ -801,6 +801,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+			"POST /api/cerebro/sprints/{sprintID}/complete",
 			"PUT /api/cerebro/sprints/{sprintID}/",
 			"DELETE /api/cerebro/sprints/{sprintID}/",
 			"PUT /api/cerebro/issues/{issueID}/sprint/",

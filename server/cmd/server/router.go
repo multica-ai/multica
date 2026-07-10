@@ -2116,6 +2116,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroSprintsHandler.UpdateSprint)
 				r.Delete("/", cerebroSprintsHandler.DeleteSprint)
 				r.Get("/issues", cerebroSprintsHandler.ListSprintIssues)
+				r.Post("/complete", cerebroSprintsHandler.CompleteSprint) // CEREBRO-PATCH(cerebro-sprints-routes): FIR-2828 end-a-sprint action.
 			})
 			r.Route("/api/cerebro/issues/{issueID}/sprint", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)

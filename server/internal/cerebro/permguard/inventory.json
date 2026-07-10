@@ -133,6 +133,10 @@
       "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
     },
     {
+      "id": "POST /api/cerebro/sprints/{sprintID}/complete",
+      "gate": "via:POST /api/cerebro/sprints/{sprintID}/complete"
+    },
+    {
       "id": "DELETE /api/cerebro/status-models/default",
       "gate": "workspace_admin"
     },
