@@ -163,7 +163,6 @@ func (q *Queries) ClearRuntimeHold(ctx context.Context, id pgtype.UUID) (AgentRu
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 	)
@@ -408,8 +407,7 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.OwnerID,
 			&i.LegacyDaemonID,
 			&i.Visibility,
-			&i.ProfileID,
-			&i.HoldUntil,
+						&i.HoldUntil,
 			&i.HoldReason,
 			&i.ProfileID,
 			&i.CustomName,
@@ -495,7 +493,6 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -533,7 +530,6 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -573,8 +569,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.OwnerID,
 			&i.LegacyDaemonID,
 			&i.Visibility,
-			&i.ProfileID,
-			&i.HoldUntil,
+						&i.HoldUntil,
 			&i.HoldReason,
 			&i.ProfileID,
 			&i.CustomName,
@@ -625,8 +620,7 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.OwnerID,
 			&i.LegacyDaemonID,
 			&i.Visibility,
-			&i.ProfileID,
-			&i.HoldUntil,
+						&i.HoldUntil,
 			&i.HoldReason,
 			&i.ProfileID,
 			&i.CustomName,
@@ -747,7 +741,6 @@ func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRu
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -785,7 +778,6 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -1021,7 +1013,6 @@ func (q *Queries) SetRuntimeHold(ctx context.Context, arg SetRuntimeHoldParams) 
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 	)
@@ -1219,7 +1210,6 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -1282,7 +1272,6 @@ type UpsertAgentRuntimeRow struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	Visibility     string             `json:"visibility"`
-	ProfileID      pgtype.UUID        `json:"profile_id"`
 	HoldUntil      pgtype.Timestamptz `json:"hold_until"`
 	HoldReason     pgtype.Text        `json:"hold_reason"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
@@ -1326,7 +1315,6 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
@@ -1393,7 +1381,6 @@ type UpsertAgentRuntimeWithProfileRow struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	Visibility     string             `json:"visibility"`
-	ProfileID      pgtype.UUID        `json:"profile_id"`
 	HoldUntil      pgtype.Timestamptz `json:"hold_until"`
 	HoldReason     pgtype.Text        `json:"hold_reason"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
@@ -1438,7 +1425,6 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		&i.OwnerID,
 		&i.LegacyDaemonID,
 		&i.Visibility,
-		&i.ProfileID,
 		&i.HoldUntil,
 		&i.HoldReason,
 		&i.ProfileID,
