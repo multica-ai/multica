@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { RuntimeDevice } from "@multica/core/types";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import { Text } from "@/components/ui/text";
+import { ProviderLogo } from "@/components/runtime/provider-logo";
 import { HEALTH_DOT_CLASS } from "@/lib/runtime-health";
 import { timeAgo } from "@/lib/time-ago";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -23,16 +24,9 @@ export function RuntimeRow({ runtime, onPress }: Props) {
   return (
     <Pressable onPress={onPress} className="active:bg-secondary px-4 py-3">
       <View className="flex-row items-start gap-3">
-        <Ionicons
-          name={
-            runtime.runtime_mode === "cloud"
-              ? "cloud-outline"
-              : "desktop-outline"
-          }
-          size={20}
-          color={mutedFg}
-          style={{ marginTop: 2 }}
-        />
+        <View style={{ marginTop: 2 }}>
+          <ProviderLogo provider={runtime.provider} size={20} color={mutedFg} />
+        </View>
         <View className="flex-1 gap-1">
           <Text
             className="text-base text-foreground font-medium"
