@@ -259,6 +259,38 @@ func TestPrepareCodexHomeFailsLoudWhenSharedHooksExposureFails(t *testing.T) {
 	}
 }
 
+// Design ② (fail-loud boundary, Codex round-2): even when the shared hooks are
+// ABSENT, if stale per-task hook residue cannot be removed, prepare must fail
+// loud — a removed hook that survives into the session is a correctness fault,
+// not an "absent optional feature" the task may proceed without.
+func TestPrepareCodexHomeFailsLoudWhenStaleHookCleanupFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("read-only-dir permission injection does not hold for root")
+	}
+	sharedHome := t.TempDir() // no hooks.json / hooks/ — shared source is absent
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	// Leftover stale per-task hooks.json symlink from a prior run whose shared
+	// source is now gone (a broken symlink).
+	stale := filepath.Join(codexHome, "hooks.json")
+	if err := os.Symlink(filepath.Join(sharedHome, "hooks.json"), stale); err != nil {
+		t.Fatalf("seed stale hooks.json: %v", err)
+	}
+	// Make the per-task home read-only so removing the stale symlink fails.
+	if err := os.Chmod(codexHome, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(codexHome, 0o755) })
+
+	if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, discardLogger()); err == nil {
+		t.Fatal("expected fail-loud when stale hooks cleanup fails, got nil")
+	}
+}
+
 // Design ① regression guard: codexHooksSourceID must be a pure lexical join and
 // must NOT resolve symlinks. Codex keys hook trust by the normalized (not
 // canonicalized) per-task path; resolving would turn a matching trust key into a

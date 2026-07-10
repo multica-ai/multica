@@ -96,21 +96,19 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// valid directory; otherwise clear stale per-task residue. See
 	// ensureExistingDirSymlink.
 	//
-	// Scoped fail-loud (design ②): if the shared source is intended (present,
-	// or its state can't be verified) but we fail to expose it, abort task prep
-	// with an error rather than start a Codex session that silently lacks the
-	// user's hooks — a "false success" the user must never get. If the shared
-	// source is provably absent, an error here is only a best-effort stale
-	// cleanup failure; log it, but do NOT block the task over an absent
-	// optional feature.
+	// Fail-loud (design ②): propagate any error. ensureExistingDirSymlink
+	// returns nil for the common no-op — shared source absent and nothing stale
+	// to clear — so this does NOT block a task that simply has no hooks. It
+	// returns an error only on a genuine problem: the shared source exists (or
+	// its state can't be verified) but we failed to expose it, OR stale per-task
+	// residue could not be removed. Both must abort task prep: the first would
+	// start a Codex session silently lacking the user's hooks ("false success"),
+	// the second would let a removed hook survive into the session.
 	for _, name := range codexOptionalSymlinkedDirs {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureExistingDirSymlink(src, dst); err != nil {
-			if sharedResourceIntended(src) {
-				return fmt.Errorf("expose codex optional dir %q into per-task home: %w", name, err)
-			}
-			logger.Warn("execenv: codex-home optional dir stale cleanup failed (shared absent)", "dir", name, "error", err)
+			return fmt.Errorf("expose codex optional dir %q into per-task home: %w", name, err)
 		}
 	}
 
@@ -125,16 +123,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 
 	// Expose optional shared files (hooks.json) only when the source is a
 	// valid regular file; otherwise clear stale per-task residue. See
-	// ensureOptionalFileSymlink. Same scoped fail-loud rule as the optional
-	// dirs above (design ②).
+	// ensureOptionalFileSymlink. Same fail-loud rule as the optional dirs above
+	// (design ②): nil on the no-hooks no-op, error on a real expose/cleanup
+	// failure.
 	for _, name := range codexOptionalSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureOptionalFileSymlink(src, dst); err != nil {
-			if sharedResourceIntended(src) {
-				return fmt.Errorf("expose codex optional file %q into per-task home: %w", name, err)
-			}
-			logger.Warn("execenv: codex-home optional file stale cleanup failed (shared absent)", "file", name, "error", err)
+			return fmt.Errorf("expose codex optional file %q into per-task home: %w", name, err)
 		}
 	}
 
@@ -206,46 +202,32 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// The shared/task hooks.json paths are derived via codexHooksSourceID so
 	// the re-keyed trust block's source id is byte-identical to what Codex
 	// itself computes (design ①).
-	sharedHooksPath := codexHooksSourceID(sharedHome)
 	hookTrustResult, err := syncCodexHookTrustStateWithResult(
 		filepath.Join(sharedHome, "config.toml"),
 		filepath.Join(codexHome, "config.toml"),
-		sharedHooksPath,
+		codexHooksSourceID(sharedHome),
 		codexHooksSourceID(codexHome),
 	)
 	if err != nil {
-		// Scoped fail-loud (design ②): if the user actually has a shared
-		// hooks.json, failing to re-key its trust onto the per-task path means
-		// Codex would silently treat the inherited hook as untrusted and skip
-		// it — a "false success". Abort task prep. If the shared hooks.json is
-		// absent, this call only clears stale mapped blocks; a failure there is
-		// best-effort cleanup, so log it without blocking the task.
-		if sharedResourceIntended(sharedHooksPath) {
-			return fmt.Errorf("mirror codex hook trust state onto per-task home: %w", err)
-		}
-		logger.Warn("execenv: codex-home hook trust stale cleanup failed (shared absent)", "error", err)
-	} else {
-		// Log paths and counts only — never hook contents, tokens, or secrets.
-		logger.Info("execenv: codex-home hook trust sync",
-			"codex_home", codexHome,
-			"shared_hooks", hookTrustResult.SharedHooksCount,
-			"mapped_hooks", hookTrustResult.MappedHooksCount,
-			"stale_hooks", hookTrustResult.StaleHooksCount,
-			"changed", hookTrustResult.Changed)
+		// Fail-loud (design ②): propagate any error. When the shared hooks.json
+		// is absent and there is no stale mapped block to clear, this call
+		// returns nil, so a hookless task is not blocked. It errors only on a
+		// real failure — the user has a shared hooks.json but we could not
+		// re-key its trust (Codex would then silently treat the inherited hook
+		// as untrusted and skip it — a "false success"), or a stale mapped trust
+		// block could not be cleared (it would survive into the session). Both
+		// abort task prep.
+		return fmt.Errorf("mirror codex hook trust state onto per-task home: %w", err)
 	}
+	// Log paths and counts only — never hook contents, tokens, or secrets.
+	logger.Info("execenv: codex-home hook trust sync",
+		"codex_home", codexHome,
+		"shared_hooks", hookTrustResult.SharedHooksCount,
+		"mapped_hooks", hookTrustResult.MappedHooksCount,
+		"stale_hooks", hookTrustResult.StaleHooksCount,
+		"changed", hookTrustResult.Changed)
 
 	return nil
-}
-
-// sharedResourceIntended reports whether a shared optional resource at path was
-// meant to be exposed into the per-task home. It is true when the path exists
-// (any kind), and also true when its state cannot be determined (a non-ENOENT
-// stat error → fail-closed: we must not silently skip a resource we cannot
-// verify is absent). It is false only when the path is provably absent
-// (ENOENT). Used to scope the hooks fail-loud in prepareCodexHomeWithOpts.
-func sharedResourceIntended(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
 }
 
 // codexHooksSourceID returns the absolute hooks.json path that Codex uses as the
