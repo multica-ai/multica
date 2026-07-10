@@ -112,10 +112,6 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
-  // Moving an issue between spaces renumbers it and moves it across
-  // space-filtered lists; the flag drives the same membership reconcile as
-  // project_changed.
-  space_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {

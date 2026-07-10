@@ -249,7 +249,12 @@
     "toast_saved": "템플릿을 저장했습니다",
     "toast_save_failed": "템플릿을 저장하지 못했습니다",
     "toast_deleted": "템플릿을 삭제했습니다",
-    "toast_delete_failed": "템플릿을 삭제하지 못했습니다"
+    "toast_delete_failed": "템플릿을 삭제하지 못했습니다",
+    "edit": "{{name}} 편집",
+    "delete": "{{name}} 삭제",
+    "delete_confirm_title": "템플릿을 삭제할까요?",
+    "delete_confirm_body": "“{{name}}” 템플릿을 삭제합니다. 이 템플릿으로 이미 만든 자동화에는 영향을 주지 않습니다.",
+    "delete_action": "템플릿 삭제"
   },
   "integration_bindings": {
     "title": "스페이스 접근",

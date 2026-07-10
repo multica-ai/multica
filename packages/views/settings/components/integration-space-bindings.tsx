@@ -5,6 +5,7 @@ import { Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { spaceKeys } from "@multica/core/spaces/queries";
 import type { ListIntegrationBindingsResponse } from "@multica/core/types";
 import { SpaceMultiPicker } from "../../spaces";
 import { useT } from "../../i18n";
@@ -36,6 +37,7 @@ export function IntegrationSpaceBindings() {
         bindingKey(wsId),
         next,
       );
+      queryClient.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
       toast.success(t(($) => $.integration_bindings.toast_saved));
     },
     onError: (error) => {

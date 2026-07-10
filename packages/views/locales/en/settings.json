@@ -257,7 +257,12 @@
     "toast_saved": "Template saved",
     "toast_save_failed": "Failed to save template",
     "toast_deleted": "Template deleted",
-    "toast_delete_failed": "Failed to delete template"
+    "toast_delete_failed": "Failed to delete template",
+    "edit": "Edit {{name}}",
+    "delete": "Delete {{name}}",
+    "delete_confirm_title": "Delete template?",
+    "delete_confirm_body": "“{{name}}” will be removed. Existing Autopilots created from it are not affected.",
+    "delete_action": "Delete template"
   },
   "integration_bindings": {
     "title": "Space access",

@@ -76,16 +76,14 @@ key — letter-first, 1-7 chars total (`[a-z][a-z0-9]{0,6}`, narrowed from the o
 workspace has a default space whose key is the legacy workspace prefix, so a bare
 `MUL-2759` routes through that default space.
 
-**Move-to-space (issue update `--space`).** `UpdateIssue`'s `space_id` branch
-(`handler/issue.go`, move block) renumbers the issue under the target space's
-counter and records the old `key-number` in `issue_identifier_alias`
-(`UpsertIssueIdentifierAlias`). Identifier resolution falls back to that alias
-in `resolveIssueByIdentifier` (`handler.go`) and in GitHub branch/PR linking
-(`github.go`), so pre-move references keep resolving. The CLI exposes standalone
-Issue moves as
-`multica issue update <id> --space <UUID-or-key>` (`cmd_issue.go`,
-`resolveSpaceRef` accepts a key or UUID). Parent/child and Project/Issue pairs
-are validated to remain in the same Space.
+**Immutable Issue Space.** `UpdateIssue` detects an explicitly supplied
+`space_id` and returns `409 Issue Space cannot be changed` when it differs from
+the Issue's current Space (`server/internal/handler/issue.go`). The CLI exposes
+`--space` only on `issue create` and `issue list`; `issue update` deliberately
+has no `--space` flag (`server/cmd/multica/cmd_issue.go`). Project assignment and
+parent assignment are validated against the Issue's existing Space before the
+write, so neither relation can become an implicit move path. Identifier aliases
+remain for Space-key renames, not for an exposed Move Issue feature.
 
 **Reference-only flag (MUL-3739).** The link row carries a `reference_only`
 boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler

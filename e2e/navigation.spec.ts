@@ -24,12 +24,12 @@ test.describe("Navigation", () => {
   });
 
   test("settings page loads via sidebar", async ({ page }) => {
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByLabel("Settings").click();
     await expect(page).toHaveURL(/\/settings/, { timeout: ROUTE_CHANGE_TIMEOUT });
     await waitForPageText(page, "Settings");
 
-    await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Members" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "General" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Members" })).toBeVisible();
   });
 
   test("agents page shows agent list", async ({ page }) => {

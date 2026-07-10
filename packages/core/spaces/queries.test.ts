@@ -9,6 +9,7 @@ function space(overrides: Partial<Space>): Space {
     name: "Space",
     key: "SPC",
     icon: null,
+    context: "",
     issue_counter: 0,
     is_default: false,
     visibility: "open",

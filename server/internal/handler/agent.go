@@ -301,6 +301,7 @@ type AgentTaskResponse struct {
 	SpaceID             string                   `json:"space_id,omitempty"`             // issue/autopilot/quick-create Space, when known
 	SpaceKey            string                   `json:"space_key,omitempty"`            // Space issue namespace key, e.g. MUL
 	SpaceName           string                   `json:"space_name,omitempty"`           // human-readable Space name
+	SpaceContext        string                   `json:"space_context,omitempty"`        // Space operating context; only present for runs bound to this Space
 	ProjectID           string                   `json:"project_id,omitempty"`           // issue's project, when present
 	ProjectTitle        string                   `json:"project_title,omitempty"`        // for surfacing in agent context
 	ProjectDescription  string                   `json:"project_description,omitempty"`  // durable project-level context injected into the brief

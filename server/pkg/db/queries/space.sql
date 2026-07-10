@@ -60,10 +60,11 @@ LIMIT 1;
 
 -- name: CreateWorkspaceSpace :one
 INSERT INTO workspace_space (
-    workspace_id, name, key, icon, visibility, created_by
+    workspace_id, name, key, icon, visibility, context, created_by
 ) VALUES (
     $1, $2, $3, sqlc.narg('icon')::text,
-    COALESCE(sqlc.narg('visibility')::text, 'open'), sqlc.narg('created_by')
+    COALESCE(sqlc.narg('visibility')::text, 'open'),
+    COALESCE(sqlc.narg('context')::text, ''), sqlc.narg('created_by')
 ) RETURNING *;
 
 -- name: UpdateWorkspaceSpace :one
@@ -72,6 +73,7 @@ UPDATE workspace_space SET
     key = COALESCE(sqlc.narg('key'), key),
     icon = COALESCE(sqlc.narg('icon'), icon),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
+    context = COALESCE(sqlc.narg('context'), context),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

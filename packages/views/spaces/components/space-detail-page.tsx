@@ -6,7 +6,11 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
+import {
+  spaceActivityOptions,
+  spaceListOptions,
+  spaceMembersOptions,
+} from "@multica/core/spaces/queries";
 import {
   useArchiveSpace,
   useRestoreSpace,
@@ -21,7 +25,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { sanitizeSpaceKeyInput, isValidSpaceKey, RESERVED_SPACE_KEYS } from "@multica/core/workspace";
-import type { Space } from "@multica/core/types";
+import type { Space, SpaceActivity } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -34,6 +38,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -50,7 +55,7 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { SpaceIcon } from "./space-icon";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 /**
  * Space settings — /space/:key/settings. Identity fields apply inline, then
@@ -91,12 +96,194 @@ export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
           <Identity space={space} />
+          <ContextSection space={space} />
           <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
           <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
           <RestoreSection space={space} />
+          <ActivitySection space={space} />
         </div>
       </div>
     </div>
+  );
+}
+
+function activityCount(details: Record<string, unknown>, key: string): number {
+  const value = details[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function ActivitySection({ space }: { space: Space }) {
+  const { t } = useT("spaces");
+  const wsId = useWorkspaceId();
+  const timeAgo = useTimeAgo();
+  const { data: activities = [], isLoading } = useQuery(
+    spaceActivityOptions(wsId, space.id),
+  );
+
+  const actionText = (activity: SpaceActivity) => {
+    switch (activity.action) {
+      case "space_archived":
+        return t(($) => $.settings.activity_space_archived, {
+          squads: activityCount(activity.details, "archived_squad_count"),
+          autopilots: activityCount(activity.details, "paused_autopilot_count"),
+        });
+      case "space_restored":
+        return t(($) => $.settings.activity_space_restored, {
+          squads: activityCount(activity.details, "restored_squad_count"),
+          autopilots: activityCount(
+            activity.details,
+            "autopilots_awaiting_confirmation",
+          ),
+        });
+      case "space_autopilots_resumed":
+        return t(($) => $.settings.activity_autopilots_resumed, {
+          count: activityCount(activity.details, "resumed_autopilot_count"),
+        });
+      case "integration_space_bindings_replaced":
+        return t(($) => $.settings.activity_integrations_updated, {
+          provider:
+            typeof activity.details.provider === "string"
+              ? activity.details.provider
+              : t(($) => $.settings.activity_integration),
+        });
+      default:
+        return activity.action;
+    }
+  };
+
+  return (
+    <section className="flex max-w-2xl flex-col gap-3">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold">{t(($) => $.settings.activity_title)}</h2>
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.settings.activity_hint)}
+        </p>
+      </div>
+      <div className="divide-y rounded-lg border">
+        {isLoading ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {t(($) => $.settings.activity_loading)}
+          </p>
+        ) : activities.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {t(($) => $.settings.activity_empty)}
+          </p>
+        ) : (
+          activities.map((activity) => {
+            const actorName =
+              activity.actor_name ||
+              (activity.actor_type === "system"
+                ? t(($) => $.settings.activity_system_actor)
+                : t(($) => $.settings.activity_unknown_actor));
+            const initials = actorName.slice(0, 2).toUpperCase();
+            return (
+              <div key={activity.id} className="flex items-start gap-3 p-4">
+                <ActorAvatar
+                  name={actorName}
+                  initials={initials}
+                  avatarUrl={activity.actor_avatar_url}
+                  isAgent={activity.actor_type === "agent"}
+                  isSystem={activity.actor_type === "system"}
+                  size="sm"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">
+                    <span className="font-medium">{actorName}</span>{" "}
+                    <span className="text-muted-foreground">{actionText(activity)}</span>
+                  </p>
+                  <time
+                    dateTime={activity.created_at}
+                    title={activity.created_at}
+                    className="mt-1 block text-xs text-muted-foreground"
+                  >
+                    {timeAgo(activity.created_at)}
+                  </time>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ContextSection({ space }: { space: Space }) {
+  const { t } = useT("spaces");
+  const wsId = useWorkspaceId();
+  const { role } = useCurrentMember(wsId);
+  const isAdmin = role === "owner" || role === "admin";
+  const canManage =
+    !space.archived_at &&
+    (isAdmin || space.member_role === "lead" || space.member_role === "admin");
+  const updateSpace = useUpdateSpace();
+  const [context, setContext] = useState(space.context);
+
+  useEffect(() => {
+    setContext(space.context);
+  }, [space.id, space.context]);
+
+  const dirty = context !== space.context;
+
+  const save = async () => {
+    if (!canManage || !dirty) return;
+    try {
+      await updateSpace.mutateAsync({ id: space.id, context });
+      toast.success(t(($) => $.toast_updated));
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t(($) => $.toast_save_failed),
+      );
+    }
+  };
+
+  return (
+    <section className="flex max-w-2xl flex-col gap-3">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold">{t(($) => $.settings.context_title)}</h2>
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.settings.context_hint)}
+        </p>
+      </div>
+      <Label htmlFor={`space-context-${space.id}`} className="sr-only">
+        {t(($) => $.settings.context_label)}
+      </Label>
+      <Textarea
+        id={`space-context-${space.id}`}
+        name="space_context"
+        autoComplete="off"
+        rows={7}
+        value={context}
+        disabled={!canManage}
+        placeholder={t(($) => $.settings.context_placeholder)}
+        onChange={(event) => setContext(event.target.value)}
+      />
+      {canManage && (
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setContext(space.context)}
+            >
+              {t(($) => $.actions.cancel)}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            disabled={!dirty || updateSpace.isPending}
+            onClick={() => void save()}
+          >
+            {updateSpace.isPending
+              ? t(($) => $.actions.saving)
+              : t(($) => $.actions.save)}
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -83,6 +83,7 @@ import type {
   UpdateSpacePreferenceRequest,
   SpaceMemberRoleUpdate,
   ListSpaceMembersResponse,
+  ListSpaceActivityResponse,
   CreateSpaceRequest,
   UpdateSpaceRequest,
   ListSpacesResponse,
@@ -229,6 +230,7 @@ import {
   ListProjectsResponseSchema,
   ListSpacesResponseSchema,
   ListSpaceMembersResponseSchema,
+  ListSpaceActivityResponseSchema,
   EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
   SpaceSchema,
   RestoreSpaceResponseSchema,
@@ -1771,6 +1773,13 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`);
     return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
       endpoint: "GET /api/spaces/:id/members",
+    });
+  }
+
+  async listSpaceActivity(id: string): Promise<ListSpaceActivityResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/activity`);
+    return parseWithFallback(raw, ListSpaceActivityResponseSchema, { activities: [] }, {
+      endpoint: "GET /api/spaces/:id/activity",
     });
   }
 

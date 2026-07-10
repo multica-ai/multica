@@ -15,6 +15,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -52,6 +54,7 @@ export function CreateSpacePage() {
   const [keyTouched, setKeyTouched] = useState(false);
   const [icon, setIcon] = useState("");
   const [visibility, setVisibility] = useState<"open" | "private">("open");
+  const [context, setContext] = useState("");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -88,6 +91,7 @@ export function CreateSpacePage() {
         key,
         icon: icon.trim() || null,
         visibility,
+        context,
         member_ids: memberIds,
       });
       toast.success(t(($) => $.toast_created));
@@ -224,6 +228,29 @@ export function CreateSpacePage() {
                       : t(($) => $.form.key_hint)}
               </p>
             )}
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold">
+                {t(($) => $.settings.context_title)}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.settings.context_hint)}
+              </p>
+            </div>
+            <Label htmlFor="new-space-context" className="sr-only">
+              {t(($) => $.settings.context_label)}
+            </Label>
+            <Textarea
+              id="new-space-context"
+              name="space_context"
+              autoComplete="off"
+              rows={6}
+              value={context}
+              placeholder={t(($) => $.settings.context_placeholder)}
+              onChange={(event) => setContext(event.target.value)}
+            />
           </div>
 
           {/* Members — header + inline picker, mirroring the space detail page's

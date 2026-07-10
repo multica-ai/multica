@@ -274,8 +274,9 @@ export function useResumeSpaceAutopilots() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (id: string) => api.resumeSpaceAutopilots(id),
-    onSettled: () => {
+    onSettled: (_data, _error, id) => {
       qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: spaceKeys.activity(wsId, id) });
     },
   });
 }

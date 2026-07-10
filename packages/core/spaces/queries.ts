@@ -21,6 +21,8 @@ export const spaceKeys = {
   list: (wsId: string) => [...spaceKeys.all(wsId), "list"] as const,
   members: (wsId: string, spaceId: string) =>
     [...spaceKeys.all(wsId), "members", spaceId] as const,
+  activity: (wsId: string, spaceId: string) =>
+    [...spaceKeys.all(wsId), "activity", spaceId] as const,
 };
 
 export function spaceListOptions(wsId: string) {
@@ -49,6 +51,14 @@ export function spaceMembersOptions(wsId: string, spaceId: string) {
     queryKey: spaceKeys.members(wsId, spaceId),
     queryFn: () => api.listSpaceMembers(spaceId),
     select: (data) => data.members,
+  });
+}
+
+export function spaceActivityOptions(wsId: string, spaceId: string) {
+  return queryOptions({
+    queryKey: spaceKeys.activity(wsId, spaceId),
+    queryFn: () => api.listSpaceActivity(spaceId),
+    select: (data) => data.activities,
   });
 }
 

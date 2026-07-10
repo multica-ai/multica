@@ -4,6 +4,8 @@ export interface Space {
   name: string;
   key: string;
   icon: string | null;
+  /** Operating context injected only into runs bound to this Space. */
+  context: string;
   issue_counter: number;
   /** Stable workspace-level fallback for context-free creation. */
   is_default: boolean;
@@ -28,6 +30,7 @@ export interface CreateSpaceRequest {
   key: string;
   icon?: string | null;
   visibility?: "open" | "private";
+  context?: string;
   /** Workspace members invited alongside the creator (who joins as lead). */
   member_ids?: string[];
 }
@@ -37,6 +40,7 @@ export interface UpdateSpaceRequest {
   key?: string;
   icon?: string | null;
   visibility?: "open" | "private";
+  context?: string;
 }
 
 export interface ListSpacesResponse {
@@ -51,6 +55,21 @@ export interface RestoreSpaceResponse {
 
 export interface ResumeSpaceAutopilotsResponse {
   resumed_autopilot_count: number;
+}
+
+export interface SpaceActivity {
+  id: string;
+  actor_type: "member" | "agent" | "system";
+  actor_id: string;
+  actor_name: string;
+  actor_avatar_url?: string;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ListSpaceActivityResponse {
+  activities: SpaceActivity[];
 }
 
 /** Caller's own membership row, as returned by PATCH /api/spaces/{id}/membership. */

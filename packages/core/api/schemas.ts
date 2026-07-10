@@ -494,6 +494,7 @@ export const SpaceSchema = z.object({
   name: z.string().default(""),
   key: z.string().default(""),
   icon: z.string().nullable().default(null),
+  context: z.string().default(""),
   issue_counter: z.number().default(0),
   is_default: z.boolean().default(false),
   visibility: z.enum(["open", "private"]).default("open"),
@@ -511,6 +512,21 @@ export const SpaceSchema = z.object({
 export const RestoreSpaceResponseSchema = z.object({
   space: SpaceSchema,
   paused_autopilot_count: z.number().default(0),
+}).loose();
+
+export const SpaceActivitySchema = z.object({
+  id: z.string(),
+  actor_type: z.enum(["member", "agent", "system"]),
+  actor_id: z.string().default(""),
+  actor_name: z.string().default(""),
+  actor_avatar_url: z.string().optional(),
+  action: z.string(),
+  details: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string(),
+}).loose();
+
+export const ListSpaceActivityResponseSchema = z.object({
+  activities: z.array(SpaceActivitySchema).default([]),
 }).loose();
 
 // PATCH /api/spaces/{id}/membership — the caller's own sort position.
@@ -562,6 +578,7 @@ export const EMPTY_SPACE: Space = {
   name: "",
   key: "",
   icon: null,
+  context: "",
   issue_counter: 0,
   is_default: false,
   visibility: "open",

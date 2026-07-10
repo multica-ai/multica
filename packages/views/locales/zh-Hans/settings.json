@@ -256,7 +256,12 @@
     "toast_saved": "模板已保存",
     "toast_save_failed": "保存模板失败",
     "toast_deleted": "模板已删除",
-    "toast_delete_failed": "删除模板失败"
+    "toast_delete_failed": "删除模板失败",
+    "edit": "编辑 {{name}}",
+    "delete": "删除 {{name}}",
+    "delete_confirm_title": "删除模板？",
+    "delete_confirm_body": "删除 \"{{name}}\" 后，已用它创建的自动化不会受到影响。",
+    "delete_action": "删除模板"
   },
   "integration_bindings": {
     "title": "Space 访问范围",

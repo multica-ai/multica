@@ -736,6 +736,7 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     name: "Frontend",
     key: "FE",
     icon: null,
+    context: "Use the frontend design system.",
     issue_counter: 3,
     archived_at: null,
     created_by: "user-1",
@@ -747,6 +748,7 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     const parsed = SpaceSchema.parse({ ...baseSpace, future_field: "ignored" });
     expect(parsed.id).toBe("space-1");
     expect(parsed.key).toBe("FE");
+    expect(parsed.context).toBe("Use the frontend design system.");
   });
 
   it("defaults scalar fields when an older backend omits them", () => {
@@ -754,6 +756,7 @@ describe("SpaceSchema / ListSpacesResponseSchema drift", () => {
     expect(parsed.name).toBe("");
     expect(parsed.key).toBe("");
     expect(parsed.icon).toBeNull();
+    expect(parsed.context).toBe("");
     expect(parsed.issue_counter).toBe(0);
     expect(parsed.archived_at).toBeNull();
   });

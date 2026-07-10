@@ -186,3 +186,90 @@ func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivities
 	}
 	return items, nil
 }
+
+const listSpaceLifecycleActivities = `-- name: ListSpaceLifecycleActivities :many
+SELECT
+  al.id,
+  al.actor_type,
+  al.actor_id,
+  al.action,
+  al.details,
+  al.created_at,
+  COALESCE(CASE
+    WHEN al.actor_type = 'member' THEN u.name
+    WHEN al.actor_type = 'agent' THEN a.name
+    ELSE NULL
+  END, '')::text AS actor_name,
+  COALESCE(CASE
+    WHEN al.actor_type = 'member' THEN u.avatar_url
+    WHEN al.actor_type = 'agent' THEN a.avatar_url
+    ELSE NULL
+  END, '')::text AS actor_avatar_url
+FROM activity_log al
+LEFT JOIN "user" u ON al.actor_type = 'member' AND al.actor_id = u.id
+LEFT JOIN agent a ON al.actor_type = 'agent' AND al.actor_id = a.id
+WHERE al.workspace_id = $1
+  AND al.action IN (
+    'space_archived',
+    'space_restored',
+    'space_autopilots_resumed',
+    'integration_space_bindings_replaced'
+  )
+  AND (
+    al.details->>'space_id' = $2::text
+    OR (
+      al.action = 'integration_space_bindings_replaced'
+      AND al.details->'affected_space_ids' ? $2::text
+    )
+  )
+ORDER BY al.created_at DESC, al.id DESC
+LIMIT 100
+`
+
+type ListSpaceLifecycleActivitiesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     string      `json:"space_id"`
+}
+
+type ListSpaceLifecycleActivitiesRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	ActorType      pgtype.Text        `json:"actor_type"`
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	Action         string             `json:"action"`
+	Details        []byte             `json:"details"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ActorName      string             `json:"actor_name"`
+	ActorAvatarUrl string             `json:"actor_avatar_url"`
+}
+
+// Space Settings only needs governance events for this one Space, newest
+// first. Actor display data is resolved here so deleted/missing actors safely
+// fall back to the stored actor type in the UI.
+func (q *Queries) ListSpaceLifecycleActivities(ctx context.Context, arg ListSpaceLifecycleActivitiesParams) ([]ListSpaceLifecycleActivitiesRow, error) {
+	rows, err := q.db.Query(ctx, listSpaceLifecycleActivities, arg.WorkspaceID, arg.SpaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSpaceLifecycleActivitiesRow{}
+	for rows.Next() {
+		var i ListSpaceLifecycleActivitiesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.ActorName,
+			&i.ActorAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

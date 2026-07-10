@@ -99,6 +99,52 @@ func TestIntegrationSpaceBindingsAreAdminManagedAndSpaceScoped(t *testing.T) {
 	if bindingCount != 2 {
 		t.Fatalf("deduplicated binding count = %d, want 2", bindingCount)
 	}
+	activity := httptest.NewRecorder()
+	testHandler.ListSpaceActivity(activity, withURLParam(newRequest(http.MethodGet, "/api/spaces/"+spaceA.ID+"/activity", nil), "id", spaceA.ID))
+	if activity.Code != http.StatusOK {
+		t.Fatalf("ListSpaceActivity after binding: expected 200, got %d: %s", activity.Code, activity.Body.String())
+	}
+	var activityResponse struct {
+		Activities []SpaceActivityResponse `json:"activities"`
+	}
+	if err := json.Unmarshal(activity.Body.Bytes(), &activityResponse); err != nil {
+		t.Fatalf("decode Space binding activity: %v", err)
+	}
+	foundBindingActivity := false
+	for _, item := range activityResponse.Activities {
+		if item.Action == "integration_space_bindings_replaced" {
+			foundBindingActivity = true
+			break
+		}
+	}
+	if !foundBindingActivity {
+		t.Fatal("Space activity did not include its Integration binding change")
+	}
+	removeFromA := httptest.NewRecorder()
+	removeFromAReq := withIntegrationBindingParams(newRequest(http.MethodPut, "/api/integration-bindings/github/"+uuidToString(connection.ID), map[string]any{
+		"space_ids": []string{spaceB.ID},
+	}), "github", uuidToString(connection.ID))
+	testHandler.ReplaceIntegrationBindings(removeFromA, removeFromAReq)
+	if removeFromA.Code != http.StatusOK {
+		t.Fatalf("remove Space A binding: expected 200, got %d: %s", removeFromA.Code, removeFromA.Body.String())
+	}
+	activity = httptest.NewRecorder()
+	testHandler.ListSpaceActivity(activity, withURLParam(newRequest(http.MethodGet, "/api/spaces/"+spaceA.ID+"/activity", nil), "id", spaceA.ID))
+	if activity.Code != http.StatusOK {
+		t.Fatalf("ListSpaceActivity after unbinding: expected 200, got %d: %s", activity.Code, activity.Body.String())
+	}
+	if err := json.Unmarshal(activity.Body.Bytes(), &activityResponse); err != nil {
+		t.Fatalf("decode Space unbinding activity: %v", err)
+	}
+	bindingActivityCount := 0
+	for _, item := range activityResponse.Activities {
+		if item.Action == "integration_space_bindings_replaced" {
+			bindingActivityCount++
+		}
+	}
+	if bindingActivityCount != 2 {
+		t.Fatalf("Space A binding activity count = %d, want add and removal", bindingActivityCount)
+	}
 
 	archive := httptest.NewRecorder()
 	testHandler.ArchiveSpace(archive, withURLParam(newRequest(http.MethodDelete, "/api/spaces/"+spaceB.ID, nil), "id", spaceB.ID))
@@ -123,8 +169,8 @@ func TestIntegrationSpaceBindingsAreAdminManagedAndSpaceScoped(t *testing.T) {
 	`, testWorkspaceID, uuidToString(connection.ID)).Scan(&auditCount); err != nil {
 		t.Fatalf("count binding audit: %v", err)
 	}
-	if auditCount != 1 {
-		t.Fatalf("binding audit count = %d, want 1", auditCount)
+	if auditCount != 2 {
+		t.Fatalf("binding audit count = %d, want 2", auditCount)
 	}
 
 	if _, err := testPool.Exec(ctx, `DELETE FROM github_installation WHERE id = $1`, connection.ID); err != nil {

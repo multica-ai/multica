@@ -31,6 +31,64 @@ func createSpaceForAccessTest(t *testing.T, name, key, visibility string) SpaceR
 	return space
 }
 
+func TestSpaceContextRoundTripsAndReachesBoundTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	const initialContext = "Use the Payments runbook before changing settlement code."
+	create := httptest.NewRecorder()
+	testHandler.CreateSpace(create, newRequest(http.MethodPost, "/api/spaces", map[string]any{
+		"name":       "Context Probe",
+		"key":        "CTXAP",
+		"visibility": "open",
+		"context":    initialContext,
+	}))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("CreateSpace: expected 201, got %d: %s", create.Code, create.Body.String())
+	}
+	var space SpaceResponse
+	if err := json.Unmarshal(create.Body.Bytes(), &space); err != nil {
+		t.Fatalf("decode created Space: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_space WHERE id = $1`, space.ID)
+	})
+	if space.Context != initialContext {
+		t.Fatalf("created Space context = %q, want %q", space.Context, initialContext)
+	}
+	if !space.IsMember || space.MemberRole == nil || *space.MemberRole != "lead" {
+		t.Fatalf("created Space caller membership = member:%v role:%v, want true/lead", space.IsMember, space.MemberRole)
+	}
+
+	const updatedContext = "Prefer idempotent jobs and document reconciliation steps."
+	update := httptest.NewRecorder()
+	testHandler.UpdateSpace(update, withURLParam(newRequest(http.MethodPatch, "/api/spaces/"+space.ID, map[string]any{
+		"context": updatedContext,
+	}), "id", space.ID))
+	if update.Code != http.StatusOK {
+		t.Fatalf("UpdateSpace: expected 200, got %d: %s", update.Code, update.Body.String())
+	}
+	var updated SpaceResponse
+	if err := json.Unmarshal(update.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated Space: %v", err)
+	}
+	if updated.Context != updatedContext {
+		t.Fatalf("updated Space context = %q, want %q", updated.Context, updatedContext)
+	}
+
+	var task AgentTaskResponse
+	testHandler.attachSpaceToTaskResponse(
+		context.Background(),
+		&task,
+		parseUUID(testWorkspaceID),
+		parseUUID(space.ID),
+	)
+	if task.SpaceID != space.ID || task.SpaceContext != updatedContext {
+		t.Fatalf("task Space context = id:%q context:%q, want %q/%q", task.SpaceID, task.SpaceContext, space.ID, updatedContext)
+	}
+}
+
 func TestSpaceVisibilityJoinAndGuestCollaboration(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -395,5 +453,26 @@ func TestSpaceArchiveRestoreLifecyclePreservesIntent(t *testing.T) {
 	}
 	if auditCount != 3 {
 		t.Fatalf("lifecycle audit count = %d, want 3", auditCount)
+	}
+
+	activity := httptest.NewRecorder()
+	testHandler.ListSpaceActivity(activity, withURLParam(newRequest(http.MethodGet, "/api/spaces/"+space.ID+"/activity", nil), "id", space.ID))
+	if activity.Code != http.StatusOK {
+		t.Fatalf("ListSpaceActivity: expected 200, got %d: %s", activity.Code, activity.Body.String())
+	}
+	var activityResponse struct {
+		Activities []SpaceActivityResponse `json:"activities"`
+	}
+	if err := json.Unmarshal(activity.Body.Bytes(), &activityResponse); err != nil {
+		t.Fatalf("decode Space activity response: %v", err)
+	}
+	if len(activityResponse.Activities) != 3 {
+		t.Fatalf("Space activity count = %d, want 3", len(activityResponse.Activities))
+	}
+	if activityResponse.Activities[0].Action != "space_autopilots_resumed" || activityResponse.Activities[2].Action != "space_archived" {
+		t.Fatalf("Space activity order/actions = %+v", activityResponse.Activities)
+	}
+	if activityResponse.Activities[0].ActorName == "" {
+		t.Fatal("Space activity must resolve the actor display name")
 	}
 }

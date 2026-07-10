@@ -20,6 +20,7 @@ function space(id: string, name: string, archived = false): Space {
     name,
     key: name.slice(0, 3).toUpperCase(),
     icon: null,
+    context: "",
     issue_counter: 0,
     is_default: id === "space-1",
     visibility: "open",

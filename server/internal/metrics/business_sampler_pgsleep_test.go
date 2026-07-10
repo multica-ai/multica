@@ -69,7 +69,7 @@ func TestBusinessSamplerStatementTimeoutCutsHungQuery(t *testing.T) {
 	start := time.Now()
 	c.runQuery(ctx, conn, queryName, func(ctx context.Context, tx pgx.Tx) error {
 		// 2 s is comfortably longer than the 500 ms statement_timeout
-		// AND the 550 ms outer context deadline, so whichever layer
+		// AND the 1 s outer context deadline, so whichever layer
 		// fires first we still observe a cancelled query.
 		_, err := tx.Exec(ctx, "SELECT pg_sleep(2)")
 		capturedErr = err

@@ -23,6 +23,7 @@ type SpaceResponse struct {
 	Name         string  `json:"name"`
 	Key          string  `json:"key"`
 	Icon         *string `json:"icon"`
+	Context      string  `json:"context"`
 	IssueCounter int32   `json:"issue_counter"`
 	IsDefault    bool    `json:"is_default"`
 	Visibility   string  `json:"visibility"`
@@ -39,6 +40,17 @@ type SpaceResponse struct {
 	SortOrder  float64 `json:"sort_order"`
 }
 
+type SpaceActivityResponse struct {
+	ID             string          `json:"id"`
+	ActorType      string          `json:"actor_type"`
+	ActorID        string          `json:"actor_id"`
+	ActorName      string          `json:"actor_name"`
+	ActorAvatarURL string          `json:"actor_avatar_url,omitempty"`
+	Action         string          `json:"action"`
+	Details        json.RawMessage `json:"details"`
+	CreatedAt      string          `json:"created_at"`
+}
+
 func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 	return SpaceResponse{
 		ID:           uuidToString(t.ID),
@@ -46,6 +58,7 @@ func spaceToResponse(t db.WorkspaceSpace) SpaceResponse {
 		Name:         t.Name,
 		Key:          t.Key,
 		Icon:         textToPtr(t.Icon),
+		Context:      t.Context,
 		IssueCounter: t.IssueCounter,
 		IsDefault:    t.IsDefault,
 		Visibility:   t.Visibility,
@@ -210,6 +223,7 @@ type CreateSpaceRequest struct {
 	Key        string  `json:"key"`
 	Icon       *string `json:"icon"`
 	Visibility *string `json:"visibility"`
+	Context    *string `json:"context"`
 	// MemberIDs invites workspace members into the new space alongside the
 	// creator (who always joins as lead). Open Spaces can also be joined later;
 	// Private Spaces remain invitation-only.
@@ -221,6 +235,7 @@ type UpdateSpaceRequest struct {
 	Key        *string `json:"key"`
 	Icon       *string `json:"icon"`
 	Visibility *string `json:"visibility"`
+	Context    *string `json:"context"`
 }
 
 func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
@@ -259,6 +274,53 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spaces": resp, "total": len(resp)})
+}
+
+// ListSpaceActivity exposes the Space governance trail in Space Settings.
+// Visibility follows the Space itself: open Spaces are visible to Workspace
+// members, while Private Space activity remains restricted to its members.
+func (h *Handler) ListSpaceActivity(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	spaceID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "space id")
+	if !ok {
+		return
+	}
+	if _, err := h.Queries.GetWorkspaceSpace(r.Context(), db.GetWorkspaceSpaceParams{
+		ID: spaceID, WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "space not found")
+		return
+	}
+	if !h.requireSpaceView(w, r, wsUUID, spaceID) {
+		return
+	}
+
+	rows, err := h.Queries.ListSpaceLifecycleActivities(r.Context(), db.ListSpaceLifecycleActivitiesParams{
+		WorkspaceID: wsUUID,
+		SpaceID:     uuidToString(spaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list Space activity")
+		return
+	}
+	activities := make([]SpaceActivityResponse, 0, len(rows))
+	for _, row := range rows {
+		activities = append(activities, SpaceActivityResponse{
+			ID:             uuidToString(row.ID),
+			ActorType:      row.ActorType.String,
+			ActorID:        uuidToString(row.ActorID),
+			ActorName:      row.ActorName,
+			ActorAvatarURL: row.ActorAvatarUrl,
+			Action:         row.Action,
+			Details:        row.Details,
+			CreatedAt:      timestampToString(row.CreatedAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activities": activities})
 }
 
 func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +386,7 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 		Key:         key,
 		Icon:        ptrToText(req.Icon),
 		Visibility:  pgtype.Text{String: visibility, Valid: true},
+		Context:     ptrToText(req.Context),
 		CreatedBy:   creatorUUID,
 	})
 	if err != nil {
@@ -361,6 +424,8 @@ func (h *Handler) CreateSpace(w http.ResponseWriter, r *http.Request) {
 
 	resp := spaceToResponse(space)
 	resp.IsMember = true
+	leadRole := "lead"
+	resp.MemberRole = &leadRole
 	resp.SortOrder = creatorSort
 	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"space": resp})
 	writeJSON(w, http.StatusCreated, resp)
@@ -989,6 +1054,9 @@ func (h *Handler) UpdateSpace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Visibility = pgtype.Text{String: visibility, Valid: true}
+	}
+	if req.Context != nil {
+		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())

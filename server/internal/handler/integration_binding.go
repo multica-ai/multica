@@ -122,6 +122,32 @@ func (h *Handler) ReplaceIntegrationBindings(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
+	previousBindings, err := h.Queries.ListIntegrationSpaceBindings(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect Integration bindings")
+		return
+	}
+	previousSpaceIDs := make([]string, 0)
+	affectedSpaceIDs := make([]string, 0)
+	affectedSeen := make(map[string]struct{})
+	for _, binding := range previousBindings {
+		if binding.Provider != provider || binding.ConnectionID != connectionID {
+			continue
+		}
+		id := uuidToString(binding.SpaceID)
+		previousSpaceIDs = append(previousSpaceIDs, id)
+		affectedSpaceIDs = append(affectedSpaceIDs, id)
+		affectedSeen[id] = struct{}{}
+	}
+	newSpaceIDs := make([]string, 0, len(spaceIDs))
+	for _, spaceID := range spaceIDs {
+		id := uuidToString(spaceID)
+		newSpaceIDs = append(newSpaceIDs, id)
+		if _, exists := affectedSeen[id]; !exists {
+			affectedSpaceIDs = append(affectedSpaceIDs, id)
+			affectedSeen[id] = struct{}{}
+		}
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -146,9 +172,11 @@ func (h *Handler) ReplaceIntegrationBindings(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	auditDetails, _ := json.Marshal(map[string]any{
-		"provider":      provider,
-		"connection_id": uuidToString(connectionID),
-		"space_ids":     req.SpaceIDs,
+		"provider":           provider,
+		"connection_id":      uuidToString(connectionID),
+		"previous_space_ids": previousSpaceIDs,
+		"space_ids":          newSpaceIDs,
+		"affected_space_ids": affectedSpaceIDs,
 	})
 	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
 		WorkspaceID: wsUUID, IssueID: pgtype.UUID{},

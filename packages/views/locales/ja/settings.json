@@ -249,7 +249,12 @@
     "toast_saved": "テンプレートを保存しました",
     "toast_save_failed": "テンプレートを保存できませんでした",
     "toast_deleted": "テンプレートを削除しました",
-    "toast_delete_failed": "テンプレートを削除できませんでした"
+    "toast_delete_failed": "テンプレートを削除できませんでした",
+    "edit": "{{name}} を編集",
+    "delete": "{{name}} を削除",
+    "delete_confirm_title": "テンプレートを削除しますか？",
+    "delete_confirm_body": "「{{name}}」を削除します。このテンプレートから作成済みの自動化には影響しません。",
+    "delete_action": "テンプレートを削除"
   },
   "integration_bindings": {
     "title": "スペースアクセス",

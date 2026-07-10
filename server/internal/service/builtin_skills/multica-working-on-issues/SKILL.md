@@ -204,13 +204,12 @@ prefix. `multica issue list --space <UUID>` filters a listing to one space.
 
 Every Issue has one owning Space:
 
-- `multica issue update <id> --space <UUID-or-key>` moves a standalone Issue to
-  another Space. It is renumbered under the target Space's key; the old identifier is
-  recorded as an alias and keeps resolving (CLI lookups, API, GitHub branch/PR
-  linking), so existing references never break.
+- Issue Space is immutable in the current release. `multica issue update` has
+  no `--space` flag, and the API rejects a different `space_id`; create a new
+  Issue in the target Space instead.
 - Parent and child Issues must share a Space.
-- A Project Issue must use its Project's owning Space. Detach it from the
-  Project before moving it independently.
+- A Project Issue must use its Project's owning Space. An Issue can only attach
+  to a Project in its existing Space.
 
 Parallel children — all start now:
 

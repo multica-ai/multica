@@ -11,7 +11,9 @@ test.describe("Settings", () => {
     const sidebarName = page.getByRole("button", { name: /E2E Workspace/ }).first();
     const originalName = (await sidebarName.innerText()).split("\n").pop()?.trim() ?? "E2E Workspace";
 
-    await page.goto(`/${workspaceSlug}/settings?tab=workspace`, { waitUntil: "domcontentloaded" });
+    await page.goto(`/${workspaceSlug}/settings/workspace/general`, {
+      waitUntil: "domcontentloaded",
+    });
     await waitForPageText(page, "General");
 
     // Change workspace name
@@ -47,10 +49,24 @@ test.describe("Settings", () => {
     page,
   }) => {
     const workspaceSlug = await loginAsDefault(page);
-    const settingsUrl = `/${workspaceSlug}/settings?tab=integrations`;
+    const settingsUrl = `/${workspaceSlug}/settings/workspace/integrations`;
 
     // Stateful: connections is empty until the (mocked) connect flow lands.
     let connected = false;
+
+    await page.route("**/api/config", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          allow_signup: true,
+          posthog_key: "",
+          posthog_host: "",
+          analytics_environment: "",
+          feature_flags: { composio_mcp_apps: true },
+        }),
+      }),
+    );
 
     await page.route("**/api/integrations/composio/toolkits", (route) =>
       route.fulfill({
@@ -84,18 +100,14 @@ test.describe("Settings", () => {
     });
 
     await page.route("**/api/integrations/composio/connect/init", (route) => {
-      // Composio would 302 through its hosted consent and back to our callback,
-      // which emits CallbackRedirect's slug-less shape:
-      // `/settings?tab=integrations&connected=<slug>`. The web proxy's
-      // legacy-route redirect then prepends the last workspace slug, landing on
-      // the real settings route. Mock that exact backend shape (NOT the final
-      // slugged URL) so the test exercises the same redirect path real users hit.
+      // Composio would 302 through its hosted consent and back to the canonical
+      // workspace-scoped integrations route.
       connected = true;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          redirect_url: `/settings?tab=integrations&connected=notion`,
+          redirect_url: `/${workspaceSlug}/settings/workspace/integrations?connected=notion`,
         }),
       });
     });

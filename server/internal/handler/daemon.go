@@ -2562,6 +2562,7 @@ func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTask
 	resp.SpaceID = uuidToString(space.ID)
 	resp.SpaceKey = space.Key
 	resp.SpaceName = space.Name
+	resp.SpaceContext = space.Context
 	if rows, err := h.Queries.ListIntegrationBindingsForSpace(ctx, db.ListIntegrationBindingsForSpaceParams{
 		WorkspaceID: workspaceID,
 		SpaceID:     spaceID,

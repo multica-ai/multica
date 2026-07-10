@@ -23,6 +23,13 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -70,6 +77,7 @@ export function AutopilotTemplatesTab() {
   const deleteTemplate = useDeleteAutopilotTemplate();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [deletingTemplate, setDeletingTemplate] = useState<AutopilotTemplate | null>(null);
 
   const beginCreate = () => {
     setEditingId(null);
@@ -116,6 +124,7 @@ export function AutopilotTemplatesTab() {
     try {
       await deleteTemplate.mutateAsync(template.id);
       toast.success(t(($) => $.autopilot_templates.toast_deleted));
+      setDeletingTemplate(null);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -137,7 +146,7 @@ export function AutopilotTemplatesTab() {
           </p>
         </div>
         <Button size="sm" onClick={beginCreate}>
-          <Plus className="size-4" />
+          <Plus className="size-4" aria-hidden />
           {t(($) => $.autopilot_templates.new)}
         </Button>
       </div>
@@ -145,15 +154,25 @@ export function AutopilotTemplatesTab() {
       {draft && (
         <div className="space-y-4 rounded-lg border p-4">
           <div className="space-y-1.5">
-            <Label>{t(($) => $.autopilot_templates.name)}</Label>
+            <Label htmlFor="autopilot-template-name">
+              {t(($) => $.autopilot_templates.name)}
+            </Label>
             <Input
+              id="autopilot-template-name"
+              name="autopilot_template_name"
+              autoComplete="off"
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>{t(($) => $.autopilot_templates.runbook)}</Label>
+            <Label htmlFor="autopilot-template-runbook">
+              {t(($) => $.autopilot_templates.runbook)}
+            </Label>
             <Textarea
+              id="autopilot-template-runbook"
+              name="autopilot_template_runbook"
+              autoComplete="off"
               rows={7}
               value={draft.description}
               onChange={(event) =>
@@ -174,7 +193,9 @@ export function AutopilotTemplatesTab() {
                   })
                 }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label={t(($) => $.autopilot_templates.execution_mode)}>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="create_issue">
                     {t(($) => $.autopilot_templates.execution_mode_create_issue)}
@@ -197,7 +218,9 @@ export function AutopilotTemplatesTab() {
                   })
                 }
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label={t(($) => $.autopilot_templates.trigger)}>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="schedule">
                     {t(($) => $.autopilot_templates.trigger_schedule)}
@@ -211,8 +234,13 @@ export function AutopilotTemplatesTab() {
           </div>
           {draft.execution_mode === "create_issue" && (
             <div className="space-y-1.5">
-              <Label>{t(($) => $.autopilot_templates.issue_title_template)}</Label>
+              <Label htmlFor="autopilot-template-issue-title">
+                {t(($) => $.autopilot_templates.issue_title_template)}
+              </Label>
               <Input
+                id="autopilot-template-issue-title"
+                name="autopilot_template_issue_title"
+                autoComplete="off"
                 value={draft.issue_title_template ?? ""}
                 placeholder={t(
                   ($) => $.autopilot_templates.issue_title_template_placeholder,
@@ -230,8 +258,13 @@ export function AutopilotTemplatesTab() {
           {draft.trigger_kind === "schedule" && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>{t(($) => $.autopilot_templates.cron)}</Label>
+                <Label htmlFor="autopilot-template-cron">
+                  {t(($) => $.autopilot_templates.cron)}
+                </Label>
                 <Input
+                  id="autopilot-template-cron"
+                  name="autopilot_template_cron"
+                  autoComplete="off"
                   value={draft.cron_expression ?? ""}
                   onChange={(event) =>
                     setDraft({ ...draft, cron_expression: event.target.value })
@@ -239,8 +272,13 @@ export function AutopilotTemplatesTab() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>{t(($) => $.autopilot_templates.timezone)}</Label>
+                <Label htmlFor="autopilot-template-timezone">
+                  {t(($) => $.autopilot_templates.timezone)}
+                </Label>
                 <Input
+                  id="autopilot-template-timezone"
+                  name="autopilot_template_timezone"
+                  autoComplete="off"
                   value={draft.timezone ?? ""}
                   onChange={(event) =>
                     setDraft({ ...draft, timezone: event.target.value })
@@ -280,7 +318,7 @@ export function AutopilotTemplatesTab() {
             return (
               <div key={template.id} className="flex items-start gap-3 p-4">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{template.name}</p>
+                  <p className="break-words text-sm font-medium">{template.name}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                     {template.description || t(($) => $.autopilot_templates.no_runbook)}
                   </p>
@@ -292,11 +330,21 @@ export function AutopilotTemplatesTab() {
                 </div>
                 {canManage && (
                   <div className="flex gap-1">
-                    <Button size="icon-sm" variant="ghost" onClick={() => beginEdit(template)}>
-                      <Pencil className="size-4" />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t(($) => $.autopilot_templates.edit, { name: template.name })}
+                      onClick={() => beginEdit(template)}
+                    >
+                      <Pencil className="size-4" aria-hidden />
                     </Button>
-                    <Button size="icon-sm" variant="ghost" onClick={() => void remove(template)}>
-                      <Trash2 className="size-4" />
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t(($) => $.autopilot_templates.delete, { name: template.name })}
+                      onClick={() => setDeletingTemplate(template)}
+                    >
+                      <Trash2 className="size-4" aria-hidden />
                     </Button>
                   </div>
                 )}
@@ -305,6 +353,38 @@ export function AutopilotTemplatesTab() {
           })
         )}
       </div>
+
+      <Dialog
+        open={deletingTemplate !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteTemplate.isPending) setDeletingTemplate(null);
+        }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogTitle>{t(($) => $.autopilot_templates.delete_confirm_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.autopilot_templates.delete_confirm_body, {
+              name: deletingTemplate?.name ?? "",
+            })}
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={deleteTemplate.isPending}
+              onClick={() => setDeletingTemplate(null)}
+            >
+              {t(($) => $.autopilot_templates.cancel)}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!deletingTemplate || deleteTemplate.isPending}
+              onClick={() => deletingTemplate && void remove(deletingTemplate)}
+            >
+              {t(($) => $.autopilot_templates.delete_action)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

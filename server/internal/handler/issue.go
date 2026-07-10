@@ -2709,8 +2709,8 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
-	// SpaceID moves the issue to another space. Numbers are per-space, so the
-	// move renumbers the issue and records the old identifier as an alias.
+	// SpaceID is accepted only to reject attempted moves explicitly. Issue
+	// ownership is immutable in the current Space-first product model.
 	SpaceID *string `json:"space_id"`
 	Stage   *int32  `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
@@ -2923,10 +2923,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Space ownership is immutable in the first Space-first release. Accepting
-	// the current value keeps full-form clients idempotent; a different value
-	// is rejected until the product has a complete tree/project move workflow.
-	spaceChanged := false
+	// Space ownership is immutable in the current release. Accepting the current
+	// value keeps older full-form clients idempotent; a different value is never
+	// interpreted as a move.
 	finalSpaceID := prevIssue.SpaceID
 	if _, ok := rawFields["space_id"]; ok {
 		if req.SpaceID == nil {
@@ -2943,10 +2942,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate the final ownership pair, not the fields independently. A
-	// Project owns exactly one Space, so assigning a Project and moving to its
-	// Space may be done atomically in one request, while every partial mismatch
-	// is rejected before opening the transaction.
+	// Validate ownership against the Issue's immutable Space. Assigning a
+	// Project or parent never changes the Issue's home.
 	if params.ProjectID.Valid {
 		project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 			ID:          params.ProjectID,
@@ -3020,7 +3017,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff
 	// project_id against its own cache, which breaks once an optimistic local
-	// move has overwritten the cached value (MUL-3669 / #4548).
+	// project reassignment has overwritten the cached value (MUL-3669 / #4548).
 	projectChanged := req.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
@@ -3040,8 +3037,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
 		"project_changed":     projectChanged,
-		"space_changed":       spaceChanged,
-		"prev_space_id":       uuidToPtr(prevIssue.SpaceID),
 		"start_date_changed":  startDateChanged,
 		"due_date_changed":    dueDateChanged,
 		"description_changed": descriptionChanged,

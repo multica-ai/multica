@@ -1136,6 +1136,8 @@ type WorkspaceSpace struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	IsDefault    bool               `json:"is_default"`
 	Visibility   string             `json:"visibility"`
+	// Operating context injected into Agent runs bound to this Space. It does not grant access or widen the task token scope.
+	Context string `json:"context"`
 }
 
 type WorkspaceSpaceMember struct {

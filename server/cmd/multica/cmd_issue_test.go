@@ -3418,3 +3418,9 @@ func TestRunIssueUpdateOmitsPositionWhenUnset(t *testing.T) {
 		t.Fatalf("position must be absent from the body when --position is not passed, got %#v", body["position"])
 	}
 }
+
+func TestIssueUpdateDoesNotExposeSpaceMove(t *testing.T) {
+	if flag := issueUpdateCmd.Flags().Lookup("space"); flag != nil {
+		t.Fatalf("issue update unexpectedly exposes --space: %s", flag.Usage)
+	}
+}

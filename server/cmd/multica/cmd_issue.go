@@ -492,7 +492,6 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
-	issueUpdateCmd.Flags().String("space", "", "Move the issue to this Space (UUID or key); it is renumbered and the old identifier keeps resolving")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1277,17 +1276,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
-	}
-	if cmd.Flags().Changed("space") {
-		v, _ := cmd.Flags().GetString("space")
-		if v == "" {
-			return fmt.Errorf("--space requires a Space UUID or key")
-		}
-		spaceID, err := resolveSpaceRef(ctx, client, v)
-		if err != nil {
-			return err
-		}
-		body["space_id"] = spaceID
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")

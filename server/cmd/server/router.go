@@ -1122,6 +1122,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListSpaces)
 				r.With(handler.RequireHumanActor).Post("/", h.CreateSpace)
 				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/activity", h.ListSpaceActivity)
 					r.With(handler.RequireHumanActor).Patch("/", h.UpdateSpace)
 					r.With(handler.RequireHumanActor).Put("/", h.UpdateSpace)
 					r.With(handler.RequireHumanActor).Delete("/", h.ArchiveSpace)

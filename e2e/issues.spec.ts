@@ -152,7 +152,7 @@ test.describe("Issues", () => {
     ).toBeVisible();
 
     await page.getByRole("button", { name: "View issue" }).click();
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await page.waitForURL(/\/issue\/[\w-]+/);
     await expect(page.locator("text=Properties")).toBeVisible();
   });
 
@@ -163,14 +163,12 @@ test.describe("Issues", () => {
     // Reload to see the new issue
     await reloadAppPage(page);
 
-    // Navigate to the issue detail. Use a suffix match so the selector works
-    // whether the href is legacy `/issues/{id}` or URL-refactored
-    // `/{slug}/issues/{id}`.
-    const issueLink = page.locator(`a[href$="/issues/${issue.id}"]`);
+    // Navigate to the canonical singular issue-detail route.
+    const issueLink = page.locator(`a[href$="/issue/${issue.id}"]`);
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
 
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await page.waitForURL(/\/issue\/[\w-]+/);
 
     // Should show Properties panel
     await expect(page.locator("text=Properties")).toBeVisible();
