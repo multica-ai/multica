@@ -351,6 +351,48 @@ func notifyCreatorIssueStarted(
 	}, routeInbox)
 }
 
+// CEREBRO-PATCH(triggered-agent-started-inbox): agent-created issues notify the member they were created for.
+func notifyTriggeredMemberIssueStarted(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	e events.Event,
+	issue handler.IssueResponse,
+	triggeringTaskID string,
+) {
+	if issue.CreatorType != "agent" || triggeringTaskID == "" {
+		return
+	}
+	if !issueStartsImmediately(issue.Status) || !startedIssuesInInboxEnabled(ctx, queries, issue.WorkspaceID) {
+		return
+	}
+	memberID := lookupTriggeringMember(queries, triggeringTaskID)
+	if memberID == "" || memberID == issue.CreatorID {
+		return
+	}
+	subscribed, err := queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+		IssueID:  parseUUID(issue.ID),
+		UserType: "member",
+		UserID:   parseUUID(memberID),
+	})
+	if err != nil || !subscribed {
+		return
+	}
+	createInboxItemForChannel(ctx, queries, bus, inboxItemDraft{
+		WorkspaceID:   issue.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   memberID,
+		IssueID:       issue.ID,
+		IssueStatus:   issue.Status,
+		NotifType:     "issue_started",
+		Severity:      "info",
+		Title:         issue.Title,
+		Body:          "",
+		Details:       emptyDetails,
+		Actor:         e,
+	}, routeInbox)
+}
+
 // parseMentions extracts mentions from markdown content.
 // Delegates to the shared util.ParseMentions and converts to the local type.
 func parseMentions(content string) []mention {
@@ -803,6 +845,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		skip := map[string]bool{e.ActorID: true}
 
 		notifyCreatorIssueStarted(ctx, queries, bus, e, issue)
+		if triggeringTaskID, _ := payload["triggering_task_id"].(string); triggeringTaskID != "" {
+			notifyTriggeredMemberIssueStarted(ctx, queries, bus, e, issue, triggeringTaskID)
+		}
 
 		// Direct notification to assignee
 		if issue.AssigneeType != nil && issue.AssigneeID != nil {
