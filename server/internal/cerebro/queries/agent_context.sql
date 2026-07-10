@@ -80,6 +80,26 @@ INSERT INTO agent_context_version (
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
+-- GetLatestAgentContextVersion returns the most recent snapshot row for the
+-- agent. The direct-edit recorder compares against it to skip edits that did
+-- not change any versioned field, and to keep the version pointer monotonic
+-- if it ever drifted behind the history.
+-- name: GetLatestAgentContextVersion :one
+SELECT * FROM agent_context_version
+WHERE agent_id = $1
+ORDER BY created_at DESC, version DESC
+LIMIT 1;
+
+-- BumpAgentContextVersion advances only the version pointer. The direct-edit
+-- path has already written the new field values through the generic agent
+-- update; unlike ApplyAgentContextSnapshot nothing else may be rewritten here.
+-- name: BumpAgentContextVersion :one
+UPDATE agent SET
+    context_version = $2,
+    updated_at      = now()
+WHERE id = $1
+RETURNING *;
+
 -- --- Change requests ---
 
 -- name: ListAgentChangeRequestsByAgent :many

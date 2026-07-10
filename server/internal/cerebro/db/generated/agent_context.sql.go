@@ -91,6 +91,57 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 	return i, err
 }
 
+const bumpAgentContextVersion = `-- name: BumpAgentContextVersion :one
+UPDATE agent SET
+    context_version = $2,
+    updated_at      = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+`
+
+type BumpAgentContextVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	ContextVersion string      `json:"context_version"`
+}
+
+// BumpAgentContextVersion advances only the version pointer. The direct-edit
+// path has already written the new field values through the generic agent
+// update; unlike ApplyAgentContextSnapshot nothing else may be rewritten here.
+func (q *Queries) BumpAgentContextVersion(ctx context.Context, arg BumpAgentContextVersionParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, bumpAgentContextVersion, arg.ID, arg.ContextVersion)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.PersonaSandbox,
+		&i.SurfaceVisibility,
+		&i.ContextOwnerID,
+		&i.ContextApproverIds,
+		&i.ContextVersion,
+	)
+	return i, err
+}
+
 const createAgentChangeRequest = `-- name: CreateAgentChangeRequest :one
 INSERT INTO agent_change_request (
     agent_id, title, description, base_version, proposed_version,
@@ -355,6 +406,32 @@ type GetAgentContextVersionParams struct {
 
 func (q *Queries) GetAgentContextVersion(ctx context.Context, arg GetAgentContextVersionParams) (AgentContextVersion, error) {
 	row := q.db.QueryRow(ctx, getAgentContextVersion, arg.AgentID, arg.Version)
+	var i AgentContextVersion
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.Version,
+		&i.Snapshot,
+		&i.Description,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestAgentContextVersion = `-- name: GetLatestAgentContextVersion :one
+SELECT id, agent_id, version, snapshot, description, created_by, created_at FROM agent_context_version
+WHERE agent_id = $1
+ORDER BY created_at DESC, version DESC
+LIMIT 1
+`
+
+// GetLatestAgentContextVersion returns the most recent snapshot row for the
+// agent. The direct-edit recorder compares against it to skip edits that did
+// not change any versioned field, and to keep the version pointer monotonic
+// if it ever drifted behind the history.
+func (q *Queries) GetLatestAgentContextVersion(ctx context.Context, agentID pgtype.UUID) (AgentContextVersion, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentContextVersion, agentID)
 	var i AgentContextVersion
 	err := row.Scan(
 		&i.ID,
