@@ -298,8 +298,16 @@ func (s *TaskService) attributionFromTriggerComment(ctx context.Context, comment
 	if err != nil {
 		return attribution.Result{Source: attribution.SourceUnattributed}
 	}
+	return s.attributionFromComment(ctx, comment, agentAuthoredSource)
+}
+
+// attributionFromComment classifies a run from an already-loaded trigger comment,
+// so a caller that already has the row (e.g. to inspect author_type) does not
+// re-read it. Kept byte-identical to the inline logic attributionFromTriggerComment
+// used before, so authorization behavior is unchanged.
+func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Comment, agentAuthoredSource attribution.Source) attribution.Result {
 	facts := attribution.CommentFacts{
-		CommentID:  commentID,
+		CommentID:  comment.ID,
 		AuthorType: comment.AuthorType,
 		AuthorID:   comment.AuthorID,
 	}
@@ -347,7 +355,28 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		return attribution.ClassifyDirect(attribution.DirectFacts{IssueID: issue.ID, ActorUserID: actorUserID})
 	}
 	if triggerCommentID.Valid {
-		return s.attributionFromTriggerComment(ctx, triggerCommentID, agentAuthoredSource)
+		if s == nil || s.Queries == nil {
+			return attribution.Result{Source: attribution.SourceUnattributed}
+		}
+		comment, err := s.Queries.GetComment(ctx, triggerCommentID)
+		if err != nil {
+			return attribution.Result{Source: attribution.SourceUnattributed}
+		}
+		// A member/agent trigger comment resolves the human (direct_human / delegation
+		// / comment_source). A SYSTEM-authored comment — today the Stage-completion
+		// child-done comment (issue_child_done.go), which wakes the parent assignee
+		// and threads no actor — carries no human and is not part of any delegation
+		// chain. Classifying it would degrade straight to owner_fallback (the agent's
+		// own owner), which is wrong for a Stage cascade: the woken run should be
+		// accountable to whoever caused the PARENT issue to exist. So for a system
+		// comment we skip the comment branch and fall through to the parent issue's
+		// own provenance below — the same creator / agent_create-origin /
+		// autopilot-origin chain a direct enqueue resolves — reaching owner_fallback
+		// only if that provenance itself has no human (MUL-4302; raised by Bohan on
+		// the stage-cascade fallback).
+		if comment.AuthorType != "system" {
+			return s.attributionFromComment(ctx, comment, agentAuthoredSource)
+		}
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
 	// webhook trigger: no human authorized the run, so originator stays NULL, but it
