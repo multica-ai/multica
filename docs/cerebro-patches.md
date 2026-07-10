@@ -3,6 +3,12 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-2996 — Usage dashboard skill telemetry routes
+
+- `server/cmd/server/router.go` exposes daemon reporting at `POST /api/daemon/tasks/{taskId}/skill-usage` and the workspace read at `GET /api/dashboard/usage/skills`.
+- The implementation and schema remain fork-owned in `dashboard_usage_explorer_cerebro.go` and migration `9129_cerebro_task_skill_usage`.
+- `server/internal/daemon/daemon.go` invokes the fork-owned transcript extractor after each supported run; `packages/views/dashboard/components/dashboard-page.tsx` mounts the fork-owned panel behind `cerebro_dashboard`.
+
 **Marker format:** `// CEREBRO-PATCH(<name>): <description>` (or language-appropriate
 comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 

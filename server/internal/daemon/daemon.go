@@ -2941,6 +2941,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	d.reportTaskSkillUsage(ctx, task, provider, result) // CEREBRO-PATCH(task-skill-usage-report): FIR-2996 extract explicit SKILL.md reads from supported runtime transcripts.
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
