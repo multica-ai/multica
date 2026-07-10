@@ -220,8 +220,74 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n\n", task.IssueID)
 	}
-	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+	// Reply routing. When this run coalesced comments spanning MORE THAN ONE
+	// root thread, answer each thread in its own thread instead of dumping one
+	// merged comment (MUL-4348). Same-thread follow-ups collapse to a single
+	// group upstream, so they keep the ordinary single-parent path below and can
+	// never be split into duplicate replies.
+	if targets := commentReplyThreads(task); len(targets) >= 2 {
+		b.WriteString(execenv.BuildMultiThreadCommentReplyInstructions(task.IssueID, targets))
+	} else {
+		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+	}
 	return b.String()
+}
+
+// commentReplyThreads groups this run's trigger + coalesced comments by their
+// root thread, in first-seen order (coalesced comments oldest-first, the newest
+// trigger last). A run that coalesced several @mentions from the SAME thread
+// yields a single group, so same-thread follow-ups get exactly one consolidated
+// reply and can never be split into duplicates; comments from different root
+// threads yield one group each so the agent replies inside each thread instead
+// of merging them into one blob (MUL-4348).
+//
+// The trigger's own thread replies under the trigger comment itself, matching
+// the long-standing single-thread behaviour (--parent = trigger comment id);
+// every other thread replies under its root comment id. Returns nil when there
+// is no trigger or only a single distinct thread — the caller then keeps the
+// existing single-parent reply path unchanged.
+func commentReplyThreads(task Task) []execenv.ThreadReplyTarget {
+	if task.TriggerCommentID == "" {
+		return nil
+	}
+	// A comment with no explicit thread id is a root comment: it is its own
+	// thread, so fall back to the comment id itself as the thread key.
+	threadKey := func(threadID, commentID string) string {
+		if threadID != "" {
+			return threadID
+		}
+		return commentID
+	}
+
+	order := make([]string, 0, len(task.CoalescedComments)+1)
+	parentByThread := make(map[string]string, len(task.CoalescedComments)+1)
+	note := func(threadID, parentID string) {
+		if _, ok := parentByThread[threadID]; !ok {
+			order = append(order, threadID)
+		}
+		parentByThread[threadID] = parentID
+	}
+
+	// Coalesced (older) comments first: each replies under its own thread root.
+	for _, cc := range task.CoalescedComments {
+		tid := threadKey(cc.ThreadID, cc.ID)
+		if _, ok := parentByThread[tid]; ok {
+			continue // thread already represented; keep its first parent
+		}
+		note(tid, tid)
+	}
+	// The newest trigger last: its thread replies under the trigger comment,
+	// overriding any coalesced comment that shared the trigger's thread.
+	note(threadKey(task.TriggerThreadID, task.TriggerCommentID), task.TriggerCommentID)
+
+	if len(order) <= 1 {
+		return nil
+	}
+	targets := make([]execenv.ThreadReplyTarget, 0, len(order))
+	for _, tid := range order {
+		targets = append(targets, execenv.ThreadReplyTarget{ThreadID: tid, ParentID: parentByThread[tid]})
+	}
+	return targets
 }
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
