@@ -1221,6 +1221,62 @@ func TestExecuteAndDrain_SeqContinuesAcrossRetry(t *testing.T) {
 	}
 }
 
+// sessionBackend hands out a pre-built session, leaving the test in control
+// of message and result delivery.
+type sessionBackend struct {
+	session *agent.Session
+}
+
+func (b sessionBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	return b.session, nil
+}
+
+// TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript pins the same
+// flush-before-return contract for the drainCtx.Done() terminal: when a
+// cancellation (or timeout/watchdog) ends the run with a message still
+// pending, executeAndDrain must not return until that tail is reported —
+// otherwise runTask fails-and-broadcasts while the last batch is in flight.
+func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	// Unbuffered: the send below returns only once the drain loop has
+	// consumed the message. The result channel never delivers, so only the
+	// context cancellation can end the drain.
+	msgCh := make(chan agent.Message)
+	b := sessionBackend{session: &agent.Session{Messages: msgCh, Result: make(chan agent.Result)}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	type ret struct {
+		result agent.Result
+		err    error
+	}
+	retCh := make(chan ret, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(ctx, b, "p", agent.ExecOptions{}, slog.Default(), "task-cancel-flush", new(atomic.Int32))
+		retCh <- ret{result, err}
+	}()
+
+	msgCh <- agent.Message{Type: agent.MessageText, Content: "pending tail"}
+	cancel()
+
+	r := <-retCh
+	if r.err != nil {
+		t.Fatalf("executeAndDrain: %v", r.err)
+	}
+	if r.result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled, got %q (err=%q)", r.result.Status, r.result.Error)
+	}
+
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "pending tail" {
+		t.Fatalf("expected the pending tail flushed before the cancelled return, got %+v", got)
+	}
+}
+
 func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	t.Parallel()
 
