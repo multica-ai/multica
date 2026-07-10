@@ -424,7 +424,8 @@ func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 	}
 }
 
-// TestManageWorkspaceVisibleAgentByOwner (FIR-1416) verifies that a plain
+// CEREBRO-PATCH(personal-agent-owner-manage): FIR-1416 regression coverage.
+// TestManageWorkspaceVisibleAgentByOwner verifies that a plain
 // workspace member who OWNS a workspace-visible (non-private) agent can manage
 // it — previously canManageAgent only allowed the owner when the agent was
 // private, so a member who made their agent workspace-visible (so the team can
