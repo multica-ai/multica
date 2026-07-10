@@ -3516,6 +3516,11 @@ SET coalesced_comment_ids = (
     trigger_comment_id = $1::uuid,
     trigger_summary = COALESCE($2, trigger_summary),
     originator_user_id = $3::uuid,
+    -- Keep the MUL-4302 one-way invariant on re-attribution: when a coalescing run
+    -- takes over the new comment's originator, accountable must mirror it — the same
+    -- thing finalizeAttribution does for enqueues. Without this, folding member B's
+    -- comment into member A's queued task would leave originator=B / accountable=A.
+    accountable_user_id = $3::uuid,
     runtime_mcp_overlay = $4,
     runtime_connected_apps = $5
 WHERE id = (

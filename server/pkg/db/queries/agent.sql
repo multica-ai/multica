@@ -866,6 +866,11 @@ SET coalesced_comment_ids = (
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
     originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
+    -- Keep the MUL-4302 one-way invariant on re-attribution: when a coalescing run
+    -- takes over the new comment's originator, accountable must mirror it — the same
+    -- thing finalizeAttribution does for enqueues. Without this, folding member B's
+    -- comment into member A's queued task would leave originator=B / accountable=A.
+    accountable_user_id = sqlc.narg('new_originator_user_id')::uuid,
     runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
     runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (

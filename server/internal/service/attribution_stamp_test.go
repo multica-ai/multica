@@ -176,6 +176,69 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 	}
 }
 
+// TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator guards the
+// MUL-4302 one-way invariant across the comment-coalescing merge (main #5192 ×
+// attribution): when a coalescing run re-stamps originator_user_id to the newly
+// arrived comment's human, accountable_user_id must mirror it. Otherwise folding
+// member B's comment into member A's queued task leaves originator=B / accountable=A.
+func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userA, agentID, issueID := seedAttributionFixture(t, pool)
+
+	// A second member B whose comment will be coalesced in.
+	var userB string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Attr User B', $1) RETURNING id`,
+		fmt.Sprintf("attr-b-%d@multica.test", time.Now().UnixNano())).Scan(&userB); err != nil {
+		t.Fatalf("seed user B: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userB) })
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, workspaceID, userB); err != nil {
+		t.Fatalf("add member B: %v", err)
+	}
+
+	// A queued task attributed to A (originator == accountable == A).
+	var taskID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id, originator_source)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3, $3, 'direct_human')
+		RETURNING id`, agentID, issueID, userA).Scan(&taskID); err != nil {
+		t.Fatalf("seed queued task: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	// B's newly-arrived comment on the same issue.
+	var commentID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'B comment') RETURNING id`, issueID, workspaceID, userB).Scan(&commentID); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+
+	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:             util.MustParseUUID(issueID),
+		AgentID:             util.MustParseUUID(agentID),
+		NewTriggerCommentID: util.MustParseUUID(commentID),
+		NewOriginatorUserID: util.MustParseUUID(userB),
+	}); err != nil {
+		t.Fatalf("MergeCommentIntoPendingTask: %v", err)
+	}
+
+	var originator, accountable pgtype.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT originator_user_id, accountable_user_id FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&originator, &accountable); err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if !originator.Valid || originator.Bytes != util.MustParseUUID(userB).Bytes {
+		t.Errorf("originator = %s, want re-stamped to B %s", util.UUIDToString(originator), userB)
+	}
+	if !accountable.Valid || accountable.Bytes != originator.Bytes {
+		t.Errorf("accountable = %s, want == originator (B); one-way invariant violated on merge", util.UUIDToString(accountable))
+	}
+}
+
 // TestTriggerOwnerAttribution_ScheduleTriggerCreator is the acceptance test for
 // trigger_owner (MUL-4302; Bohan): an autopilot schedule/webhook run is accountable
 // to the member who CREATED the firing trigger, with originator NULL (no human
