@@ -407,6 +407,8 @@ SELECT
     tu.cache_write_tokens
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
+LEFT JOIN comment tc ON tc.id = atq.trigger_comment_id
+LEFT JOIN comment root ON root.id = COALESCE(tc.parent_id, tc.id)
 WHERE atq.issue_id = $1
 ORDER BY atq.created_at DESC, tu.model
 `
