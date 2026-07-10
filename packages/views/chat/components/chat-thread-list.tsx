@@ -259,7 +259,7 @@ export function ChatThreadList({
         {/* Thin ring keeps photo + fallback avatars reading as the same circle
             (the fallback's faint bg otherwise looks smaller). */}
         {agent ? (
-          <ActorAvatar actorType="agent" actorId={agent.id} size={32} enableHoverCard className="ring-1 ring-inset ring-border" />
+          <ActorAvatar actorType="agent" actorId={agent.id} size="lg" enableHoverCard className="ring-1 ring-inset ring-border" />
         ) : (
           <span className="size-8 shrink-0" />
         )}

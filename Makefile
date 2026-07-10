@@ -307,7 +307,7 @@ cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
 
 multica: ## Run the multica CLI entrypoint directly from the Go source tree
-	cd server && go run ./cmd/multica $(MULTICA_ARGS)
+	cd server && go run -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" ./cmd/multica $(MULTICA_ARGS)
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -322,7 +322,15 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/migrate up
-	cd server && go test -race ./...
+	# pkg/agent spawns many subprocess-backed tests with hard 5s deadlines; under
+	# -race on high-core machines the default GOMAXPROCS fan-out starves their
+	# parent event loops so they miss the deadline. Run the rest of the suite at
+	# full concurrency and cap only pkg/agent's package- and within-package
+	# parallelism, keeping those tests within budget without slowing the whole suite.
+	# Build the package list via explicit assignments so a go list failure
+	# fails this target instead of being swallowed by command substitution.
+	cd server && pkgs="$$(go list ./...)" && pkgs="$$(printf '%s\n' "$$pkgs" | grep -vE '/pkg/agent(/|$$)')" && go test -race $$pkgs
+	cd server && go test -race -p 2 -parallel 2 ./pkg/agent/...
 
 # Database
 ##@ Database

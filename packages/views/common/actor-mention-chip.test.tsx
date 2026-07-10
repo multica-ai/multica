@@ -43,17 +43,16 @@ describe("ActorMentionChip", () => {
     expect(pill.className).toContain("border-brand/20");
   });
 
-  it("renders a squad chip with info tint and a square avatar", () => {
+  it("renders a squad chip with info tint and a round avatar", () => {
     const { container } = render(
       <ActorMentionChip type="squad" label="设计组" initials="设" />,
     );
     const pill = container.querySelector(".actor-mention-chip")!;
     expect(pill.className).toContain("bg-info/10");
     expect(pill.className).toContain("border-info/20");
-    // Squads get a square tile so they don't read as a single person.
+    // Upstream unified all avatars to circles (MUL-4277); squads are round too.
     const avatar = container.querySelector('[data-slot="avatar"]')!;
-    expect(avatar.className).toContain("rounded-md");
-    expect(avatar.className).not.toContain("rounded-full");
+    expect(avatar.className).toContain("rounded-full");
   });
 
   it("renders an @all chip with warning tint and a dedicated avatar", () => {

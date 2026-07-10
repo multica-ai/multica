@@ -19,7 +19,7 @@ export function EmptyState({ agent }: { agent: Agent | null }) {
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
-          size={56}
+          size="2xl"
           className="ring-1 ring-inset ring-border"
         />
       )}

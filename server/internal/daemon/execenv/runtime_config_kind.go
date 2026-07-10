@@ -1,12 +1,10 @@
 package execenv
 
-// taskKind labels the dispatch path that the slim runtime brief should
-// follow for a given TaskContextForEnv. Used only by
-// `buildMetaSkillContentSlim` (MUL-3560 slim brief, flag-gated via
-// `runtime_brief_slim`). The legacy `buildMetaSkillContent` body in
-// runtime_config.go does not consult this type — it re-derives the same
-// branches inline from raw ctx fields, the way it has shipped to
-// production for the last two years.
+// taskKind labels the dispatch path that the runtime brief should
+// follow for a given TaskContextForEnv. Used by
+// `buildMetaSkillContentSlim` (MUL-3560 brief; the `runtime_brief_slim`
+// flag that once gated it against a legacy verbose brief was retired in
+// MUL-4297, so this is now the only brief).
 //
 // Five kinds, mutually exclusive in practice. classifyTask documents the
 // tiebreak rule that applies if a future caller accidentally violates the

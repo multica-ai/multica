@@ -193,7 +193,7 @@ function BoardGroupHeading({
       <ActorAvatar
         actorType={group.assigneeType}
         actorId={group.assigneeId}
-        size={18}
+        size="sm"
         showStatusDot={group.assigneeType === "agent"}
       />
     ) : (

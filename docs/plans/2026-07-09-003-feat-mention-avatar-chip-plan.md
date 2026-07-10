@@ -50,7 +50,7 @@ The autocomplete shows rich previews (avatar + name + type badge) when the user 
 **Visual form**
 
 - R1. Actor mentions (member, agent, squad, @all) render as an inline Avatar Chip: a pill container with `rounded-full` or `rounded-md` border-radius, a 1px border, subtle background tint, a 14-16px ActorAvatar, and the `@name` label.
-- R2. The ActorAvatar shape follows the existing type distinction: circular for members and agents, rounded-square for squads. The avatar content follows existing ActorAvatar logic: initials for members, Bot icon for agents, Users icon for squads, and the `Users` icon for @all (per KTD4 — same icon as squads, rendered inside a warning-tinted circle to distinguish it from the squad chip).
+- R2. All avatar types render as circles, matching upstream's unified avatar shape invariant (MUL-4277). The avatar content follows existing ActorAvatar logic: initials for members, Bot icon for agents, Users icon for squads, and the `Users` icon for @all (per KTD4 — same icon as squads, rendered in a warning-tinted circle to distinguish it from the squad chip). Type distinction is carried by the pill's background tint only.
 - R3. Background tint and border color vary by `data-mention-type`:
   - member: `bg-muted` with `border-border`
   - agent: `bg-brand/10` with `border-brand/20`

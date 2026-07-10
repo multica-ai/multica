@@ -44,6 +44,9 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import { issueIdentifierOptions } from "@multica/core/issues/queries";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { isIssueIdentifier } from "@multica/ui/markdown";
 import type { Attachment } from "@multica/core/types";
 import {
   parseMarkdownChunked,
@@ -51,6 +54,7 @@ import {
   type MarkdownManagerLike,
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
+import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
@@ -304,7 +308,41 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const queryClient = useQueryClient();
 
+    // Linear-style bare identifier autolink resolver. Fully lazy — it runs only
+    // on user input, never on render, so it adds no query hook to this widely
+    // used component. It reads the current workspace from the query cache (via
+    // the slug ref) and returns null outside a workspace, for non-identifier
+    // tokens, or when the prefix can't match this workspace, so no network call
+    // happens for those; the exact-match filter enforces correctness.
+    const resolveIssueIdentifierRef = useRef<IssueIdentifierResolver | undefined>(
+      undefined,
+    );
+    resolveIssueIdentifierRef.current = async (identifier) => {
+      if (!isIssueIdentifier(identifier)) return null;
+      const slug = workspaceSlugRef.current;
+      if (!slug) return null;
+      const workspaces = await queryClient.fetchQuery(workspaceListOptions());
+      const ws = workspaces.find((w) => w.slug === slug);
+      if (!ws) return null;
+      const prefix = ws.issue_prefix;
+      if (
+        prefix &&
+        !identifier.toUpperCase().startsWith(`${prefix.toUpperCase()}-`)
+      ) {
+        return null;
+      }
+      const issue = await queryClient.fetchQuery(
+        issueIdentifierOptions(ws.id, identifier),
+      );
+      return issue ? { id: issue.id, identifier: issue.identifier } : null;
+    };
+
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // With `immediatelyRender: false` the Tiptap instance is created after
+    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
+    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
+    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    const focusOnReadyRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -337,6 +375,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // repair it so the mounted editor has a real cursor in the list.
         repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        if (focusOnReadyRef.current) {
+          focusOnReadyRef.current = false;
+          ed.commands.focus("end");
+        }
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -355,6 +397,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
         slashCommandMode,
+        resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -519,7 +562,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         editor?.commands.clearContent();
       },
       focus: () => {
-        editor?.commands.focus();
+        if (editor) editor.commands.focus();
+        // Editor not mounted yet — defer the focus to `onCreate`.
+        else focusOnReadyRef.current = true;
       },
       blur: () => {
         editor?.commands.blur();

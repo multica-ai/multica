@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
@@ -25,6 +28,18 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
 			t.Errorf("expected Authorization Bearer tok, got %q", got)
+		}
+		capabilities := make(map[string]bool)
+		for _, capability := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
+			capabilities[strings.TrimSpace(capability)] = true
+		}
+		for _, want := range []string{
+			protocol.DaemonCapabilitySkillBundlesV1,
+			protocol.DaemonCapabilityCoalescedCommentsV1,
+		} {
+			if !capabilities[want] {
+				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"ok": "1"})

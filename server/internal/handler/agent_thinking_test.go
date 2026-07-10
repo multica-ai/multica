@@ -214,12 +214,15 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'runtime-switch-%'`, testWorkspaceID)
 	})
 
+	// Direction is Codex → Claude: Codex's enum is a superset of Claude's
+	// (it adds none/minimal plus the gpt-5.6 max/ultra levels), so a
+	// Codex-only token is the value that becomes invalid on switch.
 	t.Run("existing value still valid for new runtime is kept", func(t *testing.T) {
-		// `high` is valid for both Claude and Codex enums — switching
+		// `high` is valid for both Codex and Claude enums — switching
 		// runtime without touching thinking_level should keep it.
-		agentID := createAgentOnRuntime(t, "runtime-switch-keep", claudeRuntimeID, "high")
+		agentID := createAgentOnRuntime(t, "runtime-switch-keep", codexRuntimeID, "high")
 		body := map[string]any{
-			"runtime_id": codexRuntimeID,
+			"runtime_id": claudeRuntimeID,
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -235,12 +238,12 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 	})
 
 	t.Run("existing value invalid for new runtime is 400, not silent", func(t *testing.T) {
-		// `max` is Claude-only; switching to Codex must NOT silently
-		// keep it. Behaviour stays consistent with the explicit-set
-		// path: always 400 on literal-invalid.
-		agentID := createAgentOnRuntime(t, "runtime-switch-reject", claudeRuntimeID, "max")
+		// `ultra` is Codex-only (added for the gpt-5.6 series); switching to
+		// Claude must NOT silently keep it. Behaviour stays consistent with
+		// the explicit-set path: always 400 on literal-invalid.
+		agentID := createAgentOnRuntime(t, "runtime-switch-reject", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id": codexRuntimeID,
+			"runtime_id": claudeRuntimeID,
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -255,9 +258,9 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		// the same PATCH and the switch goes through with a cleared
 		// value. This is the documented escape hatch in the error
 		// message; the test pins it so the contract holds.
-		agentID := createAgentOnRuntime(t, "runtime-switch-clear", claudeRuntimeID, "max")
+		agentID := createAgentOnRuntime(t, "runtime-switch-clear", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id":     codexRuntimeID,
+			"runtime_id":     claudeRuntimeID,
 			"thinking_level": "",
 		}
 		w := httptest.NewRecorder()
@@ -276,10 +279,10 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 	t.Run("simultaneous explicit set to valid value lets the switch through", func(t *testing.T) {
 		// The other recovery: caller picks a value valid for the new
 		// runtime. Same PATCH, no need for a separate roundtrip.
-		agentID := createAgentOnRuntime(t, "runtime-switch-replace", claudeRuntimeID, "max")
+		agentID := createAgentOnRuntime(t, "runtime-switch-replace", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id":     codexRuntimeID,
-			"thinking_level": "minimal",
+			"runtime_id":     claudeRuntimeID,
+			"thinking_level": "high",
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -289,8 +292,8 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		}
 		var resp map[string]any
 		_ = json.NewDecoder(w.Body).Decode(&resp)
-		if resp["thinking_level"] != "minimal" {
-			t.Errorf("expected thinking_level=minimal, got %v", resp["thinking_level"])
+		if resp["thinking_level"] != "high" {
+			t.Errorf("expected thinking_level=high, got %v", resp["thinking_level"])
 		}
 	})
 }

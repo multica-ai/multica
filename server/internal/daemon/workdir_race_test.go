@@ -163,15 +163,20 @@ func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
 		t.Skip("shell-script agent fixture is POSIX-only")
 	}
 
-	workspacesRoot := t.TempDir()
+	workspacesRoot := filepath.Join(t.TempDir(), strings.Repeat("long-workspaces-root-", 3))
 	workspaceID := "ws-private-temp"
-	taskID := "task-private-temp"
-	expectedTempDir := filepath.Join(execenv.PredictRootDir(workspacesRoot, workspaceID, taskID), "tmp", taskID)
+	taskID := "task-private-temp-with-long-id-that-would-overflow-socket-paths"
+	envRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
 
 	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
 	fakeBin := filepath.Join(t.TempDir(), "claude")
 	script := `#!/bin/sh
-printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\n' "$TMPDIR" "$TMP" "$TEMP" > "$CAPTURE_FILE"
+if [ -d "$TMPDIR" ]; then
+  tmpdir_exists=yes
+else
+  tmpdir_exists=no
+fi
+printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nTMPDIR_EXISTS=%s\n' "$TMPDIR" "$TMP" "$TEMP" "$tmpdir_exists" > "$CAPTURE_FILE"
 IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"sess-private-temp"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-temp","result":"done"}'
@@ -231,14 +236,6 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
 	}
 
-	info, err := os.Stat(expectedTempDir)
-	if err != nil {
-		t.Fatalf("expected task temp dir %q to exist: %v", expectedTempDir, err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("expected task temp path %q to be a directory", expectedTempDir)
-	}
-
 	raw, err := os.ReadFile(captureFile)
 	if err != nil {
 		t.Fatalf("read captured agent env: %v", err)
@@ -252,9 +249,25 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		got[key] = value
 	}
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		if got[key] != expectedTempDir {
-			t.Fatalf("%s = %q, want private task temp dir %q", key, got[key], expectedTempDir)
+		if got[key] == "" {
+			t.Fatalf("%s was not captured", key)
 		}
+		if got[key] != got["TMPDIR"] {
+			t.Fatalf("%s = %q, want same private task temp dir %q", key, got[key], got["TMPDIR"])
+		}
+	}
+	if got["TMPDIR_EXISTS"] != "yes" {
+		t.Fatalf("fake agent saw TMPDIR_EXISTS=%q, want yes", got["TMPDIR_EXISTS"])
+	}
+	taskTempDir := got["TMPDIR"]
+	if strings.HasPrefix(taskTempDir, envRoot) {
+		t.Fatalf("task temp dir %q must not live under long env root %q", taskTempDir, envRoot)
+	}
+	if len(taskTempDir) > 80 {
+		t.Fatalf("task temp dir %q length = %d, want <= 80 for Unix-socket headroom", taskTempDir, len(taskTempDir))
+	}
+	if _, err := os.Stat(taskTempDir); !os.IsNotExist(err) {
+		t.Fatalf("expected task temp dir %q to be cleaned after run, stat err=%v", taskTempDir, err)
 	}
 }
 
