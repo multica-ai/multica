@@ -192,6 +192,44 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 	return resp.Task, nil
 }
 
+// batchClaimRequestTimeout is the short, request-scoped deadline for the
+// machine-level batch claim (MUL-4257). Unlike the per-runtime claim — which
+// gets the full 30s control-plane timeout because a stall there only blocks
+// that one runtime's goroutine — the batch call covers every runtime the
+// daemon hosts in a single request, so a slow claim would delay ALL of them
+// (the head-of-line coupling the per-runtime pollers were split to avoid,
+// MUL-1744). Bounding the batch to a few seconds caps that worst-case
+// starvation; a claim that commits server-side after the client gives up is
+// recovered by ReclaimStaleDispatchedTasksForRuntimes on the next poll. Kept
+// comfortably above p99 claim latency so recovery stays the exception.
+const batchClaimRequestTimeout = 5 * time.Second
+
+// ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
+// it asks the server, in a single request, to claim up to maxTasks tasks across
+// every runtime the daemon hosts. daemonID scopes the request to this machine —
+// the server rejects any runtime_id whose runtime.daemon_id doesn't match, so a
+// stale/crossed runtime set can't claim another machine's tasks. Each returned
+// Task carries its own RuntimeID so the daemon routes it to the matching
+// runtime locally. The request runs under a short, request-scoped deadline
+// (batchClaimRequestTimeout) rather than the shared 30s control-plane timeout so
+// one slow claim cannot stall the whole batch; the deadline propagates to the
+// server and cancels the in-flight query there too.
+func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
+	defer cancel()
+	var resp struct {
+		Tasks []*Task `json:"tasks"`
+	}
+	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Tasks, nil
+}
+
 // ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
 // fixed timeout) so the deadline is governed entirely by ctx, which the daemon
 // scales to the bundle's size, and retries transient transport blips within
